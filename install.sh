@@ -24,18 +24,24 @@ case $(uname -m) in
 esac
 asset=tinyagent-$os-$arch
 
-if [ "$VERSION" = latest ]; then
-	base=https://github.com/$REPO/releases/latest/download
-else
-	base=https://github.com/$REPO/releases/download/$VERSION
-fi
-
 if command -v curl >/dev/null 2>&1; then
 	fetch() { curl -fsSL -o "$2" "$1"; }
 elif command -v wget >/dev/null 2>&1; then
 	fetch() { wget -qO "$2" "$1"; }
 else
 	fail "need curl or wget"
+fi
+
+if [ "$VERSION" = latest ]; then
+	# Ask the API: the releases/latest/download redirect lags for minutes after a release.
+	VERSION=$(fetch "https://api.github.com/repos/$REPO/releases/latest" - 2>/dev/null |
+		sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1) || true
+fi
+if [ -n "$VERSION" ] && [ "$VERSION" != latest ]; then
+	base=https://github.com/$REPO/releases/download/$VERSION
+else
+	VERSION=latest
+	base=https://github.com/$REPO/releases/latest/download
 fi
 
 if command -v sha256sum >/dev/null 2>&1; then
