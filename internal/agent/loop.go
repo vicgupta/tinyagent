@@ -1,0 +1,157 @@
+// Package agent runs the step loop: query the model, execute tool calls, repeat.
+package agent
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"runtime"
+	"strings"
+	"time"
+
+	"github.com/vicgupta/tinyagent/internal/config"
+	"github.com/vicgupta/tinyagent/internal/model"
+	"github.com/vicgupta/tinyagent/internal/tools"
+	"github.com/vicgupta/tinyagent/internal/trajectory"
+)
+
+const SubmitMarker = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
+
+const (
+	StatusSubmitted   = "Submitted"
+	StatusCompleted   = "Completed" // model stopped calling tools without the submit marker
+	StatusStepLimit   = "StepLimitExceeded"
+	StatusCostLimit   = "CostLimitExceeded"
+	StatusTimeLimit   = "TimeLimitExceeded"
+	StatusInterrupted = "Interrupted"
+	StatusError       = "Error"
+)
+
+type Agent struct {
+	Model     model.Model
+	ModelName string
+	Tools     *tools.Executor
+	Config    config.AgentConfig
+	Out       io.Writer // progress log; nil discards
+	Verbose   bool
+	// Streamed means the model already wrote its text to Out as it arrived.
+	Streamed bool
+	// OnStep is called after every step, e.g. to save the trajectory.
+	OnStep func(*trajectory.Trajectory)
+}
+
+// Run executes task until submission, a limit, or an error. It always returns
+// a trajectory describing how the run ended.
+func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
+	if a.Out == nil {
+		a.Out = io.Discard
+	}
+	if a.Config.WallTimeSec > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(a.Config.WallTimeSec)*time.Second)
+		defer cancel()
+	}
+
+	system := strings.NewReplacer("{{cwd}}", a.Tools.Root, "{{os}}", runtime.GOOS).Replace(a.Config.SystemPrompt)
+	t := &trajectory.Trajectory{
+		Task:  task,
+		Model: a.ModelName,
+		Messages: []model.Message{
+			{Role: "system", Content: system},
+			{Role: "user", Content: task},
+		},
+	}
+	specs := tools.Specs()
+
+	for {
+		if status, ok := a.checkLimits(ctx, t); !ok {
+			return a.finish(t, status, "")
+		}
+
+		msg, cost, err := a.Model.Query(ctx, t.Messages, specs)
+		if err != nil {
+			if status, ok := ctxStatus(ctx); ok {
+				return a.finish(t, status, "")
+			}
+			return a.finish(t, StatusError, err.Error())
+		}
+		t.Steps++
+		t.Cost += cost.USD
+		t.Messages = append(t.Messages, msg)
+		a.logAssistant(msg)
+
+		if strings.Contains(msg.Content, SubmitMarker) {
+			sub := strings.TrimSpace(strings.Replace(msg.Content, SubmitMarker, "", 1))
+			return a.finish(t, StatusSubmitted, sub)
+		}
+		if len(msg.ToolCalls) == 0 {
+			return a.finish(t, StatusCompleted, msg.Content)
+		}
+
+		for _, call := range msg.ToolCalls {
+			out := a.Tools.Run(ctx, call)
+			t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: call.ID, Content: out})
+			if a.Verbose {
+				fmt.Fprintf(a.Out, "  -> %s\n", indent(out))
+			}
+		}
+		a.step(t)
+	}
+}
+
+func (a *Agent) checkLimits(ctx context.Context, t *trajectory.Trajectory) (string, bool) {
+	if status, ok := ctxStatus(ctx); ok {
+		return status, false
+	}
+	if a.Config.StepLimit > 0 && t.Steps >= a.Config.StepLimit {
+		return StatusStepLimit, false
+	}
+	if a.Config.CostLimit > 0 && t.Cost >= a.Config.CostLimit {
+		return StatusCostLimit, false
+	}
+	return "", true
+}
+
+func ctxStatus(ctx context.Context) (string, bool) {
+	switch err := ctx.Err(); {
+	case errors.Is(err, context.DeadlineExceeded):
+		return StatusTimeLimit, true
+	case err != nil:
+		return StatusInterrupted, true
+	}
+	return "", false
+}
+
+func (a *Agent) finish(t *trajectory.Trajectory, status, submission string) *trajectory.Trajectory {
+	t.ExitStatus = status
+	t.Submission = submission
+	a.step(t)
+	return t
+}
+
+func (a *Agent) step(t *trajectory.Trajectory) {
+	if a.OnStep != nil {
+		a.OnStep(t)
+	}
+}
+
+func (a *Agent) logAssistant(msg model.Message) {
+	switch {
+	case msg.Content == "":
+	case !a.Streamed:
+		fmt.Fprintln(a.Out, msg.Content)
+	case !strings.HasSuffix(msg.Content, "\n"):
+		fmt.Fprintln(a.Out) // end the streamed line
+	}
+	if !a.Verbose {
+		return
+	}
+	for _, c := range msg.ToolCalls {
+		fmt.Fprintf(a.Out, "[%s] %s\n", c.Function.Name, c.Function.Arguments)
+	}
+}
+
+func indent(s string) string {
+	return strings.ReplaceAll(strings.TrimRight(s, "\n"), "\n", "\n     ")
+}

@@ -1,0 +1,57 @@
+# agent
+
+A minimal coding agent in a single static Go binary. It gives an LLM six tools (`read_file`, `write_file`, `edit_file`, `list_files`, `grep`, `bash`) and keeps a linear message history until the model submits.
+
+```bash
+make build                      # ./agent
+make dist                       # linux/darwin/windows × amd64/arm64 in dist/
+make test
+
+export OPENAI_API_KEY=...
+./agent -t "fix the failing test in pkg/foo" --cwd ~/src/project -o run.json -v
+./agent -m anthropic/claude-sonnet-4-5 -t "..."
+./agent -m openrouter/qwen/qwen3-coder -t "..."
+./agent -m ollama/llama3.1 -t "..."
+```
+
+## Flags
+
+| Flag | Default | |
+|---|---|---|
+| `-t, --task` | — | Task prompt (required) |
+| `-m, --model` | `$AGENT_MODEL`, `$MSWEA_MODEL_NAME`, or `openai/gpt-4o` | `<provider>/<model>`; no `/` means openai |
+| `-c, --config` | embedded defaults | YAML config file |
+| `--cwd` | `.` | Root directory; tools can't reach outside it |
+| `--step-limit` | 0 (unlimited) | Max model calls |
+| `--cost-limit` | 0 (unlimited) | Max USD |
+| `-o, --output` | — | Trajectory JSON, rewritten after every step |
+| `-v, --verbose` | off | Print tool calls and their outputs |
+| `--no-stream` | off | Wait for each full response instead of streaming it |
+
+Environment: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (any OpenAI-compatible endpoint), `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENROUTER_API_KEY`, `OLLAMA_HOST`.
+
+## Config
+
+Every key is optional. Command-line flags override the file.
+
+```yaml
+system_prompt: |          # {{cwd}} and {{os}} are substituted
+  You are a coding agent...
+step_limit: 50
+cost_limit: 2.0
+wall_time_seconds: 1800
+bash_timeout_seconds: 120
+max_output_chars: 30000   # tool output is truncated, keeping head and tail
+input_price_per_mtok: 3   # override the built-in price table
+output_price_per_mtok: 15
+```
+
+## Exit status
+
+The run ends when the model writes `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` (`Submitted`), stops calling tools (`Completed`), or hits a limit (`StepLimitExceeded`, `CostLimitExceeded`, `TimeLimitExceeded`), Ctrl-C (`Interrupted`), or a non-retryable API error (`Error`). The process exits 0 only for `Submitted` and `Completed`.
+
+## Notes
+
+- Each `bash` call runs in a new process; `cd` and exported variables don't carry over. On timeout the whole process group is killed (Unix).
+- Path sandboxing is lexical: `..` and absolute paths outside `--cwd` are rejected, but a symlink inside the root that points outside it is followed. `bash` isn't sandboxed at all. Only run it on code you trust.
+- Cost uses a small built-in price table (`internal/model/provider.go`). Unknown models cost $0 unless you set the price in the config, so `--cost-limit` does nothing for them.
