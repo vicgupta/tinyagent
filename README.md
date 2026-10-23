@@ -1,17 +1,17 @@
-# agent
+# tinyagent
 
 A minimal coding agent in a single static Go binary. It gives an LLM six tools (`read_file`, `write_file`, `edit_file`, `list_files`, `grep`, `bash`) and keeps a linear message history until the model submits.
 
 ```bash
-make build                      # ./agent
+make build                      # ./tinyagent
 make dist                       # linux/darwin/windows × amd64/arm64 in dist/
 make test
 
 export OPENAI_API_KEY=...
-./agent -t "fix the failing test in pkg/foo" --cwd ~/src/project -o run.json -v
-./agent -m anthropic/claude-sonnet-4-5 -t "..."
-./agent -m openrouter/qwen/qwen3-coder -t "..."
-./agent -m ollama/llama3.1 -t "..."
+./tinyagent -t "fix the failing test in pkg/foo" --cwd ~/src/project -o run.json -v
+./tinyagent -m anthropic/claude-sonnet-4-5 -t "..."
+./tinyagent -m openrouter/qwen/qwen3-coder -t "..."
+./tinyagent -m ollama/llama3.1 -t "..."
 ```
 
 ## Flags
@@ -19,7 +19,7 @@ export OPENAI_API_KEY=...
 | Flag | Default | |
 |---|---|---|
 | `-t, --task` | — | Task prompt (required) |
-| `-m, --model` | `$AGENT_MODEL`, `$MSWEA_MODEL_NAME`, or `openai/gpt-4o` | `<provider>/<model>`; no `/` means openai |
+| `-m, --model` | `$AGENT_MODEL` or `openai/gpt-4o` | `<provider>/<model>`; no `/` means openai |
 | `-c, --config` | embedded defaults | YAML config file |
 | `--cwd` | `.` | Root directory; tools can't reach outside it |
 | `--step-limit` | 0 (unlimited) | Max model calls |
@@ -27,6 +27,8 @@ export OPENAI_API_KEY=...
 | `-o, --output` | — | Trajectory JSON, rewritten after every step |
 | `-v, --verbose` | off | Print tool calls and their outputs |
 | `--no-stream` | off | Wait for each full response instead of streaming it |
+| `--version` | | Print the version and exit |
+| `--update` | | Replace this binary with the latest GitHub release (checksum-verified) and exit |
 
 Environment: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (any OpenAI-compatible endpoint), `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENROUTER_API_KEY`, `OLLAMA_HOST`.
 

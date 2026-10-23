@@ -1,4 +1,4 @@
-// Package embed holds files compiled into the agent binary.
+// Package embed holds files compiled into the tinyagent binary.
 package embed
 
 import stdembed "embed"

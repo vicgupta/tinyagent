@@ -1,4 +1,4 @@
-// Command agent is a minimal coding agent: an LLM with file and bash tools.
+// Command tinyagent is a minimal coding agent: an LLM with file and bash tools.
 package main
 
 import (
@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/vicgupta/tinyagent/internal/agent"
@@ -15,7 +17,11 @@ import (
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
+	"github.com/vicgupta/tinyagent/internal/update"
 )
+
+// version is set at build time with -ldflags "-X main.version=v1.2.3".
+var version string
 
 func main() {
 	os.Exit(run())
@@ -26,9 +32,9 @@ func run() int {
 		task, modelName, configPath, cwd, output string
 		stepLimit                                int
 		costLimit                                float64
-		verbose, noStream                        bool
+		verbose, noStream, showVersion, doUpdate bool
 	)
-	fs := flag.NewFlagSet("agent", flag.ContinueOnError)
+	fs := flag.NewFlagSet("tinyagent", flag.ContinueOnError)
 	fs.StringVar(&task, "task", "", "task/prompt (required)")
 	fs.StringVar(&task, "t", "", "shorthand for --task")
 	fs.StringVar(&modelName, "model", defaultModel(), "provider/model, e.g. openai/gpt-4o")
@@ -43,8 +49,26 @@ func run() int {
 	fs.BoolVar(&verbose, "verbose", false, "print tool outputs")
 	fs.BoolVar(&verbose, "v", false, "shorthand for --verbose")
 	fs.BoolVar(&noStream, "no-stream", false, "wait for each full response instead of streaming it")
+	fs.BoolVar(&showVersion, "version", false, "print the version and exit")
+	fs.BoolVar(&doUpdate, "update", false, "replace this binary with the latest GitHub release and exit")
 	if err := fs.Parse(os.Args[1:]); err != nil {
 		return 2
+	}
+	if showVersion {
+		fmt.Println("tinyagent", currentVersion())
+		return 0
+	}
+	if doUpdate {
+		u, err := update.New(currentVersion())
+		if err != nil {
+			return fail(err)
+		}
+		msg, err := u.Run(context.Background())
+		if err != nil {
+			return fail(err)
+		}
+		fmt.Println(msg)
+		return 0
 	}
 	if task == "" {
 		fmt.Fprintln(os.Stderr, "error: --task is required")
@@ -120,11 +144,21 @@ func run() int {
 	return 1
 }
 
+// currentVersion prefers the -ldflags stamp, then the module version that
+// `go install pkg@vX` records, then "dev".
+func currentVersion() string {
+	if version != "" {
+		return version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && strings.HasPrefix(bi.Main.Version, "v") {
+		return bi.Main.Version
+	}
+	return "dev"
+}
+
 func defaultModel() string {
-	for _, k := range []string{"AGENT_MODEL", "MSWEA_MODEL_NAME"} {
-		if v := os.Getenv(k); v != "" {
-			return v
-		}
+	if v := os.Getenv("AGENT_MODEL"); v != "" {
+		return v
 	}
 	return "openai/gpt-4o"
 }
