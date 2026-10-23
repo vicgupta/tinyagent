@@ -63,14 +63,19 @@ tinyagent -t "fix the failing test in pkg/foo" --cwd ~/src/project -o run.json -
 tinyagent -m anthropic/claude-sonnet-4-5 -t "..."
 tinyagent -m openrouter/qwen/qwen3-coder -t "..."
 tinyagent -m ollama/llama3.1 -t "..."
+tinyagent -m codex/gpt-5.6-luna -t "..."   # ChatGPT subscription, see below
 ```
+
+### ChatGPT subscription (Codex)
+
+The `codex` provider uses your ChatGPT subscription instead of an API key. Sign in once with the [Codex CLI](https://github.com/openai/codex) (`codex login`, choose ChatGPT). tinyagent reads the tokens it saves in `$CODEX_HOME/auth.json` (default `~/.codex/auth.json`), refreshes them when they expire and writes them back, so Codex stays signed in too. Requests go to the Codex backend's Responses API. Usage counts against your plan's limits rather than costing money, so cost shows as $0 and `--cost-limit` has no effect. Only models your plan offers in Codex work (the ones the Codex CLI's model picker shows); others fail with "model is not supported".
 
 ## Flags
 
 | Flag | Default | |
 |---|---|---|
 | `-t, --task` | — | Task prompt (required) |
-| `-m, --model` | `$AGENT_MODEL` or `openai/gpt-4o` | `<provider>/<model>`; no `/` means openai |
+| `-m, --model` | `$AGENT_MODEL` or `openai/gpt-4o` | `<provider>/<model>`; no `/` means openai. Providers: openai, openrouter, anthropic, ollama, codex |
 | `-c, --config` | embedded defaults | YAML config file |
 | `--cwd` | `.` | Root directory; tools can't reach outside it |
 | `--step-limit` | 0 (unlimited) | Max model calls |
@@ -81,7 +86,7 @@ tinyagent -m ollama/llama3.1 -t "..."
 | `--version` | | Print the version and exit |
 | `--update` | | Replace this binary with the latest GitHub release (checksum-verified) and exit |
 
-Environment: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (any OpenAI-compatible endpoint), `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENROUTER_API_KEY`, `OLLAMA_HOST`.
+Environment: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (any OpenAI-compatible endpoint), `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENROUTER_API_KEY`, `OLLAMA_HOST`, `CODEX_HOME`.
 
 ## Config
 

@@ -121,8 +121,10 @@ func New(spec string, onText func(string)) (Model, error) {
 		m := NewOllama(name)
 		m.OnText = onText
 		return m, nil
+	case "codex":
+		return NewCodex(name, onText)
 	default:
-		return nil, fmt.Errorf("unknown provider %q (want openai, openrouter, anthropic, or ollama)", provider)
+		return nil, fmt.Errorf("unknown provider %q (want openai, openrouter, anthropic, ollama, or codex)", provider)
 	}
 }
 
