@@ -155,6 +155,7 @@ Output:
   -v, --verbose           print tool outputs
       --no-stream         wait for full responses instead of streaming
       --no-agents-md      don't add AGENTS.md (nearest, up to the repo root) to the system prompt
+      --read-only         allow only read_file, list_files, and grep; blocks edits and commands
 Other:
   -V, --version           print the version and exit
       --update            update to the latest release and exit

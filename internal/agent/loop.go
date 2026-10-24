@@ -20,6 +20,7 @@ import (
 )
 
 const SubmitMarker = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
+const readOnlyNotice = "Read-only mode is active. You may only inspect files with read_file, list_files, and grep. Do not attempt edits or commands."
 
 const (
 	StatusSubmitted   = "Submitted"
@@ -108,20 +109,21 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		system := a.systemPrompt()
 		t = &trajectory.Trajectory{
 			Task:          task,
+			ReadOnly:      a.Tools.ReadOnly,
 			Model:         a.ModelName,
 			SchemaVersion: trajectory.SchemaVersion,
 			Root:          a.Tools.Root,
 			SystemPrompt:  system,
 			SkipAgentsMD:  a.SkipAgentsMD,
-			Tools:         toolNames(tools.Specs()),
-			ToolSignature: ToolSignature(),
+			Tools:         toolNames(tools.Specs(a.Tools.ReadOnly)),
+			ToolSignature: ToolSignature(a.Tools.ReadOnly),
 			Messages: []model.Message{
 				{Role: "system", Content: system},
 				{Role: "user", Content: task},
 			},
 		}
 	}
-	specs := tools.Specs()
+	specs := tools.Specs(a.Tools.ReadOnly)
 	v := newView(t.Messages)
 
 	for {
@@ -205,16 +207,22 @@ func (a *Agent) systemPrompt() string {
 	if !a.SkipAgentsMD {
 		system += agentsMD(a.Tools.Root, a.Err, a.Out, a.Verbose)
 	}
+	if a.Tools.ReadOnly {
+		system += "\n\n" + readOnlyNotice
+	}
 	return system
 }
 
 // SystemPrompt returns the effective system prompt a run rooted at root would
 // use, given cfg and whether AGENTS.md is skipped. It is exported so callers
 // can validate a checkpoint against the current configuration.
-func SystemPrompt(cfg config.AgentConfig, root string, skipAgentsMD bool) string {
+func SystemPrompt(cfg config.AgentConfig, root string, skipAgentsMD bool, readOnly ...bool) string {
 	system := strings.NewReplacer("{{cwd}}", root, "{{os}}", runtime.GOOS).Replace(cfg.SystemPrompt)
 	if !skipAgentsMD {
 		system += agentsMD(root, io.Discard, io.Discard, false)
+	}
+	if len(readOnly) > 0 && readOnly[0] {
+		system += "\n\n" + readOnlyNotice
 	}
 	return system
 }

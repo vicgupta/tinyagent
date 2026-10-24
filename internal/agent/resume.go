@@ -16,9 +16,14 @@ import (
 
 // ToolSignature fingerprints the definitions plus an execution contract
 // version. Bump the prefix when tool semantics change without a spec change.
-func ToolSignature() string {
-	data, _ := json.Marshal(tools.Specs())
-	return fmt.Sprintf("tools-v1:%x", sha256.Sum256(data))
+func ToolSignature(readOnly ...bool) string {
+	readonly := len(readOnly) > 0 && readOnly[0]
+	data, _ := json.Marshal(tools.Specs(readonly))
+	prefix := "tools-v1:"
+	if readonly {
+		prefix = "tools-read-only-v1:"
+	}
+	return fmt.Sprintf("%s%x", prefix, sha256.Sum256(data))
 }
 
 // ValidateResume runs before provider setup, using only the explicit execution
@@ -31,10 +36,10 @@ func ValidateResume(t *trajectory.Trajectory, cfg config.AgentConfig, root strin
 	if root != t.Root {
 		return errors.New("--cwd does not match the checkpoint's canonical root")
 	}
-	if t.ToolSignature != ToolSignature() {
+	if t.ToolSignature != ToolSignature(t.ReadOnly) {
 		return errors.New("tool compatibility has changed; start a fresh task")
 	}
-	names := toolNames(tools.Specs())
+	names := toolNames(tools.Specs(t.ReadOnly))
 	if len(names) != len(t.Tools) {
 		return errors.New("tool set has changed; start a fresh task")
 	}
@@ -50,6 +55,9 @@ func ValidateResume(t *trajectory.Trajectory, cfg config.AgentConfig, root strin
 			return errors.New("cannot reconstruct AGENTS.md instructions; inspect permissions and start a fresh task if instructions changed")
 		}
 		system += section
+	}
+	if t.ReadOnly {
+		system += "\n\n" + readOnlyNotice
 	}
 	if system != t.SystemPrompt {
 		return errors.New("effective system prompt or AGENTS.md has changed; start a fresh task")

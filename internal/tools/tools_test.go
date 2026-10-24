@@ -49,6 +49,37 @@ func TestWriteReadEdit(t *testing.T) {
 	}
 }
 
+func TestReadOnlyExecutorDeniesNonReadTools(t *testing.T) {
+	root := t.TempDir()
+	marker := filepath.Join(root, "marker")
+	e := &Executor{Root: root, ReadOnly: true}
+	for _, tc := range []struct{ name, args string }{
+		{"write_file", `{"path":"marker","content":"written"}`},
+		{"edit_file", `{"path":"marker","old_str":"x","new_str":"y"}`},
+		{"bash", `{"command":"touch marker"}`},
+		{"start_process", `{"command":"touch marker"}`},
+		{"read_process", `{}`}, {"stop_process", `{}`}, {"future_tool", `{}`},
+	} {
+		out := e.Run(context.Background(), model.ToolCall{ID: "id", Function: model.FunctionCall{Name: tc.name, Arguments: tc.args}})
+		if !strings.Contains(out, "read-only mode") {
+			t.Errorf("%s: %q", tc.name, out)
+		}
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("marker exists or stat failed: %v", err)
+	}
+	specs := Specs(true)
+	want := []string{"read_file", "list_files", "grep"}
+	if len(specs) != len(want) {
+		t.Fatalf("specs=%v", specs)
+	}
+	for i, spec := range specs {
+		if spec.Function.Name != want[i] {
+			t.Errorf("spec %d=%q", i, spec.Function.Name)
+		}
+	}
+}
+
 func setupTree(t *testing.T) string {
 	root := t.TempDir()
 	for p, c := range map[string]string{
