@@ -17,6 +17,13 @@ import (
 
 type AgentConfig struct {
 	ReadOnly bool `yaml:"read_only"`
+	// Sandbox confines bash and start_process commands at the OS level:
+	// writes only under --cwd, a per-run temp dir and SandboxWritablePaths.
+	Sandbox bool `yaml:"sandbox"`
+	// SandboxNetwork lets sandboxed commands use the network.
+	SandboxNetwork bool `yaml:"sandbox_network"`
+	// SandboxWritablePaths are extra absolute directories commands may write.
+	SandboxWritablePaths []string `yaml:"sandbox_writable_paths,omitempty"`
 	// Model is the provider/model used when neither -m nor $AGENT_MODEL sets
 	// one. "" falls back to the built-in default.
 	Model string `yaml:"model"`
@@ -108,6 +115,14 @@ func Load(path string) (AgentConfig, error) {
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) { // io.EOF: empty or comment-only file
 		return cfg, fmt.Errorf("parse config %s: %w", path, err)
+	}
+	for _, p := range cfg.SandboxWritablePaths {
+		if !filepath.IsAbs(p) {
+			return cfg, fmt.Errorf("config %s: sandbox_writable_paths entry %q must be an absolute path", path, p)
+		}
+		if fi, err := os.Stat(p); err != nil || !fi.IsDir() {
+			return cfg, fmt.Errorf("config %s: sandbox_writable_paths entry %q is not an existing directory", path, p)
+		}
 	}
 	return cfg, nil
 }

@@ -9,7 +9,16 @@ import (
 	"github.com/vicgupta/tinyagent/internal/model"
 )
 
+// SandboxInfo records the OS sandbox that confined bash commands.
+type SandboxInfo struct {
+	Backend  string   `json:"backend"`
+	Writable []string `json:"writable"`
+	Network  bool     `json:"network"`
+}
+
 type Trajectory struct {
+	// Sandbox is set when bash and start_process ran in an OS sandbox.
+	Sandbox      *SandboxInfo    `json:"sandbox,omitempty"`
 	ReadOnly     bool            `json:"read_only"`
 	Task         string          `json:"task"`
 	Model        string          `json:"model"`

@@ -162,7 +162,7 @@ func (e *Executor) StartProcess(command string) (string, error) {
 	e.procs.nextID++
 	id := "p" + strconv.Itoa(e.procs.nextID)
 	ctx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
+	cmd := shellCommand(ctx, e.Sandbox, command)
 	cmd.Dir = e.Root
 	out := newOutBuffer(e.bufferBytes())
 	cmd.Stdout = out
