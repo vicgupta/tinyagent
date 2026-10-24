@@ -64,7 +64,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.verbose, "verbose", false, "print tool outputs")
 	fs.BoolVar(&o.verbose, "v", false, "shorthand for --verbose")
 	fs.BoolVar(&o.noStream, "no-stream", false, "wait for full responses instead of streaming")
-	fs.BoolVar(&o.noAgentsMD, "no-agents-md", false, "don't add <cwd>/AGENTS.md to the system prompt")
+	fs.BoolVar(&o.noAgentsMD, "no-agents-md", false, "don't add AGENTS.md (nearest, up to the repo root) to the system prompt")
 	fs.BoolVar(&o.showVersion, "version", false, "print the version and exit")
 	fs.BoolVar(&o.showVersion, "V", false, "shorthand for --version")
 	fs.BoolVar(&o.doUpdate, "update", false, "update to the latest release and exit")

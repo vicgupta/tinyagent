@@ -141,7 +141,7 @@ Output:
   -o, --output path       write trajectory JSON
   -v, --verbose           print tool outputs
       --no-stream         wait for full responses instead of streaming
-      --no-agents-md      don't add <cwd>/AGENTS.md to the system prompt
+      --no-agents-md      don't add AGENTS.md (nearest, up to the repo root) to the system prompt
 Other:
   -V, --version           print the version and exit
       --update            update to the latest release and exit

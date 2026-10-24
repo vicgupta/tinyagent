@@ -44,7 +44,8 @@ type Agent struct {
 	Verbose   bool
 	// Streamed means the model already wrote its text to Out as it arrived.
 	Streamed bool
-	// SkipAgentsMD stops Run from appending <root>/AGENTS.md to the system prompt.
+	// SkipAgentsMD stops Run from appending the nearest AGENTS.md at or above
+	// <root> to the system prompt.
 	SkipAgentsMD bool
 	// OnStep is called after every step, e.g. to save the trajectory.
 	OnStep func(*trajectory.Trajectory)
@@ -120,7 +121,11 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 // agentsMD returns the project's AGENTS.md as a system prompt section, or ""
 // when there is none.
 func (a *Agent) agentsMD() string {
-	b, err := os.ReadFile(filepath.Join(a.Tools.Root, "AGENTS.md"))
+	path := findAgentsMD(a.Tools.Root)
+	if path == "" {
+		return ""
+	}
+	b, err := os.ReadFile(path)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			fmt.Fprintln(a.Err, "warning: reading AGENTS.md:", err)
@@ -128,7 +133,7 @@ func (a *Agent) agentsMD() string {
 		return ""
 	}
 	if a.Verbose {
-		fmt.Fprintf(a.Out, "loaded AGENTS.md (%d bytes)\n", len(b))
+		fmt.Fprintf(a.Out, "loaded AGENTS.md from %s (%d bytes)\n", path, len(b))
 	}
 	s := string(b)
 	if len(s) > maxAgentsMD {
@@ -140,6 +145,35 @@ func (a *Agent) agentsMD() string {
 		s = s[:n] + "\n[AGENTS.md truncated]"
 	}
 	return "\n\n## Project instructions (AGENTS.md)\n\n" + s
+}
+
+// findAgentsMD returns the nearest AGENTS.md at or above root, stopping at the
+// repository root: the nearest directory containing .git. Without a .git above
+// root, only root itself is checked. It returns "" when there is no such file.
+func findAgentsMD(root string) string {
+	stop := root
+	for dir := root; ; {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			stop = dir
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+
+	for dir := root; ; {
+		path := filepath.Join(dir, "AGENTS.md")
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+		if dir == stop {
+			return ""
+		}
+		dir = filepath.Dir(dir)
+	}
 }
 
 func (a *Agent) checkLimits(ctx context.Context, t *trajectory.Trajectory) (string, bool) {

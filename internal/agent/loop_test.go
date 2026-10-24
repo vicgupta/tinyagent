@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,8 +150,8 @@ func TestAgentsMD(t *testing.T) {
 	if got, want := firstSystem(t, a), base+"\n\n## Project instructions (AGENTS.md)\n\nrun make check"; got != want {
 		t.Errorf("system = %q, want %q", got, want)
 	}
-	if !strings.Contains(out.String(), "loaded AGENTS.md (14 bytes)\n") {
-		t.Errorf("verbose output = %q", out.String())
+	if want := fmt.Sprintf("loaded AGENTS.md from %s (14 bytes)\n", filepath.Join(a.Tools.Root, "AGENTS.md")); !strings.Contains(out.String(), want) {
+		t.Errorf("verbose output = %q, want %q", out.String(), want)
 	}
 
 	a.SkipAgentsMD = true
@@ -208,5 +209,117 @@ func TestAgentsMDTruncatedOnRuneBoundary(t *testing.T) {
 	_, md, _ := strings.Cut(body, "## Project instructions (AGENTS.md)\n\n")
 	if len(md) > maxAgentsMD || len(md) < maxAgentsMD-utf8.UTFMax {
 		t.Errorf("kept %d bytes, want at most %d", len(md), maxAgentsMD)
+	}
+}
+
+// writeTestFile creates parent directories and writes content to path.
+func writeTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// nestedRepo returns a repository root with a .git directory and a nested
+// working directory two levels below it.
+func nestedRepo(t *testing.T) (repo, cwd string) {
+	t.Helper()
+	repo = t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cwd = filepath.Join(repo, "services", "api")
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return repo, cwd
+}
+
+func agentAt(t *testing.T, root string) *Agent {
+	t.Helper()
+	a := newAgent(t, nil)
+	a.Tools.Root = root
+	return a
+}
+
+func TestAgentsMDFromAncestor(t *testing.T) {
+	repo, cwd := nestedRepo(t)
+	a := agentAt(t, cwd)
+	base := firstSystem(t, a)
+	writeTestFile(t, filepath.Join(repo, "AGENTS.md"), "repo rules")
+
+	var out strings.Builder
+	a.Out, a.Verbose = &out, true
+	if got, want := firstSystem(t, a), base+"\n\n## Project instructions (AGENTS.md)\n\nrepo rules"; got != want {
+		t.Errorf("system = %q, want %q", got, want)
+	}
+	if want := fmt.Sprintf("loaded AGENTS.md from %s (10 bytes)\n", filepath.Join(repo, "AGENTS.md")); !strings.Contains(out.String(), want) {
+		t.Errorf("verbose output = %q, want %q", out.String(), want)
+	}
+
+	a.SkipAgentsMD = true
+	if got := firstSystem(t, a); got != base {
+		t.Errorf("SkipAgentsMD: system = %q, want %q", got, base)
+	}
+}
+
+func TestAgentsMDInCwdWinsOverAncestor(t *testing.T) {
+	repo, cwd := nestedRepo(t)
+	writeTestFile(t, filepath.Join(repo, "AGENTS.md"), "repo rules")
+	writeTestFile(t, filepath.Join(cwd, "AGENTS.md"), "cwd rules")
+	got := firstSystem(t, agentAt(t, cwd))
+	if !strings.HasSuffix(got, "## Project instructions (AGENTS.md)\n\ncwd rules") || strings.Contains(got, "repo rules") {
+		t.Errorf("system = %q, want the cwd file only", got)
+	}
+}
+
+func TestAgentsMDNearestAncestorWins(t *testing.T) {
+	repo, cwd := nestedRepo(t)
+	writeTestFile(t, filepath.Join(repo, "AGENTS.md"), "root rules")
+	writeTestFile(t, filepath.Join(repo, "services", "AGENTS.md"), "services rules")
+	got := firstSystem(t, agentAt(t, cwd))
+	if !strings.HasSuffix(got, "## Project instructions (AGENTS.md)\n\nservices rules") || strings.Contains(got, "root rules") {
+		t.Errorf("system = %q, want the closest ancestor file only", got)
+	}
+}
+
+func TestAgentsMDNotReadAboveRepoRoot(t *testing.T) {
+	outer := t.TempDir()
+	repo := filepath.Join(outer, "repo")
+	cwd := filepath.Join(repo, "services", "api")
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := agentAt(t, cwd)
+	base := firstSystem(t, a)
+
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(outer, "AGENTS.md"), "outside rules")
+	var errOut strings.Builder
+	a.Err = &errOut
+	if got := firstSystem(t, a); got != base {
+		t.Errorf("system = %q, want %q", got, base)
+	}
+	if errOut.Len() != 0 {
+		t.Errorf("Err = %q, want no warning", errOut.String())
+	}
+}
+
+func TestAgentsMDWithoutGitChecksOnlyCwd(t *testing.T) {
+	outer := t.TempDir()
+	cwd := filepath.Join(outer, "child")
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	a := agentAt(t, cwd)
+	base := firstSystem(t, a)
+	writeTestFile(t, filepath.Join(outer, "AGENTS.md"), "parent rules")
+	if got := firstSystem(t, a); got != base {
+		t.Errorf("system = %q, want %q", got, base)
 	}
 }
