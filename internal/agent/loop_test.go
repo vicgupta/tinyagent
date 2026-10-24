@@ -36,8 +36,14 @@ func call(id, name, args string) model.ToolCall {
 	return model.ToolCall{ID: id, Type: "function", Function: model.FunctionCall{Name: name, Arguments: args}}
 }
 
+// newAgent returns an Agent rooted at a fresh temp dir. The dir gets a .git so
+// the AGENTS.md lookup stops there and never reads files above it.
 func newAgent(t *testing.T, m model.Model) *Agent {
-	return &Agent{Model: m, ModelName: "fake", Tools: &tools.Executor{Root: t.TempDir()}, Config: config.Default()}
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return &Agent{Model: m, ModelName: "fake", Tools: &tools.Executor{Root: root}, Config: config.Default()}
 }
 
 func TestRunSubmits(t *testing.T) {
@@ -293,12 +299,12 @@ func TestAgentsMDNotReadAboveRepoRoot(t *testing.T) {
 	if err := os.MkdirAll(cwd, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	a := agentAt(t, cwd)
-	base := firstSystem(t, a)
-
 	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	a := agentAt(t, cwd)
+	base := firstSystem(t, a)
+
 	writeTestFile(t, filepath.Join(outer, "AGENTS.md"), "outside rules")
 	var errOut strings.Builder
 	a.Err = &errOut
@@ -312,6 +318,14 @@ func TestAgentsMDNotReadAboveRepoRoot(t *testing.T) {
 
 func TestAgentsMDWithoutGitChecksOnlyCwd(t *testing.T) {
 	outer := t.TempDir()
+	for dir := outer; ; dir = filepath.Dir(dir) {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			t.Skipf("the temp dir is inside a repository (%s), so there's no .git-free tree to test", dir)
+		}
+		if filepath.Dir(dir) == dir {
+			break
+		}
+	}
 	cwd := filepath.Join(outer, "child")
 	if err := os.MkdirAll(cwd, 0o755); err != nil {
 		t.Fatal(err)
