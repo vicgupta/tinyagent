@@ -98,7 +98,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 
 ### Machine-readable output
 
-`--json` makes stdout a UTF-8 JSONL event stream, with one complete JSON object and newline per event. It can be combined with `--verbose`, `--no-stream`, `--read-only`, `--resume`, and `-o`. In this mode, streamed assistant text, verbose tool logs, and live bash output are represented by events or suppressed; the human summary and warnings remain on stderr. Setup failures before a run starts may leave stdout empty.
+`--json` makes stdout a UTF-8 JSONL event stream, with one complete JSON object and newline per event. It can be combined with `--no-stream`, `--read-only`, `--resume`, and `-o` (which still writes the trajectory JSON to its file). In this mode, streamed assistant text and live bash output are represented by events, and `--verbose` has no effect because tool calls and results are already events; the human summary and warnings remain on stderr. Setup failures before a run starts may leave stdout empty.
 
 Every event has a `type`. Event names and fields in schema version 1 are:
 
@@ -117,7 +117,7 @@ When the run starts, the final event is `result`, including for model errors, in
 Consumers should check `schema_version` on `run.started`. Event names and field meanings are stable within a schema version; an incompatible change will increment the version. New optional fields and event types may be added without changing it. The JSONL stream is intended for scripting and CI integrations:
 
 ```sh
-tinyagent --json -t "fix the failing test" --cwd . -o run.jsonl \
+tinyagent --json -t "fix the failing test" --cwd . \
   | jq -c 'select(.type == "result") | {status, submission, cost_usd}'
 ```
 
