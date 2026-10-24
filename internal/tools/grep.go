@@ -17,12 +17,21 @@ const (
 )
 
 // Grep returns lines matching pattern as "file:line: content". Binary and
-// very large files are skipped.
-func Grep(root, pattern, path string) (string, error) {
+// very large files are skipped. A non-empty include glob limits the search to
+// matching files, using the same rules as ListFiles: a glob without "/"
+// matches base names, a glob with "/" matches paths relative to the searched
+// directory. When path is a single file, include is ignored.
+func Grep(root, pattern, path, include string) (string, error) {
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return "", fmt.Errorf("bad regexp: %w", err)
 	}
+	if include != "" {
+		if _, err := filepath.Match(include, ""); err != nil {
+			return "", fmt.Errorf("bad include pattern %q: %w", include, err)
+		}
+	}
+	matchPath := strings.Contains(include, "/")
 	start, err := Resolve(root, path)
 	if err != nil {
 		return "", err
@@ -38,6 +47,15 @@ func Grep(root, pattern, path string) (string, error) {
 				return filepath.SkipDir
 			}
 			return nil
+		}
+		if include != "" && p != start {
+			subject := d.Name()
+			if matchPath {
+				subject = rel(start, p)
+			}
+			if ok, _ := filepath.Match(include, subject); !ok {
+				return nil
+			}
 		}
 		if info, err := d.Info(); err != nil || info.Size() > maxGrepFileSize {
 			return nil
