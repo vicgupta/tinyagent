@@ -32,7 +32,7 @@ func main() {
 func run() int {
 	var (
 		task, modelName, configPath, cwd, output string
-		stepLimit                                int
+		stepLimit, timeLimit                     int
 		costLimit                                float64
 		verbose, noStream, showVersion, doUpdate bool
 		noAgentsMD                               bool
@@ -47,6 +47,7 @@ func run() int {
 	fs.StringVar(&cwd, "cwd", ".", "working directory")
 	fs.IntVar(&stepLimit, "step-limit", 0, "max model calls, 0 = unlimited")
 	fs.Float64Var(&costLimit, "cost-limit", 0, "max USD, 0 = unlimited")
+	fs.IntVar(&timeLimit, "time-limit", 0, "max wall-clock seconds, 0 = unlimited; overrides wall_time_seconds")
 	fs.StringVar(&output, "output", "", "trajectory JSON path")
 	fs.StringVar(&output, "o", "", "shorthand for --output")
 	fs.BoolVar(&verbose, "verbose", false, "print tool outputs")
@@ -56,6 +57,10 @@ func run() int {
 	fs.BoolVar(&showVersion, "version", false, "print the version and exit")
 	fs.BoolVar(&doUpdate, "update", false, "replace this binary with the latest GitHub release and exit")
 	if err := fs.Parse(os.Args[1:]); err != nil {
+		return 2
+	}
+	if timeLimit < 0 {
+		fmt.Fprintln(os.Stderr, "error: --time-limit must be >= 0")
 		return 2
 	}
 	if showVersion {
@@ -88,15 +93,7 @@ func run() int {
 	if err != nil {
 		return fail(err)
 	}
-	// Flags override the config file only when given explicitly.
-	fs.Visit(func(f *flag.Flag) {
-		switch f.Name {
-		case "step-limit":
-			cfg.StepLimit = stepLimit
-		case "cost-limit":
-			cfg.CostLimit = costLimit
-		}
-	})
+	applyFlagOverrides(fs, &cfg, stepLimit, costLimit, timeLimit)
 	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 
 	root, err := filepath.Abs(cwd)
@@ -151,6 +148,21 @@ func run() int {
 	}
 	fmt.Fprintln(os.Stderr)
 	return 1
+}
+
+// applyFlagOverrides copies limit flags into cfg, but only the ones given
+// explicitly, so unset flags leave the config file's values alone.
+func applyFlagOverrides(fs *flag.FlagSet, cfg *config.AgentConfig, stepLimit int, costLimit float64, timeLimit int) {
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "step-limit":
+			cfg.StepLimit = stepLimit
+		case "cost-limit":
+			cfg.CostLimit = costLimit
+		case "time-limit":
+			cfg.WallTimeSec = timeLimit
+		}
+	})
 }
 
 // currentVersion prefers the -ldflags stamp, then the module version that
