@@ -147,6 +147,7 @@ func run() int {
 		printHint(os.Stderr, o.modelName, err.Error())
 		return code
 	}
+	warnUnpriced(os.Stderr, o.modelName, cfg.CostLimit)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -295,6 +296,14 @@ func formatInt(n int) string {
 func printHint(w io.Writer, modelName, errMsg string) {
 	if h := model.Hint(modelName, errMsg); h != "" {
 		fmt.Fprintln(w, "hint:", h)
+	}
+}
+
+// warnUnpriced warns when a cost limit is set but the model's cost can't be
+// estimated, so the limit would never stop the run.
+func warnUnpriced(w io.Writer, modelName string, costLimit float64) {
+	if costLimit > 0 && model.Unpriced(modelName) {
+		fmt.Fprintf(w, "warning: no pricing available for %s; --cost-limit cannot be enforced. Set input_price_per_mtok and output_price_per_mtok in your config to enable cost tracking.\n", modelName)
 	}
 }
 

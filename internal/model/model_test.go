@@ -328,3 +328,30 @@ func TestAnthropicStreamError(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestUnpriced(t *testing.T) {
+	cases := map[string]bool{
+		"openai/gpt-4o":                   false,
+		"gpt-4o-mini-2024-07-18":          false,
+		"anthropic/claude-sonnet-4-5":     false,
+		"openai/unlisted-model":           true,
+		"unlisted-model":                  true,
+		"openrouter/meta-llama/llama-3.1": true,
+		"anthropic/claude-2":              true,
+		"ollama/llama3.1":                 false,
+		"codex/gpt-5":                     false,
+		"nope/model":                      false,
+	}
+	for spec, want := range cases {
+		if got := Unpriced(spec); got != want {
+			t.Errorf("Unpriced(%q) = %v, want %v", spec, got, want)
+		}
+	}
+	t.Cleanup(func() { PriceOverride = [2]float64{} })
+	for _, o := range [][2]float64{{1, 2}, {1, 0}, {0, 2}} {
+		PriceOverride = o
+		if Unpriced("openai/unlisted-model") {
+			t.Errorf("override %v: want priced", o)
+		}
+	}
+}
