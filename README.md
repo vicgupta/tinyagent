@@ -64,6 +64,7 @@ tinyagent -m anthropic/claude-sonnet-4-5 -t "..."
 tinyagent -m openrouter/qwen/qwen3-coder -t "..."
 tinyagent -m ollama/llama3.1 -t "..."
 tinyagent -m codex/gpt-5.6-luna -t "..."   # ChatGPT subscription, see below
+cat task.md | tinyagent -t -               # read a long or multi-line task from stdin
 ```
 
 ### ChatGPT subscription (Codex)
@@ -74,7 +75,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 
 | Flag | Default | |
 |---|---|---|
-| `-t, --task` | — | Task prompt (required) |
+| `-t, --task` | — | Task prompt (required); `-` reads it from stdin |
 | `-m, --model` | `$AGENT_MODEL` or `openai/gpt-4o` | `<provider>/<model>`; no `/` means openai. Providers: openai, openrouter, anthropic, ollama, codex |
 | `-c, --config` | embedded defaults | YAML config file |
 | `--cwd` | `.` | Root directory; tools can't reach outside it |

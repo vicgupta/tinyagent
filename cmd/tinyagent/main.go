@@ -3,8 +3,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -35,7 +37,7 @@ func run() int {
 		verbose, noStream, showVersion, doUpdate bool
 	)
 	fs := flag.NewFlagSet("tinyagent", flag.ContinueOnError)
-	fs.StringVar(&task, "task", "", "task/prompt (required)")
+	fs.StringVar(&task, "task", "", "task/prompt (required); - reads it from stdin")
 	fs.StringVar(&task, "t", "", "shorthand for --task")
 	fs.StringVar(&modelName, "model", defaultModel(), "provider/model, e.g. openai/gpt-4o")
 	fs.StringVar(&modelName, "m", defaultModel(), "shorthand for --model")
@@ -74,6 +76,10 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "error: --task is required")
 		fs.Usage()
 		return 2
+	}
+	task, err := readTask(task, os.Stdin)
+	if err != nil {
+		return fail(err)
 	}
 
 	cfg, err := config.Load(configPath)
@@ -154,6 +160,21 @@ func currentVersion() string {
 		return bi.Main.Version
 	}
 	return "dev"
+}
+
+// readTask returns task, or the trimmed contents of stdin when task is "-".
+func readTask(task string, stdin io.Reader) (string, error) {
+	if task != "-" {
+		return task, nil
+	}
+	b, err := io.ReadAll(stdin)
+	if err != nil {
+		return "", fmt.Errorf("reading task from stdin: %w", err)
+	}
+	if task = strings.TrimSpace(string(b)); task == "" {
+		return "", errors.New("--task - got an empty task on stdin")
+	}
+	return task, nil
 }
 
 func defaultModel() string {
