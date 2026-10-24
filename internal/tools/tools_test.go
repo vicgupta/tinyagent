@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,7 +31,7 @@ func TestWriteReadEdit(t *testing.T) {
 	if err := WriteFile(root, "a/b/c.txt", "foo bar foo"); err != nil {
 		t.Fatal(err)
 	}
-	got, err := ReadFile(root, "a/b/c.txt")
+	got, err := ReadFile(root, "a/b/c.txt", 0, 0)
 	if err != nil || got != "foo bar foo" {
 		t.Fatalf("ReadFile = %q, %v", got, err)
 	}
@@ -43,7 +44,7 @@ func TestWriteReadEdit(t *testing.T) {
 	if err := EditFile(root, "a/b/c.txt", "bar", "baz"); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := ReadFile(root, "a/b/c.txt"); got != "foo baz foo" {
+	if got, _ := ReadFile(root, "a/b/c.txt", 0, 0); got != "foo baz foo" {
 		t.Errorf("after edit = %q", got)
 	}
 }
@@ -161,4 +162,111 @@ func TestExecutorRun(t *testing.T) {
 	if n := len(Specs()); n != 6 {
 		t.Errorf("Specs() has %d tools", n)
 	}
+}
+
+func TestReadFileRange(t *testing.T) {
+	root := t.TempDir()
+	if err := WriteFile(root, "f.txt", "l1\nl2\nl3\nl4\nl5\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFile(root, "nonl.txt", "a\nb\nc"); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFile(root, "empty.txt", ""); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		path          string
+		offset, limit int
+		want          string
+	}{
+		{"f.txt", 0, 0, "l1\nl2\nl3\nl4\nl5\n"},
+		{"f.txt", 1, 0, "l1\nl2\nl3\nl4\nl5\n"},
+		{"f.txt", 1, 5, "l1\nl2\nl3\nl4\nl5\n"},
+		{"f.txt", 1, 99, "l1\nl2\nl3\nl4\nl5\n"},
+		{"f.txt", 2, 2, "l2\nl3\n[lines 2-3 of 5]"},
+		{"f.txt", 4, 0, "l4\nl5\n[lines 4-5 of 5]"},
+		{"f.txt", 0, 2, "l1\nl2\n[lines 1-2 of 5]"},
+		{"f.txt", 5, 1, "l5\n[lines 5-5 of 5]"},
+		{"nonl.txt", 3, 0, "c\n[lines 3-3 of 3]"},
+		{"nonl.txt", 0, 0, "a\nb\nc"},
+		{"empty.txt", 0, 0, ""},
+		{"empty.txt", 1, 10, ""},
+	}
+	for _, c := range cases {
+		got, err := ReadFile(root, c.path, c.offset, c.limit)
+		if err != nil || got != c.want {
+			t.Errorf("ReadFile(%s, %d, %d) = %q, %v; want %q", c.path, c.offset, c.limit, got, err, c.want)
+		}
+	}
+	for _, c := range []struct {
+		offset, limit int
+		want          string
+	}{
+		{6, 0, "past the end"},
+		{-1, 0, "offset"},
+		{0, -1, "limit"},
+	} {
+		if _, err := ReadFile(root, "f.txt", c.offset, c.limit); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("ReadFile(f.txt, %d, %d) err = %v, want %q", c.offset, c.limit, err, c.want)
+		}
+	}
+	if _, err := ReadFile(root, "empty.txt", 2, 0); err == nil {
+		t.Error("offset 2 on an empty file: want an error")
+	}
+}
+
+func TestExecutorReadFileRangeArgs(t *testing.T) {
+	root := t.TempDir()
+	var b strings.Builder
+	for i := 1; i <= 200; i++ {
+		fmt.Fprintf(&b, "line %d\n", i)
+	}
+	if err := WriteFile(root, "src/main.go", b.String()); err != nil {
+		t.Fatal(err)
+	}
+	e := &Executor{Root: root}
+	call := func(args string) string {
+		return e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "read_file", Arguments: args}})
+	}
+	want := ""
+	for i := 100; i < 150; i++ {
+		want += fmt.Sprintf("line %d\n", i)
+	}
+	want += "[lines 100-149 of 200]"
+	// The issue's example, as JSON numbers and as the strings some models send.
+	for _, args := range []string{`{"path": "src/main.go", "offset": 100, "limit": 50}`, `{"path":"src/main.go","offset":"100","limit":"50"}`} {
+		if got := call(args); got != want {
+			t.Errorf("%s:\ngot  %q\nwant %q", args, got, want)
+		}
+	}
+	if got := call(`{"path":"src/main.go"}`); got != b.String() {
+		t.Errorf("no range: got %d chars, want the whole file (%d)", len(got), b.Len())
+	}
+	for _, args := range []string{`{"path":"src/main.go","offset":"ten"}`, `{"path":"src/main.go","offset":1.5}`, `{"path":"src/main.go","offset":-3}`} {
+		if got := call(args); !strings.HasPrefix(got, "error:") {
+			t.Errorf("%s = %q, want an error", args, got)
+		}
+	}
+}
+
+func TestReadFileSpec(t *testing.T) {
+	for _, s := range Specs() {
+		if s.Function.Name != "read_file" {
+			continue
+		}
+		p := s.Function.Parameters
+		props := p["properties"].(map[string]any)
+		for _, k := range []string{"offset", "limit"} {
+			prop, ok := props[k].(map[string]any)
+			if !ok || prop["type"] != "integer" {
+				t.Errorf("read_file %s = %v, want an integer property", k, props[k])
+			}
+		}
+		if req := p["required"].([]string); len(req) != 1 || req[0] != "path" {
+			t.Errorf("read_file required = %v, want [path]", req)
+		}
+		return
+	}
+	t.Fatal("no read_file spec")
 }
