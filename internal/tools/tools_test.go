@@ -35,13 +35,13 @@ func TestWriteReadEdit(t *testing.T) {
 	if err != nil || got != "foo bar foo" {
 		t.Fatalf("ReadFile = %q, %v", got, err)
 	}
-	if err := EditFile(root, "a/b/c.txt", "foo", "x"); err == nil || !strings.Contains(err.Error(), "2 times") {
+	if _, err := EditFile(root, "a/b/c.txt", "foo", "x", false); err == nil || !strings.Contains(err.Error(), "2 times") {
 		t.Errorf("ambiguous edit: err = %v", err)
 	}
-	if err := EditFile(root, "a/b/c.txt", "nope", "x"); err == nil || !strings.Contains(err.Error(), "not found") {
+	if _, err := EditFile(root, "a/b/c.txt", "nope", "x", false); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("missing edit: err = %v", err)
 	}
-	if err := EditFile(root, "a/b/c.txt", "bar", "baz"); err != nil {
+	if _, err := EditFile(root, "a/b/c.txt", "bar", "baz", false); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := ReadFile(root, "a/b/c.txt", 0, 0); got != "foo baz foo" {
@@ -269,4 +269,75 @@ func TestReadFileSpec(t *testing.T) {
 		return
 	}
 	t.Fatal("no read_file spec")
+}
+
+func TestExecutorEditReplaceAll(t *testing.T) {
+	root := t.TempDir()
+	if err := WriteFile(root, "x.go", "foo := 1\nbar(foo)\nfoo++\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(root, "x.go"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	e := &Executor{Root: root}
+	call := func(args string) string {
+		return e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "edit_file", Arguments: args}})
+	}
+	read := func() string {
+		got, _ := ReadFile(root, "x.go", 0, 0)
+		return got
+	}
+	if out := call(`{"path":"x.go","old_str":"foo","new_str":"n"}`); !strings.Contains(out, "occurs 3 times") {
+		t.Errorf("repeated without replace_all = %q", out)
+	}
+	if out := call(`{"path":"x.go","old_str":"foo","new_str":"n","replace_all":false}`); !strings.Contains(out, "occurs 3 times") {
+		t.Errorf("repeated with replace_all false = %q", out)
+	}
+	if out := call(`{"path":"x.go","old_str":"nope","new_str":"n","replace_all":true}`); !strings.Contains(out, "not found") {
+		t.Errorf("missing with replace_all = %q", out)
+	}
+	if out := call(`{"path":"x.go","old_str":"","new_str":"n","replace_all":true}`); !strings.Contains(out, "must not be empty") {
+		t.Errorf("empty old_str with replace_all = %q", out)
+	}
+	if out := call(`{"path":"x.go","old_str":"foo","new_str":"n","replace_all":"yes"}`); !strings.Contains(out, "replace_all must be true or false") {
+		t.Errorf("non-boolean replace_all = %q", out)
+	}
+	if got := read(); got != "foo := 1\nbar(foo)\nfoo++\n" {
+		t.Errorf("failed edits changed the file: %q", got)
+	}
+	if out := call(`{"path":"x.go","old_str":"foo","new_str":"n","replace_all":true}`); out != "ok (3 replacements)" {
+		t.Errorf("replace_all = %q", out)
+	}
+	if got := read(); got != "n := 1\nbar(n)\nn++\n" {
+		t.Errorf("after replace_all = %q", got)
+	}
+	if out := call(`{"path":"x.go","old_str":"bar","new_str":"baz"}`); out != "ok" {
+		t.Errorf("unique edit = %q", out)
+	}
+	if fi, err := os.Stat(filepath.Join(root, "x.go")); err != nil || fi.Mode().Perm() != 0o755 {
+		t.Errorf("mode after edits = %v, %v", fi.Mode().Perm(), err)
+	}
+}
+
+func TestEditFileSpec(t *testing.T) {
+	for _, s := range Specs() {
+		if s.Function.Name != "edit_file" {
+			continue
+		}
+		p := s.Function.Parameters
+		props := p["properties"].(map[string]any)
+		if prop, ok := props["replace_all"].(map[string]any); !ok || prop["type"] != "boolean" {
+			t.Errorf("edit_file replace_all = %v, want a boolean property", props["replace_all"])
+		}
+		for _, r := range p["required"].([]string) {
+			if r == "replace_all" {
+				t.Error("replace_all is required")
+			}
+		}
+		if !strings.Contains(s.Function.Description, "replace_all") {
+			t.Errorf("edit_file description doesn't mention replace_all: %q", s.Function.Description)
+		}
+		return
+	}
+	t.Fatal("no edit_file spec")
 }
