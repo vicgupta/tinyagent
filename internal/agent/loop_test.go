@@ -121,3 +121,48 @@ func TestStreamedTextNotReprinted(t *testing.T) {
 		t.Errorf("output = %q, want only the line ending", out.String())
 	}
 }
+
+func firstSystem(t *testing.T, a *Agent) string {
+	t.Helper()
+	m := &scripted{replies: []model.Message{{Role: "assistant", Content: "answer"}}}
+	a.Model = m
+	a.Run(context.Background(), "q")
+	return m.seen[0][0].Content
+}
+
+func TestAgentsMD(t *testing.T) {
+	a := newAgent(t, nil)
+	base := firstSystem(t, a)
+	if strings.Contains(base, "AGENTS.md") {
+		t.Fatalf("prompt mentions AGENTS.md without the file: %q", base)
+	}
+
+	if err := os.WriteFile(filepath.Join(a.Tools.Root, "AGENTS.md"), []byte("run make check"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	a.Out, a.Verbose = &out, true
+	if got, want := firstSystem(t, a), base+"\n\n## Project instructions (AGENTS.md)\n\nrun make check"; got != want {
+		t.Errorf("system = %q, want %q", got, want)
+	}
+	if !strings.Contains(out.String(), "loaded AGENTS.md (14 bytes)\n") {
+		t.Errorf("verbose output = %q", out.String())
+	}
+
+	a.SkipAgentsMD = true
+	if got := firstSystem(t, a); got != base {
+		t.Errorf("SkipAgentsMD: system = %q, want %q", got, base)
+	}
+}
+
+func TestAgentsMDTruncated(t *testing.T) {
+	a := newAgent(t, nil)
+	big := strings.Repeat("x", maxAgentsMD+100)
+	if err := os.WriteFile(filepath.Join(a.Tools.Root, "AGENTS.md"), []byte(big), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := firstSystem(t, a)
+	if !strings.HasSuffix(got, big[:maxAgentsMD]+"\n[AGENTS.md truncated]") || strings.Contains(got, big[:maxAgentsMD+1]) {
+		t.Errorf("system not truncated with marker; tail = %q", got[len(got)-40:])
+	}
+}

@@ -35,6 +35,7 @@ func run() int {
 		stepLimit                                int
 		costLimit                                float64
 		verbose, noStream, showVersion, doUpdate bool
+		noAgentsMD                               bool
 	)
 	fs := flag.NewFlagSet("tinyagent", flag.ContinueOnError)
 	fs.StringVar(&task, "task", "", "task/prompt (required); - reads it from stdin")
@@ -51,6 +52,7 @@ func run() int {
 	fs.BoolVar(&verbose, "verbose", false, "print tool outputs")
 	fs.BoolVar(&verbose, "v", false, "shorthand for --verbose")
 	fs.BoolVar(&noStream, "no-stream", false, "wait for each full response instead of streaming it")
+	fs.BoolVar(&noAgentsMD, "no-agents-md", false, "don't add <cwd>/AGENTS.md to the system prompt")
 	fs.BoolVar(&showVersion, "version", false, "print the version and exit")
 	fs.BoolVar(&doUpdate, "update", false, "replace this binary with the latest GitHub release and exit")
 	if err := fs.Parse(os.Args[1:]); err != nil {
@@ -125,10 +127,11 @@ func run() int {
 			BashTimeout:    time.Duration(cfg.BashTimeoutSec) * time.Second,
 			MaxOutputChars: cfg.MaxOutputChars,
 		},
-		Config:   cfg,
-		Out:      os.Stdout,
-		Verbose:  verbose,
-		Streamed: !noStream,
+		Config:       cfg,
+		Out:          os.Stdout,
+		Verbose:      verbose,
+		Streamed:     !noStream,
+		SkipAgentsMD: noAgentsMD,
 	}
 	if output != "" {
 		a.OnStep = func(t *trajectory.Trajectory) {

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -28,6 +30,9 @@ const (
 	StatusError       = "Error"
 )
 
+// maxAgentsMD caps how much of AGENTS.md goes into the system prompt.
+const maxAgentsMD = 32 << 10
+
 type Agent struct {
 	Model     model.Model
 	ModelName string
@@ -37,6 +42,8 @@ type Agent struct {
 	Verbose   bool
 	// Streamed means the model already wrote its text to Out as it arrived.
 	Streamed bool
+	// SkipAgentsMD stops Run from appending <root>/AGENTS.md to the system prompt.
+	SkipAgentsMD bool
 	// OnStep is called after every step, e.g. to save the trajectory.
 	OnStep func(*trajectory.Trajectory)
 }
@@ -54,6 +61,9 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 	}
 
 	system := strings.NewReplacer("{{cwd}}", a.Tools.Root, "{{os}}", runtime.GOOS).Replace(a.Config.SystemPrompt)
+	if !a.SkipAgentsMD {
+		system += a.agentsMD()
+	}
 	t := &trajectory.Trajectory{
 		Task:  task,
 		Model: a.ModelName,
@@ -98,6 +108,26 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		}
 		a.step(t)
 	}
+}
+
+// agentsMD returns the project's AGENTS.md as a system prompt section, or ""
+// when there is none.
+func (a *Agent) agentsMD() string {
+	b, err := os.ReadFile(filepath.Join(a.Tools.Root, "AGENTS.md"))
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintln(a.Out, "warning: reading AGENTS.md:", err)
+		}
+		return ""
+	}
+	if a.Verbose {
+		fmt.Fprintf(a.Out, "loaded AGENTS.md (%d bytes)\n", len(b))
+	}
+	s := string(b)
+	if len(s) > maxAgentsMD {
+		s = s[:maxAgentsMD] + "\n[AGENTS.md truncated]"
+	}
+	return "\n\n## Project instructions (AGENTS.md)\n\n" + s
 }
 
 func (a *Agent) checkLimits(ctx context.Context, t *trajectory.Trajectory) (string, bool) {
