@@ -36,6 +36,7 @@ type args struct {
 	Limit      json.Number     `json:"limit"`
 	Timeout    json.Number     `json:"timeout"`
 	ReplaceAll json.RawMessage `json:"replace_all"`
+	IgnoreCase json.RawMessage `json:"ignore_case"`
 }
 
 // Specs returns the OpenAI tool definitions for all tools.
@@ -50,7 +51,7 @@ func Specs() []model.ToolSpec {
 		spec("list_files", "List directory entries. With a glob pattern (e.g. *.go, or a pattern containing /), search recursively and return matching file paths.",
 			props{"path": "Directory (default .)", "pattern": "Optional glob pattern"}),
 		spec("grep", "Search files recursively for a regular expression. Returns file:line: content.",
-			props{"pattern": "Go regular expression", "path": "File or directory to search (default .)", "include": "Optional glob to filter files, e.g. *.go (a glob with / matches paths relative to path)"}, "pattern"),
+			props{"pattern": "Go regular expression", "path": "File or directory to search (default .)", "include": "Optional glob to filter files, e.g. *.go (a glob with / matches paths relative to path)", "ignore_case": "Optional: match file contents case-insensitively (default false)"}, "pattern"),
 		spec("bash", "Run a command with bash -c in the working directory. Each call is a fresh process. Returns the exit code and combined stdout/stderr.",
 			props{"command": "Shell command", "timeout": "Optional timeout in seconds for this command (default: the configured bash timeout, max 600)"}, "command"),
 	}
@@ -62,7 +63,7 @@ type props map[string]string
 // the rest take strings.
 var (
 	intProps  = map[string]bool{"offset": true, "limit": true, "timeout": true}
-	boolProps = map[string]bool{"replace_all": true}
+	boolProps = map[string]bool{"replace_all": true, "ignore_case": true}
 )
 
 func spec(name, desc string, p props, required ...string) model.ToolSpec {
@@ -132,7 +133,11 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 	case "list_files":
 		return ListFiles(e.Root, a.Path, a.Pattern)
 	case "grep":
-		return Grep(e.Root, a.Pattern, a.Path, a.Include)
+		ignoreCase, err := boolArg("ignore_case", a.IgnoreCase)
+		if err != nil {
+			return "", err
+		}
+		return Grep(e.Root, a.Pattern, a.Path, a.Include, ignoreCase)
 	case "bash":
 		secs, err := intArg("timeout", a.Timeout)
 		if err != nil {

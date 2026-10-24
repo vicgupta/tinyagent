@@ -90,7 +90,7 @@ func TestListFiles(t *testing.T) {
 
 func TestGrep(t *testing.T) {
 	root := setupTree(t)
-	out, err := Grep(root, "TODO", "", "")
+	out, err := Grep(root, "TODO", "", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,40 +98,40 @@ func TestGrep(t *testing.T) {
 	if out != want {
 		t.Errorf("Grep = %q, want %q", out, want)
 	}
-	if out, _ := Grep(root, "zzz", "pkg", ""); out != "no matches" {
+	if out, _ := Grep(root, "zzz", "pkg", "", false); out != "no matches" {
 		t.Errorf("no-match grep = %q", out)
 	}
-	if _, err := Grep(root, "(", "", ""); err == nil {
+	if _, err := Grep(root, "(", "", "", false); err == nil {
 		t.Error("bad regexp accepted")
 	}
 }
 
 func TestGrepInclude(t *testing.T) {
 	root := setupTree(t)
-	if out, err := Grep(root, "TODO", "", "*.go"); err != nil || out != "pkg/util.go:2: // TODO fix" {
+	if out, err := Grep(root, "TODO", "", "*.go", false); err != nil || out != "pkg/util.go:2: // TODO fix" {
 		t.Errorf("include *.go = %q, %v", out, err)
 	}
-	if out, _ := Grep(root, "TODO", "", "*.txt"); out != "pkg/util.txt:1: TODO later" {
+	if out, _ := Grep(root, "TODO", "", "*.txt", false); out != "pkg/util.txt:1: TODO later" {
 		t.Errorf("include *.txt = %q", out)
 	}
-	if out, _ := Grep(root, "package", "", "pkg/*/*.go"); out != "pkg/sub/deep.go:1: package sub" {
+	if out, _ := Grep(root, "package", "", "pkg/*/*.go", false); out != "pkg/sub/deep.go:1: package sub" {
 		t.Errorf("include pkg/*/*.go = %q", out)
 	}
-	if out, _ := Grep(root, "package", "pkg", "sub/*.go"); out != "pkg/sub/deep.go:1: package sub" {
+	if out, _ := Grep(root, "package", "pkg", "sub/*.go", false); out != "pkg/sub/deep.go:1: package sub" {
 		t.Errorf("include sub/*.go under pkg = %q", out)
 	}
-	if out, _ := Grep(root, "TODO", "", "*.md"); out != "no matches" {
+	if out, _ := Grep(root, "TODO", "", "*.md", false); out != "no matches" {
 		t.Errorf("include *.md = %q", out)
 	}
-	if _, err := Grep(root, "TODO", "", "["); err == nil || !strings.Contains(err.Error(), `bad include pattern "["`) {
+	if _, err := Grep(root, "TODO", "", "[", false); err == nil || !strings.Contains(err.Error(), `bad include pattern "["`) {
 		t.Errorf("bad include err = %v", err)
 	}
 	// A single-file path ignores include.
-	if out, _ := Grep(root, "TODO", "pkg/util.txt", "*.go"); out != "pkg/util.txt:1: TODO later" {
+	if out, _ := Grep(root, "TODO", "pkg/util.txt", "*.go", false); out != "pkg/util.txt:1: TODO later" {
 		t.Errorf("single file with include = %q", out)
 	}
-	all, _ := Grep(root, "TODO", "", "")
-	if out, _ := Grep(root, "TODO", "", ""); out != all {
+	all, _ := Grep(root, "TODO", "", "", false)
+	if out, _ := Grep(root, "TODO", "", "", false); out != all {
 		t.Errorf("empty include changed results: %q", out)
 	}
 	e := &Executor{Root: root}
@@ -159,6 +159,116 @@ func TestGrepSpec(t *testing.T) {
 		return
 	}
 	t.Fatal("no grep spec")
+}
+
+func TestExecutorGrepIgnoreCase(t *testing.T) {
+	root := t.TempDir()
+	for path, content := range map[string]string{
+		"Logs/app.log":     "Error: connection failed\nERROR: timeout\nerror: retrying\n",
+		"Logs/other.LOG":   "ERROR: excluded by glob\n",
+		"Logs/notes.txt":   "ERROR: excluded by extension\n",
+		"Logs/sub/api.log": "eRrOr: nested\n",
+		".git/hidden.log":  "ERROR: hidden\n",
+		"Logs/binary.log":  "ERROR\x00binary\n",
+	} {
+		if err := WriteFile(root, path, content); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e := &Executor{Root: root}
+	all := "Logs/app.log:1: Error: connection failed\nLogs/app.log:2: ERROR: timeout\nLogs/app.log:3: error: retrying"
+	for _, tt := range []struct {
+		name string
+		args string
+		want string
+	}{
+		{"omitted", `{"pattern":"error","path":"Logs/app.log"}`, "Logs/app.log:3: error: retrying"},
+		{"false", `{"pattern":"error","path":"Logs/app.log","ignore_case":false}`, "Logs/app.log:3: error: retrying"},
+		{"null", `{"pattern":"error","path":"Logs/app.log","ignore_case":null}`, "Logs/app.log:3: error: retrying"},
+		{"single file", `{"pattern":"error","path":"Logs/app.log","ignore_case":true}`, all},
+		{"single file ignores include", `{"pattern":"error","path":"Logs/app.log","include":"*.txt","ignore_case":true}`, all},
+		{"recursive", `{"pattern":"error","ignore_case":true}`, all + "\nLogs/notes.txt:1: ERROR: excluded by extension\nLogs/other.LOG:1: ERROR: excluded by glob\nLogs/sub/api.log:1: eRrOr: nested"},
+		{"recursive include", `{"pattern":"error","include":"*.log","ignore_case":true}`, all + "\nLogs/sub/api.log:1: eRrOr: nested"},
+		{"relative include", `{"pattern":"error","path":"Logs","include":"sub/*.log","ignore_case":true}`, "Logs/sub/api.log:1: eRrOr: nested"},
+		{"include stays case sensitive", `{"pattern":"error","include":"logs/*.log","ignore_case":true}`, "no matches"},
+		{"no matches", `{"pattern":"missing","ignore_case":true}`, "no matches"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: tt.args}})
+			if got != tt.want {
+				t.Errorf("grep %s = %q, want %q", tt.args, got, tt.want)
+			}
+		})
+	}
+	for _, flag := range []string{"", `,"ignore_case":false`, `,"ignore_case":null`, `,"ignore_case":true`} {
+		args := `{"pattern":"(?i)error","path":"Logs/app.log"` + flag + `}`
+		if got := e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: args}}); got != all {
+			t.Errorf("inline flag with %s = %q, want %q", args, got, all)
+		}
+	}
+}
+
+func TestExecutorGrepIgnoreCaseValidation(t *testing.T) {
+	e := &Executor{Root: t.TempDir()}
+	for _, value := range []string{`"true"`, `"yes"`, `0`, `1`, `[]`, `{}`} {
+		args := `{"pattern":"error","ignore_case":` + value + `}`
+		want := "error: ignore_case must be true or false, got " + value
+		if got := e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: args}}); got != want {
+			t.Errorf("grep %s = %q, want %q", args, got, want)
+		}
+	}
+	for _, flag := range []string{"", `,"ignore_case":false`, `,"ignore_case":null`, `,"ignore_case":true`} {
+		args := `{"pattern":"("` + flag + `}`
+		if got := e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: args}}); !strings.HasPrefix(got, "error: bad regexp:") {
+			t.Errorf("grep %s = %q, want a bad regexp error", args, got)
+		}
+	}
+}
+
+func TestGrepIgnoreCaseSpec(t *testing.T) {
+	for _, s := range Specs() {
+		if s.Function.Name != "grep" {
+			continue
+		}
+		props := s.Function.Parameters["properties"].(map[string]any)
+		prop, ok := props["ignore_case"].(map[string]any)
+		if !ok || prop["type"] != "boolean" {
+			t.Fatalf("grep ignore_case = %v, want a boolean property", props["ignore_case"])
+		}
+		if desc, _ := prop["description"].(string); !strings.Contains(desc, "default false") {
+			t.Errorf("ignore_case description = %q, want default false", desc)
+		}
+		for _, required := range s.Function.Parameters["required"].([]string) {
+			if required == "ignore_case" {
+				t.Error("ignore_case is required")
+			}
+		}
+		return
+	}
+	t.Fatal("no grep spec")
+}
+
+func TestGrepIgnoreCaseLimits(t *testing.T) {
+	root := t.TempDir()
+	if err := WriteFile(root, "large.log", strings.Repeat("ERROR\n", maxGrepFileSize/6+1)); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Grep(root, "error", "", "", true); err != nil || got != "no matches" {
+		t.Fatalf("large file = %q, %v", got, err)
+	}
+	if err := WriteFile(root, "matches.log", strings.Repeat("ERROR\n", maxGrepMatches+1)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Grep(root, "error", "", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(got, "\n")
+	if len(lines) != maxGrepMatches+1 || lines[0] != "matches.log:1: ERROR" ||
+		lines[maxGrepMatches-1] != fmt.Sprintf("matches.log:%d: ERROR", maxGrepMatches) ||
+		lines[maxGrepMatches] != fmt.Sprintf("... (stopped at %d matches)", maxGrepMatches) {
+		t.Errorf("match limit: got %d lines, ending in %q", len(lines), lines[len(lines)-1])
+	}
 }
 
 func TestBash(t *testing.T) {
