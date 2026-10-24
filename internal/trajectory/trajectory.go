@@ -28,7 +28,35 @@ type Trajectory struct {
 	// BackgroundProcesses summarizes background processes still registered
 	// when the run ended (all are killed): status and output tail of each.
 	BackgroundProcesses string `json:"background_processes,omitempty"`
+
+	// Resume metadata, present on trajectories written by this version. It
+	// lets a later invocation validate and continue an unfinished run.
+	SchemaVersion int    `json:"schema_version,omitempty"`
+	Root          string `json:"root,omitempty"` // canonical working directory
+	// SystemPrompt is the effective system prompt (with {{cwd}}/{{os}}
+	// substituted and AGENTS.md appended) the run used.
+	SystemPrompt string `json:"system_prompt,omitempty"`
+	// SkipAgentsMD records whether AGENTS.md was excluded from the prompt.
+	SkipAgentsMD  bool     `json:"skip_agents_md"`
+	Tools         []string `json:"tools,omitempty"`          // tool names, in spec order
+	ToolSignature string   `json:"tool_signature,omitempty"` // versioned spec/semantics fingerprint
+	// Resume records the checkpoint this run continued, when it did.
+	Resume *ResumeInfo `json:"resume,omitempty"`
 }
+
+// ResumeInfo records the checkpoint a run continued, so the previous
+// termination stays distinguishable from the active result.
+type ResumeInfo struct {
+	Source     string      `json:"source"`      // path of the input checkpoint
+	ExitStatus string      `json:"exit_status"` // previous termination status
+	Steps      int         `json:"steps"`       // steps at the previous termination
+	Submission string      `json:"submission,omitempty"`
+	Message    int         `json:"message"` // continuation notice index in Messages
+	Previous   *ResumeInfo `json:"previous,omitempty"`
+}
+
+// SchemaVersion is the resume-metadata version written by this build.
+const SchemaVersion = 1
 
 // Compaction describes one compaction of the model's view of the history.
 // Indexes refer to Trajectory.Messages.
@@ -49,9 +77,20 @@ type Compaction struct {
 	View []int `json:"view"`
 }
 
-// Save writes the trajectory to path atomically, so a crash mid-write never
-// leaves a truncated file.
+// Save replaces path with a complete private file using a same-directory
+// temporary file and rename. This does not guarantee power-loss durability.
 func (t *Trajectory) Save(path string) error {
+	return t.save(path, false)
+}
+
+// SaveNew publishes the starting checkpoint without replacing any existing
+// destination, including symlinks. Linking the completed temporary file makes
+// publication atomic and exclusive on filesystems supporting hard links.
+func (t *Trajectory) SaveNew(path string) error {
+	return t.save(path, true)
+}
+
+func (t *Trajectory) save(path string, exclusive bool) error {
 	data, err := json.MarshalIndent(t, "", "  ")
 	if err != nil {
 		return err
@@ -59,9 +98,20 @@ func (t *Trajectory) Save(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".tinyagent-*.json")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if exclusive {
+		return os.Link(tmp.Name(), path)
+	}
+	return os.Rename(tmp.Name(), path)
 }

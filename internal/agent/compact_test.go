@@ -184,10 +184,11 @@ func TestCompactSummarizes(t *testing.T) {
 	}}
 	a, stderr := compactAgent(t, f, 30000)
 	out := filepath.Join(t.TempDir(), "traj.json")
-	a.OnStep = func(tr *trajectory.Trajectory) {
+	a.OnStep = func(tr *trajectory.Trajectory) error {
 		if err := tr.Save(out); err != nil {
 			t.Fatal(err)
 		}
+		return nil
 	}
 	tr := a.Run(context.Background(), "the task")
 

@@ -50,9 +50,19 @@ type Agent struct {
 	// NoCompact turns off context compaction: the full history is always
 	// sent, and a context-overflow error ends the run.
 	NoCompact bool
-	// OnStep is called after every step, e.g. to save the trajectory.
-	OnStep func(*trajectory.Trajectory)
+	// OnStep is called after every step, e.g. to save the trajectory. A
+	// non-nil error stops the run.
+	OnStep func(*trajectory.Trajectory) error
+	// Resume, when non-nil, continues that trajectory instead of starting a
+	// fresh run: its messages, accounting totals, and steps are the starting
+	// state, and a continuation notice is appended before the first request.
+	Resume       *trajectory.Trajectory
+	ResumeSource string // audit-only input path for resume provenance
 }
+
+// resumeNotice is appended to the model's history when a run is resumed, so
+// the model knows the workspace may have changed since the last save.
+const resumeNotice = trajectory.ContinuationNotice
 
 // Run executes task until submission, a limit, or an error. It always returns
 // a trajectory describing how the run ended.
@@ -69,17 +79,47 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		defer cancel()
 	}
 
-	system := strings.NewReplacer("{{cwd}}", a.Tools.Root, "{{os}}", runtime.GOOS).Replace(a.Config.SystemPrompt)
-	if !a.SkipAgentsMD {
-		system += a.agentsMD()
-	}
-	t := &trajectory.Trajectory{
-		Task:  task,
-		Model: a.ModelName,
-		Messages: []model.Message{
-			{Role: "system", Content: system},
-			{Role: "user", Content: task},
-		},
+	var t *trajectory.Trajectory
+	if a.Resume != nil {
+		t = a.Resume
+		if a.ModelName != t.Model {
+			t.ExitStatus, t.Submission = StatusError, "resume model differs from checkpoint"
+			return t
+		}
+		if err := ValidateResume(t, a.Config, a.Tools.Root); err != nil {
+			t.ExitStatus, t.Submission = StatusError, err.Error()
+			return t
+		}
+		source := a.ResumeSource
+		if source == "" {
+			source = "memory"
+		}
+		t.Resume = &trajectory.ResumeInfo{
+			Source: source, ExitStatus: t.ExitStatus, Submission: t.Submission,
+			Steps: t.Steps, Message: len(t.Messages), Previous: t.Resume,
+		}
+		t.ExitStatus, t.Submission = "", ""
+		t.Messages = append(t.Messages, model.Message{Role: "user", Content: resumeNotice})
+		// Persist the validated starting state before the first request.
+		if err := a.step(t); err != nil {
+			return a.saveFailed(t, err)
+		}
+	} else {
+		system := a.systemPrompt()
+		t = &trajectory.Trajectory{
+			Task:          task,
+			Model:         a.ModelName,
+			SchemaVersion: trajectory.SchemaVersion,
+			Root:          a.Tools.Root,
+			SystemPrompt:  system,
+			SkipAgentsMD:  a.SkipAgentsMD,
+			Tools:         toolNames(tools.Specs()),
+			ToolSignature: ToolSignature(),
+			Messages: []model.Message{
+				{Role: "system", Content: system},
+				{Role: "user", Content: task},
+			},
+		}
 	}
 	specs := tools.Specs()
 	v := newView(t.Messages)
@@ -144,7 +184,9 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 				fmt.Fprintf(a.Out, "  -> %s\n", indent(out))
 			}
 		}
-		a.step(t)
+		if err := a.step(t); err != nil {
+			return a.saveFailed(t, err)
+		}
 	}
 }
 
@@ -157,22 +199,47 @@ func (a *Agent) compactFailed(ctx context.Context, t *trajectory.Trajectory, err
 	return a.finish(t, StatusError, err.Error())
 }
 
+// systemPrompt returns the effective system prompt for this agent's run.
+func (a *Agent) systemPrompt() string {
+	system := strings.NewReplacer("{{cwd}}", a.Tools.Root, "{{os}}", runtime.GOOS).Replace(a.Config.SystemPrompt)
+	if !a.SkipAgentsMD {
+		system += agentsMD(a.Tools.Root, a.Err, a.Out, a.Verbose)
+	}
+	return system
+}
+
+// SystemPrompt returns the effective system prompt a run rooted at root would
+// use, given cfg and whether AGENTS.md is skipped. It is exported so callers
+// can validate a checkpoint against the current configuration.
+func SystemPrompt(cfg config.AgentConfig, root string, skipAgentsMD bool) string {
+	system := strings.NewReplacer("{{cwd}}", root, "{{os}}", runtime.GOOS).Replace(cfg.SystemPrompt)
+	if !skipAgentsMD {
+		system += agentsMD(root, io.Discard, io.Discard, false)
+	}
+	return system
+}
+
 // agentsMD returns the project's AGENTS.md as a system prompt section, or ""
-// when there is none.
-func (a *Agent) agentsMD() string {
-	path := findAgentsMD(a.Tools.Root)
-	if path == "" {
-		return ""
+// when there is none. Warnings go to errW and verbose notices to outW.
+func agentsMD(root string, errW, outW io.Writer, verbose bool) string {
+	section, err := loadAgentsMD(root, outW, verbose)
+	if err != nil {
+		fmt.Fprintln(errW, "warning: reading AGENTS.md:", err)
+	}
+	return section
+}
+
+func loadAgentsMD(root string, outW io.Writer, verbose bool) (string, error) {
+	path, err := findAgentsMD(root)
+	if err != nil || path == "" {
+		return "", err
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintln(a.Err, "warning: reading AGENTS.md:", err)
-		}
-		return ""
+		return "", err
 	}
-	if a.Verbose {
-		fmt.Fprintf(a.Out, "loaded AGENTS.md from %s (%d bytes)\n", path, len(b))
+	if verbose {
+		fmt.Fprintf(outW, "loaded AGENTS.md from %s (%d bytes)\n", path, len(b))
 	}
 	s := string(b)
 	if len(s) > maxAgentsMD {
@@ -183,13 +250,22 @@ func (a *Agent) agentsMD() string {
 		}
 		s = s[:n] + "\n[AGENTS.md truncated]"
 	}
-	return "\n\n## Project instructions (AGENTS.md)\n\n" + s
+	return "\n\n## Project instructions (AGENTS.md)\n\n" + s, nil
+}
+
+// toolNames returns the tool names from specs, in order.
+func toolNames(specs []model.ToolSpec) []string {
+	names := make([]string, len(specs))
+	for i, s := range specs {
+		names[i] = s.Function.Name
+	}
+	return names
 }
 
 // findAgentsMD returns the nearest AGENTS.md at or above root, stopping at the
 // repository root: the nearest directory containing .git. Without a .git above
 // root, only root itself is checked. It returns "" when there is no such file.
-func findAgentsMD(root string) string {
+func findAgentsMD(root string) (string, error) {
 	stop := root
 	for dir := root; ; {
 		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
@@ -206,10 +282,12 @@ func findAgentsMD(root string) string {
 	for dir := root; ; {
 		path := filepath.Join(dir, "AGENTS.md")
 		if _, err := os.Stat(path); err == nil {
-			return path
+			return path, nil
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return "", err
 		}
 		if dir == stop {
-			return ""
+			return "", nil
 		}
 		dir = filepath.Dir(dir)
 	}
@@ -238,25 +316,37 @@ func ctxStatus(ctx context.Context) (string, bool) {
 	return "", false
 }
 
-func (a *Agent) finish(t *trajectory.Trajectory, status, submission string) *trajectory.Trajectory {
-	// Kill any background processes the model left running, and record
-	// their final output.
+func (a *Agent) closeTools(t *trajectory.Trajectory) {
 	if summary := a.Tools.Close(); summary != "" {
 		t.BackgroundProcesses = summary
 		if a.Verbose {
 			fmt.Fprintf(a.Out, "stopped background processes:\n%s", summary)
 		}
 	}
-	t.ExitStatus = status
-	t.Submission = submission
-	a.step(t)
+}
+
+func (a *Agent) finish(t *trajectory.Trajectory, status, submission string) *trajectory.Trajectory {
+	a.closeTools(t)
+	t.ExitStatus, t.Submission = status, submission
+	if err := a.step(t); err != nil {
+		return a.saveFailed(t, err)
+	}
 	return t
 }
 
-func (a *Agent) step(t *trajectory.Trajectory) {
+// Never retry persistence after failure: the previous complete checkpoint is
+// the recovery boundary, even if an in-memory turn has since completed.
+func (a *Agent) saveFailed(t *trajectory.Trajectory, err error) *trajectory.Trajectory {
+	a.closeTools(t)
+	t.ExitStatus, t.Submission = StatusError, "saving trajectory: "+err.Error()
+	return t
+}
+
+func (a *Agent) step(t *trajectory.Trajectory) error {
 	if a.OnStep != nil {
-		a.OnStep(t)
+		return a.OnStep(t)
 	}
+	return nil
 }
 
 func (a *Agent) logAssistant(msg model.Message) {

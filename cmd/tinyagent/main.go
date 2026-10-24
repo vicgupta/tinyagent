@@ -35,11 +35,11 @@ var (
 
 // options holds the parsed command line.
 type options struct {
-	task, modelName, configPath, cwd, output string
-	stepLimit, timeLimit                     int
-	costLimit                                float64
-	verbose, noStream, noAgentsMD, noCompact bool
-	showHelp, showVersion, doUpdate          bool
+	task, modelName, configPath, cwd, output, resume string
+	stepLimit, timeLimit                             int
+	costLimit                                        float64
+	verbose, noStream, noAgentsMD, noCompact         bool
+	showHelp, showVersion, doUpdate                  bool
 }
 
 // newFlagSet defines the command-line flags, storing their values in o. Each
@@ -50,7 +50,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.Usage = func() { printUsage(fs.Output(), fs) }
 	fs.BoolVar(&o.showHelp, "help", false, "show this help and exit")
 	fs.BoolVar(&o.showHelp, "h", false, "shorthand for --help")
-	fs.StringVar(&o.task, "task", "", `task/prompt (required); "-" reads it from stdin`)
+	fs.StringVar(&o.task, "task", "", `task/prompt (required unless --resume); "-" reads it from stdin`)
 	fs.StringVar(&o.task, "t", "", "shorthand for --task")
 	fs.StringVar(&o.modelName, "model", defaultModel(), "provider/model; if unset, $AGENT_MODEL, then the config's model")
 	fs.StringVar(&o.modelName, "m", defaultModel(), "shorthand for --model")
@@ -62,6 +62,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.IntVar(&o.timeLimit, "time-limit", 0, "max wall-clock seconds, 0 = unlimited")
 	fs.StringVar(&o.output, "output", "", "write trajectory JSON")
 	fs.StringVar(&o.output, "o", "", "shorthand for --output")
+	fs.StringVar(&o.resume, "resume", "", "continue an unfinished run from a trajectory JSON checkpoint")
 	fs.BoolVar(&o.verbose, "verbose", false, "print tool outputs")
 	fs.BoolVar(&o.verbose, "v", false, "shorthand for --verbose")
 	fs.BoolVar(&o.noStream, "no-stream", false, "wait for full responses instead of streaming")
@@ -114,6 +115,9 @@ func run() int {
 		fmt.Println(msg)
 		return 0
 	}
+	if o.resume != "" {
+		return runResume(&o, fs)
+	}
 	if o.task == "" {
 		fmt.Fprintln(os.Stderr, "error: --task is required")
 		fs.Usage()
@@ -132,7 +136,7 @@ func run() int {
 	o.modelName = resolveModel(fs, o.modelName, cfg.Model)
 	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 
-	root, err := filepath.Abs(o.cwd)
+	root, err := canonicalRoot(o.cwd)
 	if err != nil {
 		return fail(err)
 	}
@@ -174,10 +178,11 @@ func run() int {
 		NoCompact:    o.noCompact,
 	}
 	if o.output != "" {
-		a.OnStep = func(t *trajectory.Trajectory) {
+		a.OnStep = func(t *trajectory.Trajectory) error {
 			if err := t.Save(o.output); err != nil {
 				fmt.Fprintln(os.Stderr, "warning: saving trajectory:", err)
 			}
+			return nil
 		}
 	}
 
@@ -190,6 +195,171 @@ func run() int {
 	return 1
 }
 
+// runResume continues an unfinished run from a validated checkpoint. It reuses
+// the saved task and model, requires a matching working directory and a
+// distinct output destination, and refuses to continue if the effective
+// instructions or tool set have changed.
+func runResume(o *options, fs *flag.FlagSet) int {
+	if flagWasSet(fs, "task", "t") {
+		fmt.Fprintln(os.Stderr, "error: --resume and --task are mutually exclusive")
+		return 2
+	}
+
+	if !flagWasSet(fs, "cwd") {
+		return fail(errors.New("resume: an explicit --cwd matching the checkpoint root is required"))
+	}
+
+	src, err := trajectory.Load(o.resume)
+	if err != nil {
+		return fail(fmt.Errorf("resume: %w", err))
+	}
+
+	// The saved model wins unless an explicit, different model is given.
+	if flagWasSet(fs, "model", "m") && o.modelName != src.Model {
+		return fail(fmt.Errorf("resume: --model %q conflicts with the checkpoint's model %q", o.modelName, src.Model))
+	}
+	modelName := src.Model
+
+	cfg, err := config.Load(config.Find(o.configPath))
+	if err != nil {
+		return fail(err)
+	}
+	applyFlagOverrides(fs, &cfg, o.stepLimit, o.costLimit, o.timeLimit)
+	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
+
+	root, err := canonicalRoot(o.cwd)
+	if err != nil {
+		return fail(err)
+	}
+	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
+		return fail(fmt.Errorf("--cwd %s is not a directory", o.cwd))
+	}
+	if root != src.Root {
+		return fail(fmt.Errorf("resume: --cwd %s does not match the checkpoint's root %s", root, src.Root))
+	}
+
+	if o.output == "" {
+		return fail(errors.New("resume: --output is required to write the continued trajectory"))
+	}
+	if sameFile(o.resume, o.output) {
+		return fail(errors.New("resume: --output must be distinct from the source checkpoint"))
+	}
+	if _, err := os.Lstat(o.output); err == nil {
+		return fail(errors.New("resume: --output already exists; choose a new destination"))
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fail(fmt.Errorf("resume: checking --output: %w", err))
+	}
+	if flagWasSet(fs, "no-agents-md") && o.noAgentsMD != src.SkipAgentsMD {
+		return fail(errors.New("resume: --no-agents-md conflicts with the recorded loading mode; start a fresh task"))
+	}
+	if err := agent.ValidateResume(src, cfg, root); err != nil {
+		return fail(fmt.Errorf("resume: %w", err))
+	}
+
+	var onText func(string)
+	if !o.noStream {
+		onText = func(s string) { os.Stdout.WriteString(s) }
+	}
+	m, err := model.New(modelName, onText)
+	if err != nil {
+		code := fail(err)
+		printHint(os.Stderr, modelName, err.Error())
+		return code
+	}
+	warnUnpriced(os.Stderr, modelName, cfg.CostLimit)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	// The agent records this boundary and clears the active termination before
+	// persisting the new starting state.
+	prevStatus := src.ExitStatus
+	if prevStatus == "" {
+		prevStatus = "in progress"
+	}
+
+	a := &agent.Agent{
+		Model:     m,
+		ModelName: modelName,
+		Tools: &tools.Executor{
+			Root:           root,
+			BashTimeout:    time.Duration(cfg.BashTimeoutSec) * time.Second,
+			MaxOutputChars: cfg.MaxOutputChars,
+			MaxProcesses:   cfg.MaxBackgroundProcesses,
+			Stream:         os.Stdout,
+		},
+		Config:       cfg,
+		Out:          os.Stdout,
+		Err:          os.Stderr,
+		Verbose:      o.verbose,
+		Streamed:     !o.noStream,
+		SkipAgentsMD: src.SkipAgentsMD,
+		NoCompact:    o.noCompact,
+		Resume:       src,
+		ResumeSource: o.resume,
+	}
+	initial := true
+	a.OnStep = func(t *trajectory.Trajectory) error {
+		if initial {
+			if err := t.SaveNew(o.output); err != nil {
+				return err
+			}
+			initial = false
+			return nil
+		}
+		return t.Save(o.output)
+	}
+
+	fmt.Fprintf(os.Stderr, "resuming %s from %s (previous status %s after %d steps)\n", modelName, o.resume, prevStatus, src.Steps)
+	fmt.Fprintln(os.Stderr, "note: inspect and revalidate the workspace; it may have changed and commands may have produced unrecorded side effects after the last save. Live processes are not restored")
+
+	start := time.Now()
+	t := a.Run(ctx, src.Task)
+	reportSummary(os.Stderr, modelName, t, time.Since(start))
+	if t.ExitStatus == agent.StatusSubmitted || t.ExitStatus == agent.StatusCompleted {
+		return 0
+	}
+	return 1
+}
+
+// sameFile reports whether two paths refer to the same file, following
+// symlinks and detecting hard links.
+func sameFile(a, b string) bool {
+	ai, errA := os.Stat(a)
+	bi, errB := os.Stat(b)
+	if errA == nil && errB == nil && os.SameFile(ai, bi) {
+		return true
+	}
+	ra, _ := filepath.EvalSymlinks(a)
+	rb, _ := filepath.EvalSymlinks(b)
+	if ra != "" && rb != "" && ra == rb {
+		return true
+	}
+	aa, _ := filepath.Abs(a)
+	bb, _ := filepath.Abs(b)
+	return filepath.Clean(aa) == filepath.Clean(bb)
+}
+
+func flagWasSet(fs *flag.FlagSet, names ...string) bool {
+	found := false
+	fs.Visit(func(f *flag.Flag) {
+		for _, name := range names {
+			if f.Name == name {
+				found = true
+			}
+		}
+	})
+	return found
+}
+
+func canonicalRoot(path string) (string, error) {
+	root, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(root)
+}
+
 // usageGroups lays out --help: each flag's shorthand, long name and value
 // placeholder, by group. Help text and defaults come from the FlagSet.
 var usageGroups = []struct {
@@ -197,7 +367,7 @@ var usageGroups = []struct {
 	flags [][3]string
 }{
 	{"", [][3]string{{"h", "help", ""}}},
-	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"c", "config", "path"}, {"", "cwd", "dir"}}},
+	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "resume", "path"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "no-agents-md", ""}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}}},
@@ -220,7 +390,7 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 			width = max(width, len(left(f)))
 		}
 	}
-	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n\n")
+	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n       tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]\n\n")
 	for _, g := range usageGroups {
 		if g.name != "" {
 			fmt.Fprintf(w, "%s:\n", g.name)
@@ -236,7 +406,8 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 	}
 	fmt.Fprint(w, "\nExamples:\n"+
 		"  tinyagent -t \"fix the failing test\" -m anthropic/claude-sonnet-4\n"+
-		"  cat task.md | tinyagent -t - --step-limit 30 -o run.json\n")
+		"  cat task.md | tinyagent -t - --step-limit 30 -o run.json\n"+
+		"  tinyagent --resume run.json --cwd . --step-limit 60 -o continued.json\n")
 }
 
 // reportSummary prints one line on how the run ended: status, steps, elapsed

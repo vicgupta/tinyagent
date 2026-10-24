@@ -165,12 +165,20 @@ func TestProcessLimit(t *testing.T) {
 func TestProcessBufferCap(t *testing.T) {
 	e := &Executor{Root: t.TempDir(), ProcessBufferBytes: 100}
 	defer e.Close()
-	id, _ := startID(t, e, `sleep 0.6; for i in $(seq 1 200); do echo line$i; done; sleep 300`)
-	var out string
+	id, _ := startID(t, e, `while [ ! -f emit ]; do sleep 0.01; done; for i in $(seq 1 200); do echo line$i; done; sleep 300`)
+	// Wait for the entire burst without consuming it. Reading concurrently
+	// can legitimately return early lines before the buffer reaches its cap.
+	if err := os.WriteFile(filepath.Join(e.Root, "emit"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.procs.mu.Lock()
+	p := e.procs.procs[id]
+	e.procs.mu.Unlock()
 	waitFor(t, func() bool {
-		out += runTool(t, e, "read_process", map[string]any{"id": id, "timeout": 1000})
-		return strings.Contains(out, "line200")
+		buffered, _, _ := p.out.since(0)
+		return strings.Contains(buffered, "line200\n")
 	})
+	out := runTool(t, e, "read_process", map[string]any{"id": id})
 	if !strings.Contains(out, "dropped: buffer cap") {
 		t.Fatalf("no drop note in %q", out)
 	}

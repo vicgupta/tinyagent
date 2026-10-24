@@ -76,7 +76,8 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | Flag | Default | |
 |---|---|---|
 | `-h, --help` | | Print usage to stdout and exit |
-| `-t, --task` | — | Task prompt (required); `-` reads it from stdin |
+| `-t, --task` | — | Task prompt (required unless `--resume`); `-` reads it from stdin |
+| `--resume` | — | Continue a validated unfinished trajectory; requires explicit matching `--cwd` and a new `-o` path |
 | `-m, --model` | `$AGENT_MODEL`, else config `model`, else `openai/gpt-4o` | `<provider>/<model>`; no `/` means openai. Providers: openai, openrouter, anthropic, ollama, codex |
 | `-c, --config` | user config, else built-in | YAML config file; see [Config](#config) |
 | `--cwd` | `.` | Root directory; tools can't reach outside it |
@@ -96,6 +97,31 @@ tinyagent takes no positional arguments: quote the task and pass it with `-t`. A
 The limit flags must be >= 0, and `--cost-limit` must also be finite. A typo such as `--step-limit -1` or `--cost-limit NaN` is an error (exit 2) instead of quietly running without the cap. An explicit 0 means unlimited and overrides the config file's limit.
 
 Environment: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (any OpenAI-compatible endpoint), `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENROUTER_API_KEY`, `OLLAMA_HOST`, `CODEX_HOME`.
+
+### Resume an unfinished task
+
+```sh
+# Save complete tool turns; this run stops at 20 cumulative model steps.
+tinyagent -t "fix the failing test" --cwd ~/src/project --step-limit 20 --no-compact -o run.json
+
+# Inspect the workspace (for example, git diff) and rerun relevant checks.
+# Continue the same task with a ceiling of 40 total steps.
+tinyagent --resume run.json --cwd ~/src/project --step-limit 40 --no-compact -o continued.json
+```
+
+`--resume <trajectory.json>` is noninteractive and uses the saved task and model. Do not pass `--task`; an explicitly different `--model` is rejected. The saved model wins over `$AGENT_MODEL` and the config's default model. Credentials and provider endpoints come from the current normal setup, never the checkpoint. Paths to checkpoints are relative to the invoking shell's directory, independently of `--cwd`.
+
+An explicit `--cwd` must resolve to the recorded canonical root (directory symlinks are resolved). The effective system prompt must match the saved prompt, including `{{cwd}}`/`{{os}}` substitutions and the recorded AGENTS.md loading mode. Current config is used to reconstruct it without appending AGENTS.md twice. Changed instructions, a conflicting `--no-agents-md`, or changed tool definitions/compatibility require a fresh task. In particular, a task that edits its effective AGENTS.md cannot resume under changed instructions.
+
+Only new-format, unfinished checkpoints at a complete model-query boundary are eligible: an in-progress save or a stop caused by a step/cost/time limit, interruption, or error. Successful `Submitted`/`Completed` runs cannot be extended. Legacy logs, unsupported versions/state, malformed or partial tool turns, and **compacted checkpoints** are refused before provider setup. This release does not restore the separate compacted model view; use `--no-compact` when the ability to resume later is needed. Checkpoint loading is limited to regular files of at most **64 MiB**. Larger trajectories remain audit logs.
+
+A distinct `-o`/`--output` is required, and any existing destination is refused, including symlink and hard-link aliases of the source. The input stays unchanged. The validated starting state is saved to the new destination before the first request; completed tool turns and termination then replace it using a private temporary file. Initial publication requires filesystem hard-link support to publish atomically without replacing another file. A save failure in resume mode stops further work, prints an error, and exits nonzero, preserving the last complete checkpoint. Ordinary fresh-run save failures retain their existing warning behavior. Rename/link publication does not promise power-loss durability.
+
+Steps, cost, token counts, and cache totals remain cumulative. Step/cost limits are cumulative ceilings: if already exhausted, no model request is made; increase the ceiling explicitly (or set it to 0 for unlimited). Runtime limits, tool timeouts, output settings, and compaction settings use normal config/flag precedence. Wall time and the stderr elapsed duration restart for each invocation; stopped time is not charged. Normal streaming, summaries, and success/failure exit codes still apply. The next action is a new model query, which incurs ordinary context/token costs; loading a checkpoint never dispatches historical tool calls.
+
+New JSON keeps the existing top-level trajectory fields and adds versioned metadata: `schema_version` (currently 1), `root`, `system_prompt`, `skip_agents_md`, `tools`, and `tool_signature`. `resume` records the input path, previous status/submission, cumulative step, and continuation-message index; nested `previous` entries retain earlier resume boundaries. These audit paths are not read as configuration. Metadata excludes credentials and environment dumps. Checkpoints still contain prompts, code, and tool outputs: treat them as private, trusted local execution inputs. New checkpoint and temporary files use owner-only permissions (0600) where supported.
+
+A checkpoint restores **conversation state**, not files, Git state, shell variables, live processes, or external services. The model receives a continuation notice and stderr warns to inspect and revalidate the current workspace. Commands may have produced unrecorded side effects after the last save, especially during a hard crash in a tool batch. Historical process IDs cannot reattach to children from another invocation. There is no rollback or exactly-once execution guarantee; inspect current state before resuming.
 
 ### Project instructions (AGENTS.md)
 

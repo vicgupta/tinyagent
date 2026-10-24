@@ -237,6 +237,8 @@ func (a *Agent) summarize(ctx context.Context, t *trajectory.Trajectory, task st
 	t.Cost += cost.USD
 	t.InputTokens += cost.InputTokens
 	t.OutputTokens += cost.OutputTokens
+	t.CacheReadTokens += cost.CacheReadTokens
+	t.CacheWriteTokens += cost.CacheWriteTokens
 	s := strings.TrimSpace(resp.Content)
 	if s == "" {
 		return "", errors.New("summarizing context: the model returned an empty summary")
