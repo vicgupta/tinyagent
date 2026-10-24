@@ -96,6 +96,8 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		t.Cost += cost.USD
 		t.InputTokens += cost.InputTokens
 		t.OutputTokens += cost.OutputTokens
+		t.CacheReadTokens += cost.CacheReadTokens
+		t.CacheWriteTokens += cost.CacheWriteTokens
 		t.Messages = append(t.Messages, msg)
 		a.logAssistant(msg)
 

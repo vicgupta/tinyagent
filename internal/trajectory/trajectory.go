@@ -17,8 +17,11 @@ type Trajectory struct {
 	Cost         float64         `json:"cost"`
 	InputTokens  int             `json:"input_tokens"`
 	OutputTokens int             `json:"output_tokens"`
-	ExitStatus   string          `json:"exit_status"`
-	Submission   string          `json:"submission"`
+	// Prompt-cache totals, included in InputTokens.
+	CacheReadTokens  int    `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int    `json:"cache_write_tokens,omitempty"`
+	ExitStatus       string `json:"exit_status"`
+	Submission       string `json:"submission"`
 }
 
 // Save writes the trajectory to path atomically, so a crash mid-write never
