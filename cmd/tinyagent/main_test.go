@@ -4,13 +4,18 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/vicgupta/tinyagent/internal/agent"
 	"github.com/vicgupta/tinyagent/internal/config"
+	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
 )
 
@@ -296,5 +301,101 @@ func TestFlagLookingTaskIsNotPositional(t *testing.T) {
 	}
 	if fs.NArg() != 0 || o.task != "run with --step-limit 5 typo" || o.stepLimit != 3 {
 		t.Errorf("args %q, task %q, step limit %d", fs.Args(), o.task, o.stepLimit)
+	}
+}
+
+// fakeOpenAI serves one canned reply that submits, counting requests.
+func fakeOpenAI(t *testing.T, requests *atomic.Int32) *httptest.Server {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// captureStderr runs f with os.Stderr redirected and returns what it wrote.
+func captureStderr(t *testing.T, f func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func(f *os.File) { os.Stderr = f }(os.Stderr)
+	os.Stderr = w
+	done := make(chan string)
+	go func() { b, _ := io.ReadAll(r); done <- string(b) }()
+	f()
+	w.Close()
+	return <-done
+}
+
+func TestUnpricedCostLimitWarning(t *testing.T) {
+	const warn = "warning: no pricing available for "
+	dir := t.TempDir()
+	withLimit := filepath.Join(dir, "limit.yaml")
+	if err := os.WriteFile(withLimit, []byte("cost_limit: 2.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withPrice := filepath.Join(dir, "price.yaml")
+	if err := os.WriteFile(withPrice, []byte("cost_limit: 2.0\ninput_price_per_mtok: 1.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	noConfig := filepath.Join(dir, "none.yaml")
+	if err := os.WriteFile(noConfig, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { model.PriceOverride = [2]float64{} })
+	cases := []struct {
+		name string
+		args []string
+		warn bool
+	}{
+		{"flag limit, unpriced", []string{"-m", "openai/unlisted-model", "-c", noConfig, "--cost-limit", "1"}, true},
+		{"implicit openai", []string{"-m", "unlisted-model", "-c", noConfig, "--cost-limit", "1"}, true},
+		{"config limit, unpriced", []string{"-m", "openai/unlisted-model", "-c", withLimit}, true},
+		{"explicit zero overrides config", []string{"-m", "openai/unlisted-model", "-c", withLimit, "--cost-limit", "0"}, false},
+		{"no limit", []string{"-m", "openai/unlisted-model", "-c", noConfig}, false},
+		{"priced model", []string{"-m", "openai/gpt-4o", "-c", withLimit}, false},
+		{"price override", []string{"-m", "openai/unlisted-model", "-c", withPrice}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var requests atomic.Int32
+			srv := fakeOpenAI(t, &requests)
+			t.Setenv("OPENAI_BASE_URL", srv.URL)
+			t.Setenv("OPENAI_API_KEY", "fake")
+			var code int
+			var out string
+			got := captureStderr(t, func() {
+				code, out, _ = runWith(t, append([]string{"-t", "x", "--no-stream", "--cwd", dir}, c.args...)...)
+			})
+			if code != 0 || requests.Load() != 1 {
+				t.Fatalf("exit = %d, requests = %d; want 0, 1; stderr:\n%s", code, requests.Load(), got)
+			}
+			if n := strings.Count(got, warn); n != map[bool]int{true: 1, false: 0}[c.warn] {
+				t.Fatalf("got %d warnings, want warn=%v; stderr:\n%s", n, c.warn, got)
+			}
+			if !c.warn {
+				return
+			}
+			want := warn + c.args[1] + "; --cost-limit cannot be enforced. Set input_price_per_mtok and output_price_per_mtok in your config to enable cost tracking.\n"
+			if !strings.HasPrefix(got, want) {
+				t.Errorf("stderr = %q, want it to start with %q", got, want)
+			}
+			if strings.Contains(out, "warning") {
+				t.Errorf("warning on stdout: %q", out)
+			}
+		})
+	}
+}
+
+func TestNoWarningForFreeProviders(t *testing.T) {
+	for _, m := range []string{"ollama/llama3.1", "codex/gpt-5"} {
+		var b strings.Builder
+		warnUnpriced(&b, m, 5)
+		if b.String() != "" {
+			t.Errorf("%s: unexpected warning %q", m, b.String())
+		}
 	}
 }

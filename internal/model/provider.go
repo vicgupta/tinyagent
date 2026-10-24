@@ -104,13 +104,7 @@ func price(model string, in, out int) Cost {
 // cachedPrice prices a response whose input was in uncached tokens plus
 // cacheWrite tokens written to and cacheRead tokens read from the cache.
 func cachedPrice(model string, in, cacheWrite, cacheRead, out int) Cost {
-	var p [3]float64
-	best := ""
-	for prefix, v := range Prices {
-		if strings.HasPrefix(model, prefix) && len(prefix) > len(best) {
-			best, p = prefix, v
-		}
-	}
+	p, _ := lookupPrice(model)
 	if PriceOverride != [2]float64{} {
 		p[0], p[1] = PriceOverride[0], PriceOverride[1]
 	}
@@ -128,14 +122,49 @@ func cachedPrice(model string, in, cacheWrite, cacheRead, out int) Cost {
 	}
 }
 
+// lookupPrice returns the Prices entry with the longest prefix of model.
+func lookupPrice(model string) (p [3]float64, ok bool) {
+	best := ""
+	for prefix, v := range Prices {
+		if strings.HasPrefix(model, prefix) && len(prefix) > len(best) {
+			best, p, ok = prefix, v, true
+		}
+	}
+	return p, ok
+}
+
+// Unpriced reports whether spec, as passed to New, names a model billed per
+// token whose cost tinyagent can't estimate: no Prices entry and no
+// PriceOverride, so its cost always reads 0. Ollama and Codex are free by
+// design and never unpriced.
+func Unpriced(spec string) bool {
+	provider, name := splitSpec(spec)
+	switch provider {
+	case "openai", "openrouter", "anthropic":
+	default:
+		return false
+	}
+	if PriceOverride != [2]float64{} {
+		return false
+	}
+	_, ok := lookupPrice(name)
+	return !ok
+}
+
+// splitSpec splits "<provider>/<model>"; without a "/", the provider is openai.
+func splitSpec(spec string) (provider, name string) {
+	provider, name, ok := strings.Cut(spec, "/")
+	if !ok {
+		return "openai", spec
+	}
+	return provider, name
+}
+
 // New resolves "<provider>/<model>" to a Model. Without a "/", the provider is
 // openai. If onText is non-nil, responses are streamed and each text delta is
 // passed to it as it arrives.
 func New(spec string, onText func(string)) (Model, error) {
-	provider, name, ok := strings.Cut(spec, "/")
-	if !ok {
-		provider, name = "openai", spec
-	}
+	provider, name := splitSpec(spec)
 	if name == "" {
 		return nil, fmt.Errorf("model %q: missing model name", spec)
 	}
