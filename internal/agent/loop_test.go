@@ -58,11 +58,12 @@ func TestRunSubmits(t *testing.T) {
 	a := newAgent(t, m)
 	out := filepath.Join(t.TempDir(), "traj.json")
 	saves := 0
-	a.OnStep = func(tr *trajectory.Trajectory) {
+	a.OnStep = func(tr *trajectory.Trajectory) error {
 		saves++
 		if err := tr.Save(out); err != nil {
 			t.Fatal(err)
 		}
+		return nil
 	}
 	tr := a.Run(context.Background(), "write hi")
 
