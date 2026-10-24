@@ -38,7 +38,7 @@ type options struct {
 	task, modelName, configPath, cwd, output string
 	stepLimit, timeLimit                     int
 	costLimit                                float64
-	verbose, noStream, noAgentsMD            bool
+	verbose, noStream, noAgentsMD, noCompact bool
 	showHelp, showVersion, doUpdate          bool
 }
 
@@ -66,6 +66,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.verbose, "v", false, "shorthand for --verbose")
 	fs.BoolVar(&o.noStream, "no-stream", false, "wait for full responses instead of streaming")
 	fs.BoolVar(&o.noAgentsMD, "no-agents-md", false, "don't add AGENTS.md (nearest, up to the repo root) to the system prompt")
+	fs.BoolVar(&o.noCompact, "no-compact", false, "don't compact the history when it nears the context window")
 	fs.BoolVar(&o.showVersion, "version", false, "print the version and exit")
 	fs.BoolVar(&o.showVersion, "V", false, "shorthand for --version")
 	fs.BoolVar(&o.doUpdate, "update", false, "update to the latest release and exit")
@@ -167,6 +168,7 @@ func run() int {
 		Verbose:      o.verbose,
 		Streamed:     !o.noStream,
 		SkipAgentsMD: o.noAgentsMD,
+		NoCompact:    o.noCompact,
 	}
 	if o.output != "" {
 		a.OnStep = func(t *trajectory.Trajectory) {
@@ -193,7 +195,7 @@ var usageGroups = []struct {
 }{
 	{"", [][3]string{{"h", "help", ""}}},
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"c", "config", "path"}, {"", "cwd", "dir"}}},
-	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}}},
+	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "no-agents-md", ""}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}}},
 }

@@ -22,6 +22,28 @@ type Trajectory struct {
 	CacheWriteTokens int    `json:"cache_write_tokens,omitempty"`
 	ExitStatus       string `json:"exit_status"`
 	Submission       string `json:"submission"`
+	// Compactions records each time the context sent to the model was
+	// compacted. Messages always keeps the full, original history.
+	Compactions []Compaction `json:"compactions,omitempty"`
+}
+
+// Compaction describes one compaction of the model's view of the history.
+// Indexes refer to Trajectory.Messages.
+type Compaction struct {
+	Step         int    `json:"step"`   // steps completed when it ran
+	Reason       string `json:"reason"` // "proactive" or "overflow"
+	Stage        string `json:"stage"`  // "elide" or "summarize"
+	TokensBefore int    `json:"tokens_before"`
+	TokensAfter  int    `json:"tokens_after"`
+	// Elided lists messages whose tool output was replaced by a placeholder.
+	Elided []int `json:"elided,omitempty"`
+	// Summarized lists messages replaced by Summary.
+	Summarized []int   `json:"summarized,omitempty"`
+	Summary    string  `json:"summary,omitempty"`
+	USD        float64 `json:"usd,omitempty"` // cost of the summarization call
+	// View is what the model is sent next: indexes into Messages, with -1
+	// for the summary message.
+	View []int `json:"view"`
 }
 
 // Save writes the trajectory to path atomically, so a crash mid-write never
