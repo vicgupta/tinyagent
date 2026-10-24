@@ -239,6 +239,14 @@ func ctxStatus(ctx context.Context) (string, bool) {
 }
 
 func (a *Agent) finish(t *trajectory.Trajectory, status, submission string) *trajectory.Trajectory {
+	// Kill any background processes the model left running, and record
+	// their final output.
+	if summary := a.Tools.Close(); summary != "" {
+		t.BackgroundProcesses = summary
+		if a.Verbose {
+			fmt.Fprintf(a.Out, "stopped background processes:\n%s", summary)
+		}
+	}
 	t.ExitStatus = status
 	t.Submission = submission
 	a.step(t)

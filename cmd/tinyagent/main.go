@@ -161,6 +161,8 @@ func run() int {
 			Root:           root,
 			BashTimeout:    time.Duration(cfg.BashTimeoutSec) * time.Second,
 			MaxOutputChars: cfg.MaxOutputChars,
+			MaxProcesses:   cfg.MaxBackgroundProcesses,
+			Stream:         os.Stdout,
 		},
 		Config:       cfg,
 		Out:          os.Stdout,

@@ -23,6 +23,9 @@ type AgentConfig struct {
 
 	BashTimeoutSec int `yaml:"bash_timeout_seconds"`
 	MaxOutputChars int `yaml:"max_output_chars"`
+	// MaxBackgroundProcesses bounds how many start_process processes may run
+	// at once.
+	MaxBackgroundProcesses int `yaml:"max_background_processes"`
 
 	// Optional price override in USD per million tokens, for models
 	// missing from the built-in price table.
@@ -39,6 +42,8 @@ func Default() AgentConfig {
 		SystemPrompt:   embed.SystemPrompt(),
 		BashTimeoutSec: 120,
 		MaxOutputChars: 30000,
+
+		MaxBackgroundProcesses: 4,
 	}
 }
 

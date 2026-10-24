@@ -25,6 +25,9 @@ type Trajectory struct {
 	// Compactions records each time the context sent to the model was
 	// compacted. Messages always keeps the full, original history.
 	Compactions []Compaction `json:"compactions,omitempty"`
+	// BackgroundProcesses summarizes background processes still registered
+	// when the run ended (all are killed): status and output tail of each.
+	BackgroundProcesses string `json:"background_processes,omitempty"`
 }
 
 // Compaction describes one compaction of the model's view of the history.

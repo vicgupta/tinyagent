@@ -403,3 +403,51 @@ func TestAnthropicRunKeepsPrefixStable(t *testing.T) {
 		t.Errorf("totals = %d read / %d write / %d input", tr.CacheReadTokens, tr.CacheWriteTokens, tr.InputTokens)
 	}
 }
+
+// cancelling cancels ctx when queried, simulating Ctrl-C mid-run.
+type cancelling struct {
+	scripted
+	cancel context.CancelFunc
+	after  int
+}
+
+func (c *cancelling) Query(ctx context.Context, msgs []model.Message, specs []model.ToolSpec) (model.Message, model.Cost, error) {
+	if len(c.seen) >= c.after {
+		c.cancel()
+		return model.Message{}, model.Cost{}, ctx.Err()
+	}
+	return c.scripted.Query(ctx, msgs, specs)
+}
+
+func TestRunKillsBackgroundProcesses(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status string
+	}{{"step limit", StatusStepLimit}, {"interrupt", StatusInterrupted}} {
+		t.Run(tc.name, func(t *testing.T) {
+			start := model.Message{Role: "assistant", ToolCalls: []model.ToolCall{call("1", "start_process", `{"command":"echo $$ > bg.pid; echo serving; sleep 300"}`)}}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var m model.Model
+			if tc.status == StatusInterrupted {
+				m = &cancelling{scripted: scripted{replies: []model.Message{start}}, cancel: cancel, after: 1}
+			} else {
+				m = &scripted{replies: []model.Message{start}}
+			}
+			a := newAgent(t, m)
+			if tc.status == StatusStepLimit {
+				a.Config.StepLimit = 1
+			}
+			tr := a.Run(ctx, "start a server")
+			if tr.ExitStatus != tc.status {
+				t.Fatalf("status = %s", tr.ExitStatus)
+			}
+			if !strings.Contains(tr.BackgroundProcesses, "killed at run end") || !strings.Contains(tr.BackgroundProcesses, "serving") {
+				t.Fatalf("BackgroundProcesses = %q", tr.BackgroundProcesses)
+			}
+			if s := a.Tools.Close(); s != "" {
+				t.Fatalf("processes left after run: %q", s)
+			}
+		})
+	}
+}
