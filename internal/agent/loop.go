@@ -47,6 +47,9 @@ type Agent struct {
 	// SkipAgentsMD stops Run from appending the nearest AGENTS.md at or above
 	// <root> to the system prompt.
 	SkipAgentsMD bool
+	// NoCompact turns off context compaction: the full history is always
+	// sent, and a context-overflow error ends the run.
+	NoCompact bool
 	// OnStep is called after every step, e.g. to save the trajectory.
 	OnStep func(*trajectory.Trajectory)
 }
@@ -79,19 +82,41 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		},
 	}
 	specs := tools.Specs()
+	v := newView(t.Messages)
 
 	for {
 		if status, ok := a.checkLimits(ctx, t); !ok {
 			return a.finish(t, status, "")
 		}
+		if a.needsCompaction(v) {
+			if err := a.compact(ctx, t, v, "proactive"); err != nil {
+				return a.compactFailed(ctx, t, err)
+			}
+			if status, ok := a.checkLimits(ctx, t); !ok {
+				return a.finish(t, status, "")
+			}
+		}
 
-		msg, cost, err := a.Model.Query(ctx, t.Messages, specs)
+		msg, cost, err := a.Model.Query(ctx, v.msgs, specs)
+		if err != nil && !a.NoCompact && model.IsContextOverflow(err) && ctx.Err() == nil {
+			if cerr := a.compact(ctx, t, v, "overflow"); cerr != nil {
+				return a.compactFailed(ctx, t, fmt.Errorf("%w: %v", cerr, err))
+			}
+			if status, ok := a.checkLimits(ctx, t); !ok {
+				return a.finish(t, status, "")
+			}
+			msg, cost, err = a.Model.Query(ctx, v.msgs, specs)
+			if err != nil && model.IsContextOverflow(err) {
+				err = fmt.Errorf("%w: %v", errStillTooLong, err)
+			}
+		}
 		if err != nil {
 			if status, ok := ctxStatus(ctx); ok {
 				return a.finish(t, status, "")
 			}
 			return a.finish(t, StatusError, err.Error())
 		}
+		v.queried(cost)
 		t.Steps++
 		t.Cost += cost.USD
 		t.InputTokens += cost.InputTokens
@@ -99,6 +124,8 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		t.CacheReadTokens += cost.CacheReadTokens
 		t.CacheWriteTokens += cost.CacheWriteTokens
 		t.Messages = append(t.Messages, msg)
+		v.add(t, msg)
+		v.pendingChars = 0 // already counted in cost.OutputTokens
 		a.logAssistant(msg)
 
 		if strings.Contains(msg.Content, SubmitMarker) {
@@ -112,12 +139,22 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		for _, call := range msg.ToolCalls {
 			out := a.Tools.Run(ctx, call)
 			t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: call.ID, Content: out})
+			v.add(t, t.Messages[len(t.Messages)-1])
 			if a.Verbose {
 				fmt.Fprintf(a.Out, "  -> %s\n", indent(out))
 			}
 		}
 		a.step(t)
 	}
+}
+
+// compactFailed ends the run after a failed compaction: as the context's
+// status if it was cancelled or timed out, else as an error.
+func (a *Agent) compactFailed(ctx context.Context, t *trajectory.Trajectory, err error) *trajectory.Trajectory {
+	if status, ok := ctxStatus(ctx); ok {
+		return a.finish(t, status, "")
+	}
+	return a.finish(t, StatusError, err.Error())
 }
 
 // agentsMD returns the project's AGENTS.md as a system prompt section, or ""

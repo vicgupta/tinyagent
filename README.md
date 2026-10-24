@@ -83,6 +83,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--step-limit` | 0 (unlimited) | Max model calls |
 | `--cost-limit` | 0 (unlimited) | Max USD |
 | `--time-limit` | 0 (unlimited) | Max wall-clock seconds; overrides `wall_time_seconds` |
+| `--no-compact` | off | Never compact the history; see [Long runs](#long-runs) |
 | `-o, --output` | — | Trajectory JSON, rewritten after every step |
 | `-v, --verbose` | off | Print tool calls and their outputs |
 | `--no-stream` | off | Wait for each full response instead of streaming it |
@@ -124,7 +125,22 @@ bash_timeout_seconds: 120
 max_output_chars: 30000   # tool output is truncated, keeping head and tail
 input_price_per_mtok: 3   # override the built-in price table
 output_price_per_mtok: 15
+context_window: 200000    # tokens; overrides the built-in table, used for compaction
 ```
+
+## Long runs
+
+tinyagent resends the whole history on every step, so a long run can outgrow the model's context window. Before each request it estimates the request's size (the previous request's reported input tokens plus about 4 characters per token for anything added since). Above 80% of the window, it compacts:
+
+1. Old tool outputs are replaced with a placeholder such as `[output elided: 12,400 chars]`. The system prompt, the task, and the most recent turns (about 25% of the window, and never fewer than the last 2 assistant turns with their tool results) are kept verbatim. If that brings the estimate under 50% of the window, it stops here.
+2. Otherwise, one extra request asks the same model, with no tools, to summarize everything older than the recent turns. The model then sees the system prompt, the task, that summary, and the recent turns.
+3. If it still doesn't fit, the run ends as `Error` with `context still exceeds the window after compaction`.
+
+If a provider rejects a request as too long (`prompt is too long`, `context_length_exceeded`, `maximum context length`), tinyagent compacts and retries that step once; a second rejection ends the run as `Error`. This works even for models whose window isn't known.
+
+The window comes from a small built-in table (`internal/model/context.go`) or `context_window` in the config, which wins. Without either, only the retry-on-error path runs. Each compaction prints one line to stderr, such as `compacted context: ~182,000 → ~31,000 tokens (summarized 41 messages)`. The summary request's tokens and cost count toward the run's totals and `--cost-limit`, but not `--step-limit`. With `-o`, the trajectory keeps every original message, and `compactions` records each one: the step, the estimates before and after, the stage, the summary, and which messages the model was sent next.
+
+Summaries lose detail. Put instructions that must hold for the whole run in `AGENTS.md`, which is part of the system prompt and never compacted. `--no-compact` turns all of this off.
 
 ## Exit status
 

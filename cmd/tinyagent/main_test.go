@@ -146,6 +146,7 @@ Limits:
       --step-limit n      max model calls, 0 = unlimited
       --cost-limit usd    max USD, 0 = unlimited
       --time-limit sec    max wall-clock seconds, 0 = unlimited
+      --no-compact        don't compact the history when it nears the context window
 Output:
   -o, --output path       write trajectory JSON
   -v, --verbose           print tool outputs

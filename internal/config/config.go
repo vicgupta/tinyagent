@@ -28,6 +28,10 @@ type AgentConfig struct {
 	// missing from the built-in price table.
 	InputPricePerMTok  float64 `yaml:"input_price_per_mtok"`
 	OutputPricePerMTok float64 `yaml:"output_price_per_mtok"`
+
+	// ContextWindow, in tokens, overrides the built-in context window table.
+	// 0 uses the table.
+	ContextWindow int `yaml:"context_window"`
 }
 
 func Default() AgentConfig {
