@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -41,6 +42,7 @@ type options struct {
 	costLimit                                        float64
 	verbose, noStream, noAgentsMD, noCompact         bool
 	readOnly                                         bool
+	jsonOutput                                       bool
 	showHelp, showVersion, doUpdate                  bool
 }
 
@@ -71,6 +73,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.noAgentsMD, "no-agents-md", false, "don't add AGENTS.md (nearest, up to the repo root) to the system prompt")
 	fs.BoolVar(&o.noCompact, "no-compact", false, "don't compact the history when it nears the context window")
 	fs.BoolVar(&o.readOnly, "read-only", false, "allow only read_file, list_files, and grep; blocks edits and commands")
+	fs.BoolVar(&o.jsonOutput, "json", false, "write run events as JSONL to stdout")
 	fs.BoolVar(&o.showVersion, "version", false, "print the version and exit")
 	fs.BoolVar(&o.showVersion, "V", false, "shorthand for --version")
 	fs.BoolVar(&o.doUpdate, "update", false, "update to the latest release and exit")
@@ -167,7 +170,7 @@ func run() int {
 	defer mcpRegistry.Close()
 
 	var onText func(string)
-	if !o.noStream {
+	if !o.noStream && !o.jsonOutput {
 		onText = func(s string) { os.Stdout.WriteString(s) }
 	}
 	m, err := model.New(o.modelName, onText)
@@ -187,22 +190,41 @@ func run() int {
 			BashTimeout:    time.Duration(cfg.BashTimeoutSec) * time.Second,
 			MaxOutputChars: cfg.MaxOutputChars,
 			MaxProcesses:   cfg.MaxBackgroundProcesses,
-			Stream:         os.Stdout,
+			Stream:         jsonStream(o.jsonOutput),
 			ExternalSpecs:  mcpRegistry.Specs,
 			ExternalCall:   mcpRegistry.Call,
 		},
 		Config:       cfg,
-		Out:          os.Stdout,
+		Out:          runOutput(o.jsonOutput),
 		Err:          os.Stderr,
 		Verbose:      o.verbose,
 		Streamed:     !o.noStream,
 		SkipAgentsMD: o.noAgentsMD,
 		NoCompact:    o.noCompact,
 	}
+	events := newJSONEvents(os.Stdout, o.jsonOutput)
+	if o.jsonOutput {
+		events.emit("run.started", map[string]any{"schema_version": 1, "model": o.modelName, "root": root, "read_only": cfg.ReadOnly, "resumed": false})
+		a.OnEvent = func(kind string, fields map[string]any) {
+			events.emit(kind, fields)
+			if events.err != nil {
+				stop()
+			}
+		}
+		if cfg.CostLimit > 0 && model.Unpriced(o.modelName) {
+			events.emit("warning", map[string]any{"message": fmt.Sprintf("no pricing available for %s; --cost-limit cannot be enforced", o.modelName)})
+		}
+	}
+	if events.err != nil {
+		return 1
+	}
 	if o.output != "" {
 		a.OnStep = func(t *trajectory.Trajectory) error {
 			if err := t.Save(o.output); err != nil {
 				fmt.Fprintln(os.Stderr, "warning: saving trajectory:", err)
+				if a.OnEvent != nil {
+					a.OnEvent("warning", map[string]any{"message": "saving trajectory: " + err.Error()})
+				}
 			}
 			return nil
 		}
@@ -219,9 +241,19 @@ func run() int {
 		}
 		a.Config.WallTimeSec = cfg.WallTimeSec
 	}
-	start := time.Now()
+	runStart := time.Now()
 	t := a.Run(ctx, task)
-	reportSummary(os.Stderr, o.modelName, t, time.Since(start))
+	elapsed := time.Since(runStart)
+	reportSummary(os.Stderr, o.modelName, t, elapsed)
+	if o.jsonOutput {
+		if t.ExitStatus == agent.StatusError {
+			events.emit("error", map[string]any{"message": t.Submission})
+		}
+		events.emit("result", resultFields(t, elapsed))
+		if events.err != nil {
+			return 1
+		}
+	}
 	if t.ExitStatus == agent.StatusSubmitted || t.ExitStatus == agent.StatusCompleted {
 		return 0
 	}
@@ -300,7 +332,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	}
 
 	var onText func(string)
-	if !o.noStream {
+	if !o.noStream && !o.jsonOutput {
 		onText = func(s string) { os.Stdout.WriteString(s) }
 	}
 	m, err := model.New(modelName, onText)
@@ -330,10 +362,10 @@ func runResume(o *options, fs *flag.FlagSet) int {
 			BashTimeout:    time.Duration(cfg.BashTimeoutSec) * time.Second,
 			MaxOutputChars: cfg.MaxOutputChars,
 			MaxProcesses:   cfg.MaxBackgroundProcesses,
-			Stream:         os.Stdout,
+			Stream:         jsonStream(o.jsonOutput),
 		},
 		Config:       cfg,
-		Out:          os.Stdout,
+		Out:          runOutput(o.jsonOutput),
 		Err:          os.Stderr,
 		Verbose:      o.verbose,
 		Streamed:     !o.noStream,
@@ -341,6 +373,22 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		NoCompact:    o.noCompact,
 		Resume:       src,
 		ResumeSource: o.resume,
+	}
+	events := newJSONEvents(os.Stdout, o.jsonOutput)
+	if o.jsonOutput {
+		events.emit("run.started", map[string]any{"schema_version": 1, "model": modelName, "root": root, "read_only": src.ReadOnly, "resumed": true})
+		a.OnEvent = func(kind string, fields map[string]any) {
+			events.emit(kind, fields)
+			if events.err != nil {
+				stop()
+			}
+		}
+		if cfg.CostLimit > 0 && model.Unpriced(modelName) {
+			events.emit("warning", map[string]any{"message": fmt.Sprintf("no pricing available for %s; --cost-limit cannot be enforced", modelName)})
+		}
+	}
+	if events.err != nil {
+		return 1
 	}
 	initial := true
 	a.OnStep = func(t *trajectory.Trajectory) error {
@@ -357,9 +405,19 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	fmt.Fprintf(os.Stderr, "resuming %s from %s (previous status %s after %d steps)\n", modelName, o.resume, prevStatus, src.Steps)
 	fmt.Fprintln(os.Stderr, "note: inspect and revalidate the workspace; it may have changed and commands may have produced unrecorded side effects after the last save. Live processes are not restored")
 
-	start := time.Now()
+	started := time.Now()
 	t := a.Run(ctx, src.Task)
-	reportSummary(os.Stderr, modelName, t, time.Since(start))
+	elapsed := time.Since(started)
+	reportSummary(os.Stderr, modelName, t, elapsed)
+	if o.jsonOutput {
+		if t.ExitStatus == agent.StatusError {
+			events.emit("error", map[string]any{"message": t.Submission})
+		}
+		events.emit("result", resultFields(t, elapsed))
+		if events.err != nil {
+			return 1
+		}
+	}
 	if t.ExitStatus == agent.StatusSubmitted || t.ExitStatus == agent.StatusCompleted {
 		return 0
 	}
@@ -413,7 +471,7 @@ var usageGroups = []struct {
 	{"", [][3]string{{"h", "help", ""}}},
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "resume", "path"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "no-compact", ""}}},
-	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "no-agents-md", ""}, {"", "read-only", ""}}},
+	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "no-agents-md", ""}, {"", "read-only", ""}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}}},
 }
 
@@ -619,4 +677,59 @@ func defaultModel() string {
 func fail(err error) int {
 	fmt.Fprintln(os.Stderr, "error:", err)
 	return 1
+}
+
+type jsonEvents struct {
+	out     io.Writer
+	enabled bool
+	err     error
+}
+
+func newJSONEvents(out io.Writer, enabled bool) *jsonEvents {
+	return &jsonEvents{out: out, enabled: enabled}
+}
+
+func (e *jsonEvents) emit(kind string, fields map[string]any) {
+	if !e.enabled || e.err != nil {
+		return
+	}
+	event := make(map[string]any, len(fields)+1)
+	event["type"] = kind
+	for key, value := range fields {
+		event[key] = value
+	}
+	line, err := json.Marshal(event)
+	if err != nil {
+		e.err = err
+		return
+	}
+	line = append(line, '\n')
+	n, err := e.out.Write(line)
+	if err == nil && n != len(line) {
+		err = io.ErrShortWrite
+	}
+	e.err = err
+}
+
+func runOutput(jsonMode bool) io.Writer {
+	if jsonMode {
+		return io.Discard
+	}
+	return os.Stdout
+}
+
+func jsonStream(jsonMode bool) io.Writer {
+	if jsonMode {
+		return nil
+	}
+	return os.Stdout
+}
+
+func resultFields(t *trajectory.Trajectory, elapsed time.Duration) map[string]any {
+	return map[string]any{
+		"status": t.ExitStatus, "submission": t.Submission, "steps": t.Steps,
+		"input_tokens": t.InputTokens, "output_tokens": t.OutputTokens,
+		"cache_read_tokens": t.CacheReadTokens, "cache_write_tokens": t.CacheWriteTokens,
+		"cost_usd": t.Cost, "duration_ms": elapsed.Milliseconds(),
+	}
 }

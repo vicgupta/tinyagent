@@ -200,6 +200,7 @@ func (a *Agent) compact(ctx context.Context, t *trajectory.Trajectory, v *view, 
 			}
 		}
 		fmt.Fprintf(a.Err, "compacted context: ~%s → ~%s tokens (%s)\n", formatInt(before), formatInt(after), detail)
+		a.event("compaction", map[string]any{"step": rec.Step, "reason": rec.Reason, "stage": rec.Stage, "tokens_before": rec.TokensBefore, "tokens_after": rec.TokensAfter, "elided_messages": len(rec.Elided), "summarized_messages": len(rec.Summarized)})
 	}
 	if !changed || (w > 0 && float64(after) > compactAt*float64(w)) {
 		return errStillTooLong

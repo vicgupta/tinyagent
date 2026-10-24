@@ -56,6 +56,8 @@ type Agent struct {
 	// OnStep is called after every step, e.g. to save the trajectory. A
 	// non-nil error stops the run.
 	OnStep func(*trajectory.Trajectory) error
+	// OnEvent receives machine-readable progress events when configured.
+	OnEvent func(string, map[string]any)
 	// Resume, when non-nil, continues that trajectory instead of starting a
 	// fresh run: its messages, accounting totals, and steps are the starting
 	// state, and a continuation notice is appended before the first request.
@@ -174,6 +176,9 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		v.add(t, msg)
 		v.pendingChars = 0 // already counted in cost.OutputTokens
 		a.logAssistant(msg)
+		if msg.Content != "" {
+			a.event("assistant.message", map[string]any{"text": msg.Content})
+		}
 
 		if strings.Contains(msg.Content, SubmitMarker) {
 			sub := strings.TrimSpace(strings.Replace(msg.Content, SubmitMarker, "", 1))
@@ -184,7 +189,9 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		}
 
 		for _, call := range msg.ToolCalls {
-			out := a.Tools.Run(ctx, call)
+			a.event("tool.call", map[string]any{"id": call.ID, "name": call.Function.Name, "arguments": eventArguments(call.Function.Arguments)})
+			out, isError := a.Tools.RunWithError(ctx, call)
+			a.event("tool.result", map[string]any{"id": call.ID, "name": call.Function.Name, "output": out, "is_error": isError})
 			t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: call.ID, Content: out})
 			v.add(t, t.Messages[len(t.Messages)-1])
 			if a.Verbose {
@@ -210,6 +217,20 @@ func externalToolSignature(specs []model.ToolSpec) string {
 	return fmt.Sprintf("mcp-tools-v1:%x", sha256.Sum256(data))
 }
 
+func (a *Agent) event(kind string, fields map[string]any) {
+	if a.OnEvent != nil {
+		a.OnEvent(kind, fields)
+	}
+}
+
+func eventArguments(raw string) any {
+	var args any
+	if err := json.Unmarshal([]byte(raw), &args); err != nil {
+		return raw
+	}
+	return args
+}
+
 // compactFailed ends the run after a failed compaction: as the context's
 // status if it was cancelled or timed out, else as an error.
 func (a *Agent) compactFailed(ctx context.Context, t *trajectory.Trajectory, err error) *trajectory.Trajectory {
@@ -223,7 +244,12 @@ func (a *Agent) compactFailed(ctx context.Context, t *trajectory.Trajectory, err
 func (a *Agent) systemPrompt() string {
 	system := strings.NewReplacer("{{cwd}}", a.Tools.Root, "{{os}}", runtime.GOOS).Replace(a.Config.SystemPrompt)
 	if !a.SkipAgentsMD {
-		system += agentsMD(a.Tools.Root, a.Err, a.Out, a.Verbose)
+		section, err := loadAgentsMD(a.Tools.Root, a.Out, a.Verbose)
+		if err != nil {
+			fmt.Fprintln(a.Err, "warning: reading AGENTS.md:", err)
+			a.event("warning", map[string]any{"message": "reading AGENTS.md: " + err.Error()})
+		}
+		system += section
 	}
 	if a.Tools.ReadOnly {
 		system += "\n\n" + readOnlyNotice

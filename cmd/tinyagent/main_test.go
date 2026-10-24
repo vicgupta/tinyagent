@@ -132,6 +132,36 @@ func TestSummaryLine(t *testing.T) {
 	}
 }
 
+func TestJSONEventsWriteOneJSONLine(t *testing.T) {
+	var out strings.Builder
+	events := newJSONEvents(&out, true)
+	events.emit("run.started", map[string]any{"schema_version": 1, "model": "fake"})
+	events.emit("result", map[string]any{"status": agent.StatusSubmitted, "submission": "done"})
+	if events.err != nil {
+		t.Fatal(events.err)
+	}
+	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines: %q", len(lines), out.String())
+	}
+	for i, line := range lines {
+		var event map[string]any
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("line %d is invalid JSON: %v", i, err)
+		}
+		if _, ok := event["type"].(string); !ok {
+			t.Errorf("line %d has no type: %#v", i, event)
+		}
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(lines[1]), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result["type"] != "result" || result["status"] != agent.StatusSubmitted || result["submission"] != "done" {
+		t.Errorf("final event = %#v", result)
+	}
+}
+
 // wantUsage is the layout from issue #12, with its update: -h, --help listed
 // first and -V for --version.
 const wantUsage = `Usage: tinyagent -t "<prompt>" [flags]    (or --task "<prompt>")
@@ -154,6 +184,7 @@ Output:
   -o, --output path       write trajectory JSON
   -v, --verbose           print tool outputs
       --no-stream         wait for full responses instead of streaming
+      --json              write run events as JSONL to stdout
       --no-agents-md      don't add AGENTS.md (nearest, up to the repo root) to the system prompt
       --read-only         allow only read_file, list_files, and grep; blocks edits and commands
 Other:
