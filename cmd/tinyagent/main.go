@@ -25,6 +25,9 @@ import (
 // version is set at build time with -ldflags "-X main.version=v1.2.3".
 var version string
 
+// flagOutput receives usage and flag parse errors; tests replace it.
+var flagOutput io.Writer = os.Stderr
+
 func main() {
 	os.Exit(run())
 }
@@ -38,25 +41,30 @@ func run() int {
 		noAgentsMD                               bool
 	)
 	fs := flag.NewFlagSet("tinyagent", flag.ContinueOnError)
-	fs.StringVar(&task, "task", "", "task/prompt (required); - reads it from stdin")
+	fs.SetOutput(flagOutput)
+	fs.Usage = func() { printUsage(fs) }
+	fs.StringVar(&task, "task", "", `task/prompt (required); "-" reads it from stdin`)
 	fs.StringVar(&task, "t", "", "shorthand for --task")
-	fs.StringVar(&modelName, "model", defaultModel(), "provider/model, e.g. openai/gpt-4o")
+	fs.StringVar(&modelName, "model", defaultModel(), "provider/model")
 	fs.StringVar(&modelName, "m", defaultModel(), "shorthand for --model")
-	fs.StringVar(&configPath, "config", "", "yaml config path (default embedded)")
+	fs.StringVar(&configPath, "config", "", "YAML config (default: built-in)")
 	fs.StringVar(&configPath, "c", "", "shorthand for --config")
 	fs.StringVar(&cwd, "cwd", ".", "working directory")
 	fs.IntVar(&stepLimit, "step-limit", 0, "max model calls, 0 = unlimited")
 	fs.Float64Var(&costLimit, "cost-limit", 0, "max USD, 0 = unlimited")
-	fs.IntVar(&timeLimit, "time-limit", 0, "max wall-clock seconds, 0 = unlimited; overrides wall_time_seconds")
-	fs.StringVar(&output, "output", "", "trajectory JSON path")
+	fs.IntVar(&timeLimit, "time-limit", 0, "max wall-clock seconds, 0 = unlimited")
+	fs.StringVar(&output, "output", "", "write trajectory JSON")
 	fs.StringVar(&output, "o", "", "shorthand for --output")
 	fs.BoolVar(&verbose, "verbose", false, "print tool outputs")
 	fs.BoolVar(&verbose, "v", false, "shorthand for --verbose")
-	fs.BoolVar(&noStream, "no-stream", false, "wait for each full response instead of streaming it")
+	fs.BoolVar(&noStream, "no-stream", false, "wait for full responses instead of streaming")
 	fs.BoolVar(&noAgentsMD, "no-agents-md", false, "don't add <cwd>/AGENTS.md to the system prompt")
 	fs.BoolVar(&showVersion, "version", false, "print the version and exit")
-	fs.BoolVar(&doUpdate, "update", false, "replace this binary with the latest GitHub release and exit")
+	fs.BoolVar(&doUpdate, "update", false, "update to the latest release and exit")
 	if err := fs.Parse(os.Args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 2
 	}
 	if timeLimit < 0 {
@@ -147,6 +155,53 @@ func run() int {
 	}
 	reportFailure(os.Stderr, modelName, t)
 	return 1
+}
+
+// usageGroups lays out --help: each flag's shorthand, long name and value
+// placeholder, by group. Help text and defaults come from the FlagSet.
+var usageGroups = []struct {
+	name  string
+	flags [][3]string
+}{
+	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"c", "config", "path"}, {"", "cwd", "dir"}}},
+	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}}},
+	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "no-agents-md", ""}}},
+	{"Other", [][3]string{{"", "version", ""}, {"", "update", ""}}},
+}
+
+func printUsage(fs *flag.FlagSet) {
+	left := func(f [3]string) string {
+		s := "      --" + f[1]
+		if f[0] != "" {
+			s = "  -" + f[0] + ", --" + f[1]
+		}
+		if f[2] != "" {
+			s += " " + f[2]
+		}
+		return s
+	}
+	width := 0
+	for _, g := range usageGroups {
+		for _, f := range g.flags {
+			width = max(width, len(left(f)))
+		}
+	}
+	w := fs.Output()
+	fmt.Fprint(w, "Usage: tinyagent --task \"<prompt>\" [flags]\n       echo \"<prompt>\" | tinyagent -t -\n\n")
+	for _, g := range usageGroups {
+		fmt.Fprintf(w, "%s:\n", g.name)
+		for _, f := range g.flags {
+			fl := fs.Lookup(f[1])
+			help := fl.Usage
+			if d := fl.DefValue; d != "" && d != "0" && d != "false" {
+				help += fmt.Sprintf(" (default %q)", d)
+			}
+			fmt.Fprintf(w, "%-*s%s\n", width+4, left(f), help)
+		}
+	}
+	fmt.Fprint(w, "\nExamples:\n"+
+		"  tinyagent -t \"fix the failing test\" -m anthropic/claude-sonnet-4\n"+
+		"  cat task.md | tinyagent -t - --step-limit 30 -o run.json\n")
 }
 
 // reportFailure prints how an unsuccessful run ended and, for an error that

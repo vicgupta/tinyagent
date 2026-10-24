@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"flag"
+	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -95,5 +97,96 @@ func TestReportFailure(t *testing.T) {
 	reportFailure(&b, "openai/gpt-4o", &trajectory.Trajectory{ExitStatus: agent.StatusStepLimit, Steps: 5})
 	if got := b.String(); got != "StepLimitExceeded after 5 steps\n" {
 		t.Errorf("limit exit: got %q", got)
+	}
+}
+
+// wantUsage is the layout from issue #12.
+const wantUsage = `Usage: tinyagent --task "<prompt>" [flags]
+       echo "<prompt>" | tinyagent -t -
+
+Task:
+  -t, --task string       task/prompt (required); "-" reads it from stdin
+  -m, --model string      provider/model (default "openai/gpt-4o")
+  -c, --config path       YAML config (default: built-in)
+      --cwd dir           working directory (default ".")
+Limits:
+      --step-limit n      max model calls, 0 = unlimited
+      --cost-limit usd    max USD, 0 = unlimited
+      --time-limit sec    max wall-clock seconds, 0 = unlimited
+Output:
+  -o, --output path       write trajectory JSON
+  -v, --verbose           print tool outputs
+      --no-stream         wait for full responses instead of streaming
+      --no-agents-md      don't add <cwd>/AGENTS.md to the system prompt
+Other:
+      --version           print the version and exit
+      --update            update to the latest release and exit
+
+Examples:
+  tinyagent -t "fix the failing test" -m anthropic/claude-sonnet-4
+  cat task.md | tinyagent -t - --step-limit 30 -o run.json
+`
+
+// runWith runs the CLI with args, returning the exit code and what went to
+// flagOutput.
+func runWith(t *testing.T, args ...string) (int, string) {
+	t.Helper()
+	var b strings.Builder
+	defer func(w io.Writer, a []string) { flagOutput, os.Args = w, a }(flagOutput, os.Args)
+	flagOutput, os.Args = &b, append([]string{"tinyagent"}, args...)
+	return run(), b.String()
+}
+
+func TestUsage(t *testing.T) {
+	t.Setenv("AGENT_MODEL", "")
+	for _, arg := range []string{"--help", "-h", "-help"} {
+		code, got := runWith(t, arg)
+		if code != 0 {
+			t.Errorf("%s exit = %d, want 0", arg, code)
+		}
+		if got != wantUsage {
+			t.Errorf("%s usage:\n%s\nwant:\n%s", arg, got, wantUsage)
+		}
+		for _, line := range strings.Split(got, "\n") {
+			if strings.HasPrefix(line, "  -task") || strings.Contains(line, "shorthand for") {
+				t.Errorf("old-style line: %q", line)
+			}
+		}
+	}
+	// Every flag row starts its help text in the same column.
+	_, got := runWith(t, "--help")
+	col := -1
+	for _, line := range strings.Split(got, "\n") {
+		if !strings.HasPrefix(line, "  -") && !strings.HasPrefix(line, "      --") {
+			continue
+		}
+		i := strings.Index(line, "--")
+		i += strings.Index(line[i:], "    ")
+		for i < len(line) && line[i] == ' ' {
+			i++
+		}
+		if col == -1 {
+			col = i
+		} else if i != col {
+			t.Errorf("help starts at column %d, want %d: %q", i, col, line)
+		}
+	}
+}
+
+func TestUsageShowsModelDefaultFromEnv(t *testing.T) {
+	t.Setenv("AGENT_MODEL", "ollama/llama3.1")
+	_, got := runWith(t, "--help")
+	if !strings.Contains(got, `  -m, --model string      provider/model (default "ollama/llama3.1")`+"\n") {
+		t.Errorf("model row doesn't show $AGENT_MODEL:\n%s", got)
+	}
+}
+
+func TestBadFlagExits2(t *testing.T) {
+	code, got := runWith(t, "--nope")
+	if code != 2 {
+		t.Errorf("exit = %d, want 2", code)
+	}
+	if !strings.Contains(got, "flag provided but not defined: -nope") || !strings.Contains(got, "Usage: tinyagent") {
+		t.Errorf("output = %q, want the parse error and usage", got)
 	}
 }
