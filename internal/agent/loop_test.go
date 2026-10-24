@@ -119,6 +119,30 @@ func TestReadOnlyRunFiltersAndDenies(t *testing.T) {
 	}
 }
 
+func TestRunGrepContextNeedsNoFollowupRead(t *testing.T) {
+	m := &scripted{replies: []model.Message{
+		{Role: "assistant", ToolCalls: []model.ToolCall{call("grep", "grep", `{"pattern":"failure","path":"src.go","context_lines":1}`)}},
+		{Role: "assistant", Content: "The failure is handled by the surrounding condition."},
+	}}
+	a := newAgent(t, m)
+	if err := os.WriteFile(filepath.Join(a.Tools.Root, "src.go"), []byte("if err != nil {\n return errors.New(\"failure\")\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tr := a.Run(context.Background(), "explain failure")
+	if tr.ExitStatus != StatusCompleted || tr.Submission == "" {
+		t.Fatalf("trajectory = %+v", tr)
+	}
+	second := m.seen[1]
+	if len(second) < 4 || second[len(second)-1].Role != "tool" || !strings.Contains(second[len(second)-1].Content, "src.go-1- if err != nil {") || !strings.Contains(second[len(second)-1].Content, "src.go-3- }") {
+		t.Fatalf("grep context not returned on next model turn: %+v", second)
+	}
+	for _, msg := range m.seen[0] {
+		if msg.Role == "tool" {
+			t.Fatalf("unexpected tool history in first turn: %+v", m.seen[0])
+		}
+	}
+}
+
 func TestLimits(t *testing.T) {
 	loop := model.Message{Role: "assistant", ToolCalls: []model.ToolCall{call("1", "list_files", `{}`)}}
 	replies := func() []model.Message { return []model.Message{loop, loop, loop, loop, loop} }

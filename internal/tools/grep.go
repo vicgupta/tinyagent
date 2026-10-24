@@ -12,8 +12,10 @@ import (
 )
 
 const (
-	maxGrepMatches  = 500
-	maxGrepFileSize = 5 << 20
+	maxGrepMatches            = 500
+	maxGrepFileSize           = 5 << 20
+	maxGrepContextLines       = 20
+	maxGrepContextOutputLines = 500
 )
 
 // Grep returns lines matching pattern as "file:line: content". Binary and
@@ -24,6 +26,11 @@ const (
 // case-insensitive matching of file contents only. fixedStrings treats pattern
 // as literal text instead of a Go regular expression.
 func Grep(root, pattern, path, include string, ignoreCase, fixedStrings bool) (string, error) {
+	return GrepWithContext(root, pattern, path, include, ignoreCase, fixedStrings, 0)
+}
+
+// GrepWithContext returns matches with up to contextLines surrounding lines.
+func GrepWithContext(root, pattern, path, include string, ignoreCase, fixedStrings bool, contextLines int) (string, error) {
 	if fixedStrings {
 		pattern = regexp.QuoteMeta(pattern)
 	}
@@ -46,6 +53,8 @@ func Grep(root, pattern, path, include string, ignoreCase, fixedStrings bool) (s
 	}
 
 	var out []string
+	matches, sourceLines := 0, 0
+	contextTruncated := false
 	err = filepath.WalkDir(start, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -74,12 +83,62 @@ func Grep(root, pattern, path, include string, ignoreCase, fixedStrings bool) (s
 		}
 		sc := bufio.NewScanner(bytes.NewReader(data))
 		sc.Buffer(make([]byte, 64*1024), maxGrepFileSize)
-		for n := 1; sc.Scan(); n++ {
-			if line := sc.Text(); re.MatchString(line) {
-				out = append(out, fmt.Sprintf("%s:%d: %s", rel(root, p), n, line))
-				if len(out) >= maxGrepMatches {
+		if contextLines == 0 {
+			for n := 1; sc.Scan(); n++ {
+				if line := sc.Text(); re.MatchString(line) {
+					out = append(out, fmt.Sprintf("%s:%d: %s", rel(root, p), n, line))
+					matches++
+					if matches >= maxGrepMatches {
+						return fs.SkipAll
+					}
+				}
+			}
+			return nil
+		}
+		// Positive context mode buffers one bounded file (files are capped at
+		// maxGrepFileSize), then emits merged ranges while enforcing the output
+		// line budget. The buffer is discarded before the next file.
+		var lines []string
+		var hit []bool
+		for sc.Scan() {
+			line := sc.Text()
+			lines = append(lines, line)
+			matched := re.MatchString(line)
+			hit = append(hit, matched)
+			if matched {
+				matches++
+			}
+		}
+		for i := 0; i < len(lines); {
+			if !hit[i] {
+				i++
+				continue
+			}
+			lo, hi := max(0, i-contextLines), min(len(lines)-1, i+contextLines)
+			for j := i + 1; j < len(lines) && j <= hi+contextLines+1; j++ {
+				if hit[j] {
+					hi = min(len(lines)-1, j+contextLines)
+				}
+			}
+			if len(out) > 0 {
+				out = append(out, "--")
+			}
+			for j := lo; j <= hi; j++ {
+				if sourceLines >= maxGrepContextOutputLines {
+					contextTruncated = true
 					return fs.SkipAll
 				}
+				marker := "-"
+				if hit[j] {
+					marker = ":"
+				}
+				out = append(out, fmt.Sprintf("%s%s%d%s %s", rel(root, p), marker, j+1, marker, lines[j]))
+				sourceLines++
+			}
+			i = hi + 1
+			if matches >= maxGrepMatches {
+				contextTruncated = true
+				return fs.SkipAll
 			}
 		}
 		return nil
@@ -91,8 +150,11 @@ func Grep(root, pattern, path, include string, ignoreCase, fixedStrings bool) (s
 		return "no matches", nil
 	}
 	res := strings.Join(out, "\n")
-	if len(out) >= maxGrepMatches {
+	if contextLines == 0 && matches >= maxGrepMatches {
 		res += fmt.Sprintf("\n... (stopped at %d matches)", maxGrepMatches)
+	}
+	if contextLines > 0 && contextTruncated {
+		res += "\n... (results/context may be incomplete: stopped at output limit)"
 	}
 	return res, nil
 }
