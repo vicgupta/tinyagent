@@ -53,7 +53,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.task, "t", "", "shorthand for --task")
 	fs.StringVar(&o.modelName, "model", defaultModel(), "provider/model")
 	fs.StringVar(&o.modelName, "m", defaultModel(), "shorthand for --model")
-	fs.StringVar(&o.configPath, "config", "", "YAML config (default: built-in)")
+	fs.StringVar(&o.configPath, "config", "", "YAML config (default: user config if present, else built-in)")
 	fs.StringVar(&o.configPath, "c", "", "shorthand for --config")
 	fs.StringVar(&o.cwd, "cwd", ".", "working directory")
 	fs.IntVar(&o.stepLimit, "step-limit", 0, "max model calls, 0 = unlimited")
@@ -115,7 +115,7 @@ func run() int {
 		return fail(err)
 	}
 
-	cfg, err := config.Load(o.configPath)
+	cfg, err := config.Load(config.Find(o.configPath))
 	if err != nil {
 		return fail(err)
 	}

@@ -78,7 +78,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `-h, --help` | | Print usage to stdout and exit |
 | `-t, --task` | — | Task prompt (required); `-` reads it from stdin |
 | `-m, --model` | `$AGENT_MODEL` or `openai/gpt-4o` | `<provider>/<model>`; no `/` means openai. Providers: openai, openrouter, anthropic, ollama, codex |
-| `-c, --config` | embedded defaults | YAML config file |
+| `-c, --config` | user config, else built-in | YAML config file; see [Config](#config) |
 | `--cwd` | `.` | Root directory; tools can't reach outside it |
 | `--step-limit` | 0 (unlimited) | Max model calls |
 | `--cost-limit` | 0 (unlimited) | Max USD |
@@ -93,6 +93,16 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 Environment: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (any OpenAI-compatible endpoint), `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENROUTER_API_KEY`, `OLLAMA_HOST`, `CODEX_HOME`.
 
 ## Config
+
+Without `-c`, tinyagent loads a per-user config file if one exists, so settings you always want don't need a flag:
+
+| OS | Default path |
+|---|---|
+| Linux and other Unix | `$XDG_CONFIG_HOME/tinyagent/config.yaml` (usually `~/.config/tinyagent/config.yaml`) |
+| macOS | `~/Library/Application Support/tinyagent/config.yaml` |
+| Windows | `%AppData%\tinyagent\config.yaml` |
+
+The lookup order is: `-c PATH` if given (a missing or unreadable file is an error, with no fallback); otherwise the user config above, if it exists; otherwise the built-in defaults. A user config that exists but can't be read or parsed is an error naming the file, not skipped.
 
 Every key is optional. Command-line flags override the file.
 

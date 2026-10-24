@@ -131,7 +131,7 @@ const wantUsage = `Usage: tinyagent -t "<prompt>" [flags]    (or --task "<prompt
 Task:
   -t, --task string       task/prompt (required); "-" reads it from stdin
   -m, --model string      provider/model (default "openai/gpt-4o")
-  -c, --config path       YAML config (default: built-in)
+  -c, --config path       YAML config (default: user config if present, else built-in)
       --cwd dir           working directory (default ".")
 Limits:
       --step-limit n      max model calls, 0 = unlimited
