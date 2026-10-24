@@ -25,18 +25,19 @@ type Executor struct {
 const maxBashTimeoutSeconds = 600
 
 type args struct {
-	Path       string          `json:"path"`
-	Content    string          `json:"content"`
-	OldStr     string          `json:"old_str"`
-	NewStr     string          `json:"new_str"`
-	Pattern    string          `json:"pattern"`
-	Include    string          `json:"include"`
-	Command    string          `json:"command"`
-	Offset     json.Number     `json:"offset"`
-	Limit      json.Number     `json:"limit"`
-	Timeout    json.Number     `json:"timeout"`
-	ReplaceAll json.RawMessage `json:"replace_all"`
-	IgnoreCase json.RawMessage `json:"ignore_case"`
+	Path         string          `json:"path"`
+	Content      string          `json:"content"`
+	OldStr       string          `json:"old_str"`
+	NewStr       string          `json:"new_str"`
+	Pattern      string          `json:"pattern"`
+	Include      string          `json:"include"`
+	Command      string          `json:"command"`
+	Offset       json.Number     `json:"offset"`
+	Limit        json.Number     `json:"limit"`
+	Timeout      json.Number     `json:"timeout"`
+	ReplaceAll   json.RawMessage `json:"replace_all"`
+	IgnoreCase   json.RawMessage `json:"ignore_case"`
+	FixedStrings json.RawMessage `json:"fixed_strings"`
 }
 
 // Specs returns the OpenAI tool definitions for all tools.
@@ -50,8 +51,8 @@ func Specs() []model.ToolSpec {
 			props{"path": "File path", "old_str": "Exact text to replace", "new_str": "Replacement text", "replace_all": "Optional: replace every occurrence instead of exactly one"}, "path", "old_str", "new_str"),
 		spec("list_files", "List directory entries. With a glob pattern (e.g. *.go, or a pattern containing /), search recursively and return matching file paths.",
 			props{"path": "Directory (default .)", "pattern": "Optional glob pattern"}),
-		spec("grep", "Search files recursively for a regular expression. Returns file:line: content.",
-			props{"pattern": "Go regular expression", "path": "File or directory to search (default .)", "include": "Optional glob to filter files, e.g. *.go (a glob with / matches paths relative to path)", "ignore_case": "Optional: match file contents case-insensitively (default false)"}, "pattern"),
+		spec("grep", "Search files recursively for a Go regular expression (default), or literal text with fixed_strings: true. Returns file:line: content.",
+			props{"pattern": "Go regular expression by default; literal text when fixed_strings is true", "path": "File or directory to search (default .)", "include": "Optional glob to filter files, e.g. *.go (a glob with / matches paths relative to path)", "ignore_case": "Optional: match file contents case-insensitively (default false)", "fixed_strings": "Optional: treat the entire pattern as literal text instead of a regular expression (default false)"}, "pattern"),
 		spec("bash", "Run a command with bash -c in the working directory. Each call is a fresh process. Returns the exit code and combined stdout/stderr.",
 			props{"command": "Shell command", "timeout": "Optional timeout in seconds for this command (default: the configured bash timeout, max 600)"}, "command"),
 	}
@@ -63,7 +64,7 @@ type props map[string]string
 // the rest take strings.
 var (
 	intProps  = map[string]bool{"offset": true, "limit": true, "timeout": true}
-	boolProps = map[string]bool{"replace_all": true, "ignore_case": true}
+	boolProps = map[string]bool{"replace_all": true, "ignore_case": true, "fixed_strings": true}
 )
 
 func spec(name, desc string, p props, required ...string) model.ToolSpec {
@@ -137,7 +138,11 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return Grep(e.Root, a.Pattern, a.Path, a.Include, ignoreCase)
+		fixedStrings, err := boolArg("fixed_strings", a.FixedStrings)
+		if err != nil {
+			return "", err
+		}
+		return Grep(e.Root, a.Pattern, a.Path, a.Include, ignoreCase, fixedStrings)
 	case "bash":
 		secs, err := intArg("timeout", a.Timeout)
 		if err != nil {

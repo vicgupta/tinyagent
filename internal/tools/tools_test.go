@@ -90,7 +90,7 @@ func TestListFiles(t *testing.T) {
 
 func TestGrep(t *testing.T) {
 	root := setupTree(t)
-	out, err := Grep(root, "TODO", "", "", false)
+	out, err := Grep(root, "TODO", "", "", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,40 +98,40 @@ func TestGrep(t *testing.T) {
 	if out != want {
 		t.Errorf("Grep = %q, want %q", out, want)
 	}
-	if out, _ := Grep(root, "zzz", "pkg", "", false); out != "no matches" {
+	if out, _ := Grep(root, "zzz", "pkg", "", false, false); out != "no matches" {
 		t.Errorf("no-match grep = %q", out)
 	}
-	if _, err := Grep(root, "(", "", "", false); err == nil {
+	if _, err := Grep(root, "(", "", "", false, false); err == nil {
 		t.Error("bad regexp accepted")
 	}
 }
 
 func TestGrepInclude(t *testing.T) {
 	root := setupTree(t)
-	if out, err := Grep(root, "TODO", "", "*.go", false); err != nil || out != "pkg/util.go:2: // TODO fix" {
+	if out, err := Grep(root, "TODO", "", "*.go", false, false); err != nil || out != "pkg/util.go:2: // TODO fix" {
 		t.Errorf("include *.go = %q, %v", out, err)
 	}
-	if out, _ := Grep(root, "TODO", "", "*.txt", false); out != "pkg/util.txt:1: TODO later" {
+	if out, _ := Grep(root, "TODO", "", "*.txt", false, false); out != "pkg/util.txt:1: TODO later" {
 		t.Errorf("include *.txt = %q", out)
 	}
-	if out, _ := Grep(root, "package", "", "pkg/*/*.go", false); out != "pkg/sub/deep.go:1: package sub" {
+	if out, _ := Grep(root, "package", "", "pkg/*/*.go", false, false); out != "pkg/sub/deep.go:1: package sub" {
 		t.Errorf("include pkg/*/*.go = %q", out)
 	}
-	if out, _ := Grep(root, "package", "pkg", "sub/*.go", false); out != "pkg/sub/deep.go:1: package sub" {
+	if out, _ := Grep(root, "package", "pkg", "sub/*.go", false, false); out != "pkg/sub/deep.go:1: package sub" {
 		t.Errorf("include sub/*.go under pkg = %q", out)
 	}
-	if out, _ := Grep(root, "TODO", "", "*.md", false); out != "no matches" {
+	if out, _ := Grep(root, "TODO", "", "*.md", false, false); out != "no matches" {
 		t.Errorf("include *.md = %q", out)
 	}
-	if _, err := Grep(root, "TODO", "", "[", false); err == nil || !strings.Contains(err.Error(), `bad include pattern "["`) {
+	if _, err := Grep(root, "TODO", "", "[", false, false); err == nil || !strings.Contains(err.Error(), `bad include pattern "["`) {
 		t.Errorf("bad include err = %v", err)
 	}
 	// A single-file path ignores include.
-	if out, _ := Grep(root, "TODO", "pkg/util.txt", "*.go", false); out != "pkg/util.txt:1: TODO later" {
+	if out, _ := Grep(root, "TODO", "pkg/util.txt", "*.go", false, false); out != "pkg/util.txt:1: TODO later" {
 		t.Errorf("single file with include = %q", out)
 	}
-	all, _ := Grep(root, "TODO", "", "", false)
-	if out, _ := Grep(root, "TODO", "", "", false); out != all {
+	all, _ := Grep(root, "TODO", "", "", false, false)
+	if out, _ := Grep(root, "TODO", "", "", false, false); out != all {
 		t.Errorf("empty include changed results: %q", out)
 	}
 	e := &Executor{Root: root}
@@ -253,22 +253,127 @@ func TestGrepIgnoreCaseLimits(t *testing.T) {
 	if err := WriteFile(root, "large.log", strings.Repeat("ERROR\n", maxGrepFileSize/6+1)); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := Grep(root, "error", "", "", true); err != nil || got != "no matches" {
+	if got, err := Grep(root, "error", "", "", true, false); err != nil || got != "no matches" {
 		t.Fatalf("large file = %q, %v", got, err)
 	}
 	if err := WriteFile(root, "matches.log", strings.Repeat("ERROR\n", maxGrepMatches+1)); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Grep(root, "error", "", "", true)
-	if err != nil {
-		t.Fatal(err)
+	for _, fixedStrings := range []bool{false, true} {
+		got, err := Grep(root, "error", "", "", true, fixedStrings)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(got, "\n")
+		if len(lines) != maxGrepMatches+1 || lines[0] != "matches.log:1: ERROR" ||
+			lines[maxGrepMatches-1] != fmt.Sprintf("matches.log:%d: ERROR", maxGrepMatches) ||
+			lines[maxGrepMatches] != fmt.Sprintf("... (stopped at %d matches)", maxGrepMatches) {
+			t.Errorf("match limit (fixed_strings=%t): got %d lines, ending in %q", fixedStrings, len(lines), lines[len(lines)-1])
+		}
 	}
-	lines := strings.Split(got, "\n")
-	if len(lines) != maxGrepMatches+1 || lines[0] != "matches.log:1: ERROR" ||
-		lines[maxGrepMatches-1] != fmt.Sprintf("matches.log:%d: ERROR", maxGrepMatches) ||
-		lines[maxGrepMatches] != fmt.Sprintf("... (stopped at %d matches)", maxGrepMatches) {
-		t.Errorf("match limit: got %d lines, ending in %q", len(lines), lines[len(lines)-1])
+}
+
+func TestExecutorGrepFixedStrings(t *testing.T) {
+	root := t.TempDir()
+	for path, content := range map[string]string{
+		"main.go":        "config.json\nconfigXjson\nfunc(\n[\n*\n\\\n(?i)config.json\nCONFIG.JSON\n",
+		"pkg/util.go":    "func(\n",
+		"pkg/util.txt":   "func(\n",
+		".git/hidden.go": "func(\n",
+		"pkg/binary.go":  "func(\x00binary\n",
+		"pkg/large.go":   strings.Repeat("func(\n", maxGrepFileSize/6+1),
+	} {
+		if err := WriteFile(root, path, content); err != nil {
+			t.Fatal(err)
+		}
 	}
+	e := &Executor{Root: root}
+	for _, tt := range []struct {
+		name string
+		args string
+		want string
+	}{
+		{"dot", `{"pattern":"config.json","path":"main.go","fixed_strings":true}`, "main.go:1: config.json\nmain.go:7: (?i)config.json"},
+		{"parenthesis", `{"pattern":"func(","path":"main.go","fixed_strings":true}`, "main.go:3: func("},
+		{"bracket", `{"pattern":"[","path":"main.go","fixed_strings":true}`, "main.go:4: ["},
+		{"asterisk", `{"pattern":"*","path":"main.go","fixed_strings":true}`, "main.go:5: *"},
+		{"backslash", `{"pattern":"\\","path":"main.go","fixed_strings":true}`, "main.go:6: \\"},
+		{"inline flags are literal", `{"pattern":"(?i)config.json","path":"main.go","fixed_strings":true}`, "main.go:7: (?i)config.json"},
+		{"ignore case", `{"pattern":"config.json","path":"main.go","fixed_strings":true,"ignore_case":true}`, "main.go:1: config.json\nmain.go:7: (?i)config.json\nmain.go:8: CONFIG.JSON"},
+		{"single file ignores include", `{"pattern":"func(","path":"main.go","include":"*.txt","fixed_strings":true}`, "main.go:3: func("},
+		{"recursive", `{"pattern":"func(","fixed_strings":true}`, "main.go:3: func(\npkg/util.go:1: func(\npkg/util.txt:1: func("},
+		{"recursive include", `{"pattern":"func(","include":"*.go","fixed_strings":true}`, "main.go:3: func(\npkg/util.go:1: func("},
+		{"relative include", `{"pattern":"func(","path":"pkg","include":"*.go","fixed_strings":true}`, "pkg/util.go:1: func("},
+		{"path include", `{"pattern":"func(","include":"pkg/*.go","fixed_strings":true}`, "pkg/util.go:1: func("},
+		{"no matches", `{"pattern":"missing(","fixed_strings":true}`, "no matches"},
+		{"include excludes matches", `{"pattern":"func(","include":"*.md","fixed_strings":true}`, "no matches"},
+		{"path confinement", `{"pattern":"func(","path":"..","fixed_strings":true}`, `error: path ".." is outside the working directory`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: tt.args}})
+			if got != tt.want {
+				t.Errorf("grep %s = %q, want %q", tt.args, got, tt.want)
+			}
+		})
+	}
+	for _, flag := range []string{"", `,"fixed_strings":false`, `,"fixed_strings":null`} {
+		for _, pattern := range []string{"config.json", "(?i)config.json", "func("} {
+			args := `{"pattern":` + fmt.Sprintf("%q", pattern) + `,"path":"main.go"` + flag + `}`
+			got := e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: args}})
+			want := "main.go:1: config.json\nmain.go:2: configXjson\nmain.go:7: (?i)config.json"
+			if pattern == "(?i)config.json" {
+				want += "\nmain.go:8: CONFIG.JSON"
+			}
+			if pattern == "func(" {
+				if !strings.HasPrefix(got, "error: bad regexp:") {
+					t.Errorf("grep %s = %q, want a bad regexp error", args, got)
+				}
+			} else if got != want {
+				t.Errorf("grep %s = %q, want %q", args, got, want)
+			}
+		}
+	}
+}
+
+func TestExecutorGrepFixedStringsValidation(t *testing.T) {
+	e := &Executor{Root: t.TempDir()}
+	for _, value := range []string{`"true"`, `"yes"`, `0`, `1`, `[]`, `{}`} {
+		args := `{"pattern":"func(","fixed_strings":` + value + `}`
+		want := "error: fixed_strings must be true or false, got " + value
+		if got := e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: args}}); got != want {
+			t.Errorf("grep %s = %q, want %q", args, got, want)
+		}
+	}
+}
+
+func TestGrepFixedStringsSpec(t *testing.T) {
+	for _, s := range Specs() {
+		if s.Function.Name != "grep" {
+			continue
+		}
+		props := s.Function.Parameters["properties"].(map[string]any)
+		prop, ok := props["fixed_strings"].(map[string]any)
+		if !ok || prop["type"] != "boolean" {
+			t.Fatalf("grep fixed_strings = %v, want a boolean property", props["fixed_strings"])
+		}
+		if desc, _ := prop["description"].(string); !strings.Contains(desc, "default false") {
+			t.Errorf("fixed_strings description = %q, want default false", desc)
+		}
+		if !strings.Contains(s.Function.Description, "fixed_strings") {
+			t.Errorf("grep description = %q, want fixed_strings guidance", s.Function.Description)
+		}
+		pattern := props["pattern"].(map[string]any)
+		if desc, _ := pattern["description"].(string); !strings.Contains(desc, "fixed_strings") {
+			t.Errorf("pattern description = %q, want fixed_strings guidance", desc)
+		}
+		for _, required := range s.Function.Parameters["required"].([]string) {
+			if required == "fixed_strings" {
+				t.Error("fixed_strings is required")
+			}
+		}
+		return
+	}
+	t.Fatal("no grep spec")
 }
 
 func TestBash(t *testing.T) {

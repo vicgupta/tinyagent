@@ -21,8 +21,12 @@ const (
 // matching files, using the same rules as ListFiles: a glob without "/"
 // matches base names, a glob with "/" matches paths relative to the searched
 // directory. When path is a single file, include is ignored. ignoreCase enables
-// case-insensitive matching of file contents only.
-func Grep(root, pattern, path, include string, ignoreCase bool) (string, error) {
+// case-insensitive matching of file contents only. fixedStrings treats pattern
+// as literal text instead of a Go regular expression.
+func Grep(root, pattern, path, include string, ignoreCase, fixedStrings bool) (string, error) {
+	if fixedStrings {
+		pattern = regexp.QuoteMeta(pattern)
+	}
 	if ignoreCase {
 		pattern = "(?i)" + pattern
 	}
