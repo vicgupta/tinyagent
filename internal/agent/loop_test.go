@@ -28,7 +28,7 @@ func (s *scripted) Query(_ context.Context, msgs []model.Message, _ []model.Tool
 	}
 	r := s.replies[0]
 	s.replies = s.replies[1:]
-	return r, model.Cost{USD: 0.01}, nil
+	return r, model.Cost{USD: 0.01, InputTokens: 100, OutputTokens: 20}, nil
 }
 
 func call(id, name, args string) model.ToolCall {
@@ -65,6 +65,9 @@ func TestRunSubmits(t *testing.T) {
 	second := m.seen[1]
 	if len(second) != 4 || second[3].Role != "tool" || second[3].ToolCallID != "1" || second[3].Content != "ok" {
 		t.Errorf("second query history = %+v", second)
+	}
+	if tr.InputTokens != 200 || tr.OutputTokens != 40 {
+		t.Errorf("tokens = %d in / %d out, want 200 / 40", tr.InputTokens, tr.OutputTokens)
 	}
 	if saves != 2 {
 		t.Errorf("saved %d times, want 2", saves)
