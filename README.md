@@ -171,6 +171,7 @@ When a run fails on a common setup problem, tinyagent prints a `hint:` line unde
 
 - `read_file` takes optional `offset` (1-based start line) and `limit` (max lines) to read part of a large file. A partial read ends with `[lines A-B of N]`; with neither set, it returns the whole file as before.
 - `edit_file` replaces exactly one occurrence of `old_str` and fails if it occurs zero or several times. Pass `replace_all: true` to replace every occurrence (for a rename); it still fails if there are none, and returns `ok (N replacements)`.
+- `grep` uses Go regular expressions by default. Set `fixed_strings: true` for literal text, e.g. `{"pattern":"func(","path":".","include":"*.go","fixed_strings":true}` finds literal `func(` in Go files without regex escaping.
 - `grep` accepts `ignore_case: true` for case-insensitive content searches, e.g. `{"pattern":"error","path":".","include":"*.log","ignore_case":true}` matches `error`, `Error`, and `ERROR` in `.log` files. The default is case-sensitive; inline regex flags such as `(?i)` still work. The `include` glob stays case-sensitive.
 - Each `bash` call runs in a new process; `cd` and exported variables don't carry over. On timeout the whole process group is killed (Unix). The model can pass an optional `timeout` (1 to 600 seconds) on a `bash` call to override `bash_timeout_seconds` for that command.
 - Path sandboxing is lexical: `..` and absolute paths outside `--cwd` are rejected, but a symlink inside the root that points outside it is followed. `bash` isn't sandboxed at all. Only run it on code you trust.
