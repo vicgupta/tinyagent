@@ -40,6 +40,19 @@ type AgentConfig struct {
 	// ContextWindow, in tokens, overrides the built-in context window table.
 	// 0 uses the table.
 	ContextWindow int `yaml:"context_window"`
+
+	MCPServers []MCPServer `yaml:"mcp_servers,omitempty"`
+}
+
+// MCPServer grants access to selected tools from one local stdio server.
+type MCPServer struct {
+	Alias               string   `yaml:"alias"`
+	Command             string   `yaml:"command"`
+	Args                []string `yaml:"args,omitempty"`
+	Tools               []string `yaml:"tools"`
+	Env                 []string `yaml:"env,omitempty"`
+	DiscoveryTimeoutSec int      `yaml:"discovery_timeout_seconds"`
+	CallTimeoutSec      int      `yaml:"call_timeout_seconds"`
 }
 
 func Default() AgentConfig {

@@ -34,7 +34,9 @@ type Executor struct {
 	ProcessBufferBytes int
 	// Stream receives bash output as it is produced when a call sets
 	// stream: true. nil discards it (the result is unchanged either way).
-	Stream io.Writer
+	Stream        io.Writer
+	ExternalSpecs []model.ToolSpec
+	ExternalCall  func(context.Context, string, string) (string, bool)
 
 	procs registry
 }
@@ -133,11 +135,31 @@ func spec(name, desc string, p props, required ...string) model.ToolSpec {
 // Run executes one tool call and returns text for the model. Tool failures are
 // reported as text so the model can recover; Run never returns an error.
 func (e *Executor) Run(ctx context.Context, call model.ToolCall) string {
+	// External tools are never dispatched in read-only mode: the check in
+	// run() below then rejects them with the read-only error, matching
+	// Catalog(), which also excludes them there.
+	if !e.ReadOnly && e.ExternalCall != nil {
+		if out, ok := e.ExternalCall(ctx, call.Function.Name, call.Function.Arguments); ok {
+			return truncate(out, e.MaxOutputChars)
+		}
+	}
 	out, err := e.run(ctx, call.Function.Name, call.Function.Arguments)
 	if err != nil {
 		out = "error: " + err.Error()
 	}
 	return truncate(out, e.MaxOutputChars)
+}
+
+// Catalog returns the fixed built-in and explicitly configured external tools.
+// In read-only mode it returns only the read-only built-ins: external MCP
+// tools must never be offered (or dispatched, see Run) when only
+// read_file, list_files, and grep are available.
+func (e *Executor) Catalog() []model.ToolSpec {
+	if e.ReadOnly {
+		return Specs(true)
+	}
+	out := Specs()
+	return append(out, e.ExternalSpecs...)
 }
 
 func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {

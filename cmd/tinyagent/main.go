@@ -17,6 +17,7 @@ import (
 
 	"github.com/vicgupta/tinyagent/internal/agent"
 	"github.com/vicgupta/tinyagent/internal/config"
+	"github.com/vicgupta/tinyagent/internal/mcptools"
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
@@ -151,6 +152,19 @@ func run() int {
 	if cfg.ReadOnly {
 		fmt.Fprintln(os.Stderr, "read-only mode: only read_file, list_files, and grep are available")
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	started := time.Now()
+	if cfg.WallTimeSec > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(cfg.WallTimeSec)*time.Second)
+		defer cancel()
+	}
+	mcpRegistry, err := mcptools.Start(ctx, root, cfg.MCPServers, os.Stderr)
+	if err != nil {
+		return fail(err)
+	}
+	defer mcpRegistry.Close()
 
 	var onText func(string)
 	if !o.noStream {
@@ -164,9 +178,6 @@ func run() int {
 	}
 	warnUnpriced(os.Stderr, o.modelName, cfg.CostLimit)
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-
 	a := &agent.Agent{
 		Model:     m,
 		ModelName: o.modelName,
@@ -177,6 +188,8 @@ func run() int {
 			MaxOutputChars: cfg.MaxOutputChars,
 			MaxProcesses:   cfg.MaxBackgroundProcesses,
 			Stream:         os.Stdout,
+			ExternalSpecs:  mcpRegistry.Specs,
+			ExternalCall:   mcpRegistry.Call,
 		},
 		Config:       cfg,
 		Out:          os.Stdout,
@@ -195,6 +208,17 @@ func run() int {
 		}
 	}
 
+	if cfg.WallTimeSec > 0 {
+		remaining := time.Duration(cfg.WallTimeSec)*time.Second - time.Since(started)
+		if remaining <= 0 {
+			return fail(errors.New("wall-clock time limit expired during MCP discovery"))
+		}
+		cfg.WallTimeSec = int(remaining / time.Second)
+		if cfg.WallTimeSec == 0 {
+			cfg.WallTimeSec = 1
+		}
+		a.Config.WallTimeSec = cfg.WallTimeSec
+	}
 	start := time.Now()
 	t := a.Run(ctx, task)
 	reportSummary(os.Stderr, o.modelName, t, time.Since(start))
@@ -232,6 +256,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	cfg, err := config.Load(config.Find(o.configPath))
 	if err != nil {
 		return fail(err)
+	}
+	if len(cfg.MCPServers) > 0 || src.MCPEnabled || len(src.ExternalTools) > 0 {
+		return fail(errors.New("resume: MCP-enabled runs cannot be resumed, and MCP configuration cannot be added to a built-in checkpoint; start a fresh task"))
 	}
 	applyFlagOverrides(fs, &cfg, o.stepLimit, o.costLimit, o.timeLimit)
 	if flagWasSet(fs, "read-only") && o.readOnly != src.ReadOnly {

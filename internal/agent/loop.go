@@ -3,6 +3,8 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -108,22 +110,25 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 	} else {
 		system := a.systemPrompt()
 		t = &trajectory.Trajectory{
-			Task:          task,
-			ReadOnly:      a.Tools.ReadOnly,
-			Model:         a.ModelName,
-			SchemaVersion: trajectory.SchemaVersion,
-			Root:          a.Tools.Root,
-			SystemPrompt:  system,
-			SkipAgentsMD:  a.SkipAgentsMD,
-			Tools:         toolNames(tools.Specs(a.Tools.ReadOnly)),
-			ToolSignature: ToolSignature(a.Tools.ReadOnly),
+			Task:                  task,
+			ReadOnly:              a.Tools.ReadOnly,
+			Model:                 a.ModelName,
+			SchemaVersion:         trajectory.SchemaVersion,
+			Root:                  a.Tools.Root,
+			SystemPrompt:          system,
+			SkipAgentsMD:          a.SkipAgentsMD,
+			Tools:                 toolNames(a.Tools.Catalog()),
+			ToolSignature:         ToolSignature(a.Tools.ReadOnly),
+			MCPEnabled:            len(a.Tools.ExternalSpecs) > 0,
+			ExternalTools:         externalToolNames(a.Tools.ExternalSpecs),
+			ExternalToolSignature: externalToolSignature(a.Tools.ExternalSpecs),
 			Messages: []model.Message{
 				{Role: "system", Content: system},
 				{Role: "user", Content: task},
 			},
 		}
 	}
-	specs := tools.Specs(a.Tools.ReadOnly)
+	specs := a.Tools.Catalog()
 	v := newView(t.Messages)
 
 	for {
@@ -190,6 +195,19 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			return a.saveFailed(t, err)
 		}
 	}
+}
+
+func externalToolNames(specs []model.ToolSpec) []string {
+	names := make([]string, len(specs))
+	for i, s := range specs {
+		names[i] = s.Function.Name
+	}
+	return names
+}
+
+func externalToolSignature(specs []model.ToolSpec) string {
+	data, _ := json.Marshal(specs)
+	return fmt.Sprintf("mcp-tools-v1:%x", sha256.Sum256(data))
 }
 
 // compactFailed ends the run after a failed compaction: as the context's
