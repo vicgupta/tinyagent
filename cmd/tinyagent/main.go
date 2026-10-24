@@ -25,57 +25,75 @@ import (
 // version is set at build time with -ldflags "-X main.version=v1.2.3".
 var version string
 
-// flagOutput receives usage and flag parse errors; tests replace it.
-var flagOutput io.Writer = os.Stderr
+// flagOutput receives flag parse errors and the usage shown with them;
+// helpOutput receives --help. Tests replace both.
+var (
+	flagOutput io.Writer = os.Stderr
+	helpOutput io.Writer = os.Stdout
+)
+
+// options holds the parsed command line.
+type options struct {
+	task, modelName, configPath, cwd, output string
+	stepLimit, timeLimit                     int
+	costLimit                                float64
+	verbose, noStream, noAgentsMD            bool
+	showHelp, showVersion, doUpdate          bool
+}
+
+// newFlagSet defines the command-line flags, storing their values in o. Each
+// long name also works with a single dash (-task), as with any Go flag.
+func newFlagSet(o *options) *flag.FlagSet {
+	fs := flag.NewFlagSet("tinyagent", flag.ContinueOnError)
+	fs.SetOutput(flagOutput)
+	fs.Usage = func() { printUsage(fs.Output(), fs) }
+	fs.BoolVar(&o.showHelp, "help", false, "show this help and exit")
+	fs.BoolVar(&o.showHelp, "h", false, "shorthand for --help")
+	fs.StringVar(&o.task, "task", "", `task/prompt (required); "-" reads it from stdin`)
+	fs.StringVar(&o.task, "t", "", "shorthand for --task")
+	fs.StringVar(&o.modelName, "model", defaultModel(), "provider/model")
+	fs.StringVar(&o.modelName, "m", defaultModel(), "shorthand for --model")
+	fs.StringVar(&o.configPath, "config", "", "YAML config (default: built-in)")
+	fs.StringVar(&o.configPath, "c", "", "shorthand for --config")
+	fs.StringVar(&o.cwd, "cwd", ".", "working directory")
+	fs.IntVar(&o.stepLimit, "step-limit", 0, "max model calls, 0 = unlimited")
+	fs.Float64Var(&o.costLimit, "cost-limit", 0, "max USD, 0 = unlimited")
+	fs.IntVar(&o.timeLimit, "time-limit", 0, "max wall-clock seconds, 0 = unlimited")
+	fs.StringVar(&o.output, "output", "", "write trajectory JSON")
+	fs.StringVar(&o.output, "o", "", "shorthand for --output")
+	fs.BoolVar(&o.verbose, "verbose", false, "print tool outputs")
+	fs.BoolVar(&o.verbose, "v", false, "shorthand for --verbose")
+	fs.BoolVar(&o.noStream, "no-stream", false, "wait for full responses instead of streaming")
+	fs.BoolVar(&o.noAgentsMD, "no-agents-md", false, "don't add <cwd>/AGENTS.md to the system prompt")
+	fs.BoolVar(&o.showVersion, "version", false, "print the version and exit")
+	fs.BoolVar(&o.showVersion, "V", false, "shorthand for --version")
+	fs.BoolVar(&o.doUpdate, "update", false, "update to the latest release and exit")
+	return fs
+}
 
 func main() {
 	os.Exit(run())
 }
 
 func run() int {
-	var (
-		task, modelName, configPath, cwd, output string
-		stepLimit, timeLimit                     int
-		costLimit                                float64
-		verbose, noStream, showVersion, doUpdate bool
-		noAgentsMD                               bool
-	)
-	fs := flag.NewFlagSet("tinyagent", flag.ContinueOnError)
-	fs.SetOutput(flagOutput)
-	fs.Usage = func() { printUsage(fs) }
-	fs.StringVar(&task, "task", "", `task/prompt (required); "-" reads it from stdin`)
-	fs.StringVar(&task, "t", "", "shorthand for --task")
-	fs.StringVar(&modelName, "model", defaultModel(), "provider/model")
-	fs.StringVar(&modelName, "m", defaultModel(), "shorthand for --model")
-	fs.StringVar(&configPath, "config", "", "YAML config (default: built-in)")
-	fs.StringVar(&configPath, "c", "", "shorthand for --config")
-	fs.StringVar(&cwd, "cwd", ".", "working directory")
-	fs.IntVar(&stepLimit, "step-limit", 0, "max model calls, 0 = unlimited")
-	fs.Float64Var(&costLimit, "cost-limit", 0, "max USD, 0 = unlimited")
-	fs.IntVar(&timeLimit, "time-limit", 0, "max wall-clock seconds, 0 = unlimited")
-	fs.StringVar(&output, "output", "", "write trajectory JSON")
-	fs.StringVar(&output, "o", "", "shorthand for --output")
-	fs.BoolVar(&verbose, "verbose", false, "print tool outputs")
-	fs.BoolVar(&verbose, "v", false, "shorthand for --verbose")
-	fs.BoolVar(&noStream, "no-stream", false, "wait for full responses instead of streaming")
-	fs.BoolVar(&noAgentsMD, "no-agents-md", false, "don't add <cwd>/AGENTS.md to the system prompt")
-	fs.BoolVar(&showVersion, "version", false, "print the version and exit")
-	fs.BoolVar(&doUpdate, "update", false, "update to the latest release and exit")
+	var o options
+	fs := newFlagSet(&o)
 	if err := fs.Parse(os.Args[1:]); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
 		return 2
 	}
-	if timeLimit < 0 {
+	if o.showHelp {
+		printUsage(helpOutput, fs)
+		return 0
+	}
+	if o.timeLimit < 0 {
 		fmt.Fprintln(os.Stderr, "error: --time-limit must be >= 0")
 		return 2
 	}
-	if showVersion {
+	if o.showVersion {
 		fmt.Println("tinyagent", currentVersion())
 		return 0
 	}
-	if doUpdate {
+	if o.doUpdate {
 		u, err := update.New(currentVersion())
 		if err != nil {
 			return fail(err)
@@ -87,39 +105,39 @@ func run() int {
 		fmt.Println(msg)
 		return 0
 	}
-	if task == "" {
+	if o.task == "" {
 		fmt.Fprintln(os.Stderr, "error: --task is required")
 		fs.Usage()
 		return 2
 	}
-	task, err := readTask(task, os.Stdin)
+	task, err := readTask(o.task, os.Stdin)
 	if err != nil {
 		return fail(err)
 	}
 
-	cfg, err := config.Load(configPath)
+	cfg, err := config.Load(o.configPath)
 	if err != nil {
 		return fail(err)
 	}
-	applyFlagOverrides(fs, &cfg, stepLimit, costLimit, timeLimit)
+	applyFlagOverrides(fs, &cfg, o.stepLimit, o.costLimit, o.timeLimit)
 	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 
-	root, err := filepath.Abs(cwd)
+	root, err := filepath.Abs(o.cwd)
 	if err != nil {
 		return fail(err)
 	}
 	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
-		return fail(fmt.Errorf("--cwd %s is not a directory", cwd))
+		return fail(fmt.Errorf("--cwd %s is not a directory", o.cwd))
 	}
 
 	var onText func(string)
-	if !noStream {
+	if !o.noStream {
 		onText = func(s string) { os.Stdout.WriteString(s) }
 	}
-	m, err := model.New(modelName, onText)
+	m, err := model.New(o.modelName, onText)
 	if err != nil {
 		code := fail(err)
-		printHint(os.Stderr, modelName, err.Error())
+		printHint(os.Stderr, o.modelName, err.Error())
 		return code
 	}
 
@@ -128,7 +146,7 @@ func run() int {
 
 	a := &agent.Agent{
 		Model:     m,
-		ModelName: modelName,
+		ModelName: o.modelName,
 		Tools: &tools.Executor{
 			Root:           root,
 			BashTimeout:    time.Duration(cfg.BashTimeoutSec) * time.Second,
@@ -137,13 +155,13 @@ func run() int {
 		Config:       cfg,
 		Out:          os.Stdout,
 		Err:          os.Stderr,
-		Verbose:      verbose,
-		Streamed:     !noStream,
-		SkipAgentsMD: noAgentsMD,
+		Verbose:      o.verbose,
+		Streamed:     !o.noStream,
+		SkipAgentsMD: o.noAgentsMD,
 	}
-	if output != "" {
+	if o.output != "" {
 		a.OnStep = func(t *trajectory.Trajectory) {
-			if err := t.Save(output); err != nil {
+			if err := t.Save(o.output); err != nil {
 				fmt.Fprintln(os.Stderr, "warning: saving trajectory:", err)
 			}
 		}
@@ -153,7 +171,7 @@ func run() int {
 	if t.ExitStatus == agent.StatusSubmitted || t.ExitStatus == agent.StatusCompleted {
 		return 0
 	}
-	reportFailure(os.Stderr, modelName, t)
+	reportFailure(os.Stderr, o.modelName, t)
 	return 1
 }
 
@@ -163,13 +181,14 @@ var usageGroups = []struct {
 	name  string
 	flags [][3]string
 }{
+	{"", [][3]string{{"h", "help", ""}}},
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"c", "config", "path"}, {"", "cwd", "dir"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "no-agents-md", ""}}},
-	{"Other", [][3]string{{"", "version", ""}, {"", "update", ""}}},
+	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}}},
 }
 
-func printUsage(fs *flag.FlagSet) {
+func printUsage(w io.Writer, fs *flag.FlagSet) {
 	left := func(f [3]string) string {
 		s := "      --" + f[1]
 		if f[0] != "" {
@@ -186,10 +205,11 @@ func printUsage(fs *flag.FlagSet) {
 			width = max(width, len(left(f)))
 		}
 	}
-	w := fs.Output()
-	fmt.Fprint(w, "Usage: tinyagent --task \"<prompt>\" [flags]\n       echo \"<prompt>\" | tinyagent -t -\n\n")
+	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n\n")
 	for _, g := range usageGroups {
-		fmt.Fprintf(w, "%s:\n", g.name)
+		if g.name != "" {
+			fmt.Fprintf(w, "%s:\n", g.name)
+		}
 		for _, f := range g.flags {
 			fl := fs.Lookup(f[1])
 			help := fl.Usage
