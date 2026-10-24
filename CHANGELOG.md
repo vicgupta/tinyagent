@@ -1,0 +1,28 @@
+# Changelog
+
+## v0.4.0 - 2026-10-24
+
+This release adds controls and integrations for longer, more scriptable agent runs, along with stronger file and tool handling.
+
+### Breaking Changes
+
+- None.
+
+### Features
+
+- Resume validated unfinished runs from saved trajectory checkpoints.
+- Compact long conversations automatically as they approach the model context limit.
+- Add background process tools and optional live output streaming for long-running commands.
+- Allow explicitly selected tools from configured local MCP servers.
+- Add read-only mode and configurable default models.
+- Emit opt-in JSONL run events for scripting and CI integrations.
+- Add per-call bash timeouts and optional surrounding lines, literal matching, and case-insensitive search to `grep`.
+
+### Fixes
+
+- Reject binary files in `read_file` with a clear error.
+- Reject invalid step and cost limits, and warn when a cost limit cannot be enforced for an unpriced model.
+
+### Other
+
+- Enforce Go formatting in CI and run tests without using the test cache.
