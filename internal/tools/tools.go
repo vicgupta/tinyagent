@@ -2,6 +2,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,10 @@ import (
 
 	"github.com/vicgupta/tinyagent/internal/model"
 )
+
+func isBinary(data []byte) bool {
+	return bytes.IndexByte(data[:min(len(data), 8000)], 0) >= 0
+}
 
 // Executor runs tool calls against files under Root.
 type Executor struct {
