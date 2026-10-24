@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vicgupta/tinyagent/internal/agent"
 	"github.com/vicgupta/tinyagent/internal/config"
@@ -78,25 +79,46 @@ func TestApplyFlagOverridesTimeLimit(t *testing.T) {
 	}
 }
 
-func TestReportFailure(t *testing.T) {
+func TestReportSummary(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	var b strings.Builder
-	reportFailure(&b, "openai/gpt-4o", &trajectory.Trajectory{ExitStatus: agent.StatusError, Submission: "HTTP 401: Incorrect API key"})
+	reportSummary(&b, "openai/gpt-4o", &trajectory.Trajectory{ExitStatus: agent.StatusError, Submission: "HTTP 401: Incorrect API key"}, 0)
 	lines := strings.Split(strings.TrimSpace(b.String()), "\n")
-	if len(lines) != 2 || lines[0] != "Error after 0 steps: HTTP 401: Incorrect API key" || !strings.HasPrefix(lines[1], "hint: OPENAI_API_KEY isn't set") {
-		t.Errorf("got %q, want the error line then a hint", b.String())
+	if len(lines) != 2 || lines[0] != "Error after 0 steps in 0s: HTTP 401: Incorrect API key" || !strings.HasPrefix(lines[1], "hint: OPENAI_API_KEY isn't set") {
+		t.Errorf("got %q, want the summary line then a hint", b.String())
 	}
 
 	b.Reset()
-	reportFailure(&b, "openai/gpt-4o", &trajectory.Trajectory{ExitStatus: agent.StatusError, Steps: 2, Submission: "HTTP 400: bad tool schema"})
-	if got := b.String(); got != "Error after 2 steps: HTTP 400: bad tool schema\n" {
-		t.Errorf("non-setup error: got %q", got)
+	reportSummary(&b, "openai/gpt-4o", &trajectory.Trajectory{ExitStatus: agent.StatusSubmitted, Steps: 2, InputTokens: 10, OutputTokens: 5, Cost: 0.5}, 3*time.Second)
+	if got := b.String(); got != "Submitted after 2 steps in 3s (10 input / 5 output tokens, $0.50)\n" {
+		t.Errorf("success: got %q", got)
 	}
+}
 
-	b.Reset()
-	reportFailure(&b, "openai/gpt-4o", &trajectory.Trajectory{ExitStatus: agent.StatusStepLimit, Steps: 5})
-	if got := b.String(); got != "StepLimitExceeded after 5 steps\n" {
-		t.Errorf("limit exit: got %q", got)
+func TestSummaryLine(t *testing.T) {
+	tests := []struct {
+		name    string
+		tr      trajectory.Trajectory
+		elapsed time.Duration
+		want    string
+	}{
+		{"submitted", trajectory.Trajectory{ExitStatus: agent.StatusSubmitted, Steps: 12, InputTokens: 48213, OutputTokens: 3104, Cost: 0.2299},
+			102 * time.Second, "Submitted after 12 steps in 1m42s (48,213 input / 3,104 output tokens, $0.23)"},
+		{"limit", trajectory.Trajectory{ExitStatus: agent.StatusStepLimit, Steps: 50, InputTokens: 120441, OutputTokens: 11209, Cost: 1.87},
+			363 * time.Second, "StepLimitExceeded after 50 steps in 6m03s (120,441 input / 11,209 output tokens, $1.87)"},
+		{"error", trajectory.Trajectory{ExitStatus: agent.StatusError, Steps: 3, InputTokens: 4120, OutputTokens: 280, Cost: 0.0043, Submission: "HTTP 401: Incorrect API key"},
+			12 * time.Second, "Error after 3 steps in 12s (4,120 input / 280 output tokens, $0.0043): HTTP 401: Incorrect API key"},
+		{"zero cost", trajectory.Trajectory{ExitStatus: agent.StatusCompleted, Steps: 4, InputTokens: 1000, OutputTokens: 200},
+			3725 * time.Second, "Completed after 4 steps in 1h02m (1,000 input / 200 output tokens)"},
+		{"zero steps", trajectory.Trajectory{ExitStatus: agent.StatusInterrupted},
+			2 * time.Second, "Interrupted after 0 steps in 2s"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := summaryLine(&tt.tr, tt.elapsed); got != tt.want {
+				t.Errorf("got  %q\nwant %q", got, tt.want)
+			}
+		})
 	}
 }
 

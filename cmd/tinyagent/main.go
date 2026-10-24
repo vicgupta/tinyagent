@@ -167,11 +167,12 @@ func run() int {
 		}
 	}
 
+	start := time.Now()
 	t := a.Run(ctx, task)
+	reportSummary(os.Stderr, o.modelName, t, time.Since(start))
 	if t.ExitStatus == agent.StatusSubmitted || t.ExitStatus == agent.StatusCompleted {
 		return 0
 	}
-	reportFailure(os.Stderr, o.modelName, t)
 	return 1
 }
 
@@ -224,16 +225,61 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 		"  cat task.md | tinyagent -t - --step-limit 30 -o run.json\n")
 }
 
-// reportFailure prints how an unsuccessful run ended and, for an error that
-// looks like a setup problem, a hint on fixing it.
-func reportFailure(w io.Writer, modelName string, t *trajectory.Trajectory) {
-	fmt.Fprintf(w, "%s after %d steps", t.ExitStatus, t.Steps)
-	if t.ExitStatus != agent.StatusError {
-		fmt.Fprintln(w)
-		return
+// reportSummary prints one line on how the run ended: status, steps, elapsed
+// time, and token and cost totals when known. For an error that looks like a
+// setup problem, a hint line follows.
+func reportSummary(w io.Writer, modelName string, t *trajectory.Trajectory, elapsed time.Duration) {
+	fmt.Fprintln(w, summaryLine(t, elapsed))
+	if t.ExitStatus == agent.StatusError {
+		printHint(w, modelName, t.Submission)
 	}
-	fmt.Fprintf(w, ": %s\n", t.Submission)
-	printHint(w, modelName, t.Submission)
+}
+
+func summaryLine(t *trajectory.Trajectory, elapsed time.Duration) string {
+	s := fmt.Sprintf("%s after %d steps in %s", t.ExitStatus, t.Steps, formatDuration(elapsed))
+	if t.InputTokens > 0 || t.OutputTokens > 0 || t.Cost > 0 {
+		s += fmt.Sprintf(" (%s input / %s output tokens", formatInt(t.InputTokens), formatInt(t.OutputTokens))
+		if t.Cost > 0 {
+			s += ", " + formatCost(t.Cost)
+		}
+		s += ")"
+	}
+	if t.ExitStatus == agent.StatusError {
+		s += ": " + t.Submission
+	}
+	return s
+}
+
+// formatDuration renders d as 12s, 1m42s or 1h02m.
+func formatDuration(d time.Duration) string {
+	sec := int(d.Round(time.Second) / time.Second)
+	switch {
+	case sec < 60:
+		return fmt.Sprintf("%ds", sec)
+	case sec < 3600:
+		return fmt.Sprintf("%dm%02ds", sec/60, sec%60)
+	}
+	return fmt.Sprintf("%dh%02dm", sec/3600, sec%3600/60)
+}
+
+// formatCost uses 2 decimals from one cent up and 4 below it.
+func formatCost(usd float64) string {
+	if usd >= 0.01 {
+		return fmt.Sprintf("$%.2f", usd)
+	}
+	return fmt.Sprintf("$%.4f", usd)
+}
+
+// formatInt adds thousands separators: 48213 -> 48,213.
+func formatInt(n int) string {
+	s := fmt.Sprint(n)
+	if n < 0 {
+		return "-" + formatInt(-n)
+	}
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return s
 }
 
 func printHint(w io.Writer, modelName, errMsg string) {

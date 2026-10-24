@@ -112,6 +112,14 @@ output_price_per_mtok: 15
 
 The run ends when the model writes `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` (`Submitted`), stops calling tools (`Completed`), or hits a limit (`StepLimitExceeded`, `CostLimitExceeded`, `TimeLimitExceeded`), Ctrl-C (`Interrupted`), or a non-retryable API error (`Error`). The process exits 0 only for `Submitted` and `Completed`.
 
+Every run ends with one summary line on stderr, so stdout keeps only the model's text:
+
+```text
+Submitted after 12 steps in 1m42s (48,213 input / 3,104 output tokens, $0.23)
+```
+
+Cost is shown only when it's above zero, and the token/cost part is left out if the run ended before any model response. With `-o`, the trajectory JSON also records `input_tokens` and `output_tokens` totals.
+
 ## Troubleshooting
 
 When a run fails on a common setup problem, tinyagent prints a `hint:` line under the error. The error itself is kept, and hints name environment variables without printing their values.
