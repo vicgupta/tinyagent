@@ -6,30 +6,31 @@ import (
 	"strings"
 )
 
-// EditFile replaces the single occurrence of oldStr with newStr.
-func EditFile(root, path, oldStr, newStr string) error {
+// EditFile replaces the single occurrence of oldStr with newStr, or every
+// occurrence if replaceAll is set, and returns the number of replacements.
+func EditFile(root, path, oldStr, newStr string, replaceAll bool) (int, error) {
 	if oldStr == "" {
-		return fmt.Errorf("old_str must not be empty")
+		return 0, fmt.Errorf("old_str must not be empty")
 	}
 	full, err := Resolve(root, path)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	b, err := os.ReadFile(full)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	content := string(b)
-	switch n := strings.Count(content, oldStr); n {
-	case 1:
-	case 0:
-		return fmt.Errorf("old_str not found in %s", path)
-	default:
-		return fmt.Errorf("old_str occurs %d times in %s; add surrounding context to make it unique", n, path)
+	n := strings.Count(content, oldStr)
+	switch {
+	case n == 0:
+		return 0, fmt.Errorf("old_str not found in %s", path)
+	case n > 1 && !replaceAll:
+		return 0, fmt.Errorf("old_str occurs %d times in %s; add surrounding context to make it unique", n, path)
 	}
 	fi, err := os.Stat(full)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return os.WriteFile(full, []byte(strings.Replace(content, oldStr, newStr, 1)), fi.Mode().Perm())
+	return n, os.WriteFile(full, []byte(strings.ReplaceAll(content, oldStr, newStr)), fi.Mode().Perm())
 }

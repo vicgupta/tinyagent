@@ -22,14 +22,15 @@ type Executor struct {
 }
 
 type args struct {
-	Path    string      `json:"path"`
-	Content string      `json:"content"`
-	OldStr  string      `json:"old_str"`
-	NewStr  string      `json:"new_str"`
-	Pattern string      `json:"pattern"`
-	Command string      `json:"command"`
-	Offset  json.Number `json:"offset"`
-	Limit   json.Number `json:"limit"`
+	Path       string          `json:"path"`
+	Content    string          `json:"content"`
+	OldStr     string          `json:"old_str"`
+	NewStr     string          `json:"new_str"`
+	Pattern    string          `json:"pattern"`
+	Command    string          `json:"command"`
+	Offset     json.Number     `json:"offset"`
+	Limit      json.Number     `json:"limit"`
+	ReplaceAll json.RawMessage `json:"replace_all"`
 }
 
 // Specs returns the OpenAI tool definitions for all tools.
@@ -39,8 +40,8 @@ func Specs() []model.ToolSpec {
 			props{"path": "File path relative to the working directory", "offset": "Optional 1-based line to start at", "limit": "Optional maximum number of lines to return"}, "path"),
 		spec("write_file", "Write content to a file, creating parent directories. Overwrites existing files.",
 			props{"path": "File path", "content": "Full file content"}, "path", "content"),
-		spec("edit_file", "Replace exactly one occurrence of old_str with new_str in a file. Fails if old_str occurs zero or multiple times; include more context to make it unique.",
-			props{"path": "File path", "old_str": "Exact text to replace", "new_str": "Replacement text"}, "path", "old_str", "new_str"),
+		spec("edit_file", "Replace exactly one occurrence of old_str with new_str in a file. Fails if old_str occurs zero or multiple times; include more context to make it unique, or set replace_all to replace every occurrence.",
+			props{"path": "File path", "old_str": "Exact text to replace", "new_str": "Replacement text", "replace_all": "Optional: replace every occurrence instead of exactly one"}, "path", "old_str", "new_str"),
 		spec("list_files", "List directory entries. With a glob pattern (e.g. *.go, or a pattern containing /), search recursively and return matching file paths.",
 			props{"path": "Directory (default .)", "pattern": "Optional glob pattern"}),
 		spec("grep", "Search files recursively for a regular expression. Returns file:line: content.",
@@ -52,8 +53,12 @@ func Specs() []model.ToolSpec {
 
 type props map[string]string
 
-// intProps are the parameters that take integers; the rest take strings.
-var intProps = map[string]bool{"offset": true, "limit": true}
+// intProps and boolProps are the parameters that take integers and booleans;
+// the rest take strings.
+var (
+	intProps  = map[string]bool{"offset": true, "limit": true}
+	boolProps = map[string]bool{"replace_all": true}
+)
 
 func spec(name, desc string, p props, required ...string) model.ToolSpec {
 	properties := map[string]any{}
@@ -61,6 +66,8 @@ func spec(name, desc string, p props, required ...string) model.ToolSpec {
 		typ := "string"
 		if intProps[k] {
 			typ = "integer"
+		} else if boolProps[k] {
+			typ = "boolean"
 		}
 		properties[k] = map[string]any{"type": typ, "description": d}
 	}
@@ -108,7 +115,15 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 	case "write_file":
 		return "ok", WriteFile(e.Root, a.Path, a.Content)
 	case "edit_file":
-		return "ok", EditFile(e.Root, a.Path, a.OldStr, a.NewStr)
+		replaceAll, err := boolArg("replace_all", a.ReplaceAll)
+		if err != nil {
+			return "", err
+		}
+		n, err := EditFile(e.Root, a.Path, a.OldStr, a.NewStr, replaceAll)
+		if err != nil || !replaceAll {
+			return "ok", err
+		}
+		return fmt.Sprintf("ok (%d replacements)", n), nil
 	case "list_files":
 		return ListFiles(e.Root, a.Path, a.Pattern)
 	case "grep":
@@ -131,6 +146,18 @@ func intArg(name string, n json.Number) (int, error) {
 		return 0, fmt.Errorf("%s must be a whole number, got %s", name, n)
 	}
 	return v, nil
+}
+
+// boolArg converts an optional boolean argument to a bool; omitted or null
+// means false.
+func boolArg(name string, raw json.RawMessage) (bool, error) {
+	switch strings.TrimSpace(string(raw)) {
+	case "", "null", "false":
+		return false, nil
+	case "true":
+		return true, nil
+	}
+	return false, fmt.Errorf("%s must be true or false, got %s", name, raw)
 }
 
 // Resolve maps a path relative to root (or absolute inside root) to an
