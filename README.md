@@ -75,6 +75,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 
 | Flag | Default | |
 |---|---|---|
+| `-h, --help` | | Print usage to stdout and exit |
 | `-t, --task` | — | Task prompt (required); `-` reads it from stdin |
 | `-m, --model` | `$AGENT_MODEL` or `openai/gpt-4o` | `<provider>/<model>`; no `/` means openai. Providers: openai, openrouter, anthropic, ollama, codex |
 | `-c, --config` | embedded defaults | YAML config file |
@@ -86,7 +87,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `-v, --verbose` | off | Print tool calls and their outputs |
 | `--no-stream` | off | Wait for each full response instead of streaming it |
 | `--no-agents-md` | off | Don't append `<cwd>/AGENTS.md` (project instructions, capped at 32KB) to the system prompt |
-| `--version` | | Print the version and exit |
+| `-V, --version` | | Print the version and exit |
 | `--update` | | Replace this binary with the latest GitHub release (checksum-verified) and exit |
 
 Environment: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (any OpenAI-compatible endpoint), `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENROUTER_API_KEY`, `OLLAMA_HOST`, `CODEX_HOME`.
