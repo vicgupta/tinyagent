@@ -36,7 +36,9 @@ type Executor struct {
 	// stream: true. nil discards it (the result is unchanged either way).
 	Stream        io.Writer
 	ExternalSpecs []model.ToolSpec
-	ExternalCall  func(context.Context, string, string) (string, bool)
+	// ExternalCall runs a tool from ExternalSpecs. ok is false when name is
+	// not an external tool; isErr marks a failed call.
+	ExternalCall func(ctx context.Context, name, args string) (out string, isErr, ok bool)
 
 	procs registry
 }
@@ -146,8 +148,8 @@ func (e *Executor) RunWithError(ctx context.Context, call model.ToolCall) (strin
 	// run() below then rejects them with the read-only error, matching
 	// Catalog(), which also excludes them there.
 	if !e.ReadOnly && e.ExternalCall != nil {
-		if out, ok := e.ExternalCall(ctx, call.Function.Name, call.Function.Arguments); ok {
-			return truncate(out, e.MaxOutputChars), externalError(out)
+		if out, isErr, ok := e.ExternalCall(ctx, call.Function.Name, call.Function.Arguments); ok {
+			return truncate(out, e.MaxOutputChars), isErr
 		}
 	}
 	out, err := e.run(ctx, call.Function.Name, call.Function.Arguments)
@@ -167,13 +169,6 @@ func (e *Executor) Catalog() []model.ToolSpec {
 	}
 	out := Specs()
 	return append(out, e.ExternalSpecs...)
-}
-
-// externalError reports whether an external tool's output is a failure. The
-// MCP client returns failures as text prefixed "error: " (call or protocol
-// failures) or "tool error: " (results the server flagged with isError).
-func externalError(out string) bool {
-	return strings.HasPrefix(out, "error: ") || strings.HasPrefix(out, "tool error: ")
 }
 
 func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -17,6 +18,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/agent"
 	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/model"
+	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
 )
 
@@ -159,6 +161,91 @@ func TestJSONEventsWriteOneJSONLine(t *testing.T) {
 	}
 	if result["type"] != "result" || result["status"] != agent.StatusSubmitted || result["submission"] != "done" {
 		t.Errorf("final event = %#v", result)
+	}
+}
+
+// replies is a model that returns its messages in order.
+type replies []model.Message
+
+func (r *replies) Query(context.Context, []model.Message, []model.ToolSpec) (model.Message, model.Cost, error) {
+	if len(*r) == 0 {
+		return model.Message{}, model.Cost{}, errors.New("out of replies")
+	}
+	msg := (*r)[0]
+	*r = (*r)[1:]
+	return msg, model.Cost{InputTokens: 10, OutputTokens: 5}, nil
+}
+
+func newTestAgent(t *testing.T, m model.Model) *agent.Agent {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return &agent.Agent{Model: m, ModelName: "fake", Tools: &tools.Executor{Root: root}, Config: config.Default(), SkipAgentsMD: true}
+}
+
+// TestJSONRunEventStream drives a whole run through startEvents and finish:
+// stdout must be only JSONL, opening with run.started and closing with result.
+func TestJSONRunEventStream(t *testing.T) {
+	m := &replies{
+		{Role: "assistant", Content: "looking", ToolCalls: []model.ToolCall{{ID: "1", Type: "function", Function: model.FunctionCall{Name: "list_files", Arguments: `{}`}}}},
+		{Role: "assistant", Content: "all good\n" + agent.SubmitMarker},
+	}
+	a := newTestAgent(t, m)
+	var out strings.Builder
+	events := startEvents(&out, true, a, false, func() { t.Error("stop called on a healthy stream") })
+	tr := a.Run(context.Background(), "check")
+	if err := events.finish(tr, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	var last map[string]any
+	for i, line := range strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n") {
+		if err := json.Unmarshal([]byte(line), &last); err != nil {
+			t.Fatalf("line %d is not JSON: %q", i, line)
+		}
+		kinds = append(kinds, last["type"].(string))
+	}
+	want := []string{"run.started", "assistant.message", "tool.call", "tool.result", "assistant.message", "result"}
+	if strings.Join(kinds, " ") != strings.Join(want, " ") {
+		t.Fatalf("events = %v, want %v", kinds, want)
+	}
+	if last["status"] != agent.StatusSubmitted || last["submission"] != "all good" || last["duration_ms"] != float64(1000) {
+		t.Errorf("result = %#v", last)
+	}
+}
+
+func TestJSONEventsDisabledWriteNothing(t *testing.T) {
+	a := newTestAgent(t, &replies{{Role: "assistant", Content: "done"}})
+	var out strings.Builder
+	events := startEvents(&out, false, a, false, func() {})
+	if err := events.finish(a.Run(context.Background(), "x"), 0); err != nil || out.Len() != 0 || a.OnEvent != nil {
+		t.Errorf("disabled stream wrote %q (err %v, OnEvent set %v)", out.String(), err, a.OnEvent != nil)
+	}
+}
+
+func TestReadOnlyStartsNoMCPServers(t *testing.T) {
+	servers := []config.MCPServer{{Alias: "docs", Command: "docs-mcp", Tools: []string{"search"}}}
+	var w strings.Builder
+	if got := mcpServers(&w, config.AgentConfig{MCPServers: servers}); len(got) != 1 || w.Len() != 0 {
+		t.Errorf("normal mode: servers %v, note %q", got, w.String())
+	}
+	if got := mcpServers(&w, config.AgentConfig{ReadOnly: true, MCPServers: servers}); got != nil || !strings.Contains(w.String(), "not started") {
+		t.Errorf("read-only mode: servers %v, note %q", got, w.String())
+	}
+}
+
+// TestDeadlineSpentBeforeRunIsTimeLimit covers a wall-clock limit used up by
+// MCP discovery: the run still ends as TimeLimitExceeded.
+func TestDeadlineSpentBeforeRunIsTimeLimit(t *testing.T) {
+	a := newTestAgent(t, &replies{{Role: "assistant", Content: "done"}})
+	a.Config.WallTimeSec = 60
+	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	<-ctx.Done()
+	if tr := a.Run(ctx, "x"); tr.ExitStatus != agent.StatusTimeLimit {
+		t.Errorf("status = %s, want %s", tr.ExitStatus, agent.StatusTimeLimit)
 	}
 }
 

@@ -63,153 +63,124 @@ func Start(ctx context.Context, root string, cfg []config.MCPServer, stderr io.W
 	if err := validateDefinitions(cfg); err != nil {
 		return nil, err
 	}
-	reserved := map[string]bool{}
-	for _, s := range []string{"read_file", "write_file", "edit_file", "list_files", "grep", "bash", "start_process", "read_process", "stop_process"} {
-		reserved[s] = true
-	}
-	aliases := map[string]bool{}
 	schemaBytes := 0
-	fail := func(err error) (*Registry, error) { r.Close(); return nil, err }
 	for _, def := range cfg {
-		if !validName(def.Alias) || aliases[def.Alias] {
-			return fail(fmt.Errorf("mcp server %q: alias must be unique and contain only letters, digits, _ or -", def.Alias))
+		if err := r.start(ctx, root, def, stderr, &schemaBytes); err != nil {
+			r.Close()
+			return nil, err
 		}
-		aliases[def.Alias] = true
-		if def.Command == "" || len(def.Tools) == 0 {
-			return fail(fmt.Errorf("mcp server %q: command and a nonempty tools allowlist are required", def.Alias))
-		}
-		if def.DiscoveryTimeoutSec == 0 {
-			def.DiscoveryTimeoutSec = 15
-		}
-		if def.CallTimeoutSec == 0 {
-			def.CallTimeoutSec = 60
-		}
-		if def.DiscoveryTimeoutSec < 1 || def.DiscoveryTimeoutSec > 300 || def.CallTimeoutSec < 1 || def.CallTimeoutSec > 600 {
-			return fail(fmt.Errorf("mcp server %q: timeouts must be between 1 and 300 seconds (discovery) and 1 and 600 seconds (call)", def.Alias))
-		}
-		env := make([]string, 0, len(def.Env)+2)
-		if p := os.Getenv("PATH"); p != "" {
-			env = append(env, "PATH="+p)
-		}
-		if runtime.GOOS == "windows" {
-			for _, k := range []string{"SystemRoot", "WINDIR", "USERPROFILE", "TEMP", "TMP"} {
-				if v, ok := os.LookupEnv(k); ok {
-					env = append(env, k+"="+v)
-				}
-			}
-		}
-		seenEnv := map[string]bool{}
-		for _, k := range def.Env {
-			if k == "" || strings.ContainsAny(k, "=\x00") || seenEnv[k] {
-				return fail(fmt.Errorf("mcp server %q: invalid or duplicate forwarded environment variable name", def.Alias))
-			}
-			seenEnv[k] = true
-			v, ok := os.LookupEnv(k)
-			if !ok {
-				return fail(fmt.Errorf("mcp server %q: forwarded environment variable %s is not set", def.Alias, k))
-			}
-			env = append(env, k+"="+v)
-		}
-		cmd := exec.Command(def.Command, def.Args...)
-		cmd.Dir = root
-		cmd.Env = env
-		cmd.Stderr = &limitedWriter{w: stderr, n: 32 << 10}
-		client := mcp.NewClient(&mcp.Implementation{Name: "tinyagent", Version: "1"}, nil)
-		dctx, cancel := context.WithTimeout(ctx, time.Duration(def.DiscoveryTimeoutSec)*time.Second)
-		defer cancel()
-		sess, err := client.Connect(dctx, &mcp.CommandTransport{Command: cmd, TerminateDuration: 2 * time.Second}, nil)
-		if err != nil {
-			return fail(fmt.Errorf("mcp server %q: connect failed: %w", def.Alias, err))
-		}
-		r.sessions = append(r.sessions, sess)
-		sv := &server{alias: def.Alias, session: sess, timeout: time.Duration(def.CallTimeoutSec) * time.Second}
-		selected := map[string]bool{}
-		for _, name := range def.Tools {
-			if name == "" || selected[name] {
-				return fail(fmt.Errorf("mcp server %q: tool allowlist contains an empty or duplicate name", def.Alias))
-			}
-			selected[name] = true
-		}
-		found := map[string]bool{}
-		cursor := ""
-		cursors := map[string]bool{}
-		count := 0
-		for page := 0; page < maxPages; page++ {
-			res, err := sess.ListTools(dctx, &mcp.ListToolsParams{Cursor: cursor})
-			if err != nil {
-				cancel()
-				return fail(fmt.Errorf("mcp server %q: tool discovery failed: %w", def.Alias, err))
-			}
-			count += len(res.Tools)
-			if count > maxTools {
-				cancel()
-				return fail(fmt.Errorf("mcp server %q: discovery exceeds %d tools", def.Alias, maxTools))
-			}
-			for _, t := range res.Tools {
-				if t == nil {
-					continue
-				}
-				if !selected[t.Name] {
-					continue
-				}
-				found[t.Name] = true
-				name := def.Alias + "__" + t.Name
-				if !validName(name) || reserved[name] {
-					cancel()
-					return fail(fmt.Errorf("mcp server %q: external tool name %q is invalid or reserved", def.Alias, t.Name))
-				}
-				if _, ok := r.tools[name]; ok {
-					cancel()
-					return fail(fmt.Errorf("mcp server %q: external tool name collision %q", def.Alias, name))
-				}
-				params, err := schema(t.InputSchema)
-				if err != nil {
-					cancel()
-					return fail(fmt.Errorf("mcp server %q tool %q: unsupported input schema: %w", def.Alias, t.Name, err))
-				}
-				encodedSchema, _ := json.Marshal(params)
-				schemaBytes += len(encodedSchema)
-				if schemaBytes > maxCatalogSchemaBytes {
-					cancel()
-					return fail(fmt.Errorf("mcp catalog exceeds %d schema bytes", maxCatalogSchemaBytes))
-				}
-				r.tools[name] = Tool{server: sv, original: t.Name}
-				desc := t.Description
-				if desc == "" {
-					desc = "MCP tool from configured server " + def.Alias
-				}
-				r.Specs = append(r.Specs, model.ToolSpec{Type: "function", Function: model.FunctionSpec{Name: name, Description: desc, Parameters: params}})
-				if len(r.Specs) > maxTools {
-					cancel()
-					return fail(fmt.Errorf("mcp catalog exceeds %d selected tools", maxTools))
-				}
-			}
-			if res.NextCursor == "" {
-				break
-			}
-			if cursors[res.NextCursor] {
-				cancel()
-				return fail(fmt.Errorf("mcp server %q: tool discovery pagination loop", def.Alias))
-			}
-			cursors[res.NextCursor] = true
-			cursor = res.NextCursor
-			if page == maxPages-1 {
-				cancel()
-				return fail(fmt.Errorf("mcp server %q: discovery exceeds %d pages", def.Alias, maxPages))
-			}
-		}
-		cancel()
-		for name := range selected {
-			if !found[name] {
-				return fail(fmt.Errorf("mcp server %q: selected tool %q was not discovered", def.Alias, name))
-			}
-		}
-		fmt.Fprintf(stderr, "mcp: enabled server %s (%d selected tools)\n", def.Alias, len(selected))
+		fmt.Fprintf(stderr, "mcp: enabled server %s (%d selected tools)\n", def.Alias, len(def.Tools))
 	}
 	if len(r.Specs) == 0 {
-		return fail(errors.New("mcp: configured servers produced no tools"))
+		r.Close()
+		return nil, errors.New("mcp: configured servers produced no tools")
 	}
 	return r, nil
+}
+
+// start launches one validated server and adds its allowlisted tools to the
+// catalog. schemaBytes accumulates the catalog's schema size across servers.
+func (r *Registry) start(ctx context.Context, root string, def config.MCPServer, stderr io.Writer, schemaBytes *int) error {
+	if def.DiscoveryTimeoutSec == 0 {
+		def.DiscoveryTimeoutSec = 15
+	}
+	if def.CallTimeoutSec == 0 {
+		def.CallTimeoutSec = 60
+	}
+	env := make([]string, 0, len(def.Env)+2)
+	if p := os.Getenv("PATH"); p != "" {
+		env = append(env, "PATH="+p)
+	}
+	if runtime.GOOS == "windows" {
+		for _, k := range []string{"SystemRoot", "WINDIR", "USERPROFILE", "TEMP", "TMP"} {
+			if v, ok := os.LookupEnv(k); ok {
+				env = append(env, k+"="+v)
+			}
+		}
+	}
+	for _, k := range def.Env {
+		env = append(env, k+"="+os.Getenv(k)) // presence checked by validateDefinitions
+	}
+	cmd := exec.Command(def.Command, def.Args...)
+	cmd.Dir = root
+	cmd.Env = env
+	cmd.Stderr = &limitedWriter{w: stderr, n: 32 << 10}
+	client := mcp.NewClient(&mcp.Implementation{Name: "tinyagent", Version: "1"}, nil)
+	dctx, cancel := context.WithTimeout(ctx, time.Duration(def.DiscoveryTimeoutSec)*time.Second)
+	defer cancel()
+	sess, err := client.Connect(dctx, &mcp.CommandTransport{Command: cmd, TerminateDuration: 2 * time.Second}, nil)
+	if err != nil {
+		return fmt.Errorf("mcp server %q: connect failed: %w", def.Alias, err)
+	}
+	r.sessions = append(r.sessions, sess)
+	sv := &server{alias: def.Alias, session: sess, timeout: time.Duration(def.CallTimeoutSec) * time.Second}
+	selected := map[string]bool{}
+	for _, name := range def.Tools {
+		selected[name] = true
+	}
+	found := map[string]bool{}
+	cursor := ""
+	cursors := map[string]bool{}
+	count := 0
+	for page := 0; ; page++ {
+		if page == maxPages {
+			return fmt.Errorf("mcp server %q: discovery exceeds %d pages", def.Alias, maxPages)
+		}
+		res, err := sess.ListTools(dctx, &mcp.ListToolsParams{Cursor: cursor})
+		if err != nil {
+			return fmt.Errorf("mcp server %q: tool discovery failed: %w", def.Alias, err)
+		}
+		count += len(res.Tools)
+		if count > maxTools {
+			return fmt.Errorf("mcp server %q: discovery exceeds %d tools", def.Alias, maxTools)
+		}
+		for _, t := range res.Tools {
+			if t == nil || !selected[t.Name] {
+				continue
+			}
+			found[t.Name] = true
+			// The alias__ prefix keeps names clear of the built-in tools.
+			name := def.Alias + "__" + t.Name
+			if !validName(name) {
+				return fmt.Errorf("mcp server %q: external tool name %q is invalid", def.Alias, t.Name)
+			}
+			if _, ok := r.tools[name]; ok {
+				return fmt.Errorf("mcp server %q: external tool name collision %q", def.Alias, name)
+			}
+			params, err := schema(t.InputSchema)
+			if err != nil {
+				return fmt.Errorf("mcp server %q tool %q: unsupported input schema: %w", def.Alias, t.Name, err)
+			}
+			encodedSchema, _ := json.Marshal(params)
+			*schemaBytes += len(encodedSchema)
+			if *schemaBytes > maxCatalogSchemaBytes {
+				return fmt.Errorf("mcp catalog exceeds %d schema bytes", maxCatalogSchemaBytes)
+			}
+			r.tools[name] = Tool{server: sv, original: t.Name}
+			desc := t.Description
+			if desc == "" {
+				desc = "MCP tool from configured server " + def.Alias
+			}
+			r.Specs = append(r.Specs, model.ToolSpec{Type: "function", Function: model.FunctionSpec{Name: name, Description: desc, Parameters: params}})
+			if len(r.Specs) > maxTools {
+				return fmt.Errorf("mcp catalog exceeds %d selected tools", maxTools)
+			}
+		}
+		if res.NextCursor == "" {
+			break
+		}
+		if cursors[res.NextCursor] {
+			return fmt.Errorf("mcp server %q: tool discovery pagination loop", def.Alias)
+		}
+		cursors[res.NextCursor] = true
+		cursor = res.NextCursor
+	}
+	for _, name := range def.Tools {
+		if !found[name] {
+			return fmt.Errorf("mcp server %q: selected tool %q was not discovered", def.Alias, name)
+		}
+	}
+	return nil
 }
 
 func validateDefinitions(cfg []config.MCPServer) error {
@@ -247,64 +218,69 @@ func validateDefinitions(cfg []config.MCPServer) error {
 }
 
 // Call executes only a catalogued tool, preserving the original JSON values.
-func (r *Registry) Call(ctx context.Context, name, raw string) (string, bool) {
+// ok is false when name is not catalogued; isErr marks a failed call.
+func (r *Registry) Call(ctx context.Context, name, raw string) (out string, isErr, ok bool) {
 	t, ok := r.tools[name]
 	if !ok {
-		return "", false
+		return "", false, false
 	}
 	if t.server.failed {
-		return "error: MCP server " + t.server.alias + " connection is unavailable after an earlier failure", true
+		return "error: MCP server " + t.server.alias + " connection is unavailable after an earlier failure", true, true
 	}
 	var args map[string]any
 	decoder := json.NewDecoder(bytes.NewBufferString(raw))
 	decoder.UseNumber()
 	if err := decoder.Decode(&args); err != nil || args == nil {
-		return "error: invalid arguments JSON object", true
+		return "error: invalid arguments JSON object", true, true
 	}
 	if decoder.Decode(new(any)) != io.EOF {
-		return "error: invalid arguments JSON object", true
+		return "error: invalid arguments JSON object", true, true
 	}
 	cctx, cancel := context.WithTimeout(ctx, t.server.timeout)
 	defer cancel()
 	res, err := t.server.session.CallTool(cctx, &mcp.CallToolParams{Name: t.original, Arguments: args})
 	if err != nil {
+		// A timeout or interrupt cancels only this request; the session stays
+		// usable. Any other error means the connection itself is suspect.
+		if cctx.Err() != nil {
+			if ctx.Err() == nil {
+				return fmt.Sprintf("error: MCP tool %s timed out after %s", name, t.server.timeout), true, true
+			}
+			return "error: MCP tool " + name + " was interrupted: " + ctx.Err().Error(), true, true
+		}
 		t.server.failed = true
-		return truncate("error: MCP server " + t.server.alias + " call failed: " + err.Error()), true
+		return truncate("error: MCP server " + t.server.alias + " call failed: " + err.Error()), true, true
 	}
-	var out strings.Builder
+	var b strings.Builder
 	for _, c := range res.Content {
-		switch v := c.(type) {
-		case *mcp.TextContent:
-			if out.Len() > 0 {
-				out.WriteByte('\n')
-			}
-			out.WriteString(v.Text)
-		default:
-			if out.Len() > 0 {
-				out.WriteByte('\n')
-			}
-			out.WriteString("[omitted unsupported MCP content]")
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		if v, text := c.(*mcp.TextContent); text {
+			b.WriteString(v.Text)
+		} else {
+			b.WriteString("[omitted unsupported MCP content]")
 		}
 	}
 	if res.StructuredContent != nil {
-		b, _ := json.Marshal(res.StructuredContent)
-		if out.Len() > 0 {
-			out.WriteByte('\n')
+		data, _ := json.Marshal(res.StructuredContent)
+		if b.Len() > 0 {
+			b.WriteByte('\n')
 		}
-		out.WriteString("structured JSON: ")
-		out.Write(b)
+		b.WriteString("structured JSON: ")
+		b.Write(data)
 	}
 	if res.NeedsInput() {
-		return "error: MCP tool requested unsupported interactive input", true
+		return "error: MCP tool requested unsupported interactive input", true, true
 	}
-	text := out.String()
+	text := b.String()
 	if res.IsError {
 		text = "tool error: " + text
 	}
 	if text == "" {
 		text = "[MCP tool returned no text or structured JSON]"
 	}
-	return truncate(text), true
+	return truncate(text), res.IsError, true
 }
 
 func (r *Registry) Close() {
@@ -360,6 +336,9 @@ func schema(v any) (map[string]any, error) {
 	if err = json.Unmarshal(b, &m); err != nil || m == nil {
 		return nil, errors.New("schema must be an object")
 	}
+	// SDK-generated schemas commonly declare their draft; it is metadata
+	// only, and providers don't need it.
+	delete(m, "$schema")
 	if err = checkSchema(m, 0); err != nil {
 		return nil, err
 	}
@@ -374,23 +353,20 @@ func checkSchema(m map[string]any, depth int) error {
 	}
 	for k := range m {
 		switch k {
-		case "type", "description", "properties", "required", "items", "additionalProperties", "enum", "title", "default", "minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems":
+		case "type", "description", "properties", "required", "items", "additionalProperties", "enum", "const", "title", "default", "examples",
+			"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+			"minLength", "maxLength", "pattern", "format", "minItems", "maxItems", "uniqueItems", "minProperties", "maxProperties":
 		default:
 			return fmt.Errorf("keyword %q is unsupported", k)
 		}
 	}
-	t, ok := m["type"].(string)
-	if !ok {
-		return errors.New("every schema must declare a type")
-	}
-	switch t {
-	case "object", "array", "string", "number", "integer", "boolean", "null":
-	default:
-		return fmt.Errorf("type %q is unsupported", t)
+	types, err := schemaTypes(m["type"])
+	if err != nil {
+		return err
 	}
 	if p, ok := m["properties"]; ok {
 		props, yes := p.(map[string]any)
-		if !yes || t != "object" {
+		if !yes || !types["object"] {
 			return errors.New("properties requires object type")
 		}
 		for _, v := range props {
@@ -405,7 +381,7 @@ func checkSchema(m map[string]any, depth int) error {
 	}
 	if i, ok := m["items"]; ok {
 		item, yes := i.(map[string]any)
-		if !yes || t != "array" {
+		if !yes || !types["array"] {
 			return errors.New("items requires array type")
 		}
 		if err := checkSchema(item, depth+1); err != nil {
@@ -413,13 +389,13 @@ func checkSchema(m map[string]any, depth int) error {
 		}
 	}
 	if a, ok := m["additionalProperties"]; ok {
-		if _, yes := a.(bool); !yes || t != "object" {
+		if _, yes := a.(bool); !yes || !types["object"] {
 			return errors.New("additionalProperties must be boolean")
 		}
 	}
 	if req, ok := m["required"]; ok {
 		arr, yes := req.([]any)
-		if !yes || t != "object" {
+		if !yes || !types["object"] {
 			return errors.New("required must be an array")
 		}
 		for _, v := range arr {
@@ -429,4 +405,30 @@ func checkSchema(m map[string]any, depth int) error {
 		}
 	}
 	return nil
+}
+
+// schemaTypes returns the set of types a schema declares: one type name, or
+// an array of them such as ["string", "null"] for a nullable value.
+func schemaTypes(v any) (map[string]bool, error) {
+	var names []any
+	switch t := v.(type) {
+	case string:
+		names = []any{t}
+	case []any:
+		names = t
+	}
+	if len(names) == 0 {
+		return nil, errors.New("every schema must declare a type")
+	}
+	types := map[string]bool{}
+	for _, n := range names {
+		name, _ := n.(string)
+		switch name {
+		case "object", "array", "string", "number", "integer", "boolean", "null":
+			types[name] = true
+		default:
+			return nil, fmt.Errorf("type %v is unsupported", n)
+		}
+	}
+	return types, nil
 }
