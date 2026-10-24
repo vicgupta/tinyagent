@@ -109,3 +109,27 @@ func TestNoUserConfigDir(t *testing.T) {
 		t.Errorf("Find(\"\") = %q, want \"\" when there's no user config dir", got)
 	}
 }
+
+func TestUnknownKeyFailsNamingPathAndKey(t *testing.T) {
+	p := fakeUserDirs(t)
+	write(t, p, "cost_limit: 2.0\nstep_limt: 20\n")
+	if _, err := load(t, ""); err == nil || !strings.Contains(err.Error(), p) || !strings.Contains(err.Error(), "step_limt") {
+		t.Errorf("user config: err = %v, want an error naming %s and step_limt", err, p)
+	}
+
+	explicit := filepath.Join(t.TempDir(), "ci.yaml")
+	write(t, explicit, "step_limit: 7\nwall_time_secs: 60\n")
+	if _, err := load(t, explicit); err == nil || !strings.Contains(err.Error(), explicit) || !strings.Contains(err.Error(), "wall_time_secs") {
+		t.Errorf("explicit config: err = %v, want an error naming %s and wall_time_secs", err, explicit)
+	}
+}
+
+func TestEmptyConfigUsesDefaults(t *testing.T) {
+	for name, data := range map[string]string{"empty": "", "comments only": "# step_limit: 50\n\n# nothing set\n"} {
+		p := filepath.Join(t.TempDir(), "config.yaml")
+		write(t, p, data)
+		if cfg, err := Load(p); err != nil || cfg != Default() {
+			t.Errorf("%s: Load = %+v, %v; want the defaults", name, cfg, err)
+		}
+	}
+}

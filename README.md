@@ -108,7 +108,7 @@ Without `-c`, tinyagent loads a per-user config file if one exists, so settings 
 
 The lookup order is: `-c PATH` if given (a missing or unreadable file is an error, with no fallback); otherwise the user config above, if it exists; otherwise the built-in defaults. A user config that exists but can't be read or parsed is an error naming the file, not skipped.
 
-Every key is optional. Command-line flags override the file.
+Every key is optional, but an unrecognized key (a typo like `step_limt`) is an error naming the file and the key, rather than silently ignored. Command-line flags override the file.
 
 ```yaml
 system_prompt: |          # {{cwd}} and {{os}} are substituted

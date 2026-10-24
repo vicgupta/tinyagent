@@ -2,8 +2,10 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -63,7 +65,9 @@ func Find(explicit string) string {
 	return p
 }
 
-// Load returns the defaults overlaid with the YAML file at path. An empty path returns the defaults.
+// Load returns the defaults overlaid with the YAML file at path. An empty path
+// returns the defaults. Unknown keys are an error, so a typo can't silently
+// drop a setting.
 func Load(path string) (AgentConfig, error) {
 	cfg := Default()
 	if path == "" {
@@ -73,7 +77,9 @@ func Load(path string) (AgentConfig, error) {
 	if err != nil {
 		return cfg, fmt.Errorf("read config: %w", err)
 	}
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) { // io.EOF: empty or comment-only file
 		return cfg, fmt.Errorf("parse config %s: %w", path, err)
 	}
 	return cfg, nil
