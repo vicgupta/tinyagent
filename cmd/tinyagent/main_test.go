@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vicgupta/tinyagent/internal/agent"
 	"github.com/vicgupta/tinyagent/internal/config"
+	"github.com/vicgupta/tinyagent/internal/trajectory"
 )
 
 func TestReadTask(t *testing.T) {
@@ -71,5 +73,27 @@ func TestApplyFlagOverridesTimeLimit(t *testing.T) {
 		if cfg.StepLimit != 7 || cfg.CostLimit != 1.5 {
 			t.Errorf("%s: unrelated limits changed: %+v", c.name, cfg)
 		}
+	}
+}
+
+func TestReportFailure(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "")
+	var b strings.Builder
+	reportFailure(&b, "openai/gpt-4o", &trajectory.Trajectory{ExitStatus: agent.StatusError, Submission: "HTTP 401: Incorrect API key"})
+	lines := strings.Split(strings.TrimSpace(b.String()), "\n")
+	if len(lines) != 2 || lines[0] != "Error after 0 steps: HTTP 401: Incorrect API key" || !strings.HasPrefix(lines[1], "hint: OPENAI_API_KEY isn't set") {
+		t.Errorf("got %q, want the error line then a hint", b.String())
+	}
+
+	b.Reset()
+	reportFailure(&b, "openai/gpt-4o", &trajectory.Trajectory{ExitStatus: agent.StatusError, Steps: 2, Submission: "HTTP 400: bad tool schema"})
+	if got := b.String(); got != "Error after 2 steps: HTTP 400: bad tool schema\n" {
+		t.Errorf("non-setup error: got %q", got)
+	}
+
+	b.Reset()
+	reportFailure(&b, "openai/gpt-4o", &trajectory.Trajectory{ExitStatus: agent.StatusStepLimit, Steps: 5})
+	if got := b.String(); got != "StepLimitExceeded after 5 steps\n" {
+		t.Errorf("limit exit: got %q", got)
 	}
 }

@@ -111,6 +111,19 @@ output_price_per_mtok: 15
 
 The run ends when the model writes `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` (`Submitted`), stops calling tools (`Completed`), or hits a limit (`StepLimitExceeded`, `CostLimitExceeded`, `TimeLimitExceeded`), Ctrl-C (`Interrupted`), or a non-retryable API error (`Error`). The process exits 0 only for `Submitted` and `Completed`.
 
+## Troubleshooting
+
+When a run fails on a common setup problem, tinyagent prints a `hint:` line under the error. The error itself is kept, and hints name environment variables without printing their values.
+
+| Symptom | Fix |
+|---|---|
+| `HTTP 401` or `403` from openai, openrouter or anthropic | Set the key: `export OPENAI_API_KEY=...` (or `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`). If it's already set, check that it's current. |
+| `HTTP 404` from openai, openrouter or anthropic | Check the model name after the `/`. |
+| `connection refused` with `ollama/...` | Start Ollama with `ollama serve`, or set `OLLAMA_HOST` to where it runs. |
+| `HTTP 404` with `ollama/...` | Pull the model: `ollama pull <model>`. |
+| `codex: no login` | Run `codex login` and choose ChatGPT. |
+| `model is not supported` with `codex/...` | Use a model the Codex CLI's model picker shows for your plan. |
+
 ## Notes
 
 - Each `bash` call runs in a new process; `cd` and exported variables don't carry over. On timeout the whole process group is killed (Unix).
