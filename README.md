@@ -132,7 +132,7 @@ Every run ends with one summary line on stderr, so stdout keeps only the model's
 Submitted after 12 steps in 1m42s (48,213 input / 3,104 output tokens, $0.23)
 ```
 
-Cost is shown only when it's above zero, and the token/cost part is left out if the run ended before any model response. With `-o`, the trajectory JSON also records `input_tokens` and `output_tokens` totals.
+Cost is shown only when it's above zero, and the token/cost part is left out if the run ended before any model response. When some input was read from the prompt cache, the line also shows how much, e.g. `(48,213 input / 3,104 output tokens, 41,900 cached, $0.09)`. With `-o`, the trajectory JSON also records `input_tokens` and `output_tokens` totals, plus `cache_read_tokens` and `cache_write_tokens` when they're non-zero.
 
 ## Troubleshooting
 
@@ -154,3 +154,4 @@ When a run fails on a common setup problem, tinyagent prints a `hint:` line unde
 - Each `bash` call runs in a new process; `cd` and exported variables don't carry over. On timeout the whole process group is killed (Unix).
 - Path sandboxing is lexical: `..` and absolute paths outside `--cwd` are rejected, but a symlink inside the root that points outside it is followed. `bash` isn't sandboxed at all. Only run it on code you trust.
 - Cost uses a small built-in price table (`internal/model/provider.go`). Unknown models cost $0 unless you set the price in the config, so `--cost-limit` does nothing for them.
+- The `anthropic` provider turns on [prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) for every request, so each step reads the history the previous step already sent from the cache instead of paying full price for it again. Input tokens in the summary and trajectory include cached tokens. Cost prices cache writes at 1.25× the input price and cache reads at 0.1× (less on models where Anthropic charges less, such as 0.05× for Claude Opus 5.5 and Sonnet 5.5). `input_price_per_mtok` overrides the base price and the multipliers apply on top.

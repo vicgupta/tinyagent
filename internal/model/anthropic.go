@@ -37,9 +37,13 @@ type anthropicTool struct {
 	InputSchema map[string]any `json:"input_schema"`
 }
 
+// anthropicUsage is a response's usage. With caching, InputTokens counts only
+// the uncached input; cached tokens are reported separately.
 type anthropicUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 }
 
 type anthropicResponse struct {
@@ -119,7 +123,14 @@ func (a *Anthropic) Query(ctx context.Context, messages []Message, tools []ToolS
 	if maxTokens == 0 {
 		maxTokens = 8192
 	}
-	body := map[string]any{"model": a.Model, "max_tokens": maxTokens, "messages": msgs}
+	// Automatic prompt caching: the API puts the cache breakpoint on the last
+	// cacheable block, so each step reads the history the previous one wrote.
+	body := map[string]any{
+		"model":         a.Model,
+		"max_tokens":    maxTokens,
+		"messages":      msgs,
+		"cache_control": map[string]string{"type": "ephemeral"},
+	}
 	if system != "" {
 		body["system"] = system
 	}
@@ -168,7 +179,8 @@ func (a *Anthropic) Query(ctx context.Context, messages []Message, tools []ToolS
 		}
 	}
 	msg.Content = strings.Join(text, "\n")
-	return msg, price(a.Model, resp.Usage.InputTokens, resp.Usage.OutputTokens), nil
+	u := resp.Usage
+	return msg, cachedPrice(a.Model, u.InputTokens, u.CacheCreationInputTokens, u.CacheReadInputTokens, u.OutputTokens), nil
 }
 
 // stream reads an SSE response into the same shape as a non-streamed
@@ -190,7 +202,8 @@ func (a *Anthropic) stream(ctx context.Context, url string, headers map[string]s
 		switch ev.Type {
 		case "message_start":
 			if ev.Message != nil {
-				out.Usage.InputTokens = ev.Message.Usage.InputTokens
+				out.Usage = ev.Message.Usage
+				out.Usage.OutputTokens = 0 // the final count arrives in message_delta
 			}
 		case "content_block_start":
 			for len(out.Content) <= ev.Index {

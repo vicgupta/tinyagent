@@ -239,6 +239,9 @@ func summaryLine(t *trajectory.Trajectory, elapsed time.Duration) string {
 	s := fmt.Sprintf("%s after %d steps in %s", t.ExitStatus, t.Steps, formatDuration(elapsed))
 	if t.InputTokens > 0 || t.OutputTokens > 0 || t.Cost > 0 {
 		s += fmt.Sprintf(" (%s input / %s output tokens", formatInt(t.InputTokens), formatInt(t.OutputTokens))
+		if t.CacheReadTokens > 0 {
+			s += ", " + formatInt(t.CacheReadTokens) + " cached"
+		}
 		if t.Cost > 0 {
 			s += ", " + formatCost(t.Cost)
 		}

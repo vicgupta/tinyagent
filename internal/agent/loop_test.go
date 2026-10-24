@@ -2,8 +2,12 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -335,5 +339,67 @@ func TestAgentsMDWithoutGitChecksOnlyCwd(t *testing.T) {
 	writeTestFile(t, filepath.Join(outer, "AGENTS.md"), "parent rules")
 	if got := firstSystem(t, a); got != base {
 		t.Errorf("system = %q, want %q", got, base)
+	}
+}
+
+// cachedModel reports cache reads and writes on every reply.
+type cachedModel struct{ scripted }
+
+func (c *cachedModel) Query(ctx context.Context, msgs []model.Message, specs []model.ToolSpec) (model.Message, model.Cost, error) {
+	msg, cost, err := c.scripted.Query(ctx, msgs, specs)
+	cost.CacheReadTokens, cost.CacheWriteTokens = 70, 10
+	return msg, cost, err
+}
+
+func TestRunTotalsCacheTokens(t *testing.T) {
+	m := &cachedModel{scripted{replies: []model.Message{
+		{Role: "assistant", ToolCalls: []model.ToolCall{call("1", "list_files", `{}`)}},
+		{Role: "assistant", Content: "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"},
+	}}}
+	tr := newAgent(t, m).Run(context.Background(), "x")
+	if tr.CacheReadTokens != 140 || tr.CacheWriteTokens != 20 || tr.InputTokens != 200 {
+		t.Errorf("totals = %d read / %d write / %d input, want 140 / 20 / 200", tr.CacheReadTokens, tr.CacheWriteTokens, tr.InputTokens)
+	}
+	b, _ := json.Marshal(tr)
+	if !strings.Contains(string(b), `"cache_read_tokens":140`) || !strings.Contains(string(b), `"cache_write_tokens":20`) {
+		t.Errorf("trajectory JSON lacks cache totals: %s", b)
+	}
+
+	plain := newAgent(t, &scripted{replies: []model.Message{{Role: "assistant", Content: "answer"}}}).Run(context.Background(), "x")
+	if b, _ := json.Marshal(plain); strings.Contains(string(b), "cache_") {
+		t.Errorf("trajectory JSON without caching has cache fields: %s", b)
+	}
+}
+
+// TestAnthropicRunKeepsPrefixStable runs the real loop against a fake
+// Anthropic server and checks the cacheable prefix never changes between steps.
+func TestAnthropicRunKeepsPrefixStable(t *testing.T) {
+	replies := []string{
+		`{"stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"list_files","input":{}}],"usage":{"input_tokens":5,"cache_creation_input_tokens":3000,"output_tokens":5}}`,
+		`{"stop_reason":"tool_use","content":[{"type":"tool_use","id":"t2","name":"write_file","input":{"path":"a.txt","content":"hi"}}],"usage":{"input_tokens":5,"cache_read_input_tokens":3000,"cache_creation_input_tokens":50,"output_tokens":5}}`,
+		`{"stop_reason":"end_turn","content":[{"type":"text","text":"COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"}],"usage":{"input_tokens":5,"cache_read_input_tokens":3050,"cache_creation_input_tokens":40,"output_tokens":5}}`,
+	}
+	var bodies []map[string]json.RawMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]json.RawMessage
+		json.NewDecoder(r.Body).Decode(&body)
+		bodies = append(bodies, body)
+		io.WriteString(w, replies[len(bodies)-1])
+	}))
+	defer srv.Close()
+
+	tr := newAgent(t, &model.Anthropic{BaseURL: srv.URL, Model: "claude-sonnet-4-5"}).Run(context.Background(), "x")
+	if tr.ExitStatus != StatusSubmitted || len(bodies) != 3 {
+		t.Fatalf("status %s after %d requests: %s", tr.ExitStatus, len(bodies), tr.Submission)
+	}
+	for i := 1; i < len(bodies); i++ {
+		for _, k := range []string{"tools", "system", "cache_control"} {
+			if len(bodies[0][k]) == 0 || string(bodies[i][k]) != string(bodies[0][k]) {
+				t.Errorf("step %d %s changed or missing", i+1, k)
+			}
+		}
+	}
+	if tr.CacheReadTokens != 6050 || tr.CacheWriteTokens != 3090 || tr.InputTokens != 15+6050+3090 {
+		t.Errorf("totals = %d read / %d write / %d input", tr.CacheReadTokens, tr.CacheWriteTokens, tr.InputTokens)
 	}
 }

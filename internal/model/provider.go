@@ -52,19 +52,25 @@ type FunctionSpec struct {
 	Parameters  map[string]any `json:"parameters"`
 }
 
+// Cost is one response's usage. InputTokens counts every input token,
+// including the cache reads and writes broken out after it.
 type Cost struct {
-	USD          float64 `json:"usd"`
-	InputTokens  int     `json:"input_tokens"`
-	OutputTokens int     `json:"output_tokens"`
+	USD              float64 `json:"usd"`
+	InputTokens      int     `json:"input_tokens"`
+	OutputTokens     int     `json:"output_tokens"`
+	CacheReadTokens  int     `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int     `json:"cache_write_tokens,omitempty"`
 }
 
 type Model interface {
 	Query(ctx context.Context, messages []Message, tools []ToolSpec) (Message, Cost, error)
 }
 
-// Prices maps a model name prefix to USD per million input/output tokens.
-// The longest matching prefix wins. Unknown models cost 0 unless overridden.
-var Prices = map[string][2]float64{
+// Prices maps a model name prefix to USD per million input/output tokens and,
+// optionally, the cache-read price as a multiple of the input price (0 means
+// the standard 0.1). The longest matching prefix wins. Unknown models cost 0
+// unless overridden.
+var Prices = map[string][3]float64{
 	"gpt-4o":            {2.50, 10.00},
 	"gpt-4o-mini":       {0.15, 0.60},
 	"gpt-4.1":           {2.00, 8.00},
@@ -75,25 +81,50 @@ var Prices = map[string][2]float64{
 	"claude-haiku-4-5":  {1.00, 5.00},
 	"claude-3-5-haiku":  {0.80, 4.00},
 	"claude-3-7-sonnet": {3.00, 15.00},
+	"claude-sonnet-5-5": {2.00, 10.00, 0.05},
+	"claude-opus-5-5":   {4.00, 20.00, 0.05},
+	"claude-fable-5-1":  {10.00, 50.00, 0.025},
 }
 
-// PriceOverride, when non-zero, replaces the price table lookup.
+// Anthropic prices cache writes (5-minute TTL) and, by default, cache reads as
+// these multiples of the input price.
+const (
+	cacheWriteMultiplier = 1.25
+	cacheReadMultiplier  = 0.1
+)
+
+// PriceOverride, when non-zero, replaces the price table's input and output
+// prices. The table's cache-read multiplier still applies.
 var PriceOverride [2]float64
 
 func price(model string, in, out int) Cost {
-	p := PriceOverride
-	if p == [2]float64{} {
-		best := ""
-		for prefix, v := range Prices {
-			if strings.HasPrefix(model, prefix) && len(prefix) > len(best) {
-				best, p = prefix, v
-			}
+	return cachedPrice(model, in, 0, 0, out)
+}
+
+// cachedPrice prices a response whose input was in uncached tokens plus
+// cacheWrite tokens written to and cacheRead tokens read from the cache.
+func cachedPrice(model string, in, cacheWrite, cacheRead, out int) Cost {
+	var p [3]float64
+	best := ""
+	for prefix, v := range Prices {
+		if strings.HasPrefix(model, prefix) && len(prefix) > len(best) {
+			best, p = prefix, v
 		}
 	}
+	if PriceOverride != [2]float64{} {
+		p[0], p[1] = PriceOverride[0], PriceOverride[1]
+	}
+	read := p[2]
+	if read == 0 {
+		read = cacheReadMultiplier
+	}
+	input := float64(in) + float64(cacheWrite)*cacheWriteMultiplier + float64(cacheRead)*read
 	return Cost{
-		USD:          (float64(in)*p[0] + float64(out)*p[1]) / 1e6,
-		InputTokens:  in,
-		OutputTokens: out,
+		USD:              (input*p[0] + float64(out)*p[1]) / 1e6,
+		InputTokens:      in + cacheWrite + cacheRead,
+		OutputTokens:     out,
+		CacheReadTokens:  cacheRead,
+		CacheWriteTokens: cacheWrite,
 	}
 }
 
