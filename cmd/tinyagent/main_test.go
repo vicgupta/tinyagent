@@ -399,3 +399,75 @@ func TestNoWarningForFreeProviders(t *testing.T) {
 		}
 	}
 }
+
+func TestInvalidLimitExits2(t *testing.T) {
+	// Without the check these runs would read the empty stdin or fail to
+	// build the unknown provider, either way exiting 1 rather than 2.
+	t.Setenv("AGENT_MODEL", "nope/x")
+	defer func(f *os.File) { os.Stdin = f }(os.Stdin)
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	defer r.Close()
+	os.Stdin = r
+	const (
+		step = "error: --step-limit must be >= 0 (0 = unlimited)"
+		cost = "error: --cost-limit must be finite and >= 0 (0 = unlimited)"
+		wall = "error: --time-limit must be >= 0"
+	)
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"-t", "x", "--step-limit", "-1"}, step},
+		{[]string{"-t", "-", "--step-limit", "-1"}, step},
+		{[]string{"-t", "x", "--cost-limit", "-0.50"}, cost},
+		{[]string{"-t", "-", "--cost-limit", "-0.50"}, cost},
+		{[]string{"-t", "x", "--cost-limit", "NaN"}, cost},
+		{[]string{"-t", "x", "--cost-limit", "Inf"}, cost},
+		{[]string{"-t", "x", "--cost-limit", "+Inf"}, cost},
+		{[]string{"-t", "x", "--cost-limit", "-Inf"}, cost},
+		{[]string{"-t", "x", "--cost-limit", "infinity"}, cost},
+		{[]string{"-t", "x", "--time-limit", "-1"}, wall},
+	} {
+		code, out, got := runWith(t, c.args...)
+		if code != 2 {
+			t.Errorf("%q: exit = %d, want 2", c.args, code)
+		}
+		if out != "" || got != c.want+"\n" {
+			t.Errorf("%q: stdout = %q, stderr = %q; want %q on stderr", c.args, out, got, c.want)
+		}
+	}
+}
+
+func TestValidLimitsPassValidation(t *testing.T) {
+	for _, args := range [][]string{
+		{"--step-limit", "0", "--cost-limit", "0", "--time-limit", "0"},
+		{"--step-limit", "1", "--cost-limit", "0.01", "--time-limit", "1"},
+		{"--cost-limit", "1e300"},
+	} {
+		var o options
+		fs := newFlagSet(&o)
+		if err := fs.Parse(args); err != nil {
+			t.Fatal(err)
+		}
+		if msg := validateLimits(o); msg != "" {
+			t.Errorf("%q: %s", args, msg)
+		}
+	}
+}
+
+func TestApplyFlagOverridesZeroClearsConfig(t *testing.T) {
+	var o options
+	fs := newFlagSet(&o)
+	if err := fs.Parse([]string{"--step-limit", "0", "--cost-limit", "0"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.AgentConfig{StepLimit: 50, CostLimit: 2}
+	applyFlagOverrides(fs, &cfg, o.stepLimit, o.costLimit, o.timeLimit)
+	if cfg.StepLimit != 0 || cfg.CostLimit != 0 {
+		t.Errorf("step limit %d, cost limit %v; want both 0", cfg.StepLimit, cfg.CostLimit)
+	}
+}
