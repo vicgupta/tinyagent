@@ -129,6 +129,7 @@ func run() int {
 		},
 		Config:       cfg,
 		Out:          os.Stdout,
+		Err:          os.Stderr,
 		Verbose:      verbose,
 		Streamed:     !noStream,
 		SkipAgentsMD: noAgentsMD,
