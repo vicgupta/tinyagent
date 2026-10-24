@@ -65,6 +65,8 @@ tinyagent -m openrouter/qwen/qwen3-coder -t "..."
 tinyagent -m ollama/llama3.1 -t "..."
 tinyagent -m codex/gpt-5.6-luna -t "..."   # ChatGPT subscription, see below
 cat task.md | tinyagent -t -               # read a long or multi-line task from stdin
+tinyagent --read-only --cwd ~/src/project -t "Review error handling in pkg/api"
+cat review-task.md | tinyagent --read-only -t - -o review.json
 ```
 
 ### ChatGPT subscription (Codex)
@@ -85,6 +87,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--cost-limit` | 0 (unlimited) | Max USD |
 | `--time-limit` | 0 (unlimited) | Max wall-clock seconds; overrides `wall_time_seconds` |
 | `--no-compact` | off | Never compact the history; see [Long runs](#long-runs) |
+| `--read-only` | config `read_only`, else off | Permit only `read_file`, `list_files`, and `grep`; blocks edits, shell, and process tools. `--read-only=false` explicitly disables it. |
 | `-o, --output` | — | Trajectory JSON, rewritten after every step |
 | `-v, --verbose` | off | Print tool calls and their outputs |
 | `--no-stream` | off | Wait for each full response instead of streaming it |
@@ -141,12 +144,15 @@ The lookup order is: `-c PATH` if given (a missing or unreadable file is an erro
 
 Every key is optional, but an unrecognized key (a typo like `step_limt`) is an error naming the file and the key, rather than silently ignored. Command-line flags override the file.
 
+Set `read_only: true` to make repository analysis the default. `--read-only` overrides the config value, including `--read-only=false`. In this mode, executor dispatch allows only `read_file`, `list_files`, and `grep`; writes, edits, shell commands, and background process tools are denied even if task text or repository instructions request them. Denials are returned to the model as tool errors. The restriction is model tool authority, not an OS sandbox: an explicit `-o` trajectory destination can be written by the CLI, provider requests still send their context to the selected service, and the Codex provider may refresh its credential file. `--update` is an administrative action outside task-tool policy. Readable secrets, symlinks that point outside `--cwd`, existing lexical path behavior, and AGENTS.md discovery retain their existing limitations; read-only mode does not make an untrusted repository safe.
+
 `model` saves a default model, so `tinyagent -t "fix the failing test"` needs no `-m`. The model is chosen in this order: `-m`/`--model` if given (even `-m openai/gpt-4o`), then a nonempty `$AGENT_MODEL`, then a nonempty `model` in the config, then `openai/gpt-4o`.
 
 ```yaml
 model: ollama/llama3.1    # same <provider>/<model> syntax as -m
 system_prompt: |          # {{cwd}} and {{os}} are substituted
   You are a coding agent...
+read_only: true            # expose only read_file, list_files, and grep
 step_limit: 50
 cost_limit: 2.0
 wall_time_seconds: 1800

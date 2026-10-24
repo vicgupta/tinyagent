@@ -97,6 +97,28 @@ func TestRunCompletesWithoutToolCalls(t *testing.T) {
 	}
 }
 
+func TestReadOnlyRunFiltersAndDenies(t *testing.T) {
+	m := &scripted{replies: []model.Message{
+		{Role: "assistant", ToolCalls: []model.ToolCall{call("denied", "write_file", `{"path":"x","content":"bad"}`), call("allowed", "list_files", `{}`)}},
+		{Role: "assistant", Content: "Review complete"},
+	}}
+	a := newAgent(t, m)
+	a.Tools.ReadOnly = true
+	tr := a.Run(context.Background(), "review")
+	if !tr.ReadOnly {
+		t.Fatal("trajectory did not record read-only mode")
+	}
+	if len(m.seen) != 2 || len(m.seen[0]) == 0 {
+		t.Fatalf("requests=%d", len(m.seen))
+	}
+	if len(m.seen[1]) < 5 || m.seen[1][3].ToolCallID != "denied" || !strings.Contains(m.seen[1][3].Content, "read-only mode") || m.seen[1][4].ToolCallID != "allowed" {
+		t.Fatalf("tool results=%+v", m.seen[1])
+	}
+	if _, err := os.Stat(filepath.Join(a.Tools.Root, "x")); !os.IsNotExist(err) {
+		t.Fatalf("write happened: %v", err)
+	}
+}
+
 func TestLimits(t *testing.T) {
 	loop := model.Message{Role: "assistant", ToolCalls: []model.ToolCall{call("1", "list_files", `{}`)}}
 	replies := func() []model.Message { return []model.Message{loop, loop, loop, loop, loop} }

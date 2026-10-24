@@ -10,6 +10,7 @@ import (
 )
 
 type Trajectory struct {
+	ReadOnly     bool            `json:"read_only"`
 	Task         string          `json:"task"`
 	Model        string          `json:"model"`
 	Messages     []model.Message `json:"messages"`

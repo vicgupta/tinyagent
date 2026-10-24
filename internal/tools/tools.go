@@ -18,6 +18,7 @@ import (
 // Executor runs tool calls against files under Root.
 type Executor struct {
 	Root           string // absolute working directory
+	ReadOnly       bool   // permits only read_file, list_files, and grep
 	BashTimeout    time.Duration
 	MaxOutputChars int // 0 = unlimited
 	// MaxProcesses bounds concurrently running background processes
@@ -56,8 +57,8 @@ type args struct {
 }
 
 // Specs returns the OpenAI tool definitions for all tools.
-func Specs() []model.ToolSpec {
-	return []model.ToolSpec{
+func Specs(readOnly ...bool) []model.ToolSpec {
+	specs := []model.ToolSpec{
 		spec("read_file", "Read a file's contents. For a large file, pass offset and limit to read just a range of lines.",
 			props{"path": "File path relative to the working directory", "offset": "Optional 1-based line to start at", "limit": "Optional maximum number of lines to return"}, "path"),
 		spec("write_file", "Write content to a file, creating parent directories. Overwrites existing files.",
@@ -77,6 +78,17 @@ func Specs() []model.ToolSpec {
 		spec("stop_process", "Kill a background process and all its children, and return its exit status and unread output.",
 			props{"id": "Process id from start_process", "tail": "Optional: return only the last N lines of the unread output"}, "id"),
 	}
+	if len(readOnly) > 0 && readOnly[0] {
+		allowed := map[string]bool{"read_file": true, "list_files": true, "grep": true}
+		filtered := make([]model.ToolSpec, 0, len(allowed))
+		for _, s := range specs {
+			if allowed[s.Function.Name] {
+				filtered = append(filtered, s)
+			}
+		}
+		return filtered
+	}
+	return specs
 }
 
 type props map[string]string
@@ -123,6 +135,9 @@ func (e *Executor) Run(ctx context.Context, call model.ToolCall) string {
 }
 
 func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
+	if e.ReadOnly && (name != "read_file" && name != "list_files" && name != "grep") {
+		return "", fmt.Errorf("tool %q is unavailable in read-only mode; only read_file, list_files, and grep are allowed", name)
+	}
 	var a args
 	if strings.TrimSpace(raw) != "" {
 		if err := json.Unmarshal([]byte(raw), &a); err != nil {

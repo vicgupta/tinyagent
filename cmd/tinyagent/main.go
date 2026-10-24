@@ -39,6 +39,7 @@ type options struct {
 	stepLimit, timeLimit                             int
 	costLimit                                        float64
 	verbose, noStream, noAgentsMD, noCompact         bool
+	readOnly                                         bool
 	showHelp, showVersion, doUpdate                  bool
 }
 
@@ -68,6 +69,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.noStream, "no-stream", false, "wait for full responses instead of streaming")
 	fs.BoolVar(&o.noAgentsMD, "no-agents-md", false, "don't add AGENTS.md (nearest, up to the repo root) to the system prompt")
 	fs.BoolVar(&o.noCompact, "no-compact", false, "don't compact the history when it nears the context window")
+	fs.BoolVar(&o.readOnly, "read-only", false, "allow only read_file, list_files, and grep; blocks edits and commands")
 	fs.BoolVar(&o.showVersion, "version", false, "print the version and exit")
 	fs.BoolVar(&o.showVersion, "V", false, "shorthand for --version")
 	fs.BoolVar(&o.doUpdate, "update", false, "update to the latest release and exit")
@@ -133,6 +135,9 @@ func run() int {
 		return fail(err)
 	}
 	applyFlagOverrides(fs, &cfg, o.stepLimit, o.costLimit, o.timeLimit)
+	if flagWasSet(fs, "read-only") {
+		cfg.ReadOnly = o.readOnly
+	}
 	o.modelName = resolveModel(fs, o.modelName, cfg.Model)
 	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 
@@ -142,6 +147,9 @@ func run() int {
 	}
 	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
 		return fail(fmt.Errorf("--cwd %s is not a directory", o.cwd))
+	}
+	if cfg.ReadOnly {
+		fmt.Fprintln(os.Stderr, "read-only mode: only read_file, list_files, and grep are available")
 	}
 
 	var onText func(string)
@@ -164,6 +172,7 @@ func run() int {
 		ModelName: o.modelName,
 		Tools: &tools.Executor{
 			Root:           root,
+			ReadOnly:       cfg.ReadOnly,
 			BashTimeout:    time.Duration(cfg.BashTimeoutSec) * time.Second,
 			MaxOutputChars: cfg.MaxOutputChars,
 			MaxProcesses:   cfg.MaxBackgroundProcesses,
@@ -225,6 +234,10 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return fail(err)
 	}
 	applyFlagOverrides(fs, &cfg, o.stepLimit, o.costLimit, o.timeLimit)
+	if flagWasSet(fs, "read-only") && o.readOnly != src.ReadOnly {
+		return fail(errors.New("resume: --read-only conflicts with the checkpoint's recorded mode; start a fresh task"))
+	}
+	cfg.ReadOnly = src.ReadOnly
 	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 
 	root, err := canonicalRoot(o.cwd)
@@ -255,6 +268,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if err := agent.ValidateResume(src, cfg, root); err != nil {
 		return fail(fmt.Errorf("resume: %w", err))
 	}
+	if src.ReadOnly {
+		fmt.Fprintln(os.Stderr, "read-only mode: only read_file, list_files, and grep are available")
+	}
 
 	var onText func(string)
 	if !o.noStream {
@@ -283,6 +299,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		ModelName: modelName,
 		Tools: &tools.Executor{
 			Root:           root,
+			ReadOnly:       src.ReadOnly,
 			BashTimeout:    time.Duration(cfg.BashTimeoutSec) * time.Second,
 			MaxOutputChars: cfg.MaxOutputChars,
 			MaxProcesses:   cfg.MaxBackgroundProcesses,
@@ -369,7 +386,7 @@ var usageGroups = []struct {
 	{"", [][3]string{{"h", "help", ""}}},
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "resume", "path"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "no-compact", ""}}},
-	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "no-agents-md", ""}}},
+	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "no-agents-md", ""}, {"", "read-only", ""}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}}},
 }
 
