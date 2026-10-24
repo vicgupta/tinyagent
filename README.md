@@ -162,7 +162,23 @@ max_background_processes: 4   # start_process processes running at once (0 uses 
 input_price_per_mtok: 3   # override the built-in price table
 output_price_per_mtok: 15
 context_window: 200000    # tokens; overrides the built-in table, used for compaction
+mcp_servers:                 # omitted by default; each entry runs a trusted local executable
+  - alias: docs
+    command: /usr/local/bin/team-docs-mcp
+    args: [--stdio]
+    tools: [search, fetch]   # explicit authorization; all entries are required to exist
+    env: [TEAM_DOCS_TOKEN]   # names only; tinyagent copies their current values to the child
+    discovery_timeout_seconds: 15
+    call_timeout_seconds: 60
 ```
+
+### Local MCP tools
+
+MCP is disabled unless `mcp_servers` is explicitly configured. Each configured executable is trusted code with its own host and network permissions; this is tool preauthorization, not a sandbox or an interactive approval prompt. Configuration is read only from the user config or the explicitly selected `-c` file, never from the repository or model output. Tinyagent launches the command directly (no shell), with `--cwd` as its working directory and a minimal environment (`PATH`, plus the Windows process variables when present) and only the named forwarded variables. Missing forwarded variables fail before launch. Do not forward secrets unless the server needs them.
+
+The Go MCP SDK v1.8.0 supports protocol revisions 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26, and 2024-11-05 over stdio. Tinyagent discovers the complete paginated catalog once per run, with a 15-second default discovery timeout, 100-page, 256-selected-tool, 64-KiB-per-schema, and 1-MiB-total-schema caps, and exposes only configured names. Tool names are sent to providers as `<alias>__<original-name>` and must fit provider-compatible naming rules. The accepted input schema subset supports object, array, string, number, integer, boolean and null types, nested properties/items, required, enum, simple bounds/length fields, and boolean `additionalProperties`; unsupported keywords and remote references are rejected. Each call defaults to a 60-second timeout. Text content is joined with newlines, structured output is appended as JSON, unsupported content is marked as omitted, tool errors remain visible, and model-visible output is capped at 256 KiB before the normal output cap is applied. Stdio protocol data is kept separate from server stderr.
+
+MCP tool calls and results are stored in trajectories along with the external tool names. Trajectories from MCP-enabled runs cannot be resumed, and MCP configuration is rejected when resuming a built-in-only checkpoint. Trajectories and server stderr may contain sensitive data supplied by tools or the server; no blanket redaction is provided. On shutdown tinyagent closes MCP sessions and asks their processes to exit, then the SDK applies its bounded termination. Unix process descendants and Windows child-process cleanup have platform-specific behavior; tinyagent does not promise process-tree cleanup on Windows.
 
 ## Long runs
 

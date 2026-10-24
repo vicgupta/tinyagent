@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -46,7 +47,7 @@ func TestNoUserConfigUsesDefaults(t *testing.T) {
 		t.Errorf("Find(\"\") = %q, want \"\" when no user config exists", got)
 	}
 	cfg, err := load(t, "")
-	if err != nil || cfg != Default() {
+	if err != nil || !reflect.DeepEqual(cfg, Default()) {
 		t.Errorf("load = %+v, %v; want the defaults", cfg, err)
 	}
 }
@@ -140,11 +141,23 @@ func TestUnknownKeyFailsNamingPathAndKey(t *testing.T) {
 	}
 }
 
+func TestMCPServerConfig(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	write(t, p, "mcp_servers:\n  - alias: docs\n    command: /usr/local/bin/docs-mcp\n    args: [--stdio]\n    tools: [search]\n    env: [DOCS_TOKEN]\n    discovery_timeout_seconds: 10\n    call_timeout_seconds: 30\n")
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.MCPServers) != 1 || cfg.MCPServers[0].Alias != "docs" || cfg.MCPServers[0].Tools[0] != "search" || cfg.MCPServers[0].CallTimeoutSec != 30 {
+		t.Fatalf("MCP config = %+v", cfg.MCPServers)
+	}
+}
+
 func TestEmptyConfigUsesDefaults(t *testing.T) {
 	for name, data := range map[string]string{"empty": "", "comments only": "# step_limit: 50\n\n# nothing set\n"} {
 		p := filepath.Join(t.TempDir(), "config.yaml")
 		write(t, p, data)
-		if cfg, err := Load(p); err != nil || cfg != Default() {
+		if cfg, err := Load(p); err != nil || !reflect.DeepEqual(cfg, Default()) {
 			t.Errorf("%s: Load = %+v, %v; want the defaults", name, cfg, err)
 		}
 	}

@@ -96,6 +96,9 @@ func unfinished(status string) bool {
 // Validate checks a complete model-query boundary, matching IDs within each
 // assistant turn. It never repairs or dispatches historical calls.
 func (t *Trajectory) Validate() error {
+	if t.MCPEnabled || len(t.ExternalTools) > 0 {
+		return errors.New("checkpoint used MCP tools and cannot be resumed; start a fresh task")
+	}
 	if t.SchemaVersion == 0 {
 		return errors.New("checkpoint has no resume metadata (it predates --resume); start a fresh task")
 	}

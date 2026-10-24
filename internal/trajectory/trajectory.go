@@ -38,9 +38,12 @@ type Trajectory struct {
 	// substituted and AGENTS.md appended) the run used.
 	SystemPrompt string `json:"system_prompt,omitempty"`
 	// SkipAgentsMD records whether AGENTS.md was excluded from the prompt.
-	SkipAgentsMD  bool     `json:"skip_agents_md"`
-	Tools         []string `json:"tools,omitempty"`          // tool names, in spec order
-	ToolSignature string   `json:"tool_signature,omitempty"` // versioned spec/semantics fingerprint
+	SkipAgentsMD          bool     `json:"skip_agents_md"`
+	Tools                 []string `json:"tools,omitempty"`          // tool names, in spec order
+	ToolSignature         string   `json:"tool_signature,omitempty"` // versioned spec/semantics fingerprint
+	MCPEnabled            bool     `json:"mcp_enabled,omitempty"`
+	ExternalTools         []string `json:"external_tools,omitempty"`
+	ExternalToolSignature string   `json:"external_tool_signature,omitempty"`
 	// Resume records the checkpoint this run continued, when it did.
 	Resume *ResumeInfo `json:"resume,omitempty"`
 }
