@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -92,8 +93,8 @@ func run() int {
 		fs.Usage()
 		return 2
 	}
-	if o.timeLimit < 0 {
-		fmt.Fprintln(os.Stderr, "error: --time-limit must be >= 0")
+	if msg := validateLimits(o); msg != "" {
+		fmt.Fprintln(fs.Output(), "error: "+msg)
 		return 2
 	}
 	if o.showVersion {
@@ -305,6 +306,21 @@ func warnUnpriced(w io.Writer, modelName string, costLimit float64) {
 	if costLimit > 0 && model.Unpriced(modelName) {
 		fmt.Fprintf(w, "warning: no pricing available for %s; --cost-limit cannot be enforced. Set input_price_per_mtok and output_price_per_mtok in your config to enable cost tracking.\n", modelName)
 	}
+}
+
+// validateLimits reports the first limit flag a run can't honor, or "" if
+// they're all fine. The agent ignores limits <= 0, so a negative or NaN value
+// would silently mean unlimited.
+func validateLimits(o options) string {
+	switch {
+	case o.stepLimit < 0:
+		return "--step-limit must be >= 0 (0 = unlimited)"
+	case !(o.costLimit >= 0) || math.IsInf(o.costLimit, 1):
+		return "--cost-limit must be finite and >= 0 (0 = unlimited)"
+	case o.timeLimit < 0:
+		return "--time-limit must be >= 0"
+	}
+	return ""
 }
 
 // applyFlagOverrides copies limit flags into cfg, but only the ones given
