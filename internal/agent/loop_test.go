@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/model"
@@ -164,5 +165,45 @@ func TestAgentsMDTruncated(t *testing.T) {
 	got := firstSystem(t, a)
 	if !strings.HasSuffix(got, big[:maxAgentsMD]+"\n[AGENTS.md truncated]") || strings.Contains(got, big[:maxAgentsMD+1]) {
 		t.Errorf("system not truncated with marker; tail = %q", got[len(got)-40:])
+	}
+}
+
+func TestAgentsMDReadErrorWarnsOnErr(t *testing.T) {
+	a := newAgent(t, nil)
+	base := firstSystem(t, a)
+	if err := os.Mkdir(filepath.Join(a.Tools.Root, "AGENTS.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut strings.Builder
+	a.Out, a.Err = &out, &errOut
+	if got := firstSystem(t, a); got != base {
+		t.Errorf("system = %q, want %q", got, base)
+	}
+	if strings.Contains(out.String(), "AGENTS.md") {
+		t.Errorf("warning on Out: %q", out.String())
+	}
+	if !strings.HasPrefix(errOut.String(), "warning: reading AGENTS.md:") {
+		t.Errorf("Err = %q, want the warning", errOut.String())
+	}
+}
+
+func TestAgentsMDTruncatedOnRuneBoundary(t *testing.T) {
+	a := newAgent(t, nil)
+	// "é" is 2 bytes; the odd prefix puts a rune across the cap.
+	big := "x" + strings.Repeat("é", maxAgentsMD)
+	if err := os.WriteFile(filepath.Join(a.Tools.Root, "AGENTS.md"), []byte(big), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := firstSystem(t, a)
+	if !utf8.ValidString(got) {
+		t.Errorf("system is not valid UTF-8; tail = %q", got[len(got)-40:])
+	}
+	body, ok := strings.CutSuffix(got, "\n[AGENTS.md truncated]")
+	if !ok {
+		t.Fatalf("no truncation marker; tail = %q", got[len(got)-40:])
+	}
+	_, md, _ := strings.Cut(body, "## Project instructions (AGENTS.md)\n\n")
+	if len(md) > maxAgentsMD || len(md) < maxAgentsMD-utf8.UTFMax {
+		t.Errorf("kept %d bytes, want at most %d", len(md), maxAgentsMD)
 	}
 }

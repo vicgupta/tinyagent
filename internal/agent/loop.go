@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/model"
@@ -39,6 +40,7 @@ type Agent struct {
 	Tools     *tools.Executor
 	Config    config.AgentConfig
 	Out       io.Writer // progress log; nil discards
+	Err       io.Writer // warnings; nil discards
 	Verbose   bool
 	// Streamed means the model already wrote its text to Out as it arrived.
 	Streamed bool
@@ -53,6 +55,9 @@ type Agent struct {
 func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 	if a.Out == nil {
 		a.Out = io.Discard
+	}
+	if a.Err == nil {
+		a.Err = io.Discard
 	}
 	if a.Config.WallTimeSec > 0 {
 		var cancel context.CancelFunc
@@ -116,7 +121,7 @@ func (a *Agent) agentsMD() string {
 	b, err := os.ReadFile(filepath.Join(a.Tools.Root, "AGENTS.md"))
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintln(a.Out, "warning: reading AGENTS.md:", err)
+			fmt.Fprintln(a.Err, "warning: reading AGENTS.md:", err)
 		}
 		return ""
 	}
@@ -125,7 +130,12 @@ func (a *Agent) agentsMD() string {
 	}
 	s := string(b)
 	if len(s) > maxAgentsMD {
-		s = s[:maxAgentsMD] + "\n[AGENTS.md truncated]"
+		// Back off to a rune boundary so the cut stays valid UTF-8.
+		n := maxAgentsMD
+		for n > 0 && !utf8.RuneStart(s[n]) {
+			n--
+		}
+		s = s[:n] + "\n[AGENTS.md truncated]"
 	}
 	return "\n\n## Project instructions (AGENTS.md)\n\n" + s
 }
