@@ -16,12 +16,16 @@ const (
 	maxGrepFileSize = 5 << 20
 )
 
-// Grep returns lines matching pattern as "file:line: content". Binary and
-// very large files are skipped. A non-empty include glob limits the search to
+// Grep returns lines matching pattern as "file:line: content". The pattern is a
+// Go regular expression unless fixedStrings is true, which matches literal text.
+// Binary and very large files are skipped. A non-empty include glob limits the search to
 // matching files, using the same rules as ListFiles: a glob without "/"
 // matches base names, a glob with "/" matches paths relative to the searched
 // directory. When path is a single file, include is ignored.
-func Grep(root, pattern, path, include string) (string, error) {
+func Grep(root, pattern, path, include string, fixedStrings bool) (string, error) {
+	if fixedStrings {
+		pattern = regexp.QuoteMeta(pattern)
+	}
 	re, err := regexp.Compile(pattern)
 	if err != nil {
 		return "", fmt.Errorf("bad regexp: %w", err)
