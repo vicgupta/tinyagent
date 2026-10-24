@@ -252,3 +252,49 @@ func TestShortAndLongFlagsParseIdentically(t *testing.T) {
 		}
 	}
 }
+
+func TestPositionalArgExits2(t *testing.T) {
+	// Without the check these runs would read stdin or call a model; both
+	// point nowhere useful, so either shows up as an exit code other than 2.
+	t.Setenv("AGENT_MODEL", "openai/gpt-4o")
+	t.Setenv("OPENAI_API_KEY", "fake")
+	t.Setenv("OPENAI_BASE_URL", "http://127.0.0.1:1")
+	defer func(f *os.File) { os.Stdin = f }(os.Stdin)
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	defer r.Close()
+	os.Stdin = r
+	for _, c := range []struct {
+		args []string
+		bad  string
+	}{
+		{[]string{"-t", "fix the failing test", "typo", "--step-limit", "5"}, "typo"},
+		{[]string{"fix the tests"}, "fix the tests"},
+		{[]string{"-t", "x", "--", "extra"}, "extra"},
+		{[]string{"--task", "-", "typo"}, "typo"},
+		{[]string{"-t", "x", "--", "--step-limit"}, "--step-limit"},
+	} {
+		code, out, got := runWith(t, c.args...)
+		if code != 2 {
+			t.Errorf("%q: exit = %d, want 2", c.args, code)
+		}
+		want := `error: unexpected positional argument "` + c.bad + `"; pass the task with -t/--task`
+		if out != "" || !strings.HasPrefix(got, want+"\n") || !strings.Contains(got, "Usage: tinyagent") {
+			t.Errorf("%q: stdout = %q, stderr = %q; want %q and usage on stderr", c.args, out, got, want)
+		}
+	}
+}
+
+func TestFlagLookingTaskIsNotPositional(t *testing.T) {
+	var o options
+	fs := newFlagSet(&o)
+	if err := fs.Parse([]string{"-t", "run with --step-limit 5 typo", "--step-limit", "3"}); err != nil {
+		t.Fatal(err)
+	}
+	if fs.NArg() != 0 || o.task != "run with --step-limit 5 typo" || o.stepLimit != 3 {
+		t.Errorf("args %q, task %q, step limit %d", fs.Args(), o.task, o.stepLimit)
+	}
+}

@@ -85,6 +85,13 @@ func run() int {
 		printUsage(helpOutput, fs)
 		return 0
 	}
+	// Parsing stops at the first non-flag, so any flags after it would be
+	// silently ignored.
+	if fs.NArg() > 0 {
+		fmt.Fprintf(fs.Output(), "error: unexpected positional argument %q; pass the task with -t/--task\n", fs.Arg(0))
+		fs.Usage()
+		return 2
+	}
 	if o.timeLimit < 0 {
 		fmt.Fprintln(os.Stderr, "error: --time-limit must be >= 0")
 		return 2
