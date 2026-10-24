@@ -59,6 +59,7 @@ type args struct {
 	Stream       json.RawMessage `json:"stream"`
 	ID           string          `json:"id"`
 	Tail         json.Number     `json:"tail"`
+	ContextLines json.RawMessage `json:"context_lines"`
 }
 
 // Specs returns the OpenAI tool definitions for all tools.
@@ -72,8 +73,8 @@ func Specs(readOnly ...bool) []model.ToolSpec {
 			props{"path": "File path", "old_str": "Exact text to replace", "new_str": "Replacement text", "replace_all": "Optional: replace every occurrence instead of exactly one"}, "path", "old_str", "new_str"),
 		spec("list_files", "List directory entries. With a glob pattern (e.g. *.go, or a pattern containing /), search recursively and return matching file paths.",
 			props{"path": "Directory (default .)", "pattern": "Optional glob pattern"}),
-		spec("grep", "Search files recursively for a Go regular expression (default), or literal text with fixed_strings: true. Returns file:line: content.",
-			props{"pattern": "Go regular expression by default; literal text when fixed_strings is true", "path": "File or directory to search (default .)", "include": "Optional glob to filter files, e.g. *.go (a glob with / matches paths relative to path)", "ignore_case": "Optional: match file contents case-insensitively (default false)", "fixed_strings": "Optional: treat the entire pattern as literal text instead of a regular expression (default false)"}, "pattern"),
+		spec("grep", "Search files recursively for a Go regular expression (default), or literal text with fixed_strings: true. Returns file:line: content; context_lines optionally adds surrounding lines.",
+			props{"pattern": "Go regular expression by default; literal text when fixed_strings is true", "path": "File or directory to search (default .)", "include": "Optional glob to filter files, e.g. *.go (a glob with / matches paths relative to path)", "ignore_case": "Optional: match file contents case-insensitively (default false)", "fixed_strings": "Optional: treat the entire pattern as literal text instead of a regular expression (default false)", "context_lines": "Optional surrounding lines before and after each match (default 0; integer from 0 to 20)"}, "pattern"),
 		spec("bash", "Run a command with bash -c in the working directory and wait for it to finish. Each call is a fresh process. Returns the exit code and combined stdout/stderr. For servers, watchers, or anything long-running, use start_process instead.",
 			props{"command": "Shell command", "timeout": "Optional timeout in seconds for this command (default: the configured bash timeout, max 600)", "stream": "Optional: also show output to the user live as it is produced (default false); the returned result is the same"}, "command"),
 		spec("start_process", "Start a command with bash -c in the background, in the working directory, and return its process id plus its first output. It keeps running across steps until stop_process or the end of the run.",
@@ -101,7 +102,7 @@ type props map[string]string
 // intProps and boolProps are the parameters that take integers and booleans;
 // the rest take strings.
 var (
-	intProps  = map[string]bool{"offset": true, "limit": true, "timeout": true, "tail": true}
+	intProps  = map[string]bool{"offset": true, "limit": true, "timeout": true, "tail": true, "context_lines": true}
 	boolProps = map[string]bool{"replace_all": true, "ignore_case": true, "fixed_strings": true, "stream": true}
 )
 
@@ -175,6 +176,13 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 	case "list_files":
 		return ListFiles(e.Root, a.Path, a.Pattern)
 	case "grep":
+		contextLines, err := contextLinesArg(a.ContextLines)
+		if err != nil {
+			return "", err
+		}
+		if contextLines < 0 || contextLines > maxGrepContextLines {
+			return "", fmt.Errorf("context_lines must be between 0 and %d, got %d", maxGrepContextLines, contextLines)
+		}
 		ignoreCase, err := boolArg("ignore_case", a.IgnoreCase)
 		if err != nil {
 			return "", err
@@ -183,7 +191,7 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return Grep(e.Root, a.Pattern, a.Path, a.Include, ignoreCase, fixedStrings)
+		return GrepWithContext(e.Root, a.Pattern, a.Path, a.Include, ignoreCase, fixedStrings, contextLines)
 	case "bash":
 		secs, err := intArg("timeout", a.Timeout)
 		if err != nil {
@@ -240,6 +248,26 @@ func intArg(name string, n json.Number) (int, error) {
 	v, err := strconv.Atoi(string(n))
 	if err != nil {
 		return 0, fmt.Errorf("%s must be a whole number, got %s", name, n)
+	}
+	return v, nil
+}
+
+func contextLinesArg(raw json.RawMessage) (int, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return 0, nil
+	}
+	var n json.Number
+	if err := json.Unmarshal(raw, &n); err != nil {
+		var value string
+		if json.Unmarshal(raw, &value) == nil {
+			n = json.Number(value)
+		} else {
+			return 0, fmt.Errorf("context_lines must be a whole number from 0 to %d", maxGrepContextLines)
+		}
+	}
+	v, err := intArg("context_lines", n)
+	if err != nil {
+		return 0, fmt.Errorf("context_lines must be a whole number from 0 to %d", maxGrepContextLines)
 	}
 	return v, nil
 }

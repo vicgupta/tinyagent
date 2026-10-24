@@ -182,6 +182,9 @@ func TestGrepSpec(t *testing.T) {
 		if prop, ok := props["include"].(map[string]any); !ok || prop["type"] != "string" {
 			t.Errorf("grep include = %v, want a string property", props["include"])
 		}
+		if prop, ok := props["context_lines"].(map[string]any); !ok || prop["type"] != "integer" || !strings.Contains(prop["description"].(string), "0 to 20") {
+			t.Errorf("grep context_lines = %v, want optional integer range description", props["context_lines"])
+		}
 		for _, r := range p["required"].([]string) {
 			if r == "include" {
 				t.Error("include is required")
@@ -405,6 +408,63 @@ func TestGrepFixedStringsSpec(t *testing.T) {
 		return
 	}
 	t.Fatal("no grep spec")
+}
+
+func TestExecutorGrepContext(t *testing.T) {
+	root := t.TempDir()
+	if err := WriteFile(root, "src/a.go", "one\ntwo\nHIT\nfour\nfive\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFile(root, "src/b.go", "HIT\nlast"); err != nil {
+		t.Fatal(err)
+	}
+	e := &Executor{Root: root}
+	call := func(args string) string {
+		return e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: args}})
+	}
+	if got := call(`{"pattern":"HIT","path":"src/a.go","context_lines":1}`); got != "src/a.go-2- two\nsrc/a.go:3: HIT\nsrc/a.go-4- four" {
+		t.Errorf("middle context = %q", got)
+	}
+	if got := call(`{"pattern":"HIT","path":"src","context_lines":1}`); got != "src/a.go-2- two\nsrc/a.go:3: HIT\nsrc/a.go-4- four\n--\nsrc/b.go:1: HIT\nsrc/b.go-2- last" {
+		t.Errorf("file boundaries = %q", got)
+	}
+	if got := call(`{"pattern":"HIT","path":"src/a.go","context_lines":0}`); got != "src/a.go:3: HIT" {
+		t.Errorf("zero context = %q", got)
+	}
+	for _, val := range []string{"-1", "21", "1.5", `"bad"`, "9223372036854775808"} {
+		if got := call(`{"pattern":"HIT","context_lines":` + val + `}`); !strings.HasPrefix(got, "error: context_lines must") {
+			t.Errorf("invalid context %s = %q", val, got)
+		}
+	}
+	for _, val := range []string{"0", "20", `"2"`, "null"} {
+		if got := call(`{"pattern":"HIT","context_lines":` + val + `}`); strings.HasPrefix(got, "error:") {
+			t.Errorf("valid context %s = %q", val, got)
+		}
+	}
+}
+
+func TestGrepContextMergesAndCaps(t *testing.T) {
+	root := t.TempDir()
+	if err := WriteFile(root, "dense.txt", "a\nHIT\nHIT\nHIT\nz\n"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := GrepWithContext(root, "HIT", "dense.txt", "", false, false, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "dense.txt-1- a\ndense.txt:2: HIT\ndense.txt:3: HIT\ndense.txt:4: HIT\ndense.txt-5- z" {
+		t.Errorf("merged context = %q", got)
+	}
+	if err := WriteFile(root, "many.txt", strings.Repeat("HIT\n", 1000)); err != nil {
+		t.Fatal(err)
+	}
+	got, err = GrepWithContext(root, "HIT", "many.txt", "", false, false, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "results/context may be incomplete") {
+		t.Errorf("context budget notice missing")
+	}
 }
 
 func TestBash(t *testing.T) {
