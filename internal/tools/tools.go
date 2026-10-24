@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -19,6 +20,17 @@ type Executor struct {
 	Root           string // absolute working directory
 	BashTimeout    time.Duration
 	MaxOutputChars int // 0 = unlimited
+	// MaxProcesses bounds concurrently running background processes
+	// (0 = DefaultMaxProcesses).
+	MaxProcesses int
+	// ProcessBufferBytes caps the output kept per background process
+	// (0 = DefaultProcessBufferBytes); older output is dropped.
+	ProcessBufferBytes int
+	// Stream receives bash output as it is produced when a call sets
+	// stream: true. nil discards it (the result is unchanged either way).
+	Stream io.Writer
+
+	procs registry
 }
 
 // maxBashTimeoutSeconds caps the per-call bash timeout a model may request.
@@ -38,6 +50,9 @@ type args struct {
 	ReplaceAll   json.RawMessage `json:"replace_all"`
 	IgnoreCase   json.RawMessage `json:"ignore_case"`
 	FixedStrings json.RawMessage `json:"fixed_strings"`
+	Stream       json.RawMessage `json:"stream"`
+	ID           string          `json:"id"`
+	Tail         json.Number     `json:"tail"`
 }
 
 // Specs returns the OpenAI tool definitions for all tools.
@@ -53,8 +68,14 @@ func Specs() []model.ToolSpec {
 			props{"path": "Directory (default .)", "pattern": "Optional glob pattern"}),
 		spec("grep", "Search files recursively for a Go regular expression (default), or literal text with fixed_strings: true. Returns file:line: content.",
 			props{"pattern": "Go regular expression by default; literal text when fixed_strings is true", "path": "File or directory to search (default .)", "include": "Optional glob to filter files, e.g. *.go (a glob with / matches paths relative to path)", "ignore_case": "Optional: match file contents case-insensitively (default false)", "fixed_strings": "Optional: treat the entire pattern as literal text instead of a regular expression (default false)"}, "pattern"),
-		spec("bash", "Run a command with bash -c in the working directory. Each call is a fresh process. Returns the exit code and combined stdout/stderr.",
-			props{"command": "Shell command", "timeout": "Optional timeout in seconds for this command (default: the configured bash timeout, max 600)"}, "command"),
+		spec("bash", "Run a command with bash -c in the working directory and wait for it to finish. Each call is a fresh process. Returns the exit code and combined stdout/stderr. For servers, watchers, or anything long-running, use start_process instead.",
+			props{"command": "Shell command", "timeout": "Optional timeout in seconds for this command (default: the configured bash timeout, max 600)", "stream": "Optional: also show output to the user live as it is produced (default false); the returned result is the same"}, "command"),
+		spec("start_process", "Start a command with bash -c in the background, in the working directory, and return its process id plus its first output. It keeps running across steps until stop_process or the end of the run.",
+			props{"command": "Shell command, e.g. a dev server or watch mode"}, "command"),
+		spec("read_process", "Return a background process's output produced since the last read (never repeated), and whether it is still running.",
+			props{"id": "Process id from start_process", "timeout": "Optional milliseconds to wait for new output if there is none yet (default 0, max 60000)", "tail": "Optional: return only the last N lines of the new output"}, "id"),
+		spec("stop_process", "Kill a background process and all its children, and return its exit status and unread output.",
+			props{"id": "Process id from start_process", "tail": "Optional: return only the last N lines of the unread output"}, "id"),
 	}
 }
 
@@ -63,8 +84,8 @@ type props map[string]string
 // intProps and boolProps are the parameters that take integers and booleans;
 // the rest take strings.
 var (
-	intProps  = map[string]bool{"offset": true, "limit": true, "timeout": true}
-	boolProps = map[string]bool{"replace_all": true, "ignore_case": true, "fixed_strings": true}
+	intProps  = map[string]bool{"offset": true, "limit": true, "timeout": true, "tail": true}
+	boolProps = map[string]bool{"replace_all": true, "ignore_case": true, "fixed_strings": true, "stream": true}
 )
 
 func spec(name, desc string, p props, required ...string) model.ToolSpec {
@@ -155,7 +176,36 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 		if secs > 0 {
 			timeout = time.Duration(secs) * time.Second
 		}
-		return Bash(ctx, e.Root, a.Command, timeout)
+		stream, err := boolArg("stream", a.Stream)
+		if err != nil {
+			return "", err
+		}
+		var live io.Writer
+		if stream {
+			live = e.Stream
+		}
+		return BashStream(ctx, e.Root, a.Command, timeout, live)
+	case "start_process":
+		return e.StartProcess(a.Command)
+	case "read_process":
+		ms, err := intArg("timeout", a.Timeout)
+		if err != nil {
+			return "", err
+		}
+		tail, err := intArg("tail", a.Tail)
+		if err != nil {
+			return "", err
+		}
+		return e.ReadProcess(ctx, a.ID, ms, tail)
+	case "stop_process":
+		tail, err := intArg("tail", a.Tail)
+		if err != nil {
+			return "", err
+		}
+		if tail < 0 {
+			return "", fmt.Errorf("tail must be positive, got %d", tail)
+		}
+		return e.StopProcess(a.ID, tail)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}

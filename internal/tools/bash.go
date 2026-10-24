@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"time"
 )
@@ -12,6 +13,12 @@ import (
 // Bash runs command in a fresh `bash -c` process in root. On timeout the
 // whole process group is killed so background children do not linger.
 func Bash(ctx context.Context, root, command string, timeout time.Duration) (string, error) {
+	return BashStream(ctx, root, command, timeout, nil)
+}
+
+// BashStream is Bash that also copies output to live, if non-nil, as it is
+// produced. The returned result is the same as Bash's.
+func BashStream(ctx context.Context, root, command string, timeout time.Duration, live io.Writer) (string, error) {
 	if timeout <= 0 {
 		timeout = 120 * time.Second
 	}
@@ -21,8 +28,12 @@ func Bash(ctx context.Context, root, command string, timeout time.Duration) (str
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)
 	cmd.Dir = root
 	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
+	var w io.Writer = &buf
+	if live != nil {
+		w = io.MultiWriter(&buf, live)
+	}
+	cmd.Stdout = w
+	cmd.Stderr = w
 	cmd.WaitDelay = 2 * time.Second
 	setProcessGroup(cmd)
 
