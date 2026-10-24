@@ -84,6 +84,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `-o, --output` | — | Trajectory JSON, rewritten after every step |
 | `-v, --verbose` | off | Print tool calls and their outputs |
 | `--no-stream` | off | Wait for each full response instead of streaming it |
+| `--no-agents-md` | off | Don't append `<cwd>/AGENTS.md` (project instructions, capped at 32KB) to the system prompt |
 | `--version` | | Print the version and exit |
 | `--update` | | Replace this binary with the latest GitHub release (checksum-verified) and exit |
 
