@@ -110,7 +110,9 @@ func run() int {
 	}
 	m, err := model.New(modelName, onText)
 	if err != nil {
-		return fail(err)
+		code := fail(err)
+		printHint(os.Stderr, modelName, err.Error())
+		return code
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -143,12 +145,26 @@ func run() int {
 	if t.ExitStatus == agent.StatusSubmitted || t.ExitStatus == agent.StatusCompleted {
 		return 0
 	}
-	fmt.Fprintf(os.Stderr, "%s after %d steps", t.ExitStatus, t.Steps)
-	if t.ExitStatus == agent.StatusError {
-		fmt.Fprintf(os.Stderr, ": %s", t.Submission)
-	}
-	fmt.Fprintln(os.Stderr)
+	reportFailure(os.Stderr, modelName, t)
 	return 1
+}
+
+// reportFailure prints how an unsuccessful run ended and, for an error that
+// looks like a setup problem, a hint on fixing it.
+func reportFailure(w io.Writer, modelName string, t *trajectory.Trajectory) {
+	fmt.Fprintf(w, "%s after %d steps", t.ExitStatus, t.Steps)
+	if t.ExitStatus != agent.StatusError {
+		fmt.Fprintln(w)
+		return
+	}
+	fmt.Fprintf(w, ": %s\n", t.Submission)
+	printHint(w, modelName, t.Submission)
+}
+
+func printHint(w io.Writer, modelName, errMsg string) {
+	if h := model.Hint(modelName, errMsg); h != "" {
+		fmt.Fprintln(w, "hint:", h)
+	}
 }
 
 // applyFlagOverrides copies limit flags into cfg, but only the ones given
