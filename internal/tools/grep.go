@@ -69,7 +69,7 @@ func Grep(root, pattern, path, include string, ignoreCase, fixedStrings bool) (s
 			return nil
 		}
 		data, err := os.ReadFile(p)
-		if err != nil || bytes.IndexByte(data[:min(len(data), 8000)], 0) >= 0 {
+		if err != nil || isBinary(data) {
 			return nil
 		}
 		sc := bufio.NewScanner(bytes.NewReader(data))

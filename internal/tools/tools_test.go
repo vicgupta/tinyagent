@@ -517,6 +517,44 @@ func TestReadFileRange(t *testing.T) {
 	}
 }
 
+func TestExecutorReadFileBinaryAndText(t *testing.T) {
+	root := t.TempDir()
+	files := map[string]string{
+		"binary.bin":      "header\x00contents",
+		"later-null.bin":  strings.Repeat("a", 7999) + "\x00contents",
+		"after-limit.bin": strings.Repeat("a", 8000) + "\x00contents",
+		"text.txt":        "plain text\n",
+		"utf8.txt":        "café 世界\n",
+		"empty.txt":       "",
+	}
+	for path, content := range files {
+		if err := os.WriteFile(filepath.Join(root, path), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e := &Executor{Root: root}
+	call := func(args string) string {
+		return e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "read_file", Arguments: args}})
+	}
+	for _, tc := range []struct {
+		name, args, want string
+	}{
+		{"binary without range", `{"path":"binary.bin"}`, "error: binary.bin looks like a binary file (15 bytes); use bash (e.g. file, xxd | head) to inspect it"},
+		{"binary with range", `{"path":"binary.bin","offset":1,"limit":1}`, "error: binary.bin looks like a binary file (15 bytes); use bash (e.g. file, xxd | head) to inspect it"},
+		{"binary at end of check window", `{"path":"later-null.bin"}`, "error: later-null.bin looks like a binary file (8008 bytes); use bash (e.g. file, xxd | head) to inspect it"},
+		{"NUL after check boundary", `{"path":"after-limit.bin"}`, strings.Repeat("a", 8000) + "\x00contents"},
+		{"text", `{"path":"text.txt"}`, "plain text\n"},
+		{"UTF-8 text", `{"path":"utf8.txt"}`, "café 世界\n"},
+		{"empty", `{"path":"empty.txt"}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := call(tc.args); got != tc.want {
+				t.Errorf("read_file = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestExecutorReadFileRangeArgs(t *testing.T) {
 	root := t.TempDir()
 	var b strings.Builder

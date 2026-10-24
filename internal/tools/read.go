@@ -25,6 +25,9 @@ func ReadFile(root, path string, offset, limit int) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if isBinary(b) {
+		return "", fmt.Errorf("%s looks like a binary file (%d bytes); use bash (e.g. file, xxd | head) to inspect it", path, len(b))
+	}
 	s := string(b)
 	if offset <= 1 && limit == 0 {
 		return s, nil
