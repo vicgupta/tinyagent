@@ -110,6 +110,22 @@ func TestNoUserConfigDir(t *testing.T) {
 	}
 }
 
+func TestConfigSetsModel(t *testing.T) {
+	p := fakeUserDirs(t)
+	write(t, p, "model: ollama/llama3.1\n")
+	if cfg, err := load(t, ""); err != nil || cfg.Model != "ollama/llama3.1" {
+		t.Errorf("user config: load = %+v, %v; want model ollama/llama3.1", cfg, err)
+	}
+	explicit := filepath.Join(t.TempDir(), "ci.yaml")
+	write(t, explicit, "model: anthropic/claude-sonnet-4\n")
+	if cfg, err := load(t, explicit); err != nil || cfg.Model != "anthropic/claude-sonnet-4" {
+		t.Errorf("explicit config: load = %+v, %v; want model anthropic/claude-sonnet-4", cfg, err)
+	}
+	if Default().Model != "" {
+		t.Errorf("Default().Model = %q, want empty so the CLI's fallbacks apply", Default().Model)
+	}
+}
+
 func TestUnknownKeyFailsNamingPathAndKey(t *testing.T) {
 	p := fakeUserDirs(t)
 	write(t, p, "cost_limit: 2.0\nstep_limt: 20\n")

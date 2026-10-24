@@ -77,7 +77,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 |---|---|---|
 | `-h, --help` | | Print usage to stdout and exit |
 | `-t, --task` | — | Task prompt (required); `-` reads it from stdin |
-| `-m, --model` | `$AGENT_MODEL` or `openai/gpt-4o` | `<provider>/<model>`; no `/` means openai. Providers: openai, openrouter, anthropic, ollama, codex |
+| `-m, --model` | `$AGENT_MODEL`, else config `model`, else `openai/gpt-4o` | `<provider>/<model>`; no `/` means openai. Providers: openai, openrouter, anthropic, ollama, codex |
 | `-c, --config` | user config, else built-in | YAML config file; see [Config](#config) |
 | `--cwd` | `.` | Root directory; tools can't reach outside it |
 | `--step-limit` | 0 (unlimited) | Max model calls |
@@ -115,7 +115,10 @@ The lookup order is: `-c PATH` if given (a missing or unreadable file is an erro
 
 Every key is optional, but an unrecognized key (a typo like `step_limt`) is an error naming the file and the key, rather than silently ignored. Command-line flags override the file.
 
+`model` saves a default model, so `tinyagent -t "fix the failing test"` needs no `-m`. The model is chosen in this order: `-m`/`--model` if given (even `-m openai/gpt-4o`), then a nonempty `$AGENT_MODEL`, then a nonempty `model` in the config, then `openai/gpt-4o`.
+
 ```yaml
+model: ollama/llama3.1    # same <provider>/<model> syntax as -m
 system_prompt: |          # {{cwd}} and {{os}} are substituted
   You are a coding agent...
 step_limit: 50

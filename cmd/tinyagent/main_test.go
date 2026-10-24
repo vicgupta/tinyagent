@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"io"
@@ -139,7 +140,7 @@ const wantUsage = `Usage: tinyagent -t "<prompt>" [flags]    (or --task "<prompt
   -h, --help              show this help and exit
 Task:
   -t, --task string       task/prompt (required); "-" reads it from stdin
-  -m, --model string      provider/model (default "openai/gpt-4o")
+  -m, --model string      provider/model; if unset, $AGENT_MODEL, then the config's model (default "openai/gpt-4o")
   -c, --config path       YAML config (default: user config if present, else built-in)
       --cwd dir           working directory (default ".")
 Limits:
@@ -214,7 +215,7 @@ func TestUsage(t *testing.T) {
 func TestUsageShowsModelDefaultFromEnv(t *testing.T) {
 	t.Setenv("AGENT_MODEL", "ollama/llama3.1")
 	_, got, _ := runWith(t, "--help")
-	if !strings.Contains(got, `  -m, --model string      provider/model (default "ollama/llama3.1")`+"\n") {
+	if !strings.Contains(got, `  -m, --model string      provider/model; if unset, $AGENT_MODEL, then the config's model (default "ollama/llama3.1")`+"\n") {
 		t.Errorf("model row doesn't show $AGENT_MODEL:\n%s", got)
 	}
 }
@@ -470,5 +471,89 @@ func TestApplyFlagOverridesZeroClearsConfig(t *testing.T) {
 	applyFlagOverrides(fs, &cfg, o.stepLimit, o.costLimit, o.timeLimit)
 	if cfg.StepLimit != 0 || cfg.CostLimit != 0 {
 		t.Errorf("step limit %d, cost limit %v; want both 0", cfg.StepLimit, cfg.CostLimit)
+	}
+}
+
+func TestResolveModel(t *testing.T) {
+	cases := []struct {
+		name, env, cfg string
+		args           []string
+		want           string
+	}{
+		{"built-in default", "", "", nil, "openai/gpt-4o"},
+		{"config", "", "ollama/llama3.1", nil, "ollama/llama3.1"},
+		{"env wins over config", "anthropic/claude-sonnet-4", "ollama/llama3.1", nil, "anthropic/claude-sonnet-4"},
+		{"--model wins over env and config", "anthropic/claude-sonnet-4", "ollama/llama3.1", []string{"--model", "openrouter/x"}, "openrouter/x"},
+		{"-m wins over env and config", "anthropic/claude-sonnet-4", "ollama/llama3.1", []string{"-m", "openrouter/x"}, "openrouter/x"},
+		{"explicit built-in default wins over config", "", "ollama/llama3.1", []string{"-m", "openai/gpt-4o"}, "openai/gpt-4o"},
+		{"explicit env value wins over config", "ollama/llama3.1", "codex/gpt-5", []string{"--model", "ollama/llama3.1"}, "ollama/llama3.1"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("AGENT_MODEL", c.env)
+			var o options
+			fs := newFlagSet(&o)
+			if err := fs.Parse(c.args); err != nil {
+				t.Fatal(err)
+			}
+			if got := resolveModel(fs, o.modelName, c.cfg); got != c.want {
+				t.Errorf("resolveModel = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestConfigModelReachesRun(t *testing.T) {
+	t.Setenv("AGENT_MODEL", "")
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("model: openai/from-config\ncost_limit: 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "run.json")
+	var requests atomic.Int32
+	srv := fakeOpenAI(t, &requests)
+	t.Setenv("OPENAI_BASE_URL", srv.URL)
+	t.Setenv("OPENAI_API_KEY", "fake")
+	var code int
+	stderr := captureStderr(t, func() {
+		code, _, _ = runWith(t, "-t", "x", "--no-stream", "--cwd", dir, "-c", cfgPath, "-o", out)
+	})
+	if code != 0 || requests.Load() != 1 {
+		t.Fatalf("exit = %d, requests = %d; want 0, 1; stderr:\n%s", code, requests.Load(), stderr)
+	}
+	if !strings.Contains(stderr, "warning: no pricing available for openai/from-config;") {
+		t.Errorf("pricing warning doesn't name the config's model; stderr:\n%s", stderr)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tr trajectory.Trajectory
+	if err := json.Unmarshal(b, &tr); err != nil {
+		t.Fatal(err)
+	}
+	if tr.Model != "openai/from-config" {
+		t.Errorf("trajectory model = %q, want openai/from-config", tr.Model)
+	}
+}
+
+func TestHelpIgnoresMalformedUserConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	p, err := config.DefaultPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("model: [not a string\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, got, _ := runWith(t, "--help"); code != 0 || !strings.Contains(got, "the config's model") {
+		t.Errorf("--help exit = %d, want 0 and the model fallback documented:\n%s", code, got)
 	}
 }

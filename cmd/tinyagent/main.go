@@ -52,7 +52,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.showHelp, "h", false, "shorthand for --help")
 	fs.StringVar(&o.task, "task", "", `task/prompt (required); "-" reads it from stdin`)
 	fs.StringVar(&o.task, "t", "", "shorthand for --task")
-	fs.StringVar(&o.modelName, "model", defaultModel(), "provider/model")
+	fs.StringVar(&o.modelName, "model", defaultModel(), "provider/model; if unset, $AGENT_MODEL, then the config's model")
 	fs.StringVar(&o.modelName, "m", defaultModel(), "shorthand for --model")
 	fs.StringVar(&o.configPath, "config", "", "YAML config (default: user config if present, else built-in)")
 	fs.StringVar(&o.configPath, "c", "", "shorthand for --config")
@@ -129,6 +129,7 @@ func run() int {
 		return fail(err)
 	}
 	applyFlagOverrides(fs, &cfg, o.stepLimit, o.costLimit, o.timeLimit)
+	o.modelName = resolveModel(fs, o.modelName, cfg.Model)
 	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 
 	root, err := filepath.Abs(o.cwd)
@@ -340,6 +341,26 @@ func applyFlagOverrides(fs *flag.FlagSet, cfg *config.AgentConfig, stepLimit int
 	})
 }
 
+// resolveModel picks the model: an explicit -m/--model, else $AGENT_MODEL,
+// else the config's model, else the built-in default.
+func resolveModel(fs *flag.FlagSet, flagModel, cfgModel string) string {
+	explicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "model" || f.Name == "m" {
+			explicit = true
+		}
+	})
+	switch {
+	case explicit:
+		return flagModel
+	case os.Getenv("AGENT_MODEL") != "":
+		return os.Getenv("AGENT_MODEL")
+	case cfgModel != "":
+		return cfgModel
+	}
+	return builtinModel
+}
+
 // currentVersion prefers the -ldflags stamp, then the module version that
 // `go install pkg@vX` records, then "dev".
 func currentVersion() string {
@@ -367,11 +388,15 @@ func readTask(task string, stdin io.Reader) (string, error) {
 	return task, nil
 }
 
+const builtinModel = "openai/gpt-4o"
+
+// defaultModel is the --model default shown in help: $AGENT_MODEL, else the
+// built-in model. resolveModel applies the config's model in between.
 func defaultModel() string {
 	if v := os.Getenv("AGENT_MODEL"); v != "" {
 		return v
 	}
-	return "openai/gpt-4o"
+	return builtinModel
 }
 
 func fail(err error) int {
