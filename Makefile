@@ -13,12 +13,16 @@ test:
 
 dist:
 	@mkdir -p dist
+	@rm -f dist/SHA256SUMS
 	@for p in $(PLATFORMS); do \
 		os=$${p%/*}; arch=$${p#*/}; ext=; [ $$os = windows ] && ext=.exe; \
 		echo "dist/$(BIN)-$$os-$$arch$$ext"; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags="$(LDFLAGS)" \
 			-o dist/$(BIN)-$$os-$$arch$$ext ./cmd/$(BIN) || exit 1; \
 	done
+	@cd dist && { command -v sha256sum >/dev/null 2>&1 \
+		&& sha256sum $(BIN)-* > SHA256SUMS \
+		|| shasum -a 256 $(BIN)-* > SHA256SUMS; }
 
 clean:
 	rm -rf $(BIN) dist
