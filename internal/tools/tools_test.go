@@ -90,7 +90,7 @@ func TestListFiles(t *testing.T) {
 
 func TestGrep(t *testing.T) {
 	root := setupTree(t)
-	out, err := Grep(root, "TODO", "")
+	out, err := Grep(root, "TODO", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,12 +98,67 @@ func TestGrep(t *testing.T) {
 	if out != want {
 		t.Errorf("Grep = %q, want %q", out, want)
 	}
-	if out, _ := Grep(root, "zzz", "pkg"); out != "no matches" {
+	if out, _ := Grep(root, "zzz", "pkg", ""); out != "no matches" {
 		t.Errorf("no-match grep = %q", out)
 	}
-	if _, err := Grep(root, "(", ""); err == nil {
+	if _, err := Grep(root, "(", "", ""); err == nil {
 		t.Error("bad regexp accepted")
 	}
+}
+
+func TestGrepInclude(t *testing.T) {
+	root := setupTree(t)
+	if out, err := Grep(root, "TODO", "", "*.go"); err != nil || out != "pkg/util.go:2: // TODO fix" {
+		t.Errorf("include *.go = %q, %v", out, err)
+	}
+	if out, _ := Grep(root, "TODO", "", "*.txt"); out != "pkg/util.txt:1: TODO later" {
+		t.Errorf("include *.txt = %q", out)
+	}
+	if out, _ := Grep(root, "package", "", "pkg/*/*.go"); out != "pkg/sub/deep.go:1: package sub" {
+		t.Errorf("include pkg/*/*.go = %q", out)
+	}
+	if out, _ := Grep(root, "package", "pkg", "sub/*.go"); out != "pkg/sub/deep.go:1: package sub" {
+		t.Errorf("include sub/*.go under pkg = %q", out)
+	}
+	if out, _ := Grep(root, "TODO", "", "*.md"); out != "no matches" {
+		t.Errorf("include *.md = %q", out)
+	}
+	if _, err := Grep(root, "TODO", "", "["); err == nil || !strings.Contains(err.Error(), `bad include pattern "["`) {
+		t.Errorf("bad include err = %v", err)
+	}
+	// A single-file path ignores include.
+	if out, _ := Grep(root, "TODO", "pkg/util.txt", "*.go"); out != "pkg/util.txt:1: TODO later" {
+		t.Errorf("single file with include = %q", out)
+	}
+	all, _ := Grep(root, "TODO", "", "")
+	if out, _ := Grep(root, "TODO", "", ""); out != all {
+		t.Errorf("empty include changed results: %q", out)
+	}
+	e := &Executor{Root: root}
+	out := e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: `{"pattern":"TODO","include":"*.go"}`}})
+	if out != "pkg/util.go:2: // TODO fix" {
+		t.Errorf("executor grep include = %q", out)
+	}
+}
+
+func TestGrepSpec(t *testing.T) {
+	for _, s := range Specs() {
+		if s.Function.Name != "grep" {
+			continue
+		}
+		p := s.Function.Parameters
+		props := p["properties"].(map[string]any)
+		if prop, ok := props["include"].(map[string]any); !ok || prop["type"] != "string" {
+			t.Errorf("grep include = %v, want a string property", props["include"])
+		}
+		for _, r := range p["required"].([]string) {
+			if r == "include" {
+				t.Error("include is required")
+			}
+		}
+		return
+	}
+	t.Fatal("no grep spec")
 }
 
 func TestBash(t *testing.T) {

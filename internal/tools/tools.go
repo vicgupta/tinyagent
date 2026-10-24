@@ -27,6 +27,7 @@ type args struct {
 	OldStr     string          `json:"old_str"`
 	NewStr     string          `json:"new_str"`
 	Pattern    string          `json:"pattern"`
+	Include    string          `json:"include"`
 	Command    string          `json:"command"`
 	Offset     json.Number     `json:"offset"`
 	Limit      json.Number     `json:"limit"`
@@ -45,7 +46,7 @@ func Specs() []model.ToolSpec {
 		spec("list_files", "List directory entries. With a glob pattern (e.g. *.go, or a pattern containing /), search recursively and return matching file paths.",
 			props{"path": "Directory (default .)", "pattern": "Optional glob pattern"}),
 		spec("grep", "Search files recursively for a regular expression. Returns file:line: content.",
-			props{"pattern": "Go regular expression", "path": "File or directory to search (default .)"}, "pattern"),
+			props{"pattern": "Go regular expression", "path": "File or directory to search (default .)", "include": "Optional glob to filter files, e.g. *.go (a glob with / matches paths relative to path)"}, "pattern"),
 		spec("bash", "Run a command with bash -c in the working directory. Each call is a fresh process. Returns the exit code and combined stdout/stderr.",
 			props{"command": "Shell command"}, "command"),
 	}
@@ -127,7 +128,7 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 	case "list_files":
 		return ListFiles(e.Root, a.Path, a.Pattern)
 	case "grep":
-		return Grep(e.Root, a.Pattern, a.Path)
+		return Grep(e.Root, a.Pattern, a.Path, a.Include)
 	case "bash":
 		return Bash(ctx, e.Root, a.Command, e.BashTimeout)
 	default:
