@@ -16,6 +16,10 @@ import (
 )
 
 type AgentConfig struct {
+	// Model is the provider/model used when neither -m nor $AGENT_MODEL sets
+	// one. "" falls back to the built-in default.
+	Model string `yaml:"model"`
+
 	SystemPrompt string  `yaml:"system_prompt"`
 	StepLimit    int     `yaml:"step_limit"`
 	CostLimit    float64 `yaml:"cost_limit"`
