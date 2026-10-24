@@ -135,19 +135,26 @@ func spec(name, desc string, p props, required ...string) model.ToolSpec {
 // Run executes one tool call and returns text for the model. Tool failures are
 // reported as text so the model can recover; Run never returns an error.
 func (e *Executor) Run(ctx context.Context, call model.ToolCall) string {
+	out, _ := e.RunWithError(ctx, call)
+	return out
+}
+
+// RunWithError executes a tool call and reports whether execution failed.
+// The returned text is still suitable for passing back to the model.
+func (e *Executor) RunWithError(ctx context.Context, call model.ToolCall) (string, bool) {
 	// External tools are never dispatched in read-only mode: the check in
 	// run() below then rejects them with the read-only error, matching
 	// Catalog(), which also excludes them there.
 	if !e.ReadOnly && e.ExternalCall != nil {
 		if out, ok := e.ExternalCall(ctx, call.Function.Name, call.Function.Arguments); ok {
-			return truncate(out, e.MaxOutputChars)
+			return truncate(out, e.MaxOutputChars), externalError(out)
 		}
 	}
 	out, err := e.run(ctx, call.Function.Name, call.Function.Arguments)
 	if err != nil {
 		out = "error: " + err.Error()
 	}
-	return truncate(out, e.MaxOutputChars)
+	return truncate(out, e.MaxOutputChars), err != nil
 }
 
 // Catalog returns the fixed built-in and explicitly configured external tools.
@@ -160,6 +167,13 @@ func (e *Executor) Catalog() []model.ToolSpec {
 	}
 	out := Specs()
 	return append(out, e.ExternalSpecs...)
+}
+
+// externalError reports whether an external tool's output is a failure. The
+// MCP client returns failures as text prefixed "error: " (call or protocol
+// failures) or "tool error: " (results the server flagged with isError).
+func externalError(out string) bool {
+	return strings.HasPrefix(out, "error: ") || strings.HasPrefix(out, "tool error: ")
 }
 
 func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {

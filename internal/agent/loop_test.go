@@ -143,6 +143,70 @@ func TestRunGrepContextNeedsNoFollowupRead(t *testing.T) {
 	}
 }
 
+func TestRunEmitsAssistantAndToolEvents(t *testing.T) {
+	m := &scripted{replies: []model.Message{
+		{Role: "assistant", Content: "checking", ToolCalls: []model.ToolCall{call("denied", "write_file", `{"path":"x","content":"bad"}`)}},
+		{Role: "assistant", Content: "Review complete"},
+	}}
+	a := newAgent(t, m)
+	a.Tools.ReadOnly = true
+	type emitted struct {
+		kind   string
+		fields map[string]any
+	}
+	var got []emitted
+	a.OnEvent = func(kind string, fields map[string]any) { got = append(got, emitted{kind, fields}) }
+	tr := a.Run(context.Background(), "review")
+	if tr.ExitStatus != StatusCompleted {
+		t.Fatalf("status = %s", tr.ExitStatus)
+	}
+	want := []string{"assistant.message", "tool.call", "tool.result", "assistant.message"}
+	if len(got) != len(want) {
+		t.Fatalf("events = %#v", got)
+	}
+	for i, kind := range want {
+		if got[i].kind != kind {
+			t.Errorf("event %d = %s, want %s", i, got[i].kind, kind)
+		}
+	}
+	if got[1].fields["id"] != "denied" || got[2].fields["id"] != "denied" || got[2].fields["is_error"] != true || !strings.Contains(got[2].fields["output"].(string), "read-only mode") {
+		t.Errorf("denied call/result events = %#v / %#v", got[1].fields, got[2].fields)
+	}
+}
+
+func TestRunDispatchesExternalToolsWithEvents(t *testing.T) {
+	m := &scripted{replies: []model.Message{
+		{Role: "assistant", ToolCalls: []model.ToolCall{call("ok", "docs__search", `{"q":"x"}`), call("bad", "docs__search", `{}`)}},
+		{Role: "assistant", Content: "found it"},
+	}}
+	a := newAgent(t, m)
+	a.Tools.ExternalSpecs = []model.ToolSpec{{Type: "function", Function: model.FunctionSpec{Name: "docs__search"}}}
+	a.Tools.ExternalCall = func(_ context.Context, name, raw string) (string, bool) {
+		if name != "docs__search" {
+			return "", false
+		}
+		if raw == `{}` {
+			return "tool error: missing q", true
+		}
+		return "result for " + raw, true
+	}
+	results := map[string]map[string]any{}
+	a.OnEvent = func(kind string, fields map[string]any) {
+		if kind == "tool.result" {
+			results[fields["id"].(string)] = fields
+		}
+	}
+	if tr := a.Run(context.Background(), "search"); tr.ExitStatus != StatusCompleted {
+		t.Fatalf("status = %s", tr.ExitStatus)
+	}
+	if r := results["ok"]; r["output"] != `result for {"q":"x"}` || r["is_error"] != false {
+		t.Errorf("ok result = %#v", r)
+	}
+	if r := results["bad"]; r["output"] != "tool error: missing q" || r["is_error"] != true {
+		t.Errorf("bad result = %#v", r)
+	}
+}
+
 func TestLimits(t *testing.T) {
 	loop := model.Message{Role: "assistant", ToolCalls: []model.ToolCall{call("1", "list_files", `{}`)}}
 	replies := func() []model.Message { return []model.Message{loop, loop, loop, loop, loop} }

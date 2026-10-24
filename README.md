@@ -90,10 +90,36 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--read-only` | config `read_only`, else off | Permit only `read_file`, `list_files`, and `grep`; blocks edits, shell, and process tools. `--read-only=false` explicitly disables it. |
 | `-o, --output` | — | Trajectory JSON, rewritten after every step |
 | `-v, --verbose` | off | Print tool calls and their outputs |
+| `--json` | off | Write machine-readable run events as JSONL to stdout |
 | `--no-stream` | off | Wait for each full response instead of streaming it |
 | `--no-agents-md` | off | Don't append the nearest `AGENTS.md` (at or above `<cwd>`, up to the repo root; capped at 32KB) to the system prompt |
 | `-V, --version` | | Print the version and exit |
 | `--update` | | Replace this binary with the latest GitHub release (checksum-verified) and exit |
+
+### Machine-readable output
+
+`--json` makes stdout a UTF-8 JSONL event stream, with one complete JSON object and newline per event. It can be combined with `--no-stream`, `--read-only`, `--resume`, and `-o` (which still writes the trajectory JSON to its file). In this mode, streamed assistant text and live bash output are represented by events, and `--verbose` has no effect because tool calls and results are already events; the human summary and warnings remain on stderr. Setup failures before a run starts may leave stdout empty.
+
+Every event has a `type`. Event names and fields in schema version 1 are:
+
+| Type | Fields |
+|---|---|
+| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed` |
+| `assistant.message` | `text` (complete assistant message) |
+| `tool.call` | `id`, `name`, `arguments` (decoded JSON value, or a string if malformed) |
+| `tool.result` | `id`, `name`, `output` (same configured truncation as tool output), `is_error` |
+| `compaction` | `step`, `reason`, `stage`, `tokens_before`, `tokens_after`, `elided_messages`, `summarized_messages` |
+| `warning` / `error` | `message` |
+| `result` | `status`, `submission`, cumulative `steps`, `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cost_usd`, invocation `duration_ms` |
+
+When the run starts, the final event is `result`, including for model errors, interruptions, and limit stops. Exit codes are unchanged. `--resume` reports cumulative trajectory accounting; `duration_ms` covers only the current invocation. Event streams can contain prompts, code, and tool output, so handle them with the same care as trajectory files. Credentials and environment dumps are not included.
+
+Consumers should check `schema_version` on `run.started`. Event names and field meanings are stable within a schema version; an incompatible change will increment the version. New optional fields and event types may be added without changing it. The JSONL stream is intended for scripting and CI integrations:
+
+```sh
+tinyagent --json -t "fix the failing test" --cwd . \
+  | jq -c 'select(.type == "result") | {status, submission, cost_usd}'
+```
 
 tinyagent takes no positional arguments: quote the task and pass it with `-t`. A stray word such as `tinyagent "fix the tests"` or `tinyagent -t "..." typo --step-limit 5` is an error (exit 2), rather than silently dropping the flags after it.
 
