@@ -396,3 +396,68 @@ func TestEditFileSpec(t *testing.T) {
 	}
 	t.Fatal("no edit_file spec")
 }
+
+func TestBashSpecTimeoutOptional(t *testing.T) {
+	for _, s := range Specs() {
+		if s.Function.Name != "bash" {
+			continue
+		}
+		params := s.Function.Parameters
+		p := params["properties"].(map[string]any)["timeout"].(map[string]any)
+		if p["type"] != "integer" {
+			t.Errorf("timeout type = %v, want integer", p["type"])
+		}
+		for _, r := range params["required"].([]string) {
+			if r == "timeout" {
+				t.Error("timeout should not be required")
+			}
+		}
+		return
+	}
+	t.Fatal("no bash spec")
+}
+
+func TestBashPerCallTimeout(t *testing.T) {
+	root := t.TempDir()
+	e := &Executor{Root: root, BashTimeout: 30 * time.Second}
+	call := func(args string) string {
+		return e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "bash", Arguments: args}})
+	}
+
+	start := time.Now()
+	out := call(`{"command":"sleep 5","timeout":1}`)
+	if !strings.Contains(out, "timed out after 1s") {
+		t.Errorf("timeout 1: output = %q", out)
+	}
+	if d := time.Since(start); d > 4*time.Second {
+		t.Errorf("timeout 1 took %s", d)
+	}
+
+	if out := call(`{"command":"echo ok","timeout":"2"}`); !strings.Contains(out, "<returncode>0</returncode>") || !strings.Contains(out, "ok") {
+		t.Errorf("string timeout: output = %q", out)
+	}
+
+	// Omitted and 0 both fall back to the configured timeout.
+	short := &Executor{Root: root, BashTimeout: 300 * time.Millisecond}
+	for _, args := range []string{`{"command":"sleep 5"}`, `{"command":"sleep 5","timeout":0}`} {
+		out := short.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "bash", Arguments: args}})
+		if !strings.Contains(out, "timed out after 300ms") {
+			t.Errorf("%s: output = %q", args, out)
+		}
+	}
+
+	marker := filepath.Join(root, "ran")
+	for _, tc := range []struct{ val, want string }{
+		{"-1", "timeout must be between 1 and 600 seconds, got -1"},
+		{"601", "timeout must be between 1 and 600 seconds, got 601"},
+		{`"abc"`, "error:"},
+	} {
+		out := call(fmt.Sprintf(`{"command":"touch %s","timeout":%s}`, marker, tc.val))
+		if !strings.Contains(out, tc.want) {
+			t.Errorf("timeout %s: output = %q, want %q", tc.val, out, tc.want)
+		}
+		if _, err := os.Stat(marker); err == nil {
+			t.Fatalf("timeout %s: command ran", tc.val)
+		}
+	}
+}

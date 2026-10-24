@@ -21,6 +21,9 @@ type Executor struct {
 	MaxOutputChars int // 0 = unlimited
 }
 
+// maxBashTimeoutSeconds caps the per-call bash timeout a model may request.
+const maxBashTimeoutSeconds = 600
+
 type args struct {
 	Path       string          `json:"path"`
 	Content    string          `json:"content"`
@@ -31,6 +34,7 @@ type args struct {
 	Command    string          `json:"command"`
 	Offset     json.Number     `json:"offset"`
 	Limit      json.Number     `json:"limit"`
+	Timeout    json.Number     `json:"timeout"`
 	ReplaceAll json.RawMessage `json:"replace_all"`
 }
 
@@ -48,7 +52,7 @@ func Specs() []model.ToolSpec {
 		spec("grep", "Search files recursively for a regular expression. Returns file:line: content.",
 			props{"pattern": "Go regular expression", "path": "File or directory to search (default .)", "include": "Optional glob to filter files, e.g. *.go (a glob with / matches paths relative to path)"}, "pattern"),
 		spec("bash", "Run a command with bash -c in the working directory. Each call is a fresh process. Returns the exit code and combined stdout/stderr.",
-			props{"command": "Shell command"}, "command"),
+			props{"command": "Shell command", "timeout": "Optional timeout in seconds for this command (default: the configured bash timeout, max 600)"}, "command"),
 	}
 }
 
@@ -57,7 +61,7 @@ type props map[string]string
 // intProps and boolProps are the parameters that take integers and booleans;
 // the rest take strings.
 var (
-	intProps  = map[string]bool{"offset": true, "limit": true}
+	intProps  = map[string]bool{"offset": true, "limit": true, "timeout": true}
 	boolProps = map[string]bool{"replace_all": true}
 )
 
@@ -130,7 +134,18 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 	case "grep":
 		return Grep(e.Root, a.Pattern, a.Path, a.Include)
 	case "bash":
-		return Bash(ctx, e.Root, a.Command, e.BashTimeout)
+		secs, err := intArg("timeout", a.Timeout)
+		if err != nil {
+			return "", err
+		}
+		if secs < 0 || secs > maxBashTimeoutSeconds {
+			return "", fmt.Errorf("timeout must be between 1 and %d seconds, got %d", maxBashTimeoutSeconds, secs)
+		}
+		timeout := e.BashTimeout
+		if secs > 0 {
+			timeout = time.Duration(secs) * time.Second
+		}
+		return Bash(ctx, e.Root, a.Command, timeout)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
