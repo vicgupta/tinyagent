@@ -85,6 +85,11 @@ type Trajectory struct {
 	ConsecutiveFormatErrors int    `json:"consecutive_format_errors,omitempty"`
 	FormatErrorMessages     []int  `json:"format_error_messages,omitempty"`
 	LastFormatError         string `json:"last_format_error,omitempty"`
+	// StopContinuations counts the times stop hooks sent the model back to
+	// work; it is restored on resume. StopReason is the last stop-hook
+	// feedback of a VerificationFailed run.
+	StopContinuations int    `json:"stop_continuations,omitempty"`
+	StopReason        string `json:"stop_reason,omitempty"`
 	// Resume records the checkpoint this run continued, when it did.
 	Resume *ResumeInfo `json:"resume,omitempty"`
 

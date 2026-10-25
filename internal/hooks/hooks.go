@@ -1,4 +1,5 @@
-// Package hooks runs user-configured commands before and after tool calls.
+// Package hooks runs user-configured commands before and after tool calls,
+// and stop hooks that verify a run before it ends successfully.
 // Hooks are trusted local executables from the user's config; they are a
 // guardrail and automation point, not a sandbox.
 package hooks
@@ -26,10 +27,13 @@ const (
 	SchemaVersion  = 1
 	PreTool        = "pre_tool"
 	PostTool       = "post_tool"
+	Stop           = "stop"
 	defaultTimeout = 30
 	maxTimeout     = 600
 	maxCapture     = 64 << 10 // bytes kept from each of a hook's stdout and stderr
-	MaxFeedback    = 8 << 10  // bytes of one post_tool hook's feedback
+	MaxFeedback    = 8 << 10  // bytes of one post_tool or stop hook's feedback
+	// MaxStopContinuationsLimit is the largest allowed max_stop_continuations.
+	MaxStopContinuationsLimit = 50
 )
 
 // Decisions reported for each hook run.
@@ -38,7 +42,13 @@ const (
 	Deny     = "deny"
 	Feedback = "feedback"
 	Error    = "error"
+	// Continue is a stop hook's request to send the model back to work.
+	Continue = "continue"
 )
+
+// defaultStopReason is the feedback for a stop hook that asks to continue
+// without giving a reason.
+const defaultStopReason = "the stop hook did not accept the result and gave no reason"
 
 type hook struct {
 	config.Hook
@@ -49,16 +59,24 @@ type hook struct {
 
 // Runner holds the validated hooks for one run. A nil Runner runs nothing.
 type Runner struct {
-	pre, post []hook
+	pre, post, stop []hook
+	maxStop         int
 }
 
 // New validates cfg, read from the config file at path, and returns its
 // hooks, or nil when none are configured.
 func New(cfg config.Hooks, path string) (*Runner, error) {
-	if len(cfg.PreTool) == 0 && len(cfg.PostTool) == 0 {
+	maxStop := config.DefaultMaxStopContinuations
+	if n := cfg.MaxStopContinuations; n != nil {
+		if *n < 1 || *n > MaxStopContinuationsLimit {
+			return nil, fmt.Errorf("config %s: hooks.max_stop_continuations must be between 1 and %d, got %d", path, MaxStopContinuationsLimit, *n)
+		}
+		maxStop = *n
+	}
+	if len(cfg.PreTool) == 0 && len(cfg.PostTool) == 0 && len(cfg.Stop) == 0 {
 		return nil, nil
 	}
-	r := &Runner{}
+	r := &Runner{maxStop: maxStop}
 	var err error
 	if r.pre, err = compile(cfg.PreTool, PreTool, path); err != nil {
 		return nil, err
@@ -66,7 +84,21 @@ func New(cfg config.Hooks, path string) (*Runner, error) {
 	if r.post, err = compile(cfg.PostTool, PostTool, path); err != nil {
 		return nil, err
 	}
+	if r.stop, err = compile(cfg.Stop, Stop, path); err != nil {
+		return nil, err
+	}
 	return r, nil
+}
+
+// HasStop reports whether any stop hooks are configured.
+func (r *Runner) HasStop() bool { return r != nil && len(r.stop) > 0 }
+
+// MaxStopContinuations is the per-run cap on stop-hook continuations.
+func (r *Runner) MaxStopContinuations() int {
+	if r == nil || r.maxStop == 0 {
+		return config.DefaultMaxStopContinuations
+	}
+	return r.maxStop
 }
 
 func compile(defs []config.Hook, event, path string) ([]hook, error) {
@@ -81,6 +113,9 @@ func compile(defs []config.Hook, event, path string) ([]hook, error) {
 		}
 		if !filepath.IsAbs(def.Command) {
 			return nil, fail("command %q must be an absolute path", def.Command)
+		}
+		if def.Match != "" && event == Stop {
+			return nil, fail("match does not apply to stop hooks")
 		}
 		if def.Match != "" {
 			re, err := regexp.Compile("^(?:" + def.Match + ")$")
@@ -138,17 +173,40 @@ type payload struct {
 	IsError *bool   `json:"is_error,omitempty"`
 }
 
+// StopInput describes the run outcome a stop hook receives as JSON on stdin.
+type StopInput struct {
+	// Status is the status the run would end with: Submitted or Completed.
+	Status     string `json:"status"`
+	Submission string `json:"submission"`
+	// StructuredOutput is the validated result of an --output-schema run.
+	StructuredOutput json.RawMessage `json:"structured_output,omitempty"`
+	Root             string          `json:"root"`
+	ReadOnly         bool            `json:"read_only"`
+	Step             int             `json:"step"`
+	// Continuations counts the stop-hook continuations already made this
+	// run; StopHookActive is set by Stop to Continuations > 0.
+	Continuations  int  `json:"continuations"`
+	StopHookActive bool `json:"stop_hook_active"`
+}
+
+type stopPayload struct {
+	SchemaVersion int    `json:"schema_version"`
+	Event         string `json:"event"`
+	StopInput
+}
+
 // Result reports one hook run.
 type Result struct {
 	Event    string
 	Command  string
-	Decision string // Allow, Deny, Feedback, or Error
+	Decision string // Allow, Deny, Feedback, Continue, or Error
 	Duration time.Duration
 	// Denied means the pre_tool call must not run.
 	Denied bool
 	// Reason is the deny reason, or the failure when Decision is Error.
 	Reason string
-	// Feedback is the marked text to append to the tool result.
+	// Feedback is the marked text to append to the tool result, or, for a
+	// stop hook that asks to continue, the marked reason for the model.
 	Feedback string
 }
 
@@ -183,6 +241,24 @@ func (r *Runner) Post(ctx context.Context, in Input, output string, isError bool
 	for _, h := range r.post {
 		if h.matches(in.ToolName) {
 			results = append(results, h.post(ctx, in.Root, data))
+		}
+	}
+	return results
+}
+
+// Stop runs every stop hook in config order. A result with Decision
+// Continue carries its marked, capped reason in Feedback.
+func (r *Runner) Stop(ctx context.Context, in StopInput) []Result {
+	if r == nil {
+		return nil
+	}
+	in.StopHookActive = in.Continuations > 0
+	data, _ := json.Marshal(stopPayload{SchemaVersion: SchemaVersion, Event: Stop, StopInput: in})
+	var results []Result
+	for _, h := range r.stop {
+		results = append(results, h.stopRun(ctx, in.Root, data))
+		if ctx.Err() != nil {
+			break
 		}
 	}
 	return results
@@ -258,6 +334,55 @@ func (h hook) post(ctx context.Context, root string, data []byte) Result {
 	if feedback = strings.TrimSpace(feedback); feedback != "" {
 		res.Decision = Feedback
 		res.Feedback = "\n[post_tool hook " + h.Command + "]\n" + capFeedback(feedback)
+	}
+	return res
+}
+
+func (h hook) stopRun(ctx context.Context, root string, data []byte) Result {
+	start := time.Now()
+	res := Result{Event: Stop, Command: h.Command, Decision: Allow}
+	code, stdout, stderr, err := h.run(ctx, root, data)
+	res.Duration = time.Since(start)
+	cont, why := false, ""
+	if err == nil {
+		switch code {
+		case 0:
+			var reply struct {
+				Decision string `json:"decision"`
+				Reason   string `json:"reason"`
+			}
+			if strings.TrimSpace(stdout) == "" {
+				break
+			}
+			if jerr := json.Unmarshal([]byte(stdout), &reply); jerr != nil {
+				err = errors.New("printed invalid JSON on stdout")
+			} else {
+				switch reply.Decision {
+				case "", Allow:
+				// block (Claude Code, Codex) and deny (Gemini CLI) are
+				// accepted as aliases so existing scripts port directly.
+				case Continue, "block", Deny:
+					cont, why = true, reply.Reason
+				default:
+					err = fmt.Errorf("printed unknown decision %q", reply.Decision)
+				}
+			}
+		case 2:
+			cont, why = true, stderr
+		default:
+			err = exitError(code, stderr)
+		}
+	}
+	if err != nil {
+		res.Decision, res.Reason = Error, err.Error()
+		return res
+	}
+	if cont {
+		if why = strings.TrimSpace(why); why == "" {
+			why = defaultStopReason
+		}
+		res.Decision, res.Reason = Continue, why
+		res.Feedback = "[stop hook " + h.Command + "]\n" + capFeedback(why)
 	}
 	return res
 }

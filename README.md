@@ -121,7 +121,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 | `assistant.message` | `text` (complete assistant message) |
 | `tool.call` | `id`, `name`, `arguments` (decoded JSON value, or a string if malformed) |
 | `tool.result` | `id`, `name`, `output` (same configured truncation as tool output), `is_error` |
-| `hook` | `event` (`pre_tool` or `post_tool`), `tool_call_id`, `tool_name`, `command`, `decision` (`allow`, `deny`, `feedback`, or `error`), `duration_ms`; emitted between the call's `tool.call` and `tool.result` |
+| `hook` | `event` (`pre_tool`, `post_tool`, or `stop`), `tool_call_id`, `tool_name`, `command`, `decision` (`allow`, `deny`, `feedback`, `continue`, or `error`), `duration_ms`; tool hooks are emitted between the call's `tool.call` and `tool.result`, and `stop` events have no tool fields |
 | `plan.updated` | `step`, `version`, `items` (`id`, `text`, `status`), `note`, `diff` |
 | `checkpoint.saved` | `step`, `path`, `pending` (tool calls without results yet) |
 | `resume.interrupted_call` | `id`, `name` of a call that was in flight when the previous process stopped |
@@ -291,6 +291,10 @@ hooks:                       # omitted by default; see Tool hooks below
     - match: "write_file|edit_file"
       command: /usr/local/bin/fmt-check
       timeout_seconds: 60
+  stop:                         # runs before a successful finish; no match or on_error
+    - command: /usr/local/bin/verify-tests
+      timeout_seconds: 300
+  max_stop_continuations: 5     # default 5, range 1..50
 ```
 
 ### OpenAI transport
@@ -351,6 +355,20 @@ A denied call is not executed; the model gets the error result `error: denied by
 
 Two examples: a `post_tool` hook on `write_file|edit_file` that runs `gofmt -l` on the edited path and prints `{"feedback":"..."}` when it lists files, and a `pre_tool` hook on `write_file|edit_file` that exits 2 with `edit schema.sql and run make gen instead` when `arguments.path` is under `migrations/`.
 
+#### Stop hooks
+
+A `stop` hook runs when the run is about to end successfully (`Submitted` or `Completed`, including a valid `--output-schema` result) and can send the model back to work instead, for example when `go test ./...` still fails. Stop hooks never run for limits, interrupts, errors, `RepeatedFormatError`, or `InvalidOutput`, nor for an `--output-schema` result that failed validation. They use the same launch rules, environment, and timeouts as tool hooks; `match` and `on_error` are rejected for them.
+
+Each stop hook gets one JSON object on stdin: `schema_version` (`1`), `event` (`stop`), `status` (`Submitted` or `Completed`), `submission`, `structured_output` (only with `--output-schema`), canonical `root`, `read_only`, `step`, `continuations` (how many times stop hooks already sent the model back), and `stop_hook_active` (`true` when `continuations` is above zero, so a hook can avoid looping).
+
+| Exit 0 | Exit 2 | Other exit, failure to start, timeout, invalid stdout JSON, or unknown decision |
+|---|---|---|
+| Accept, unless stdout is `{"decision":"continue","reason":"..."}` (`block` and `deny` are accepted as aliases) | Continue; the reason is stderr | Warning on stderr and a `warning` event; treated as accept |
+
+All stop hooks run in config order. If any asks to continue, the model gets a user message that starts with a fixed notice followed by each hook's reason under `[stop hook <command>]` (capped at 8 KiB per hook), and the run goes on as normal steps, so step, cost, and time limits still apply and win. If the submitting message also contained tool calls, those calls are not run; each gets an error result saying so. After `max_stop_continuations` continuations (default 5, range 1..50), a further continue ends the run as `VerificationFailed` with the hooks' combined reasons in the summary line and in `stop_reason` (`--json` result and `-o` trajectory); `stop_continuations` records the count. If Ctrl-C or the wall-time limit fires while a stop hook runs, the hook is killed and the run ends as `Interrupted` or `TimeLimitExceeded`, never `Submitted`. A run that a stop hook sent back to work cannot be resumed with `--resume` yet, and `VerificationFailed` runs cannot be resumed either. With no stop hooks configured, runs behave exactly as before.
+
+Example: a stop hook script `/usr/local/bin/verify-tests` that runs `go test ./...` in the working directory, and, when it fails, prints the failing output to stderr and exits 2. The model then sees `[stop hook /usr/local/bin/verify-tests]` followed by the test failures and keeps working until the tests pass or the cap is reached.
+
 ## Long runs
 
 tinyagent resends the whole history on every step, so a long run can outgrow the model's context window. Before each request it estimates the request's size (the previous request's reported input tokens plus about 4 characters per token for anything added since). Above 80% of the window, it compacts:
@@ -386,7 +404,7 @@ A checkpoint records whether images were enabled, and `--resume` keeps that sett
 
 ## Exit status
 
-The run ends when the model writes `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` (`Submitted`), stops calling tools (`Completed`), or hits a limit (`StepLimitExceeded`, `CostLimitExceeded`, `TimeLimitExceeded`), Ctrl-C (`Interrupted`), a non-retryable API error (`Error`), too many consecutive malformed tool-call steps (`RepeatedFormatError`, see below), or, with `--output-schema`, 3 consecutive invalid results (`InvalidOutput`). The process exits 0 only for `Submitted` and `Completed`.
+The run ends when the model writes `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` (`Submitted`), stops calling tools (`Completed`), or hits a limit (`StepLimitExceeded`, `CostLimitExceeded`, `TimeLimitExceeded`), Ctrl-C (`Interrupted`), a non-retryable API error (`Error`), too many consecutive malformed tool-call steps (`RepeatedFormatError`, see below), or, with `--output-schema`, 3 consecutive invalid results (`InvalidOutput`), or stop hooks still rejecting the result after `max_stop_continuations` (`VerificationFailed`, see [Stop hooks](#stop-hooks)). The process exits 0 only for `Submitted` and `Completed`.
 
 Every run ends with one summary line on stderr, so stdout keeps only the model's text:
 

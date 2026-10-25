@@ -125,6 +125,8 @@ func TestSummaryLine(t *testing.T) {
 			3725 * time.Second, "Completed after 4 steps in 1h02m (1,000 input / 200 output tokens)"},
 		{"zero steps", trajectory.Trajectory{ExitStatus: agent.StatusInterrupted},
 			2 * time.Second, "Interrupted after 0 steps in 2s"},
+		{"verification failed", trajectory.Trajectory{ExitStatus: agent.StatusVerificationFailed, Steps: 6, StopReason: "[stop hook /bin/check]\ntests failed"},
+			2 * time.Second, "VerificationFailed after 6 steps in 2s: [stop hook /bin/check] tests failed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -726,5 +728,28 @@ func TestEnvFlag(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	if code, _, _ := runWith(t, "--env", "container", "-c", cfg, "-t", "x", "-m", "ollama/none"); code != 1 {
 		t.Errorf("missing runtime: exit %d, want 1", code)
+	}
+}
+
+func TestConfiguredSecretsIncludesHookEnv(t *testing.T) {
+	t.Setenv("STOP_HOOK_TOKEN", "s3cret-stop")
+	t.Setenv("PRE_HOOK_TOKEN", "s3cret-pre")
+	cfg := config.Default()
+	cfg.Hooks.Stop = []config.Hook{{Command: "/bin/true", Env: []string{"STOP_HOOK_TOKEN"}}}
+	cfg.Hooks.PreTool = []config.Hook{{Command: "/bin/true", Env: []string{"PRE_HOOK_TOKEN"}}}
+	got := strings.Join(configuredSecrets(cfg), ",")
+	if !strings.Contains(got, "s3cret-stop") || !strings.Contains(got, "s3cret-pre") {
+		t.Errorf("secrets = %q", got)
+	}
+}
+
+func TestResultFieldsStopReason(t *testing.T) {
+	f := resultFields(&trajectory.Trajectory{ExitStatus: agent.StatusVerificationFailed, StopContinuations: 5, StopReason: "r"}, time.Second)
+	if f["stop_reason"] != "r" || f["stop_continuations"] != 5 {
+		t.Errorf("fields = %v", f)
+	}
+	f = resultFields(&trajectory.Trajectory{ExitStatus: agent.StatusSubmitted}, time.Second)
+	if _, ok := f["stop_reason"]; ok {
+		t.Errorf("fields = %v", f)
 	}
 }

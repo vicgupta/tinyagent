@@ -143,6 +143,9 @@ func (t *Trajectory) Validate() error {
 	if !unfinished(t.ExitStatus) {
 		return errors.New("checkpoint has an unsupported exit status")
 	}
+	if t.StopContinuations != 0 || t.StopReason != "" {
+		return errors.New("checkpoint was sent back to work by a stop hook; runs continued by stop hooks cannot be resumed yet; start a fresh task")
+	}
 	if t.Steps < 0 || math.IsNaN(t.Cost) || math.IsInf(t.Cost, 0) || t.Cost < 0 || t.InputTokens < 0 || t.OutputTokens < 0 || t.CacheReadTokens < 0 || t.CacheWriteTokens < 0 || t.CacheReadTokens > t.InputTokens || t.CacheWriteTokens > t.InputTokens-t.CacheReadTokens {
 		return errors.New("checkpoint has invalid accounting counters")
 	}
