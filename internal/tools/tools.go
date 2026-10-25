@@ -229,6 +229,16 @@ type Result struct {
 	// Notice is the line ending Text that points at the saved file (or, for
 	// read_file, at the rest of the file); empty when none was added.
 	Notice string
+	// Paths are the absolute paths a successful built-in file tool call
+	// touched: read_file, write_file, edit_file, view_image and lsp's
+	// path, list_files and grep's path argument (default "."), and every
+	// file an apply_patch call added, updated, deleted or moved. They may
+	// lie outside Root (additional directories); nil for other tools and
+	// for failed calls.
+	Paths []string
+	// Instructions is the suffix of Text holding scoped AGENTS.md blocks
+	// appended by the agent loop; feedback re-truncation keeps it whole.
+	Instructions string
 }
 
 // RunResult is RunWithImages plus where an over-limit result was saved.
@@ -251,7 +261,7 @@ func (e *Executor) RunResult(ctx context.Context, call model.ToolCall) Result {
 		if err != nil {
 			return Result{Text: truncate("error: "+err.Error(), e.MaxOutputChars), IsError: true}
 		}
-		return Result{Text: out, Images: []model.Image{*im}}
+		return Result{Text: out, Images: []model.Image{*im}, Paths: e.touched(ViewImageToolName, a)}
 	}
 	// External tools are never dispatched in read-only mode: the check in
 	// run() below then rejects them with the read-only error, matching
@@ -272,7 +282,61 @@ func (e *Executor) RunResult(ctx context.Context, call model.ToolCall) Result {
 			out += "\n" + note
 		}
 	}
-	return e.limit(call, out, err != nil)
+	r := e.limit(call, out, err != nil)
+	if err == nil {
+		var a args
+		if json.Unmarshal([]byte(call.Function.Arguments), &a) == nil {
+			r.Paths = e.touched(call.Function.Name, a)
+		}
+	}
+	return r
+}
+
+// touched returns the absolute paths a successful built-in call with
+// arguments a touched (see Result.Paths).
+func (e *Executor) touched(name string, a args) []string {
+	var paths []string
+	switch name {
+	case "read_file", "write_file", "edit_file", ViewImageToolName:
+		paths = []string{a.Path}
+	case LSPToolName:
+		if e.LSP == nil {
+			return nil
+		}
+		paths = []string{a.Path}
+	case "list_files", "grep":
+		p := a.Path
+		if strings.TrimSpace(p) == "" {
+			p = "."
+		}
+		paths = []string{p}
+	case ApplyPatchToolName:
+		if !e.ApplyPatch {
+			return nil
+		}
+		ops, err := parsePatch(a.Input)
+		if err != nil {
+			return nil
+		}
+		for _, op := range ops {
+			paths = append(paths, op.path)
+			if op.moveTo != "" {
+				paths = append(paths, op.moveTo)
+			}
+		}
+	default:
+		return nil
+	}
+	var out []string
+	for _, p := range paths {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		if full, err := e.scope().resolve(e.Root, p); err == nil {
+			out = append(out, full)
+		}
+	}
+	return out
 }
 
 // Catalog returns the fixed built-in and explicitly configured external tools.

@@ -292,6 +292,7 @@ Output:
       --output-schema path           end the run with a JSON result validated against this JSON Schema file (printed to stdout)
       --log-db [=path]               also log run events to SQLite (default .tinyagent/tinyagent.db under --cwd); --log-db=false turns config log_db off
       --no-agents-md                 don't add AGENTS.md (nearest, up to the repo root) to the system prompt
+      --scoped-agents-md             also deliver AGENTS.md files in directories below --cwd, appended to the first file tool result that touches a path there (default off; config scoped_agents_md)
       --read-only                    allow only read_file, list_files, and grep; blocks edits and commands
       --add-dir-read path            let the file tools (and a container) read this directory outside --cwd; repeatable; with --add-dir-write, replaces config additional_dirs
       --add-dir-write path           let the file tools, --sandbox commands and a container read and write this directory outside --cwd; repeatable; with --add-dir-read, replaces config additional_dirs
