@@ -32,6 +32,9 @@ type AgentConfig struct {
 	StepLimit    int     `yaml:"step_limit"`
 	CostLimit    float64 `yaml:"cost_limit"`
 	WallTimeSec  int     `yaml:"wall_time_seconds"`
+	// MaxFormatErrors ends the run after this many consecutive steps whose
+	// tool calls are all malformed. Must be >= 1; default 3.
+	MaxFormatErrors int `yaml:"max_format_errors"`
 
 	BashTimeoutSec int `yaml:"bash_timeout_seconds"`
 	MaxOutputChars int `yaml:"max_output_chars"`
@@ -82,6 +85,9 @@ type MCPServer struct {
 	CallTimeoutSec      int      `yaml:"call_timeout_seconds"`
 }
 
+// DefaultMaxFormatErrors is the default MaxFormatErrors.
+const DefaultMaxFormatErrors = 3
+
 func Default() AgentConfig {
 	return AgentConfig{
 		SystemPrompt:   embed.SystemPrompt(),
@@ -89,6 +95,7 @@ func Default() AgentConfig {
 		MaxOutputChars: 30000,
 
 		MaxBackgroundProcesses: 4,
+		MaxFormatErrors:        DefaultMaxFormatErrors,
 	}
 }
 
@@ -131,10 +138,21 @@ func Load(path string) (AgentConfig, error) {
 	if err != nil {
 		return cfg, fmt.Errorf("read config: %w", err)
 	}
+	var probe struct {
+		MaxFormatErrors yaml.Node `yaml:"max_format_errors"`
+	}
+	if yaml.Unmarshal(data, &probe) == nil && probe.MaxFormatErrors.Kind != 0 {
+		if n := &probe.MaxFormatErrors; n.Kind != yaml.ScalarNode || n.ShortTag() != "!!int" {
+			return cfg, fmt.Errorf("config %s: max_format_errors must be a whole number >= 1, got %q", path, n.Value)
+		}
+	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) { // io.EOF: empty or comment-only file
 		return cfg, fmt.Errorf("parse config %s: %w", path, err)
+	}
+	if cfg.MaxFormatErrors < 1 {
+		return cfg, fmt.Errorf("config %s: max_format_errors must be a whole number >= 1, got %d", path, cfg.MaxFormatErrors)
 	}
 	for _, p := range cfg.SandboxWritablePaths {
 		if !filepath.IsAbs(p) {

@@ -37,6 +37,8 @@ const (
 	// StatusInvalidOutput ends an --output-schema run that produced no valid
 	// submit_result within MaxInvalidOutputs consecutive attempts.
 	StatusInvalidOutput = "InvalidOutput"
+	// StatusFormatError: too many consecutive steps of malformed tool calls.
+	StatusFormatError = "RepeatedFormatError"
 )
 
 // maxAgentsMD caps how much of AGENTS.md goes into the system prompt.
@@ -226,8 +228,32 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			return a.finish(t, StatusCompleted, msg.Content)
 		}
 
+		malformed := 0
 		for _, call := range msg.ToolCalls {
-			a.toolStep(ctx, t, v, call)
+			if reason := a.Tools.FormatError(call); reason != "" {
+				malformed++
+				t.FormatErrors++
+				t.LastFormatError = reason
+				t.FormatErrorMessages = append(t.FormatErrorMessages, len(t.Messages))
+				out := a.Tools.FormatCorrection(reason)
+				a.event("tool.call", map[string]any{"id": call.ID, "name": call.Function.Name, "arguments": eventArguments(call.Function.Arguments)})
+				a.event("tool.result", map[string]any{"id": call.ID, "name": call.Function.Name, "output": out, "is_error": true, "format_error": true})
+				t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: call.ID, Content: out})
+				v.add(t, t.Messages[len(t.Messages)-1])
+				if a.Verbose {
+					fmt.Fprintf(a.Out, "  -> %s\n", indent(out))
+				}
+			} else {
+				a.toolStep(ctx, t, v, call)
+			}
+		}
+		if malformed == len(msg.ToolCalls) {
+			t.ConsecutiveFormatErrors++
+		} else {
+			t.ConsecutiveFormatErrors = 0
+		}
+		if t.ConsecutiveFormatErrors >= a.maxFormatErrors() {
+			return a.finish(t, StatusFormatError, "")
 		}
 		if err := a.step(t); err != nil {
 			return a.saveFailed(t, err)
@@ -250,6 +276,15 @@ func (a *Agent) recordToolResult(t *trajectory.Trajectory, v *view, call model.T
 	if a.Verbose {
 		fmt.Fprintf(a.Out, "  -> %s\n", indent(out))
 	}
+}
+
+// maxFormatErrors is the configured cap on consecutive format-error steps;
+// an unset (zero) config uses the default.
+func (a *Agent) maxFormatErrors() int {
+	if a.Config.MaxFormatErrors > 0 {
+		return a.Config.MaxFormatErrors
+	}
+	return config.DefaultMaxFormatErrors
 }
 
 // runTool executes call with its matching hooks. Calls the executor rejects
