@@ -85,12 +85,17 @@ type Container struct {
 	Image   string
 	ID      string
 	Mount   string // host directory mounted at the same path
+	// Extra are additional directories mounted at the same paths; read
+	// mode ones are mounted read-only.
+	Extra []ExtraDir
 }
 
 // StartContainer checks that runtime is usable and starts a container from
-// image with root mounted at the same path. It fails rather than falling
-// back to the host. runArgs are extra `run` arguments, after the defaults.
-func StartContainer(ctx context.Context, rt, image string, runArgs []string, root string) (*Container, error) {
+// image with root mounted at the same path, plus each additional directory
+// in extra at its own path (read-only for read mode). It fails rather than
+// falling back to the host. runArgs are extra `run` arguments, after the
+// defaults.
+func StartContainer(ctx context.Context, rt, image string, runArgs []string, root string, extra []ExtraDir) (*Container, error) {
 	if runtime.GOOS == "windows" {
 		return nil, errors.New("container: not supported on Windows")
 	}
@@ -103,11 +108,7 @@ func StartContainer(ctx context.Context, rt, image string, runArgs []string, roo
 	if _, err := exec.LookPath(rt); err != nil {
 		return nil, fmt.Errorf("container: runtime %q not found in PATH; install it or set container.runtime", rt)
 	}
-	args := []string{"run", "-d", "--rm", "--init", "--label", ContainerLabel + "=1",
-		"-v", root + ":" + root, "-w", root,
-		"--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), "-e", "HOME=/tmp"}
-	args = append(args, runArgs...)
-	args = append(args, image, "sleep", "infinity")
+	args := containerRunArgs(image, runArgs, root, extra)
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, rt, args...)
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -125,7 +126,24 @@ func StartContainer(ctx context.Context, rt, image string, runArgs []string, roo
 	if id == "" {
 		return nil, fmt.Errorf("container: %s run printed no container id", rt)
 	}
-	return &Container{Runtime: rt, Image: image, ID: id, Mount: root}, nil
+	return &Container{Runtime: rt, Image: image, ID: id, Mount: root, Extra: extra}, nil
+}
+
+// containerRunArgs builds the `run` arguments for StartContainer.
+func containerRunArgs(image string, runArgs []string, root string, extra []ExtraDir) []string {
+	args := []string{"run", "-d", "--rm", "--init", "--label", ContainerLabel + "=1",
+		"-v", root + ":" + root}
+	for _, d := range extra {
+		v := d.Path + ":" + d.Path
+		if d.Mode != DirWrite {
+			v += ":ro"
+		}
+		args = append(args, "-v", v)
+	}
+	args = append(args, "-w", root,
+		"--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), "-e", "HOME=/tmp")
+	args = append(args, runArgs...)
+	return append(args, image, "sleep", "infinity")
 }
 
 func (c *Container) Command(ctx context.Context, root, command string) *exec.Cmd {
@@ -171,7 +189,11 @@ func (c *Container) Close() error {
 
 // Describe is the one-line summary printed at startup.
 func (c *Container) Describe() string {
-	return fmt.Sprintf("environment: container (%s, image=%s); mount: %s", c.Runtime, c.Image, c.Mount)
+	s := fmt.Sprintf("environment: container (%s, image=%s); mount: %s", c.Runtime, c.Image, c.Mount)
+	for _, d := range c.Extra {
+		s += fmt.Sprintf(", %s (%s)", d.Path, d.Mode)
+	}
+	return s
 }
 
 func newToken() string {

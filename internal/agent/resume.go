@@ -136,7 +136,9 @@ func ValidateResume(t *trajectory.Trajectory, cfg config.AgentConfig, root strin
 	if t.ReadOnly {
 		system += "\n\n" + readOnlyNotice
 	}
-	if system != t.SystemPrompt {
+	// The additional directories are per invocation, so their section is
+	// left out of the comparison; a resume notice reports any change.
+	if system != tools.StripExtraDirsNotice(t.SystemPrompt) {
 		return errors.New("effective system prompt, AGENTS.md, or skills catalog has changed; start a fresh task")
 	}
 	return nil

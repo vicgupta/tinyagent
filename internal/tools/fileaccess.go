@@ -23,6 +23,9 @@ type FileAccess struct {
 	denyRead  []accessRule
 	denyWrite []accessRule
 	fold      bool
+	// extra holds the additional directories (symlink-resolved); patterns
+	// apply inside each of them the same way, relative to that directory.
+	extra []string
 }
 
 type accessRule struct {
@@ -122,6 +125,17 @@ func NewFileAccess(root string, denyRead, denyWrite []string) (*FileAccess, erro
 	return f, nil
 }
 
+// AddDirs makes the rules also apply inside each additional directory,
+// relative to that directory. It is a no-op on a nil *FileAccess.
+func (f *FileAccess) AddDirs(dirs []ExtraDir) {
+	if f == nil {
+		return
+	}
+	for _, d := range dirs {
+		f.extra = append(f.extra, d.Path)
+	}
+}
+
 // Counts returns the number of deny_read and deny_write rules.
 func (f *FileAccess) Counts() (read, write int) {
 	if f == nil {
@@ -181,11 +195,13 @@ func (f *FileAccess) match(full string, rules []accessRule) string {
 		return ""
 	}
 	full = filepath.Clean(full)
-	if p := f.matchUnder(f.root, full, rules); p != "" {
-		return p
+	for _, base := range append([]string{f.root}, f.extra...) {
+		if p := f.matchUnder(base, full, rules); p != "" {
+			return p
+		}
 	}
 	if target, ok := resolveExisting(full); ok && target != full {
-		for _, base := range []string{f.realRoot, f.root} {
+		for _, base := range append([]string{f.realRoot, f.root}, f.extra...) {
 			if p := f.matchUnder(base, target, rules); p != "" {
 				return p
 			}

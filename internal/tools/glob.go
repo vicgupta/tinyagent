@@ -20,13 +20,13 @@ func ListFiles(root, path, pattern string) (string, error) {
 
 // listFiles is ListFiles that also skips the directory skip (an absolute
 // path; "" skips nothing extra) unless the walk starts inside it, and hides
-// paths fa denies for reading, ending with a count of them.
-func listFiles(root, path, pattern, skip string, fa *FileAccess) (string, error) {
-	dir, err := Resolve(root, path)
+// paths the scope denies for reading, ending with a count of them.
+func listFiles(root, path, pattern, skip string, sc *scope) (string, error) {
+	dir, err := sc.resolve(root, path)
 	if err != nil {
 		return "", err
 	}
-	if err := fa.CheckRead(dir, displayPath(path)); err != nil {
+	if err := sc.checkRead(dir, displayPath(path)); err != nil {
 		return "", err
 	}
 	if pattern == "" {
@@ -37,7 +37,7 @@ func listFiles(root, path, pattern, skip string, fa *FileAccess) (string, error)
 		var lines []string
 		hidden := 0
 		for _, e := range entries {
-			if fa.Hidden(filepath.Join(dir, e.Name())) {
+			if sc.hidden(filepath.Join(dir, e.Name())) {
 				hidden++
 				continue
 			}
@@ -64,7 +64,7 @@ func listFiles(root, path, pattern, skip string, fa *FileAccess) (string, error)
 			if p != dir && (skipDir(d.Name()) || p == skip) {
 				return filepath.SkipDir
 			}
-			if p != dir && fa.Hidden(p) {
+			if p != dir && sc.hidden(p) {
 				hidden++
 				return filepath.SkipDir
 			}
@@ -75,7 +75,7 @@ func listFiles(root, path, pattern, skip string, fa *FileAccess) (string, error)
 			subject = rel(dir, p)
 		}
 		if ok, _ := filepath.Match(pattern, subject); ok {
-			if fa.Hidden(p) {
+			if sc.hidden(p) {
 				hidden++
 				return nil
 			}

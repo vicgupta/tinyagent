@@ -49,6 +49,13 @@ type CommandEnvInfo struct {
 	Passed         []string `json:"passed"`
 }
 
+// AdditionalDir is one additional directory: an absolute path and its
+// effective mode, "read" or "write".
+type AdditionalDir struct {
+	Path string `json:"path"`
+	Mode string `json:"mode"`
+}
+
 // FileAccessInfo records the file_access rules the built-in file tools
 // enforced.
 type FileAccessInfo struct {
@@ -68,6 +75,9 @@ type Trajectory struct {
 	// FileAccess is set when file_access rules restricted the file tools;
 	// it records this invocation's rules.
 	FileAccess *FileAccessInfo `json:"file_access,omitempty"`
+	// AdditionalDirs lists the directories outside Root the file tools could
+	// reach in this invocation, with their effective mode.
+	AdditionalDirs []AdditionalDir `json:"additional_dirs,omitempty"`
 	// SandboxNetworkDenials lists the requests the allowlist proxy refused.
 	SandboxNetworkDenials []NetworkDenial `json:"sandbox_network_denials,omitempty"`
 	ReadOnly              bool            `json:"read_only"`

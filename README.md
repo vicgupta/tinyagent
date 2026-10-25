@@ -102,6 +102,8 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--skills` | config `skills`, else off | Discover [Agent Skills](#agent-skills) and offer the `skill` tool |
 | `--no-skills` | — | Disable skills even if the config enables them (`--no-skills=false` enables) |
 | `--read-only` | config `read_only`, else off | Permit only `read_file`, `list_files`, and `grep`; blocks edits, shell, and process tools. `--read-only=false` explicitly disables it. |
+| `--add-dir-read` | config `additional_dirs`, else none | Let the file tools read (not write) an existing directory outside `--cwd`; repeatable. See [Additional directories](#additional-directories) |
+| `--add-dir-write` | config `additional_dirs`, else none | Let the file tools read and write an existing directory outside `--cwd`; repeatable. See [Additional directories](#additional-directories) |
 | `--sandbox` | config `sandbox`, else off | Confine `bash`/`start_process` at the OS level: writes only under `--cwd`, a temp dir and `sandbox_writable_paths`, network off. See [Sandboxing commands](#sandboxing-commands) |
 | `--sandbox-network` | config `sandbox_network`, else off | With `--sandbox`, allow network access |
 | `--sandbox-allow-domain <host>` | config `sandbox_allowed_domains`, else none | With `--sandbox`, let commands reach only the listed hosts over HTTP(S) through a filtering proxy. Repeatable; replaces the config list. See [Network allowlist](#network-allowlist) |
@@ -127,7 +129,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 
 | Type | Fields |
 |---|---|
-| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `reasoning_effort` (only when set), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy), `file_access` (`deny_read`, `deny_write`; only with [file access](#restricting-file-access) rules), `web_fetch` (`allowed_domains`; only with [web fetch](#web-fetch) on) |
+| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `reasoning_effort` (only when set), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy), `file_access` (`deny_read`, `deny_write`; only with [file access](#restricting-file-access) rules), `web_fetch` (`allowed_domains`; only with [web fetch](#web-fetch) on), `additional_dirs` (`path`, `mode`; only with [additional directories](#additional-directories)) |
 | `assistant.message` | `text` (complete assistant message) |
 | `tool.call` | `id`, `name`, `arguments` (decoded JSON value, or a string if malformed) |
 | `tool.result` | `id`, `name`, `output` (same configured truncation as tool output), `is_error`; with [tool output files](#tool-output-files), a saved result also has `output_file` (path relative to `--cwd`) and `output_bytes` |
@@ -318,6 +320,8 @@ command_env:               # omitted by default (inherit everything); see Comman
 file_access:               # omitted by default (no rules); see Restricting file access
   deny_read: [".env", "*.pem", "secrets/"]
   deny_write: [go.sum, "vendor/"]
+additional_dirs:           # omitted by default (only --cwd); see Additional directories
+  - {path: /home/me/src/shared-lib, mode: read}
 step_limit: 50
 cost_limit: 2.0
 wall_time_seconds: 1800
@@ -655,7 +659,7 @@ When a run fails on a common setup problem, tinyagent prints a `hint:` line unde
 
 ## Sandboxing commands
 
-`--sandbox` (or `sandbox: true`) confines every `bash` and `start_process` command, and all processes they spawn, at the OS level. Commands can write only inside `--cwd`, a per-run temporary directory (exported as `TMPDIR`, removed when the run ends) and the directories in `sandbox_writable_paths`. Reads stay unrestricted so toolchains work. Outbound network is denied unless you pass `--sandbox-network` (`sandbox_network: true`). Flags override the config, including `--sandbox=false`. It is off by default.
+`--sandbox` (or `sandbox: true`) confines every `bash` and `start_process` command, and all processes they spawn, at the OS level. Commands can write only inside `--cwd`, a per-run temporary directory (exported as `TMPDIR`, removed when the run ends), the directories in `sandbox_writable_paths` and any `write` [additional directories](#additional-directories). Reads stay unrestricted so toolchains work. Outbound network is denied unless you pass `--sandbox-network` (`sandbox_network: true`). Flags override the config, including `--sandbox=false`. It is off by default.
 
 ```yaml
 sandbox: true
@@ -747,6 +751,21 @@ file_access:
 - With `-v`, one stderr line gives the rule counts. `-o` trajectories and `--json` `run.started` record `file_access` (`deny_read`, `deny_write`). With `--resume`, the current invocation's rules apply. A `deny_read` rule that hides the [tool output](#tool-output-files) directory fails at startup, since the model is told to read it. AGENTS.md and skills loading are not affected.
 - **Not covered:** `bash`, `start_process`, hooks, MCP servers and execution environments can still read and write anything you can; combine with `--read-only`, [`--sandbox`](#sandboxing-commands) or a [command environment](#command-environment) policy as needed. Checks happen before each operation, so a file swapped for a symlink in between (a race) is not caught. This narrows what the model's file tools can touch; it is not a security boundary.
 
+## Additional directories
+
+By default the file tools reach only `--cwd`. `--add-dir-read <path>` and `--add-dir-write <path>` (both repeatable), or `additional_dirs` in the config, add up to 10 existing directories outside it, for example a sibling repo to read or a shared output folder to write:
+
+```yaml
+additional_dirs:
+  - {path: /home/me/src/shared-lib, mode: read}    # read_file, list_files, grep, view_image
+  - {path: /home/me/out, mode: write}              # also write_file, edit_file, apply_patch
+```
+
+- **Modes:** every entry needs an explicit `mode`, `read` or `write`. Read directories refuse writes (including through symlinks that point into them) with an error naming the directory and its mode; an `apply_patch` that touches one changes nothing. `--read-only` makes every additional directory read-only.
+- **Paths:** config paths must be absolute; flag paths may be relative to `--cwd`. Each must exist and be a directory, and may not be the filesystem root, `--cwd`, inside or containing `--cwd`, or overlap another entry; any of these exits 2 before the first model request. Any `--add-dir-*` flag replaces the config list. The model reaches additional directories with absolute paths; relative paths still resolve against `--cwd`.
+- **Visibility:** the system prompt lists the directories and modes, `-v` prints one `additional dir:` line each, and `-o` trajectories and `--json` `run.started` record `additional_dirs`. With `--resume`, the current invocation's directories apply; if they differ from the checkpoint's, stderr says so and the model is told.
+- **Other features:** [`file_access`](#restricting-file-access) patterns apply inside each directory relative to it. [Subagents](#subagents) can read them. With [`--sandbox`](#sandboxing-commands), write directories are added to the writable roots; with the [`container`](#execution-environments) environment, each is mounted at the same path (read ones `:ro`). [Snapshots](#rewind-workspace-changes) cover only `--cwd`, so stderr warns that `--rewind` won't restore changes made in additional directories.
+
 ## Execution environments
 
 The environment decides where `bash` and `start_process` commands run. Choose it with `--env local|container` or `environment:` in the config; the flag wins, and the default is `local`.
@@ -764,7 +783,7 @@ container:
 
 Before the first model request tinyagent runs `<runtime> run -d --rm --init --label tinyagent=1 -v <cwd>:<cwd> -w <cwd> --user <uid>:<gid> -e HOME=/tmp <run_args> <image> sleep infinity` and prints one line to stderr, e.g. `environment: container (docker, image=golang:1.23); mount: /home/me/repo`. `-o` trajectories record it as `environment` (name, runtime, image).
 
-- **Mount model:** only `--cwd` is shared, at the same path, so the in-process file tools on the host and commands in the container see the same files. Commands run as your uid:gid so files they create are yours on the host (for rootless Podman add `run_args: [--userns=keep-id]`). `$HOME` is `/tmp` inside the container; writes outside `--cwd` stay in the container. Later `run_args` such as `--user` or `-e HOME=...` override these defaults.
+- **Mount model:** only `--cwd` (plus any [additional directories](#additional-directories), read ones `:ro`) is shared, at the same path, so the in-process file tools on the host and commands in the container see the same files. Commands run as your uid:gid so files they create are yours on the host (for rootless Podman add `run_args: [--userns=keep-id]`). `$HOME` is `/tmp` inside the container; writes outside `--cwd` stay in the container. Later `run_args` such as `--user` or `-e HOME=...` override these defaults.
 - **What runs where:** only `bash` and `start_process` commands run in the container. File tools, MCP servers, provider requests and the trajectory stay on the host. No host environment variables are forwarded (pass them with `run_args: [-e, NAME]` if needed). The network is the runtime's default unless `run_args` say otherwise.
 - **Timeouts and `stop_process`** kill the command's processes inside the container (each command is tagged with a `TINYAGENT_EXEC` variable that its children inherit), not only the host-side `exec` client. Output format, return codes, the process limit and buffers are unchanged.
 - **Cleanup:** the container is removed when the run ends: normally, on error, at a limit, or on Ctrl-C. `docker ps -a --filter label=tinyagent` lists any left behind by a killed tinyagent.
