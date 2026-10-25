@@ -127,10 +127,14 @@ func (c *Container) Command(ctx context.Context, root, command string) *exec.Cmd
 }
 
 // kill kills the processes of the command marked token inside the container.
+// It runs as the container's own user, not root: reading another user's
+// /proc/<pid>/environ needs CAP_SYS_PTRACE, which containers lack by default,
+// so a root scan silently matches nothing. The commands all run as the
+// container user, so that user can both read their environ and kill them.
 func (c *Container) kill(token string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	exec.CommandContext(ctx, c.Runtime, "exec", "-u", "0", c.ID, "sh", "-c", containerKill, "sh", token).Run()
+	exec.CommandContext(ctx, c.Runtime, "exec", c.ID, "sh", "-c", containerKill, "sh", token).Run()
 }
 
 // Close stops and removes the container. It is safe on a nil Container.
