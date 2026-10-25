@@ -62,6 +62,8 @@ type options struct {
 	sandboxAllowDomains                              domainList
 	jsonOutput                                       bool
 	logDB                                            optionalPath
+	snapshots, dryRun                                bool
+	rewind, rewindTo                                 string
 	showHelp, showVersion, doUpdate                  bool
 }
 
@@ -110,6 +112,10 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.commandEnv, "command-env", "", "environment bash and start_process inherit: all, core or none (default: config's command_env.inherit, else all)")
 	fs.BoolVar(&o.jsonOutput, "json", false, "write run events as JSONL to stdout")
 	fs.StringVar(&o.outputSchema, "output-schema", "", "end the run with a JSON result validated against this JSON Schema file (printed to stdout)")
+	fs.BoolVar(&o.snapshots, "snapshots", false, "snapshot the workspace before every tool batch that can change files, for --rewind; requires -o (default off; config snapshots)")
+	fs.StringVar(&o.rewind, "rewind", "", "restore --cwd to a workspace snapshot recorded in this trajectory JSON (see --to and --dry-run)")
+	fs.StringVar(&o.rewindTo, "to", "", "with --rewind: start (the baseline, the default), a step number (the state before that step's tool batch), or a snapshot id")
+	fs.BoolVar(&o.dryRun, "dry-run", false, "with --rewind: print what would change and write nothing")
 	fs.Var(&o.logDB, "log-db", "also log run events to SQLite (default .tinyagent/tinyagent.db under --cwd); --log-db=false turns config log_db off")
 	fs.BoolVar(&o.showVersion, "version", false, "print the version and exit")
 	fs.BoolVar(&o.showVersion, "V", false, "shorthand for --version")
@@ -168,6 +174,17 @@ func run() int {
 		}
 		fmt.Println(msg)
 		return 0
+	}
+	if o.rewind != "" {
+		if o.resume != "" {
+			fmt.Fprintln(os.Stderr, "error: --rewind and --resume are mutually exclusive")
+			return 2
+		}
+		return runRewind(&o, fs)
+	}
+	if flagWasSet(fs, "to", "dry-run") {
+		fmt.Fprintln(os.Stderr, "error: --to and --dry-run apply only to --rewind")
+		return 2
 	}
 	if o.resume != "" {
 		if flagWasSet(fs, "output-schema") {
@@ -238,6 +255,12 @@ func run() int {
 	} else if set {
 		cfg.Skills = on
 	}
+	if flagWasSet(fs, "snapshots") {
+		cfg.Snapshots.Enabled = o.snapshots
+	}
+	if code := checkSnapshots(&cfg, o.output); code != 0 {
+		return code
+	}
 	if msg := envConflict(cfg); msg != "" {
 		fmt.Fprintln(os.Stderr, "error: "+msg)
 		return 2
@@ -285,6 +308,10 @@ func run() int {
 	}
 	if cfg.ReadOnly {
 		fmt.Fprintln(os.Stderr, "read-only mode: only read_file, list_files, and grep are available")
+	}
+	snaps, err := openSnapshots(fs, o, cfg, root, o.output)
+	if err != nil {
+		return fail(err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -365,6 +392,7 @@ func run() int {
 		SkipAgentsMD: o.noAgentsMD,
 		NoCompact:    o.noCompact,
 		OutputSchema: schema,
+		Snapshots:    snaps,
 	}
 	var events *runEvents
 	warn := func(msg string) { events.warn(msg) }
@@ -555,6 +583,15 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return fail(errors.New("resume: --skills/--no-skills conflicts with the checkpoint's recorded skills setting; start a fresh task"))
 	}
 	cfg.Skills = src.SkillsEnabled
+	// Snapshots are per invocation: config or --snapshots decides for this
+	// resume, and earlier snapshots stay in the trajectory either way.
+	if flagWasSet(fs, "snapshots") {
+		cfg.Snapshots.Enabled = o.snapshots
+	}
+	if cfg.ReadOnly && cfg.Snapshots.Enabled {
+		fmt.Fprintln(os.Stderr, "read-only mode: workspace snapshots are not taken")
+		cfg.Snapshots.Enabled = false
+	}
 	if o.planFile != "" && !cfg.Plan.Enabled {
 		return fail(errors.New("--plan-file requires the plan tool, and this checkpoint was recorded without it"))
 	}
@@ -603,6 +640,10 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	}
 	if src.ReadOnly {
 		fmt.Fprintln(os.Stderr, "read-only mode: only read_file, list_files, and grep are available")
+	}
+	snaps, err := openSnapshots(fs, *o, cfg, root, o.output, o.resume)
+	if err != nil {
+		return fail(err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -696,6 +737,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		NoCompact:    o.noCompact,
 		Resume:       src,
 		ResumeSource: o.resume,
+		Snapshots:    snaps,
 		FollowUp:     followUp,
 	}
 	var events *runEvents
@@ -922,7 +964,8 @@ var usageGroups = []struct {
 	{"", [][3]string{{"h", "help", ""}}},
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "resume", "path"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
-	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}}},
+	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
+	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}}},
 }
 
@@ -943,7 +986,7 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 			width = max(width, len(left(f)))
 		}
 	}
-	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n       tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <finished.json> -t \"<follow-up>\" --cwd <dir> -o <new.json> [flags]\n\n")
+	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n       tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <finished.json> -t \"<follow-up>\" --cwd <dir> -o <new.json> [flags]\n       tinyagent --rewind <trajectory.json> --cwd <dir> [--to start|<step>|<id>] [--dry-run]\n\n")
 	for _, g := range usageGroups {
 		if g.name != "" {
 			fmt.Fprintf(w, "%s:\n", g.name)
@@ -965,7 +1008,8 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 		"  tinyagent -t \"fix the failing test\" -m anthropic/claude-sonnet-4\n"+
 		"  cat task.md | tinyagent -t - --step-limit 30 -o run.json\n"+
 		"  tinyagent --resume run.json --cwd . --step-limit 60 -o continued.json\n"+
-		"  tinyagent --resume review.json -t \"fix the races you found\" --cwd . -o fix.json\n")
+		"  tinyagent --resume review.json -t \"fix the races you found\" --cwd . -o fix.json\n"+
+		"  tinyagent --rewind run.json --cwd . --to 3 --dry-run\n")
 }
 
 // reportSummary prints one line on how the run ended: status, steps, elapsed

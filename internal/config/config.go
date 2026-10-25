@@ -119,6 +119,56 @@ type AgentConfig struct {
 	// per-run files the model can page (off by default;
 	// --tool-output-files overrides Enabled).
 	ToolOutputFiles ToolOutputFiles `yaml:"tool_output_files"`
+	// Snapshots configures opt-in workspace snapshots for --rewind (off by
+	// default; --snapshots overrides enabled). It may be written as a bare
+	// bool (snapshots: true) or as a mapping.
+	Snapshots Snapshots `yaml:"snapshots"`
+}
+
+// Snapshots configures workspace snapshots.
+type Snapshots struct {
+	Enabled bool `yaml:"enabled"`
+	// MaxFileBytes is the largest file captured; larger files are skipped
+	// and reported. Must be >= 1; default 2 MiB.
+	MaxFileBytes int64 `yaml:"max_file_bytes"`
+}
+
+// DefaultSnapshotMaxFileBytes is the default snapshots.max_file_bytes.
+const DefaultSnapshotMaxFileBytes = 2 << 20
+
+// UnmarshalYAML accepts "snapshots: true" as well as the mapping form, and
+// rejects unknown keys in the mapping.
+func (s *Snapshots) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode && n.ShortTag() == "!!bool" {
+		return n.Decode(&s.Enabled)
+	}
+	if n.Kind == yaml.ScalarNode && n.ShortTag() == "!!null" {
+		return nil
+	}
+	if n.Kind != yaml.MappingNode {
+		return errors.New("snapshots must be true, false, or a mapping with enabled and max_file_bytes")
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		switch k, v := n.Content[i].Value, n.Content[i+1]; k {
+		case "enabled":
+			if v.ShortTag() != "!!bool" {
+				return fmt.Errorf("snapshots.enabled must be true or false, got %q", v.Value)
+			}
+			if err := v.Decode(&s.Enabled); err != nil {
+				return err
+			}
+		case "max_file_bytes":
+			if v.ShortTag() != "!!int" {
+				return fmt.Errorf("snapshots.max_file_bytes must be a whole number >= 1, got %q", v.Value)
+			}
+			if err := v.Decode(&s.MaxFileBytes); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("snapshots: unknown key %q", k)
+		}
+	}
+	return nil
 }
 
 // ToolOutputFiles configures saving over-limit tool output.
@@ -392,6 +442,7 @@ func Default() AgentConfig {
 		MaxImageBytes:          DefaultMaxImageBytes,
 		LogDB:                  LogDB{Level: "metadata", MaxDays: 30, MaxRuns: 500},
 		ToolOutputFiles:        ToolOutputFiles{Dir: DefaultToolOutputDir, MaxRuns: DefaultToolOutputMaxRuns},
+		Snapshots:              Snapshots{MaxFileBytes: DefaultSnapshotMaxFileBytes},
 	}
 }
 
@@ -486,6 +537,9 @@ func Load(path string) (AgentConfig, error) {
 	}
 	if cfg.MaxTruncations < 1 {
 		return cfg, fmt.Errorf("config %s: max_truncations must be a whole number >= 1, got %d", path, cfg.MaxTruncations)
+	}
+	if cfg.Snapshots.MaxFileBytes < 1 {
+		return cfg, fmt.Errorf("config %s: snapshots.max_file_bytes must be >= 1, got %d", path, cfg.Snapshots.MaxFileBytes)
 	}
 	if cfg.MaxImageBytes < 1 {
 		return cfg, fmt.Errorf("config %s: max_image_bytes must be >= 1, got %d", path, cfg.MaxImageBytes)

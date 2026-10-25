@@ -107,9 +107,60 @@ type Agent struct {
 	// OutputSchema, when non-nil, adds the submit_result tool and makes the
 	// run succeed only with a result that validates against it.
 	OutputSchema *outschema.Schema
+	// Snapshots, when non-nil, captures the workspace: a baseline before
+	// the first request, before every tool batch that can change files, and
+	// at the end of the run (--snapshots).
+	Snapshots Snapshotter
 
 	cur  *trajectory.Trajectory
 	view *view
+	// snapFailed stops further snapshots after one fails.
+	snapFailed bool
+}
+
+// Snapshotter captures the working directory.
+type Snapshotter interface {
+	Take(kind string, step int) (trajectory.Snapshot, error)
+}
+
+// readOnlyTools never change files, so a batch of only these needs no
+// snapshot.
+var readOnlyTools = map[string]bool{
+	"read_file": true, "list_files": true, "grep": true, "read_process": true,
+	tools.PlanToolName: true, tools.ViewImageToolName: true, "skill": true, SubmitToolName: true,
+}
+
+// mutating reports whether any call in the batch may change the workspace.
+func mutating(calls []model.ToolCall) bool {
+	for _, c := range calls {
+		if !readOnlyTools[c.Function.Name] {
+			return true
+		}
+	}
+	return false
+}
+
+// snapshot takes one workspace snapshot, records it in t, and reports it.
+func (a *Agent) snapshot(t *trajectory.Trajectory, kind string) error {
+	start := time.Now()
+	s, err := a.Snapshots.Take(kind, t.Steps)
+	if err != nil {
+		a.snapFailed = true
+		return err
+	}
+	t.Snapshots = append(t.Snapshots, s)
+	ms := time.Since(start).Milliseconds()
+	fields := map[string]any{"id": s.ID, "step": s.Step, "kind": s.Kind, "time": s.Time, "files": s.Files, "bytes": s.Bytes,
+		"skipped_ignored": s.SkippedIgnored, "skipped_large": s.SkippedLarge, "store": s.Store, "duration_ms": ms}
+	if len(s.LargePaths) > 0 {
+		fields["large_paths"] = s.LargePaths
+	}
+	a.event("workspace.snapshot", fields)
+	if a.Verbose && a.Err != nil {
+		fmt.Fprintf(a.Err, "snapshot %s (%s, step %d): %d files, %d bytes, %d ignored, %d over size limit, %dms\n",
+			s.ID, s.Kind, s.Step, s.Files, s.Bytes, s.SkippedIgnored, s.SkippedLarge, ms)
+	}
+	return nil
 }
 
 // Step returns the current run's completed model calls, or 0 before Run
@@ -263,6 +314,15 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 	v := viewFromTrajectory(t)
 	a.view = v
 	invalidOutputs := 0
+	t.SnapshotsEnabled = a.Snapshots != nil
+	if a.Snapshots != nil {
+		if err := a.snapshot(t, "baseline"); err != nil {
+			return a.finish(t, StatusError, "workspace snapshot failed: "+err.Error())
+		}
+		if err := a.step(t); err != nil {
+			return a.saveFailed(t, err)
+		}
+	}
 
 	for {
 		if status, ok := a.checkLimits(ctx, t); !ok {
@@ -350,6 +410,18 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 				return done
 			}
 			continue
+		}
+
+		if a.Snapshots != nil && mutating(msg.ToolCalls) {
+			if err := a.snapshot(t, "step"); err != nil {
+				// No tool runs without its snapshot; record why.
+				reason := fmt.Sprintf("workspace snapshot before step %d failed: %v", t.Steps, err)
+				for _, call := range msg.ToolCalls {
+					t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: call.ID, Content: "error: not run: " + reason})
+					v.add(t, t.Messages[len(t.Messages)-1])
+				}
+				return a.finish(t, StatusError, reason+"; the tool calls were not run")
+			}
 		}
 
 		// Write-ahead: persist the response and its pending calls before any
@@ -825,6 +897,11 @@ func (a *Agent) closeTools(t *trajectory.Trajectory) {
 
 func (a *Agent) finish(t *trajectory.Trajectory, status, submission string) *trajectory.Trajectory {
 	a.closeTools(t)
+	if a.Snapshots != nil && !a.snapFailed {
+		if err := a.snapshot(t, "final"); err != nil && a.Err != nil {
+			fmt.Fprintf(a.Err, "warning: final workspace snapshot failed: %v\n", err)
+		}
+	}
 	t.ExitStatus, t.Submission = status, submission
 	if err := a.step(t); err != nil {
 		return a.saveFailed(t, err)

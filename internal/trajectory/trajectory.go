@@ -166,6 +166,37 @@ type Trajectory struct {
 	SkillsEnabled bool `json:"skills_enabled,omitempty"`
 	// Skills is the discovered catalog (not the skill bodies).
 	Skills []SkillInfo `json:"skills,omitempty"`
+	// SnapshotsEnabled records whether the last invocation took opt-in
+	// workspace snapshots (--snapshots). It is per invocation: a resume may
+	// turn snapshots on or off.
+	SnapshotsEnabled bool `json:"snapshots_enabled,omitempty"`
+	// Snapshots indexes the workspace snapshots taken for this run, oldest
+	// first, across resumes and rewinds. The file contents live in the
+	// snapshot store named by each entry, never in the trajectory.
+	Snapshots []Snapshot `json:"snapshots,omitempty"`
+}
+
+// Snapshot is the trajectory's record of one workspace snapshot.
+type Snapshot struct {
+	ID string `json:"id"`
+	// Step is the step count when it was taken: 0 for the first baseline,
+	// N for the snapshot taken before step N's tool batch ran.
+	Step int `json:"step"`
+	// Kind is "baseline", "step", "final" or "pre-rewind".
+	Kind string `json:"kind"`
+	Time string `json:"time"` // RFC 3339
+	// Files is how many files and symlinks were captured, Bytes their total
+	// size.
+	Files int   `json:"files"`
+	Bytes int64 `json:"bytes"`
+	// SkippedIgnored counts gitignored paths left out (an ignored directory
+	// counts once); SkippedLarge counts files over max_file_bytes, and
+	// LargePaths lists the first few of them.
+	SkippedIgnored int      `json:"skipped_ignored,omitempty"`
+	SkippedLarge   int      `json:"skipped_large,omitempty"`
+	LargePaths     []string `json:"large_paths,omitempty"`
+	// Store is the snapshot store directory.
+	Store string `json:"store"`
 }
 
 // SkillInfo identifies one discovered skill.
