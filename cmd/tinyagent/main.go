@@ -51,6 +51,7 @@ type options struct {
 	openaiAPI                                        string
 	execEnv                                          string
 	stepLimit, timeLimit, maxFormatErrors            int
+	maxOutputTokens                                  int
 	costLimit                                        float64
 	verbose, noStream, noAgentsMD, noCompact         bool
 	readOnly, sandbox, sandboxNetwork                bool
@@ -78,6 +79,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.Float64Var(&o.costLimit, "cost-limit", 0, "max USD, 0 = unlimited")
 	fs.IntVar(&o.timeLimit, "time-limit", 0, "max wall-clock seconds, 0 = unlimited")
 	fs.IntVar(&o.maxFormatErrors, "max-format-errors", config.DefaultMaxFormatErrors, "stop after this many consecutive steps of malformed tool calls (>= 1)")
+	fs.IntVar(&o.maxOutputTokens, "max-output-tokens", 0, "per-request output-token budget sent to the provider, 0 = provider default (8192 for anthropic; config max_output_tokens)")
 	fs.StringVar(&o.output, "output", "", "write trajectory JSON")
 	fs.StringVar(&o.output, "o", "", "shorthand for --output")
 	fs.StringVar(&o.resume, "resume", "", "continue an unfinished run from a trajectory JSON checkpoint, or a finished one with -t \"<follow-up>\"")
@@ -197,6 +199,9 @@ func run() int {
 	if flagWasSet(fs, "max-format-errors") {
 		cfg.MaxFormatErrors = o.maxFormatErrors
 	}
+	if flagWasSet(fs, "max-output-tokens") {
+		cfg.MaxOutputTokens = o.maxOutputTokens
+	}
 	if flagWasSet(fs, "read-only") {
 		cfg.ReadOnly = o.readOnly
 	}
@@ -225,6 +230,10 @@ func run() int {
 		cfg.ReasoningEffort = o.reasoningEffort
 	}
 	if err := checkReasoningEffort(o.modelName, cfg.ReasoningEffort); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	}
+	if err := checkMaxOutputTokens(o.modelName, cfg.MaxOutputTokens); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
 	}
@@ -282,6 +291,10 @@ func run() int {
 		return code
 	}
 	if err := model.SetReasoningEffort(m, o.modelName, cfg.ReasoningEffort); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	}
+	if err := model.SetMaxOutputTokens(m, o.modelName, cfg.MaxOutputTokens); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
 	}
@@ -359,6 +372,9 @@ func run() int {
 		return 1
 	}
 	if schema != nil {
+		if t.ExitStatus == agent.StatusOutputTruncated {
+			return exitOutputTruncated
+		}
 		if t.ExitStatus != agent.StatusSubmitted || t.StructuredOutput == nil {
 			return 1
 		}
@@ -371,6 +387,9 @@ func run() int {
 	}
 	if t.ExitStatus == agent.StatusSubmitted || t.ExitStatus == agent.StatusCompleted {
 		return 0
+	}
+	if t.ExitStatus == agent.StatusOutputTruncated {
+		return exitOutputTruncated
 	}
 	return 1
 }
@@ -457,6 +476,14 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	applyFlagOverrides(fs, &cfg, o.stepLimit, o.costLimit, o.timeLimit)
 	if flagWasSet(fs, "max-format-errors") {
 		cfg.MaxFormatErrors = o.maxFormatErrors
+	}
+	// The output budget may change on resume, e.g. raised after OutputTruncated.
+	if flagWasSet(fs, "max-output-tokens") {
+		cfg.MaxOutputTokens = o.maxOutputTokens
+	}
+	if err := checkMaxOutputTokens(modelName, cfg.MaxOutputTokens); err != nil {
+		fmt.Fprintln(os.Stderr, "error: resume:", err)
+		return 2
 	}
 	if flagWasSet(fs, "read-only") && o.readOnly != src.ReadOnly {
 		return fail(errors.New("resume: --read-only conflicts with the checkpoint's recorded mode; start a fresh task"))
@@ -564,6 +591,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if err := model.SetReasoningEffort(m, modelName, src.ReasoningEffort); err != nil {
 		return fail(fmt.Errorf("resume: %w", err))
 	}
+	if err := model.SetMaxOutputTokens(m, modelName, cfg.MaxOutputTokens); err != nil {
+		return fail(fmt.Errorf("resume: %w", err))
+	}
 	warnUnpriced(os.Stderr, modelName, cfg.CostLimit)
 
 	// The agent records this boundary and clears the active termination before
@@ -648,6 +678,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	}
 	if t.ExitStatus == agent.StatusSubmitted || t.ExitStatus == agent.StatusCompleted {
 		return 0
+	}
+	if t.ExitStatus == agent.StatusOutputTruncated {
+		return exitOutputTruncated
 	}
 	return 1
 }
@@ -752,7 +785,7 @@ var usageGroups = []struct {
 }{
 	{"", [][3]string{{"h", "help", ""}}},
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "resume", "path"}}},
-	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "no-compact", ""}}},
+	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "env", "name"}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}}},
 }
@@ -823,6 +856,9 @@ func summaryLine(t *trajectory.Trajectory, elapsed time.Duration) string {
 	}
 	if t.FormatErrors > 0 {
 		s += fmt.Sprintf(", %d format errors", t.FormatErrors)
+	}
+	if t.Truncations > 0 {
+		s += fmt.Sprintf(", %d truncated responses", t.Truncations)
 	}
 	if t.ExitStatus == agent.StatusError {
 		s += ": " + t.Submission
@@ -895,6 +931,8 @@ func validateLimits(o options) string {
 		return "--time-limit must be >= 0"
 	case o.maxFormatErrors < 1:
 		return "--max-format-errors must be a whole number >= 1"
+	case o.maxOutputTokens < 0:
+		return "--max-output-tokens must be a whole number >= 0 (0 = provider default)"
 	}
 	return ""
 }
@@ -1214,6 +1252,7 @@ func resultFields(t *trajectory.Trajectory, elapsed time.Duration) map[string]an
 		"cache_read_tokens": t.CacheReadTokens, "cache_write_tokens": t.CacheWriteTokens,
 		"cost_usd": t.Cost, "duration_ms": elapsed.Milliseconds(),
 		"format_errors": t.FormatErrors,
+		"truncations":   t.Truncations,
 	}
 	if t.ExitStatus == agent.StatusSubmitted && t.StructuredOutput != nil {
 		fields["structured_output"] = t.StructuredOutput
@@ -1288,6 +1327,24 @@ func checkOpenAIAPI(v string) error {
 	}
 	return nil
 }
+
+// checkMaxOutputTokens rejects a negative budget, or a budget for a
+// provider that has no per-request output limit, before any request.
+func checkMaxOutputTokens(spec string, n int) error {
+	if n < 0 {
+		return fmt.Errorf("--max-output-tokens/max_output_tokens must be a whole number >= 0, got %d", n)
+	}
+	if n == 0 {
+		return nil
+	}
+	if err := model.MaxOutputTokensSupported(spec); err != nil {
+		return fmt.Errorf("--max-output-tokens/max_output_tokens: %w", err)
+	}
+	return nil
+}
+
+// exitOutputTruncated is the exit code of an OutputTruncated run.
+const exitOutputTruncated = 3
 
 // checkReasoningEffort rejects an unknown effort, or one the provider of spec
 // has no control for, before any provider request.

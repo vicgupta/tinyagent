@@ -89,6 +89,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--cost-limit` | 0 (unlimited) | Max USD |
 | `--time-limit` | 0 (unlimited) | Max wall-clock seconds; overrides `wall_time_seconds` |
 | `--max-format-errors` | config `max_format_errors`, else 3 | Stop with `RepeatedFormatError` after this many consecutive steps whose tool calls are all malformed; must be >= 1. See [Malformed tool calls](#malformed-tool-calls) |
+| `--max-output-tokens` | config `max_output_tokens`, else 0 | Per-request output-token budget sent to the provider; 0 keeps the provider default (8192 `max_tokens` on Anthropic). Not supported by `codex`. Unrelated to `max_output_chars`, which caps tool output. See [Output truncation](#output-truncation) |
 | `--no-compact` | off | Never compact the history; see [Long runs](#long-runs) |
 | `--plan` | config `plan.enabled`, else off | Give the model the `update_plan` tool; see [Plan tool](#plan-tool) |
 | `--images` | config `images.enabled`, else off | Let vision-capable models see images: the `view_image` tool and MCP image pass-through; see [Images](#images) |
@@ -274,6 +275,8 @@ wall_time_seconds: 1800
 max_format_errors: 3      # consecutive malformed-call steps before RepeatedFormatError (>= 1)
 bash_timeout_seconds: 120
 max_output_chars: 30000   # tool output is truncated, keeping head and tail
+max_output_tokens: 0      # per-request model output budget; 0 = provider default (8192 on anthropic)
+max_truncations: 3        # consecutive cut-off responses before OutputTruncated (>= 1)
 max_background_processes: 4   # start_process processes running at once (0 uses 4)
 input_price_per_mtok: 3   # override the built-in price table
 output_price_per_mtok: 15
@@ -350,7 +353,7 @@ Reasoning models return state that must be sent back during tool use. tinyagent 
 | `anthropic` | `output_config.effort` (thinking is not turned on explicitly) |
 | `ollama` | not supported; exits 2 |
 
-An unknown value exits 2 before any request. Which values a model accepts varies; a provider rejection is reported like any other model error and is not retried. The effort is recorded as `reasoning_effort` in trajectories and is kept on `--resume` (a different `--reasoning-effort` is refused, like `--model`). Higher effort means more output tokens, which providers bill and which count toward `--cost-limit`; on Anthropic, thinking also counts toward the request's 8192 `max_tokens`. Changing the effort invalidates provider prompt caches.
+An unknown value exits 2 before any request. Which values a model accepts varies; a provider rejection is reported like any other model error and is not retried. The effort is recorded as `reasoning_effort` in trajectories and is kept on `--resume` (a different `--reasoning-effort` is refused, like `--model`). Higher effort means more output tokens, which providers bill and which count toward `--cost-limit`; on Anthropic, thinking also counts toward the request's `max_tokens` (8192 unless `--max-output-tokens` is set). Changing the effort invalidates provider prompt caches.
 
 Reasoning state is stored in each assistant message's `extra` (`anthropic_content`, and `codex_reasoning` for Responses API reasoning items from both `codex` and `openai`) in trajectories and checkpoints, so `--resume` replays it. It may include thinking text and encrypted reasoning blobs; treat trajectory files as private. Reasoning state is not shown in the terminal or in `--json` events.
 
@@ -426,7 +429,7 @@ A checkpoint records whether images were enabled, and `--resume` keeps that sett
 
 ## Exit status
 
-The run ends when the model writes `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` (`Submitted`), stops calling tools (`Completed`), or hits a limit (`StepLimitExceeded`, `CostLimitExceeded`, `TimeLimitExceeded`), Ctrl-C (`Interrupted`), a non-retryable API error (`Error`), too many consecutive malformed tool-call steps (`RepeatedFormatError`, see below), or, with `--output-schema`, 3 consecutive invalid results (`InvalidOutput`), or stop hooks still rejecting the result after `max_stop_continuations` (`VerificationFailed`, see [Stop hooks](#stop-hooks)). The process exits 0 only for `Submitted` and `Completed`.
+The run ends when the model writes `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` (`Submitted`), stops calling tools (`Completed`), or hits a limit (`StepLimitExceeded`, `CostLimitExceeded`, `TimeLimitExceeded`), Ctrl-C (`Interrupted`), a non-retryable API error (`Error`), too many consecutive malformed tool-call steps (`RepeatedFormatError`, see below), or, with `--output-schema`, 3 consecutive invalid results (`InvalidOutput`), or stop hooks still rejecting the result after `max_stop_continuations` (`VerificationFailed`, see [Stop hooks](#stop-hooks)), or too many consecutive responses cut off at the output-token limit (`OutputTruncated`, see [Output truncation](#output-truncation)). The process exits 0 only for `Submitted` and `Completed`, 3 for `OutputTruncated`, and 1 otherwise (2 is reserved for usage errors).
 
 Every run ends with one summary line on stderr, so stdout keeps only the model's text:
 
@@ -443,6 +446,14 @@ A tool call is a *format error* when its arguments aren't valid JSON or not a JS
 A step whose tool calls are all format errors counts toward a consecutive limit; any step with at least one well-formed call resets it. After `--max-format-errors` (config `max_format_errors`, default 3) such steps in a row, the run ends with `RepeatedFormatError`, an empty submission, and a non-zero exit. Format-error steps are ordinary model calls, so they count toward `--step-limit` and `--cost-limit`, which are checked first. A response with no tool calls still ends the run as `Completed`.
 
 The summary line shows the count (`..., 3 format errors: <last reason>`). With `--json`, a malformed call's `tool.result` event has `"format_error": true` and the `result` event has `format_errors`. With `-o`, the trajectory records `format_errors`, `consecutive_format_errors`, `format_error_messages` (indexes of the correction messages) and `last_format_error`, and keeps the original arguments. The consecutive count is restored on `--resume`, and a `RepeatedFormatError` checkpoint can be resumed.
+
+### Output truncation
+
+When a response stops because it hit the output-token limit (Anthropic `stop_reason` `max_tokens` or `model_context_window_exceeded`, Chat Completions `finish_reason` `length`, Responses/Codex `incomplete` with reason `max_output_tokens`), tinyagent treats it as cut off rather than finished. None of its tool calls run, not even ones that look complete, and no hooks run for them; each gets the result `error: [not run: your response was cut off at the output-token limit ...]`, and the model is asked to continue in smaller pieces (for example, write a large file in several edits). A cut-off response never ends the run as `Submitted` or `Completed`, and does not count as a format error or an invalid structured result. Invalid partial tool-call JSON is replaced by `{}` when the conversation is sent back to the provider.
+
+After `max_truncations` (default 3) cut-off responses in a row, the run ends with `OutputTruncated` and exits 3; any complete response resets the count. Raise the budget with `--max-output-tokens` (config `max_output_tokens`; sent as `max_tokens` on Anthropic and Ollama, `max_completion_tokens` on OpenAI/OpenRouter Chat Completions, `max_output_tokens` on the OpenAI Responses transport; `codex` exits 2). The budget may be changed on `--resume`, so an `OutputTruncated` checkpoint can be resumed with a larger one.
+
+A warning goes to stderr, the summary line shows `..., N truncated responses`, `--json` (and `--log-db`) emit a `model.truncated` event with `step`, `reason`, `max_output_tokens`, `tool_calls_dropped` and `consecutive`, the dropped calls' `tool.result` events have `"truncated": true`, and the `result` event and trajectory record `truncations` (trajectories also `consecutive_truncations` and `max_output_tokens`).
 
 ## Troubleshooting
 

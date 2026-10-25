@@ -85,6 +85,13 @@ type Trajectory struct {
 	ConsecutiveFormatErrors int    `json:"consecutive_format_errors,omitempty"`
 	FormatErrorMessages     []int  `json:"format_error_messages,omitempty"`
 	LastFormatError         string `json:"last_format_error,omitempty"`
+	// Truncations counts responses cut off at the output-token limit over
+	// the whole run, and ConsecutiveTruncations the current run of them; it
+	// is restored on resume. MaxOutputTokens is the effective per-request
+	// output budget (0 = provider default).
+	Truncations            int `json:"truncations,omitempty"`
+	ConsecutiveTruncations int `json:"consecutive_truncations,omitempty"`
+	MaxOutputTokens        int `json:"max_output_tokens,omitempty"`
 	// StopContinuations counts the times stop hooks sent the model back to
 	// work; it is restored on resume. StopReason is the last stop-hook
 	// feedback of a VerificationFailed run.
