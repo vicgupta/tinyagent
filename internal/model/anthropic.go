@@ -14,6 +14,8 @@ type Anthropic struct {
 	Model     string
 	MaxTokens int          // defaults to 8192
 	OnText    func(string) // if set, stream and report text deltas
+	// ReasoningEffort, if set, is sent as output_config.effort.
+	ReasoningEffort string
 }
 
 type anthropicBlock struct {
@@ -24,11 +26,14 @@ type anthropicBlock struct {
 	Input     json.RawMessage `json:"input,omitempty"`
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   string          `json:"content,omitempty"`
+	Thinking  string          `json:"thinking,omitempty"`
+	Signature string          `json:"signature,omitempty"`
+	Data      string          `json:"data,omitempty"`
 }
 
 type anthropicMessage struct {
-	Role    string           `json:"role"`
-	Content []anthropicBlock `json:"content"`
+	Role    string            `json:"role"`
+	Content []json.RawMessage `json:"content"`
 }
 
 type anthropicTool struct {
@@ -64,6 +69,8 @@ type anthropicEvent struct {
 		Type        string `json:"type"`
 		Text        string `json:"text"`
 		PartialJSON string `json:"partial_json"`
+		Thinking    string `json:"thinking"`
+		Signature   string `json:"signature"`
 		StopReason  string `json:"stop_reason"`
 	} `json:"delta"`
 	Usage *anthropicUsage `json:"usage"`
@@ -79,7 +86,15 @@ type anthropicEvent struct {
 func toAnthropic(messages []Message) (string, []anthropicMessage) {
 	var system []string
 	var out []anthropicMessage
-	add := func(role string, blocks ...anthropicBlock) {
+	var addRaw func(role string, blocks []json.RawMessage)
+	add := func(role string, typed ...anthropicBlock) {
+		blocks := make([]json.RawMessage, len(typed))
+		for i, b := range typed {
+			blocks[i], _ = json.Marshal(b)
+		}
+		addRaw(role, blocks)
+	}
+	addRaw = func(role string, blocks []json.RawMessage) {
 		if len(blocks) == 0 {
 			return
 		}
@@ -98,6 +113,12 @@ func toAnthropic(messages []Message) (string, []anthropicMessage) {
 				add("user", anthropicBlock{Type: "text", Text: m.Content})
 			}
 		case "assistant":
+			// Replay a response that carried thinking exactly as received,
+			// as the API requires during tool use.
+			if raw, ok := anthropicReplay(m); ok {
+				addRaw("assistant", raw)
+				continue
+			}
 			var blocks []anthropicBlock
 			if m.Content != "" {
 				blocks = append(blocks, anthropicBlock{Type: "text", Text: m.Content})
@@ -134,6 +155,9 @@ func (a *Anthropic) Query(ctx context.Context, messages []Message, tools []ToolS
 	if system != "" {
 		body["system"] = system
 	}
+	if a.ReasoningEffort != "" {
+		body["output_config"] = map[string]string{"effort": a.ReasoningEffort}
+	}
 	if len(tools) > 0 {
 		at := make([]anthropicTool, len(tools))
 		for i, t := range tools {
@@ -163,8 +187,11 @@ func (a *Anthropic) Query(ctx context.Context, messages []Message, tools []ToolS
 
 	msg := Message{Role: "assistant", Extra: map[string]any{"stop_reason": resp.StopReason}}
 	var text []string
+	thinking := false
 	for _, b := range resp.Content {
 		switch b.Type {
+		case "thinking", "redacted_thinking":
+			thinking = true
 		case "text":
 			text = append(text, b.Text)
 		case "tool_use":
@@ -179,6 +206,16 @@ func (a *Anthropic) Query(ctx context.Context, messages []Message, tools []ToolS
 		}
 	}
 	msg.Content = strings.Join(text, "\n")
+	if thinking {
+		raw := make([]json.RawMessage, len(resp.Content))
+		for i, b := range resp.Content {
+			if b.Type == "tool_use" && len(b.Input) == 0 {
+				b.Input = json.RawMessage("{}")
+			}
+			raw[i], _ = json.Marshal(b)
+		}
+		msg.Extra[ExtraAnthropicContent] = raw
+	}
 	u := resp.Usage
 	return msg, cachedPrice(a.Model, u.InputTokens, u.CacheCreationInputTokens, u.CacheReadInputTokens, u.OutputTokens), nil
 }
@@ -222,6 +259,10 @@ func (a *Anthropic) stream(ctx context.Context, url string, headers map[string]s
 			case "text_delta":
 				out.Content[ev.Index].Text += ev.Delta.Text
 				a.OnText(ev.Delta.Text)
+			case "thinking_delta":
+				out.Content[ev.Index].Thinking += ev.Delta.Thinking
+			case "signature_delta":
+				out.Content[ev.Index].Signature += ev.Delta.Signature
 			case "input_json_delta":
 				partial[ev.Index].WriteString(ev.Delta.PartialJSON)
 			}
@@ -251,4 +292,32 @@ func (a *Anthropic) stream(ctx context.Context, url string, headers map[string]s
 		return anthropicResponse{}, err
 	}
 	return out, nil
+}
+
+// anthropicReplay returns the stored content blocks of an assistant message
+// that carried thinking, provided they still match its tool calls.
+func anthropicReplay(m Message) ([]json.RawMessage, bool) {
+	raw, ok := rawItems(m.Extra[ExtraAnthropicContent])
+	if !ok {
+		return nil, false
+	}
+	var ids []string
+	for _, r := range raw {
+		var b struct{ Type, ID string }
+		if json.Unmarshal(r, &b) != nil {
+			return nil, false
+		}
+		if b.Type == "tool_use" {
+			ids = append(ids, b.ID)
+		}
+	}
+	if len(ids) != len(m.ToolCalls) {
+		return nil, false
+	}
+	for i, tc := range m.ToolCalls {
+		if ids[i] != tc.ID {
+			return nil, false
+		}
+	}
+	return raw, true
 }

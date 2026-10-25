@@ -123,11 +123,11 @@ func TestToAnthropic(t *testing.T) {
 		t.Fatalf("got %d messages, want 3 (tool results merged): %+v", len(msgs), msgs)
 	}
 	asst := msgs[1]
-	if asst.Role != "assistant" || len(asst.Content) != 3 || asst.Content[2].Type != "tool_use" || string(asst.Content[2].Input) != "{}" {
+	if asst.Role != "assistant" || len(asst.Content) != 3 || block(t, asst.Content[2]).Type != "tool_use" || string(block(t, asst.Content[2]).Input) != "{}" {
 		t.Errorf("assistant = %+v", asst)
 	}
 	res := msgs[2]
-	if res.Role != "user" || len(res.Content) != 2 || res.Content[1].ToolUseID != "t2" || res.Content[1].Content != "B" {
+	if res.Role != "user" || len(res.Content) != 2 || block(t, res.Content[1]).ToolUseID != "t2" || block(t, res.Content[1]).Content != "B" {
 		t.Errorf("tool results = %+v", res)
 	}
 }
@@ -354,4 +354,13 @@ func TestUnpriced(t *testing.T) {
 			t.Errorf("override %v: want priced", o)
 		}
 	}
+}
+
+func block(t *testing.T, raw json.RawMessage) anthropicBlock {
+	t.Helper()
+	var b anthropicBlock
+	if err := json.Unmarshal(raw, &b); err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

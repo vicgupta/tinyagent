@@ -44,6 +44,7 @@ type options struct {
 	outputSchema                                     string
 	planFile                                         string
 	plan                                             bool
+	reasoningEffort                                  string
 	stepLimit, timeLimit, maxFormatErrors            int
 	costLimit                                        float64
 	verbose, noStream, noAgentsMD, noCompact         bool
@@ -85,6 +86,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.sandboxNetwork, "sandbox-network", false, "with --sandbox, allow commands to use the network")
 	fs.BoolVar(&o.plan, "plan", false, "enable the update_plan tool: a task plan saved in the checkpoint and pinned in every request (default off; config plan.enabled)")
 	fs.StringVar(&o.planFile, "plan-file", "", "with the plan enabled, also export the current plan as Markdown to this file after each save")
+	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "provider reasoning effort: none, minimal, low, medium, high, xhigh, or max")
 	fs.BoolVar(&o.jsonOutput, "json", false, "write run events as JSONL to stdout")
 	fs.StringVar(&o.outputSchema, "output-schema", "", "end the run with a JSON result validated against this JSON Schema file (printed to stdout)")
 	fs.Var(&o.logDB, "log-db", "also log run events to SQLite (default .tinyagent/tinyagent.db under --cwd); --log-db=false turns config log_db off")
@@ -192,6 +194,13 @@ func run() int {
 		return fail(errors.New("--plan-file requires the plan tool; pass --plan or set plan.enabled: true"))
 	}
 	o.modelName = resolveModel(fs, o.modelName, cfg.Model)
+	if flagWasSet(fs, "reasoning-effort") {
+		cfg.ReasoningEffort = o.reasoningEffort
+	}
+	if err := checkReasoningEffort(o.modelName, cfg.ReasoningEffort); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	}
 	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 
 	root, err := canonicalRoot(o.cwd)
@@ -234,11 +243,16 @@ func run() int {
 		printHint(os.Stderr, o.modelName, err.Error())
 		return code
 	}
+	if err := model.SetReasoningEffort(m, o.modelName, cfg.ReasoningEffort); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	}
 	warnUnpriced(os.Stderr, o.modelName, cfg.CostLimit)
 
 	a := &agent.Agent{
-		Model:     m,
-		ModelName: o.modelName,
+		Model:           m,
+		ModelName:       o.modelName,
+		ReasoningEffort: cfg.ReasoningEffort,
 		Tools: &tools.Executor{
 			Root:           root,
 			ReadOnly:       cfg.ReadOnly,
@@ -358,6 +372,14 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return fail(fmt.Errorf("resume: --model %q conflicts with the checkpoint's model %q", o.modelName, src.Model))
 	}
 	modelName := src.Model
+	// Like the model, the recorded effort is kept for the whole run (it is
+	// part of the provider's prompt cache key); the config value is ignored.
+	if flagWasSet(fs, "reasoning-effort") && o.reasoningEffort != src.ReasoningEffort {
+		return fail(fmt.Errorf("resume: --reasoning-effort %q conflicts with the checkpoint's reasoning_effort %q", o.reasoningEffort, src.ReasoningEffort))
+	}
+	if err := checkReasoningEffort(modelName, src.ReasoningEffort); err != nil {
+		return fail(fmt.Errorf("resume: %w", err))
+	}
 
 	cfgPath := config.Find(o.configPath)
 	cfg, err := config.Load(cfgPath)
@@ -439,6 +461,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		printHint(os.Stderr, modelName, err.Error())
 		return code
 	}
+	if err := model.SetReasoningEffort(m, modelName, src.ReasoningEffort); err != nil {
+		return fail(fmt.Errorf("resume: %w", err))
+	}
 	warnUnpriced(os.Stderr, modelName, cfg.CostLimit)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -452,8 +477,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	}
 
 	a := &agent.Agent{
-		Model:     m,
-		ModelName: modelName,
+		Model:           m,
+		ModelName:       modelName,
+		ReasoningEffort: src.ReasoningEffort,
 		Tools: &tools.Executor{
 			Root:           root,
 			ReadOnly:       src.ReadOnly,
@@ -587,7 +613,7 @@ var usageGroups = []struct {
 	flags [][3]string
 }{
 	{"", [][3]string{{"h", "help", ""}}},
-	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "resume", "path"}}},
+	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "resume", "path"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "sandbox", ""}, {"", "sandbox-network", ""}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}}},
@@ -861,7 +887,11 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	if len(events.fan) == 0 {
 		return events
 	}
-	events.emit("run.started", map[string]any{"schema_version": 1, "model": a.ModelName, "root": a.Tools.Root, "read_only": a.Tools.ReadOnly, "resumed": resumed})
+	started := map[string]any{"schema_version": 1, "model": a.ModelName, "root": a.Tools.Root, "read_only": a.Tools.ReadOnly, "resumed": resumed}
+	if a.ReasoningEffort != "" {
+		started["reasoning_effort"] = a.ReasoningEffort
+	}
+	events.emit("run.started", started)
 	a.OnEvent = func(kind string, fields map[string]any) {
 		events.emit(kind, fields)
 		if events.err != nil {
@@ -1083,4 +1113,24 @@ func writePlanFile(path string, p *trajectory.Plan) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)
+}
+
+// checkReasoningEffort rejects an unknown effort, or one the provider of spec
+// has no control for, before any provider request.
+func checkReasoningEffort(spec, effort string) error {
+	if effort == "" {
+		return nil
+	}
+	if !model.ValidReasoningEffort(effort) {
+		return fmt.Errorf("--reasoning-effort/reasoning_effort %q is invalid (want one of %s)", effort, strings.Join(model.ReasoningEfforts, ", "))
+	}
+	provider, _, ok := strings.Cut(spec, "/")
+	if !ok {
+		provider = "openai"
+	}
+	switch provider {
+	case "openai", "openrouter", "anthropic", "codex":
+		return nil
+	}
+	return fmt.Errorf("--reasoning-effort/reasoning_effort is not supported by the %s provider", provider)
 }

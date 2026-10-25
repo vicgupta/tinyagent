@@ -47,11 +47,13 @@ const maxAgentsMD = 32 << 10
 type Agent struct {
 	Model     model.Model
 	ModelName string
-	Tools     *tools.Executor
-	Config    config.AgentConfig
-	Out       io.Writer // progress log; nil discards
-	Err       io.Writer // warnings; nil discards
-	Verbose   bool
+	// ReasoningEffort is recorded in new trajectories; the Model sends it.
+	ReasoningEffort string
+	Tools           *tools.Executor
+	Config          config.AgentConfig
+	Out             io.Writer // progress log; nil discards
+	Err             io.Writer // warnings; nil discards
+	Verbose         bool
 	// Streamed means the model already wrote its text to Out as it arrived.
 	Streamed bool
 	// SkipAgentsMD stops Run from appending the nearest AGENTS.md at or above
@@ -153,6 +155,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			Task:                  task,
 			ReadOnly:              a.Tools.ReadOnly,
 			Model:                 a.ModelName,
+			ReasoningEffort:       a.ReasoningEffort,
 			SchemaVersion:         trajectory.SchemaVersion,
 			Root:                  a.Tools.Root,
 			SystemPrompt:          system,
