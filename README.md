@@ -82,6 +82,8 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--resume` | — | Continue a validated unfinished trajectory; requires explicit matching `--cwd` and a new `-o` path |
 | `-m, --model` | `$AGENT_MODEL`, else config `model`, else `openai/gpt-4o` | `<provider>/<model>`; no `/` means openai. Providers: openai, openrouter, anthropic, ollama, codex, plus any defined under [`providers`](#named-providers) |
 | `--reasoning-effort` | config `reasoning_effort`, else unset | Reasoning effort sent to the provider: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; see [Reasoning](#reasoning) |
+| `--fallback-model <spec>` | config `fallback_models`, else none | Model to switch to when the current one keeps failing with `429`, `5xx` or network errors after retries; repeatable, tried in order, at most 3, and replaces `fallback_models`; see [Model fallback](#model-fallback) |
+| `--no-fallback` | off | Don't fall back to other models (clears `fallback_models`); conflicts with `--fallback-model` |
 | `--openai-api` | config `openai_api`, else `auto` | Transport for the `openai` provider: `auto`, `responses`, or `chat`; see [OpenAI transport](#openai-transport) |
 | `-c, --config` | user config, else built-in | YAML config file; see [Config](#config) |
 | `--cwd` | `.` | Root directory; tools can't reach outside it |
@@ -131,7 +133,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 
 | Type | Fields |
 |---|---|
-| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `reasoning_effort` (only when set), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy), `file_access` (`deny_read`, `deny_write`; only with [file access](#restricting-file-access) rules), `web_fetch` (`allowed_domains`; only with [web fetch](#web-fetch) on), `lsp` (`servers`, the configured names; only with [language servers](#language-servers-lsp) on), `additional_dirs` (`path`, `mode`; only with [additional directories](#additional-directories)), `worktree` (`path`, `branch`, `base_commit`, `repo_root`; only with [`--worktree`](#worktrees)) |
+| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `reasoning_effort` (only when set), `fallback_models` (only when a [fallback chain](#model-fallback) is configured), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy), `file_access` (`deny_read`, `deny_write`; only with [file access](#restricting-file-access) rules), `web_fetch` (`allowed_domains`; only with [web fetch](#web-fetch) on), `lsp` (`servers`, the configured names; only with [language servers](#language-servers-lsp) on), `additional_dirs` (`path`, `mode`; only with [additional directories](#additional-directories)), `worktree` (`path`, `branch`, `base_commit`, `repo_root`; only with [`--worktree`](#worktrees)) |
 | `assistant.message` | `text` (complete assistant message) |
 | `tool.call` | `id`, `name`, `arguments` (decoded JSON value, or a string if malformed) |
 | `tool.result` | `id`, `name`, `output` (same configured truncation as tool output), `is_error`; with [tool output files](#tool-output-files), a saved result also has `output_file` (path relative to `--cwd`) and `output_bytes` |
@@ -148,6 +150,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 | `web_fetch` | `url`, `final_url`, `status`, `content_type`, `bytes`, `truncated`, `duration_ms`, and `denied_reason` (for a refused URL) or `error` (for a failed fetch); one per fetch attempt, emitted before its `tool.result` (see [Web fetch](#web-fetch)) |
 | `lsp.server` | `name`, `state` (`started`, `unavailable`, `crashed` or `stopped`), `reason` (for `unavailable` and `crashed`); one per language-server state change (see [Language servers (LSP)](#language-servers-lsp)) |
 | `provider.retry` | `attempt` (the upcoming attempt number), `reason` (`http_<status>` or `network`), `backoff_ms`; only emitted when a model request is retried |
+| `model.fallback` | `step`, `from`, `to`, `reason` (`http_<status>` or `network`), `attempts`; the run switched to the next [fallback model](#model-fallback) after `from` used up its retries |
 | `result` | `status`, `submission`, cumulative `steps`, `structured_output` (only with `--output-schema` and status `Submitted`), `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cost_usd`, invocation `duration_ms` |
 
 When the run starts, the final event is `result`, including for model errors, interruptions, and limit stops. Exit codes are unchanged. `--resume` reports cumulative trajectory accounting; `duration_ms` covers only the current invocation. Event streams can contain prompts, code, and tool output, so handle them with the same care as trajectory files. Credentials and environment dumps are not included.
@@ -393,6 +396,7 @@ log_db:                   # opt-in SQLite event log; see Event log database
   max_runs: 500           # keep at most this many runs; 0 keeps all
   max_payload_bytes: 65536
 reasoning_effort: medium  # optional; see Reasoning; --reasoning-effort wins
+fallback_models: []       # optional, at most 3; see Model fallback; --fallback-model replaces it
 openai_api: auto          # openai provider transport: auto, responses, or chat; --openai-api wins
 providers:                # omitted by default; see Named providers
   - id: gateway           # use as -m gateway/<model>
@@ -488,6 +492,25 @@ Reasoning models return state that must be sent back during tool use. tinyagent 
 An unknown value exits 2 before any request. Which values a model accepts varies; a provider rejection is reported like any other model error and is not retried. The effort is recorded as `reasoning_effort` in trajectories and is kept on `--resume` (a different `--reasoning-effort` is refused, like `--model`). Higher effort means more output tokens, which providers bill and which count toward `--cost-limit`; on Anthropic, thinking also counts toward the request's `max_tokens` (8192 unless `--max-output-tokens` is set). Changing the effort invalidates provider prompt caches.
 
 Reasoning state is stored in each assistant message's `extra` (`anthropic_content`, and `codex_reasoning` for Responses API reasoning items from both `codex` and `openai`) in trajectories and checkpoints, so `--resume` replays it. It may include thinking text and encrypted reasoning blobs; treat trajectory files as private. Reasoning state is not shown in the terminal or in `--json` events.
+
+### Model fallback
+
+A fallback chain lets a run survive a provider outage. It is off by default. List up to 3 models in `fallback_models` (config) or with repeated `--fallback-model` flags, which replace the config list; `--no-fallback` clears it:
+
+```yaml
+model: openai/gpt-5
+fallback_models: [anthropic/claude-sonnet-4-5, ollama/qwen3-coder]
+```
+
+When a model request still fails after its retries with `429`, a `5xx` status or a network error, tinyagent switches to the next model in the list, resends the same conversation, and stays on that model for the rest of the invocation. Every other error (`400`, `401`, `403`, `404`, context overflow, a failure in the middle of a streamed response, an interrupted run) is reported as before and does not switch models. When the last model also fails this way, the run ends with `Error` and a message naming every model tried and why.
+
+Each switch prints `model fallback: <from> -> <to> (<reason>) at step <n>` on stderr, emits a [`model.fallback`](#machine-readable-output) event, and is recorded in trajectories under `model_switches` (`step`, `from`, `to`, `reason`), along with `fallback_models` and `active_model` (the model serving the run when it was saved). `model` stays the primary model, and with a chain configured each assistant message records the model that produced it in `extra.model`. The final summary line notes the switch, for example `, 1 model fallback (now anthropic/claude-sonnet-4-5)`.
+
+Every entry is checked before the first request: an unknown provider, a missing API key, an entry equal to the primary model, a duplicate, or more than 3 entries exits 2. `reasoning_effort` and `max_output_tokens` apply to a fallback only when it uses the same provider as the primary. Provider-specific reasoning state (Anthropic thinking blocks, encrypted Responses reasoning) is never sent to a different provider. Prices come from each model's own pricing, and `--cost-limit` warns about every unpriced model in the chain.
+
+**Your conversation goes to the fallback provider.** After a switch, the whole history so far (task, files the model read, tool output) is sent to the next provider in the list, so only list providers you are willing to share that data with.
+
+`--resume` uses the chain from the current config and flags, not the saved one, and the resumed run starts on the primary model. Subagents (`delegate`) don't fall back. Older tinyagent versions reject a config file containing the `fallback_models` key.
 
 ### Local MCP tools
 
@@ -723,6 +746,7 @@ When a run fails on a common setup problem, tinyagent prints a `hint:` line unde
 | `HTTP 404` from openai, openrouter or anthropic | Check the model name after the `/`. |
 | `connection refused` with `ollama/...` | Start Ollama with `ollama serve`, or set `OLLAMA_HOST` to where it runs. |
 | `HTTP 404` with `ollama/...` | Pull the model: `ollama pull <model>`. |
+| `every model in the fallback chain failed` | Each listed model used up its retries; the message names each one and why. Check the providers' status pages, or add a model from another provider to `fallback_models`. |
 | `codex: no login` | Run `codex login` and choose ChatGPT. |
 | `model is not supported` with `codex/...` | Use a model the Codex CLI's model picker shows for your plan. |
 

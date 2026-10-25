@@ -124,6 +124,10 @@ func TestSummaryLine(t *testing.T) {
 			time.Second, "Submitted after 1 steps in 1s (5,000 input / 10 output tokens, $0.02)"},
 		{"zero cost", trajectory.Trajectory{ExitStatus: agent.StatusCompleted, Steps: 4, InputTokens: 1000, OutputTokens: 200},
 			3725 * time.Second, "Completed after 4 steps in 1h02m (1,000 input / 200 output tokens)"},
+		{"fallback", trajectory.Trajectory{ExitStatus: agent.StatusSubmitted, Steps: 2, ActiveModel: "anthropic/b", ModelSwitches: []trajectory.ModelSwitch{{Step: 1, From: "openai/a", To: "anthropic/b", Reason: "http_503"}}},
+			time.Second, "Submitted after 2 steps in 1s, 1 model fallback (now anthropic/b)"},
+		{"fallbacks", trajectory.Trajectory{ExitStatus: agent.StatusSubmitted, Steps: 2, ActiveModel: "ollama/c", ModelSwitches: []trajectory.ModelSwitch{{Step: 1, To: "anthropic/b"}, {Step: 2, To: "ollama/c"}}},
+			time.Second, "Submitted after 2 steps in 1s, 2 model fallbacks (now ollama/c)"},
 		{"zero steps", trajectory.Trajectory{ExitStatus: agent.StatusInterrupted},
 			2 * time.Second, "Interrupted after 0 steps in 2s"},
 		{"verification failed", trajectory.Trajectory{ExitStatus: agent.StatusVerificationFailed, Steps: 6, StopReason: "[stop hook /bin/check]\ntests failed"},
@@ -266,6 +270,8 @@ Task:
   -t, --task string                  task/prompt (required unless --resume; with --resume of a finished run, the follow-up instruction); "-" reads it from stdin
   -m, --model string                 provider/model; if unset, $AGENT_MODEL, then the config's model (default "openai/gpt-4o")
       --reasoning-effort level       provider reasoning effort: none, minimal, low, medium, high, xhigh, or max
+      --fallback-model spec          provider/model to switch to when requests still fail with 429/5xx/network errors after retries (repeatable, tried in order; replaces fallback_models)
+      --no-fallback                  don't fall back to other models (clears fallback_models)
       --openai-api api               openai provider transport: auto, responses, or chat
   -c, --config path                  YAML config (default: user config if present, else built-in)
       --cwd dir                      working directory (default ".")

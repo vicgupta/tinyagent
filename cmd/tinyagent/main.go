@@ -56,6 +56,8 @@ type options struct {
 	toolOutputFiles                                  bool
 	skills, noSkills                                 bool
 	reasoningEffort                                  string
+	fallbackModels                                   specList
+	noFallback                                       bool
 	openaiAPI                                        string
 	execEnv                                          string
 	commandEnv                                       string
@@ -121,6 +123,8 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.noSkills, "no-skills", false, "turn Agent Skills discovery off, overriding config skills; --no-skills=false turns it on")
 	fs.StringVar(&o.planFile, "plan-file", "", "with the plan enabled, also export the current plan as Markdown to this file after each save")
 	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "provider reasoning effort: none, minimal, low, medium, high, xhigh, or max")
+	fs.Var(&o.fallbackModels, "fallback-model", "provider/model to switch to when requests still fail with 429/5xx/network errors after retries (repeatable, tried in order; replaces fallback_models)")
+	fs.BoolVar(&o.noFallback, "no-fallback", false, "don't fall back to other models (clears fallback_models)")
 	fs.StringVar(&o.openaiAPI, "openai-api", "", "openai provider transport: auto, responses, or chat")
 	fs.StringVar(&o.execEnv, "env", "", "where bash and start_process run: local or container (default: config's environment, else local)")
 	fs.StringVar(&o.commandEnv, "command-env", "", "environment bash and start_process inherit: all, core or none (default: config's command_env.inherit, else all)")
@@ -323,6 +327,14 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
 	}
+	fallbacks, err := fallbackModels(fs, o.fallbackModels, o.noFallback, cfg)
+	if err == nil {
+		err = checkFallbacks(o.modelName, fallbacks, cfg.OpenAIAPI)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	}
 	subagents, err := newSubagents(cfg, o.modelName, cfg.ReasoningEffort)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -415,11 +427,16 @@ func run() int {
 		return 2
 	}
 	warnUnpriced(os.Stderr, o.modelName, cfg.CostLimit)
+	if m, err = withFallbacks(m, o.modelName, fallbacks, onText, cfg, cfg.ReasoningEffort, os.Stderr); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	}
 	providerAPI, providerBaseURL := providerInfo(o.modelName)
 
 	a := &agent.Agent{
 		Model:           m,
 		ModelName:       o.modelName,
+		FallbackModels:  fallbacks,
 		ReasoningEffort: cfg.ReasoningEffort,
 		OpenAIAPI:       openaiAPI,
 		ProviderAPI:     providerAPI,
@@ -600,6 +617,16 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	}
 	if err := checkResumeProvider(src, modelName); err != nil {
 		return fail(err)
+	}
+	// The fallback chain is this invocation's (config or flags), not the
+	// checkpoint's; a resumed run starts on the primary model again.
+	fallbacks, err := fallbackModels(fs, o.fallbackModels, o.noFallback, cfg)
+	if err == nil {
+		err = checkFallbacks(modelName, fallbacks, cfg.OpenAIAPI)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: resume:", err)
+		return 2
 	}
 	if err := model.CheckProviderEnv(modelName); err != nil {
 		fmt.Fprintln(os.Stderr, "error: resume:", err)
@@ -804,6 +831,10 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return fail(fmt.Errorf("resume: %w", err))
 	}
 	warnUnpriced(os.Stderr, modelName, cfg.CostLimit)
+	if m, err = withFallbacks(m, modelName, fallbacks, onText, cfg, src.ReasoningEffort, os.Stderr); err != nil {
+		fmt.Fprintln(os.Stderr, "error: resume:", err)
+		return 2
+	}
 	providerAPI, providerBaseURL := providerInfo(modelName)
 
 	// The agent records this boundary and clears the active termination before
@@ -816,6 +847,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	a := &agent.Agent{
 		Model:           m,
 		ModelName:       modelName,
+		FallbackModels:  fallbacks,
 		ReasoningEffort: src.ReasoningEffort,
 		OpenAIAPI:       openaiAPI,
 		ProviderAPI:     providerAPI,
@@ -1221,7 +1253,7 @@ var usageGroups = []struct {
 	flags [][3]string
 }{
 	{"", [][3]string{{"h", "help", ""}}},
-	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}}},
+	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
@@ -1292,6 +1324,13 @@ func summaryLine(t *trajectory.Trajectory, elapsed time.Duration) string {
 			s += ", " + formatCost(t.Cost)
 		}
 		s += ")"
+	}
+	if n := len(t.ModelSwitches); n > 0 && t.ActiveModel != "" {
+		noun := "fallbacks"
+		if n == 1 {
+			noun = "fallback"
+		}
+		s += fmt.Sprintf(", %d model %s (now %s)", n, noun, t.ActiveModel)
 	}
 	if t.FormatErrors > 0 {
 		s += fmt.Sprintf(", %d format errors", t.FormatErrors)
@@ -1513,6 +1552,9 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	if a.ReasoningEffort != "" {
 		started["reasoning_effort"] = a.ReasoningEffort
 	}
+	if len(a.FallbackModels) > 0 {
+		started["fallback_models"] = a.FallbackModels
+	}
 	if a.OpenAIAPI != "" {
 		started["openai_api"] = a.OpenAIAPI
 	}
@@ -1550,8 +1592,10 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 			stop()
 		}
 	}
-	if a.Config.CostLimit > 0 && model.Unpriced(a.ModelName) {
-		events.emit("warning", map[string]any{"message": fmt.Sprintf("no pricing available for %s; --cost-limit cannot be enforced", a.ModelName)})
+	for _, spec := range append([]string{a.ModelName}, a.FallbackModels...) {
+		if a.Config.CostLimit > 0 && model.Unpriced(spec) {
+			events.emit("warning", map[string]any{"message": fmt.Sprintf("no pricing available for %s; --cost-limit cannot be enforced", spec)})
+		}
 	}
 	return events
 }

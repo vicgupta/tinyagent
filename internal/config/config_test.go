@@ -332,3 +332,15 @@ func TestSubagentsConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigFallbackModels(t *testing.T) {
+	p := fakeUserDirs(t)
+	write(t, p, "fallback_models: [anthropic/claude-sonnet-4-5, ollama/qwen3-coder]\n")
+	cfg, err := load(t, "")
+	if err != nil || len(cfg.FallbackModels) != 2 || cfg.FallbackModels[0] != "anthropic/claude-sonnet-4-5" || cfg.FallbackModels[1] != "ollama/qwen3-coder" {
+		t.Errorf("load = %+v, %v", cfg.FallbackModels, err)
+	}
+	if len(Default().FallbackModels) != 0 {
+		t.Errorf("Default().FallbackModels = %v, want none", Default().FallbackModels)
+	}
+}

@@ -85,6 +85,12 @@ type AgentConfig struct {
 	// 0 uses the table.
 	ContextWindow int `yaml:"context_window"`
 
+	// FallbackModels is the opt-in fallback chain: provider/model specs
+	// tried in order when a request still fails with HTTP 429, 5xx or a
+	// network error after the provider's retries. Empty (the default)
+	// never switches. --fallback-model replaces it; --no-fallback clears it.
+	FallbackModels []string `yaml:"fallback_models,omitempty"`
+
 	// ReasoningEffort is sent to the provider's reasoning control: none,
 	// minimal, low, medium, high, xhigh, or max. "" sends nothing, so the
 	// model's default applies.
