@@ -1,4 +1,5 @@
-// Package mcptools connects explicitly configured local MCP servers.
+// Package mcptools connects explicitly configured MCP servers: local stdio
+// servers and remote Streamable HTTP servers.
 package mcptools
 
 import (
@@ -8,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
@@ -39,6 +41,8 @@ type server struct {
 	session *mcp.ClientSession
 	timeout time.Duration
 	failed  bool
+	// url and origin are set for url servers; errors show only the origin.
+	url, origin string
 }
 type Tool struct {
 	server   *server
@@ -69,7 +73,12 @@ func Start(ctx context.Context, root string, cfg []config.MCPServer, stderr io.W
 			r.Close()
 			return nil, err
 		}
-		fmt.Fprintf(stderr, "mcp: enabled server %s (%d selected tools)\n", def.Alias, len(def.Tools))
+		if def.URL != "" {
+			u, _ := url.Parse(def.URL)
+			fmt.Fprintf(stderr, "mcp: enabled server %s (http %s, %d selected tools)\n", def.Alias, origin(u), len(def.Tools))
+		} else {
+			fmt.Fprintf(stderr, "mcp: enabled server %s (%d selected tools)\n", def.Alias, len(def.Tools))
+		}
 	}
 	if len(r.Specs) == 0 {
 		r.Close()
@@ -87,33 +96,32 @@ func (r *Registry) start(ctx context.Context, root string, def config.MCPServer,
 	if def.CallTimeoutSec == 0 {
 		def.CallTimeoutSec = 60
 	}
-	env := make([]string, 0, len(def.Env)+2)
-	if p := os.Getenv("PATH"); p != "" {
-		env = append(env, "PATH="+p)
-	}
-	if runtime.GOOS == "windows" {
-		for _, k := range []string{"SystemRoot", "WINDIR", "USERPROFILE", "TEMP", "TMP"} {
-			if v, ok := os.LookupEnv(k); ok {
-				env = append(env, k+"="+v)
-			}
-		}
-	}
-	for _, k := range def.Env {
-		env = append(env, k+"="+os.Getenv(k)) // presence checked by validateDefinitions
-	}
-	cmd := exec.Command(def.Command, def.Args...)
-	cmd.Dir = root
-	cmd.Env = env
-	cmd.Stderr = &limitedWriter{w: stderr, n: 32 << 10}
 	client := mcp.NewClient(&mcp.Implementation{Name: "tinyagent", Version: "1"}, nil)
 	dctx, cancel := context.WithTimeout(ctx, time.Duration(def.DiscoveryTimeoutSec)*time.Second)
 	defer cancel()
-	sess, err := client.Connect(dctx, &mcp.CommandTransport{Command: cmd, TerminateDuration: 2 * time.Second}, nil)
+	var transport mcp.Transport
+	var remote *remoteTransport
+	if def.URL != "" {
+		httpClient, rt := newRemoteClient(def)
+		remote = rt
+		// The catalog is fixed per run, so the standalone server-to-client
+		// stream is not opened, and calls are never retried or replayed.
+		transport = &mcp.StreamableClientTransport{Endpoint: def.URL, HTTPClient: httpClient, MaxRetries: -1, DisableStandaloneSSE: true}
+	} else {
+		transport = &mcp.CommandTransport{Command: localCommand(root, def, stderr), TerminateDuration: 2 * time.Second}
+	}
+	sess, err := client.Connect(dctx, transport, nil)
 	if err != nil {
+		if remote != nil {
+			return remote.startupError(def, "connect", err)
+		}
 		return fmt.Errorf("mcp server %q: connect failed: %w", def.Alias, err)
 	}
 	r.sessions = append(r.sessions, sess)
 	sv := &server{alias: def.Alias, session: sess, timeout: time.Duration(def.CallTimeoutSec) * time.Second}
+	if remote != nil {
+		sv.url, sv.origin = def.URL, remote.origin
+	}
 	selected := map[string]bool{}
 	for _, name := range def.Tools {
 		selected[name] = true
@@ -128,6 +136,9 @@ func (r *Registry) start(ctx context.Context, root string, def config.MCPServer,
 		}
 		res, err := sess.ListTools(dctx, &mcp.ListToolsParams{Cursor: cursor})
 		if err != nil {
+			if remote != nil {
+				return remote.startupError(def, "tool discovery", err)
+			}
 			return fmt.Errorf("mcp server %q: tool discovery failed: %w", def.Alias, err)
 		}
 		count += len(res.Tools)
@@ -183,6 +194,30 @@ func (r *Registry) start(ctx context.Context, root string, def config.MCPServer,
 	return nil
 }
 
+// localCommand builds the command for a stdio server with a minimal
+// environment: PATH, the Windows process variables, and the named variables.
+func localCommand(root string, def config.MCPServer, stderr io.Writer) *exec.Cmd {
+	env := make([]string, 0, len(def.Env)+2)
+	if p := os.Getenv("PATH"); p != "" {
+		env = append(env, "PATH="+p)
+	}
+	if runtime.GOOS == "windows" {
+		for _, k := range []string{"SystemRoot", "WINDIR", "USERPROFILE", "TEMP", "TMP"} {
+			if v, ok := os.LookupEnv(k); ok {
+				env = append(env, k+"="+v)
+			}
+		}
+	}
+	for _, k := range def.Env {
+		env = append(env, k+"="+os.Getenv(k)) // presence checked by validateDefinitions
+	}
+	cmd := exec.Command(def.Command, def.Args...)
+	cmd.Dir = root
+	cmd.Env = env
+	cmd.Stderr = &limitedWriter{w: stderr, n: 32 << 10}
+	return cmd
+}
+
 func validateDefinitions(cfg []config.MCPServer) error {
 	aliases := map[string]bool{}
 	for _, def := range cfg {
@@ -190,8 +225,19 @@ func validateDefinitions(cfg []config.MCPServer) error {
 			return fmt.Errorf("mcp server %q: alias must be unique and contain only letters, digits, _ or -", def.Alias)
 		}
 		aliases[def.Alias] = true
-		if strings.TrimSpace(def.Command) == "" || len(def.Tools) == 0 {
-			return fmt.Errorf("mcp server %q: command and a nonempty tools allowlist are required", def.Alias)
+		hasCommand, hasURL := strings.TrimSpace(def.Command) != "", strings.TrimSpace(def.URL) != ""
+		if hasCommand == hasURL {
+			return fmt.Errorf("mcp server %q: set exactly one of command (local stdio server) or url (remote Streamable HTTP server)", def.Alias)
+		}
+		if len(def.Tools) == 0 {
+			return fmt.Errorf("mcp server %q: a nonempty tools allowlist is required", def.Alias)
+		}
+		if hasURL {
+			if err := validateRemote(def); err != nil {
+				return err
+			}
+		} else if def.BearerTokenEnv != "" || len(def.HeadersEnv) > 0 {
+			return fmt.Errorf("mcp server %q: bearer_token_env and headers_env apply only to url servers", def.Alias)
 		}
 		if def.DiscoveryTimeoutSec < 0 || def.DiscoveryTimeoutSec > 300 || def.CallTimeoutSec < 0 || def.CallTimeoutSec > 600 {
 			return fmt.Errorf("mcp server %q: timeouts must be between 1 and 300 seconds (discovery) and 1 and 600 seconds (call)", def.Alias)
@@ -272,7 +318,7 @@ func (r *Registry) call(ctx context.Context, name, raw string, maxImageBytes int
 			return "error: MCP tool " + name + " was interrupted: " + ctx.Err().Error(), nil, true, true
 		}
 		t.server.failed = true
-		return truncate("error: MCP server " + t.server.alias + " call failed: " + err.Error()), nil, true, true
+		return truncate("error: MCP server " + t.server.alias + " call failed: " + redact(err.Error(), t.server.url, t.server.origin)), nil, true, true
 	}
 	var b strings.Builder
 	for _, c := range res.Content {

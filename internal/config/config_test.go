@@ -242,3 +242,16 @@ func TestEnvironmentConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoteMCPServerConfig(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	write(t, p, "mcp_servers:\n  - alias: gh\n    url: https://api.githubcopilot.com/mcp/\n    bearer_token_env: GITHUB_MCP_TOKEN\n    headers_env:\n      X-Api-Key: DOCS_KEY\n    tools: [get_issue]\n")
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := cfg.MCPServers[0]
+	if s.URL != "https://api.githubcopilot.com/mcp/" || s.BearerTokenEnv != "GITHUB_MCP_TOKEN" || s.HeadersEnv["X-Api-Key"] != "DOCS_KEY" || s.Command != "" {
+		t.Fatalf("remote MCP config = %+v", s)
+	}
+}

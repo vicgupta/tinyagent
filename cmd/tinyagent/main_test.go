@@ -229,9 +229,9 @@ func TestJSONEventsDisabledWriteNothing(t *testing.T) {
 }
 
 func TestReadOnlyStartsNoMCPServers(t *testing.T) {
-	servers := []config.MCPServer{{Alias: "docs", Command: "docs-mcp", Tools: []string{"search"}}}
+	servers := []config.MCPServer{{Alias: "docs", Command: "docs-mcp", Tools: []string{"search"}}, {Alias: "gh", URL: "https://example.com/mcp", Tools: []string{"search"}}}
 	var w strings.Builder
-	if got := mcpServers(&w, config.AgentConfig{MCPServers: servers}); len(got) != 1 || w.Len() != 0 {
+	if got := mcpServers(&w, config.AgentConfig{MCPServers: servers}); len(got) != 2 || w.Len() != 0 {
 		t.Errorf("normal mode: servers %v, note %q", got, w.String())
 	}
 	if got := mcpServers(&w, config.AgentConfig{ReadOnly: true, MCPServers: servers}); got != nil || !strings.Contains(w.String(), "not started") {
@@ -741,6 +741,17 @@ func TestConfiguredSecretsIncludesHookEnv(t *testing.T) {
 	cfg.Hooks.PreTool = []config.Hook{{Command: "/bin/true", Env: []string{"PRE_HOOK_TOKEN"}}}
 	got := strings.Join(configuredSecrets(cfg), ",")
 	if !strings.Contains(got, "s3cret-stop") || !strings.Contains(got, "s3cret-pre") {
+		t.Errorf("secrets = %q", got)
+	}
+}
+
+func TestConfiguredSecretsIncludesRemoteMCPCredentials(t *testing.T) {
+	t.Setenv("GH_MCP_TOKEN", "s3cret-bearer")
+	t.Setenv("DOCS_KEY", "s3cret-header")
+	cfg := config.Default()
+	cfg.MCPServers = []config.MCPServer{{Alias: "gh", URL: "https://example.com/mcp", BearerTokenEnv: "GH_MCP_TOKEN", HeadersEnv: map[string]string{"X-Api-Key": "DOCS_KEY"}, Tools: []string{"search"}}}
+	got := strings.Join(configuredSecrets(cfg), ",")
+	if !strings.Contains(got, "s3cret-bearer") || !strings.Contains(got, "s3cret-header") {
 		t.Errorf("secrets = %q", got)
 	}
 }

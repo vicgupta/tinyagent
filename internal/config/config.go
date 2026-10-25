@@ -155,15 +155,24 @@ func ValidEnvironment(name string) bool {
 	return name == "" || name == "local" || name == "container"
 }
 
-// MCPServer grants access to selected tools from one local stdio server.
+// MCPServer grants access to selected tools from one MCP server: a local
+// stdio server (Command) or a remote Streamable HTTP server (URL).
 type MCPServer struct {
-	Alias               string   `yaml:"alias"`
-	Command             string   `yaml:"command"`
-	Args                []string `yaml:"args,omitempty"`
-	Tools               []string `yaml:"tools"`
-	Env                 []string `yaml:"env,omitempty"`
-	DiscoveryTimeoutSec int      `yaml:"discovery_timeout_seconds"`
-	CallTimeoutSec      int      `yaml:"call_timeout_seconds"`
+	Alias   string   `yaml:"alias"`
+	Command string   `yaml:"command,omitempty"`
+	Args    []string `yaml:"args,omitempty"`
+	// URL selects a remote Streamable HTTP server instead of Command.
+	URL string `yaml:"url,omitempty"`
+	// BearerTokenEnv names an environment variable whose value is sent as
+	// "Authorization: Bearer <value>" to a URL server.
+	BearerTokenEnv string `yaml:"bearer_token_env,omitempty"`
+	// HeadersEnv maps HTTP header names to the environment variables whose
+	// values a URL server receives in them.
+	HeadersEnv          map[string]string `yaml:"headers_env,omitempty"`
+	Tools               []string          `yaml:"tools"`
+	Env                 []string          `yaml:"env,omitempty"`
+	DiscoveryTimeoutSec int               `yaml:"discovery_timeout_seconds"`
+	CallTimeoutSec      int               `yaml:"call_timeout_seconds"`
 }
 
 // DefaultMaxFormatErrors is the default MaxFormatErrors.

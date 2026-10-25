@@ -13,6 +13,7 @@
 - Emit a `provider.retry` event in `--json` output when a model request is retried.
 - Add opt-in image support (`--images`, `images.enabled`, `max_image_bytes`): a `view_image` tool and MCP image pass-through for Anthropic and Codex, with a text placeholder for Chat Completions providers.
 - Preserve Anthropic thinking blocks and Codex reasoning items across tool calls, and add a `reasoning_effort` config key and `--reasoning-effort` flag.
+- Connect to remote MCP servers over Streamable HTTP: an `mcp_servers` entry can set `url` instead of `command`, with credentials only from named environment variables (`bearer_token_env`, `headers_env`), https required off loopback, headers pinned to the configured origin, and clear startup errors. Config files using the new keys fail on older binaries, which reject unknown keys.
 - Add a Responses API transport to the `openai` provider so tool calls work with reasoning on current OpenAI models, with encrypted reasoning replay and cached-token pricing. The new `openai_api` config key and `--openai-api` flag choose `auto` (default), `responses`, or `chat`.
 
 ### Fixes

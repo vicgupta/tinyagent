@@ -1158,7 +1158,9 @@ func configuredSecrets(cfg config.AgentConfig) []string {
 	for _, s := range cfg.MCPServers {
 		envs = append(envs, s.Env...)
 	}
-	var vals []string
+	// Credentials for url servers come from named variables; redact the
+	// values they had at startup.
+	vals := mcptools.CredentialValues(cfg.MCPServers)
 	for _, kv := range envs {
 		if _, v, ok := strings.Cut(kv, "="); ok {
 			vals = append(vals, v)
@@ -1183,8 +1185,8 @@ func configuredSecrets(cfg config.AgentConfig) []string {
 }
 
 // mcpServers returns the MCP servers to start. Read-only runs start none:
-// a server is an arbitrary local executable, and its tools are never offered
-// there anyway.
+// a server is an arbitrary local executable or a remote endpoint that
+// receives tool arguments, and its tools are never offered there anyway.
 func mcpServers(w io.Writer, cfg config.AgentConfig) []config.MCPServer {
 	if cfg.ReadOnly && len(cfg.MCPServers) > 0 {
 		fmt.Fprintln(w, "read-only mode: configured MCP servers are not started")

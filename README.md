@@ -293,7 +293,7 @@ log_db:                   # opt-in SQLite event log; see Event log database
   max_payload_bytes: 65536
 reasoning_effort: medium  # optional; see Reasoning; --reasoning-effort wins
 openai_api: auto          # openai provider transport: auto, responses, or chat; --openai-api wins
-mcp_servers:                 # omitted by default; each entry runs a trusted local executable
+mcp_servers:                 # omitted by default; each entry is a trusted local executable or remote endpoint
   - alias: docs
     command: /usr/local/bin/team-docs-mcp
     args: [--stdio]
@@ -301,6 +301,12 @@ mcp_servers:                 # omitted by default; each entry runs a trusted loc
     env: [TEAM_DOCS_TOKEN]   # names only; tinyagent copies their current values to the child
     discovery_timeout_seconds: 15
     call_timeout_seconds: 60
+  - alias: gh                # remote Streamable HTTP server: url instead of command
+    url: https://api.githubcopilot.com/mcp/
+    bearer_token_env: GITHUB_MCP_TOKEN   # sends "Authorization: Bearer <value>"
+    headers_env:                         # header name -> environment variable NAME
+      X-Team: TEAM_HEADER
+    tools: [get_issue, search_code]
 hooks:                       # omitted by default; see Tool hooks below
   pre_tool:
     - match: "bash|start_process"   # Go regexp matched against the whole tool name; omit to match every tool
@@ -354,13 +360,25 @@ An unknown value exits 2 before any request. Which values a model accepts varies
 
 Reasoning state is stored in each assistant message's `extra` (`anthropic_content`, and `codex_reasoning` for Responses API reasoning items from both `codex` and `openai`) in trajectories and checkpoints, so `--resume` replays it. It may include thinking text and encrypted reasoning blobs; treat trajectory files as private. Reasoning state is not shown in the terminal or in `--json` events.
 
-### Local MCP tools
+### MCP tools
 
 MCP is disabled unless `mcp_servers` is explicitly configured. Each configured executable is trusted code with its own host and network permissions; this is tool preauthorization, not a sandbox or an interactive approval prompt. Configuration is read only from the user config or the explicitly selected `-c` file, never from the repository or model output. Tinyagent launches the command directly (no shell), with `--cwd` as its working directory and a minimal environment (`PATH`, plus the Windows process variables when present) and only the named forwarded variables. Missing forwarded variables fail before launch. Do not forward secrets unless the server needs them. Read-only runs never start MCP servers.
 
-The Go MCP SDK v1.8.0 supports protocol revisions 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26, and 2024-11-05 over stdio. Tinyagent discovers the complete paginated catalog once per run, with a 15-second default discovery timeout, 100-page, 256-selected-tool, 64-KiB-per-schema, and 1-MiB-total-schema caps, and exposes only configured names. Tool names are sent to providers as `<alias>__<original-name>` and must fit provider-compatible naming rules. The accepted input schema subset supports object, array, string, number, integer, boolean and null types (a single type or an array such as `["string", "null"]`), nested properties/items, required, enum, const, numeric bounds and `multipleOf`, length, `pattern`, `format`, item and property counts, `uniqueItems`, annotations (`title`, `description`, `default`, `examples`), and boolean `additionalProperties`. A top-level `$schema` declaration is dropped. Other keywords, including `anyOf`/`oneOf`/`allOf` and references, are rejected, and a selected tool with such a schema stops startup. Each call defaults to a 60-second timeout; a timed-out call returns an error to the model and the server stays available, while any other call failure disables that server for the rest of the run. Text content is joined with newlines, structured output is appended as JSON, unsupported content is marked as omitted, tool errors remain visible, and model-visible output is capped at 256 KiB before the normal output cap is applied. Stdio protocol data is kept separate from server stderr.
+The Go MCP SDK v1.8.0 supports protocol revisions 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26, and 2024-11-05 over stdio and Streamable HTTP. Tinyagent discovers the complete paginated catalog once per run, with a 15-second default discovery timeout, 100-page, 256-selected-tool, 64-KiB-per-schema, and 1-MiB-total-schema caps, and exposes only configured names. Tool names are sent to providers as `<alias>__<original-name>` and must fit provider-compatible naming rules. The accepted input schema subset supports object, array, string, number, integer, boolean and null types (a single type or an array such as `["string", "null"]`), nested properties/items, required, enum, const, numeric bounds and `multipleOf`, length, `pattern`, `format`, item and property counts, `uniqueItems`, annotations (`title`, `description`, `default`, `examples`), and boolean `additionalProperties`. A top-level `$schema` declaration is dropped. Other keywords, including `anyOf`/`oneOf`/`allOf` and references, are rejected, and a selected tool with such a schema stops startup. Each call defaults to a 60-second timeout; a timed-out call returns an error to the model and the server stays available, while any other call failure disables that server for the rest of the run. Text content is joined with newlines, structured output is appended as JSON, unsupported content is marked as omitted, tool errors remain visible, and model-visible output is capped at 256 KiB before the normal output cap is applied. Stdio protocol data is kept separate from server stderr.
 
 MCP tool calls and results are stored in trajectories along with the external tool names. Trajectories from MCP-enabled runs cannot be resumed. Resuming a built-in-only checkpoint works with `mcp_servers` configured; the servers are not started and the run keeps the built-in tools. Trajectories and server stderr may contain sensitive data supplied by tools or the server; no blanket redaction is provided. On shutdown tinyagent closes MCP sessions and asks their processes to exit, then the SDK applies its bounded termination. Unix process descendants and Windows child-process cleanup have platform-specific behavior; tinyagent does not promise process-tree cleanup on Windows.
+
+#### Remote MCP servers
+
+An `mcp_servers` entry with `url` instead of `command` connects to a remote server over the Streamable HTTP transport; stdio and remote servers can be mixed in one run. Set exactly one of `command` or `url`; `args` and `env` apply only to `command` servers. Everything else is the same as for local servers: the explicit `tools` allowlist, the fixed per-run catalog, the schema subset and caps, `<alias>__<tool>` naming, timeouts, and fail-closed startup.
+
+- **URL rules:** the URL must be absolute and use `https`. Plain `http` is allowed only for `localhost`, `127.0.0.1` and `::1`. URLs with credentials (`user:pass@`) are rejected.
+- **Credentials:** come only from environment variables, never literal values in the config. `bearer_token_env` names a variable sent as `Authorization: Bearer <value>`, and `headers_env` maps header names to variable names. A named variable that is unset or empty stops startup with an error naming the variable (never its value). `headers_env` may not set `Accept`, `Content-Type`, `MCP-Session-Id`, `MCP-Protocol-Version`, `Host` or `Content-Length`, nor `Authorization` together with `bearer_token_env`. Credential values are never printed, are not stored in trajectories, and are redacted from the `--log-db` event log.
+- **Origin pinning:** configured headers are sent only to the configured origin (scheme, host and port). A redirect to a different origin fails startup, and the redirect target receives nothing.
+- **Startup output:** stderr shows the transport and the URL origin only, never the path or query, for example `mcp: enabled server gh (http https://api.githubcopilot.com, 2 selected tools)`. Startup failures stop the run before the first model request and say whether the host was unreachable (connection refused, DNS, or timeout), TLS verification failed, the server answered 401/403 (with the credential variable names to check), or the URL does not look like a Streamable HTTP MCP endpoint (404/405 or a non-MCP response).
+- **Calls:** the standalone server-to-client stream is not opened, since the catalog is fixed per run. A timed-out call returns an error and the server stays available. A dropped connection or ended session fails that call, is never replayed, and disables the server for the rest of the run; later calls fail without contacting it. Session cleanup on shutdown is bounded.
+- **Network and trust:** connections are made from the host with Go's standard HTTP client, so `HTTPS_PROXY`/`NO_PROXY` apply. They are not affected by `--sandbox` or `--env container`. The remote server receives tool arguments, which can include repository content, and its descriptions and results are untrusted. Read-only runs never connect, and MCP-enabled runs remain non-resumable.
+- **Not supported:** OAuth sign-in of any kind and the deprecated HTTP+SSE transport (protocol 2024-11-05). Use a server's token or API-key option with `bearer_token_env` or `headers_env`.
 
 ### Tool hooks
 
