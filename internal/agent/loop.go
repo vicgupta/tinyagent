@@ -116,6 +116,16 @@ type Agent struct {
 	view *view
 	// snapFailed stops further snapshots after one fails.
 	snapFailed bool
+
+	// Subagents runs the opt-in delegate tool's children; Tools.Delegate
+	// offers the tool. nil leaves delegate calls failing with an error.
+	Subagents *Subagents
+	// subagentID is set on a delegate child (d1, d2, ...).
+	subagentID string
+	// delegateStop is the status a delegate child ended with when it must
+	// also end the parent: Interrupted, TimeLimitExceeded or
+	// CostLimitExceeded.
+	delegateStop string
 }
 
 // Snapshotter captures the working directory.
@@ -128,6 +138,7 @@ type Snapshotter interface {
 var readOnlyTools = map[string]bool{
 	"read_file": true, "list_files": true, "grep": true, "read_process": true,
 	tools.PlanToolName: true, tools.ViewImageToolName: true, "skill": true, SubmitToolName: true,
+	tools.DelegateToolName: true,
 }
 
 // mutating reports whether any call in the batch may change the workspace.
@@ -236,6 +247,10 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			t.ExitStatus, t.Submission = StatusError, "resume apply_patch setting differs from checkpoint"
 			return t
 		}
+		if t.SubagentsEnabled != a.Tools.Delegate {
+			t.ExitStatus, t.Submission = StatusError, "resume subagents setting differs from checkpoint"
+			return t
+		}
 		t.ExitStatus, t.Submission = "", ""
 		if t.OpenAIAPI == "" {
 			t.OpenAIAPI = a.OpenAIAPI
@@ -276,10 +291,11 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			SystemPrompt:          system,
 			SkipAgentsMD:          a.SkipAgentsMD,
 			Tools:                 toolNames(a.Tools.Catalog()),
-			ToolSignature:         toolSignature(a.Tools.ReadOnly, a.Tools.Plan, a.Tools.Images, a.Tools.ApplyPatch),
+			ToolSignature:         toolSignature(a.Tools.ReadOnly, a.Tools.Plan, a.Tools.Images, a.Tools.ApplyPatch, a.Tools.Delegate),
 			PlanEnabled:           a.Tools.Plan,
 			ImagesEnabled:         a.Tools.Images,
 			ApplyPatchEnabled:     a.Tools.ApplyPatch,
+			SubagentsEnabled:      a.Tools.Delegate,
 			MCPEnabled:            len(a.Tools.ExternalSpecs) > 0,
 			ExternalTools:         externalToolNames(a.Tools.ExternalSpecs),
 			ExternalToolSignature: externalToolSignature(a.Tools.ExternalSpecs),
@@ -436,6 +452,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			return a.saveFailed(t, err)
 		}
 		malformed := 0
+		costStop := false
 		for _, call := range msg.ToolCalls {
 			a.event("tool.call", map[string]any{"id": call.ID, "name": call.Function.Name, "arguments": eventArguments(call.Function.Arguments)})
 			var out string
@@ -454,6 +471,14 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			} else {
 				res = a.runTool(ctx, t, call)
 				out, images, isError = res.Text, res.Images, res.IsError
+				switch stop := a.takeDelegateStop(); stop {
+				case StatusInterrupted, StatusTimeLimit:
+					// The delegate call stays pending; a resume closes it
+					// as interrupted, like any call cut off mid-run.
+					return a.finish(t, stop, "")
+				case StatusCostLimit:
+					costStop = true
+				}
 			}
 			fields := map[string]any{"id": call.ID, "name": call.Function.Name, "output": out, "is_error": isError}
 			if formatError {
@@ -474,6 +499,9 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			if err := a.step(t); err != nil {
 				return a.saveFailed(t, err)
 			}
+			if costStop {
+				return a.finish(t, StatusCostLimit, "")
+			}
 		}
 		if malformed == len(msg.ToolCalls) {
 			t.ConsecutiveFormatErrors++
@@ -490,7 +518,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 // reject the result. It returns the final trajectory, or nil after appending
 // the hooks' feedback when the model must keep working.
 func (a *Agent) finishSuccess(ctx context.Context, t *trajectory.Trajectory, v *view, msg model.Message, status, submission string, structured json.RawMessage) *trajectory.Trajectory {
-	if !a.Hooks.HasStop() {
+	if !a.Hooks.HasStop() || a.subagentID != "" {
 		t.StructuredOutput = structured
 		return a.finish(t, status, submission)
 	}
@@ -554,6 +582,8 @@ func (a *Agent) stopHookRan(r hooks.Result) {
 func (a *Agent) toolStep(ctx context.Context, t *trajectory.Trajectory, v *view, call model.ToolCall) bool {
 	a.event("tool.call", map[string]any{"id": call.ID, "name": call.Function.Name, "arguments": eventArguments(call.Function.Arguments)})
 	res := a.runTool(ctx, t, call)
+	// The next limit check ends a structured run the delegate stopped.
+	a.takeDelegateStop()
 	a.recordResult(t, v, call, res)
 	return res.IsError
 }
@@ -659,6 +689,7 @@ func (a *Agent) runTool(ctx context.Context, t *trajectory.Trajectory, call mode
 	in := hooks.Input{
 		ToolName: call.Function.Name, ToolCallID: call.ID, Arguments: eventArguments(call.Function.Arguments),
 		Root: a.Tools.Root, ReadOnly: a.Tools.ReadOnly, Step: t.Steps,
+		Subagent: a.subagentID,
 	}
 	for _, r := range a.Hooks.Pre(ctx, in) {
 		a.hookRan(call, r)
@@ -770,6 +801,9 @@ func (a *Agent) systemPrompt() string {
 	}
 	if a.OutputSchema != nil {
 		system += "\n\n" + structuredOutputNotice
+	}
+	if a.subagentID != "" {
+		system += "\n\n" + subagentNotice
 	}
 	return system
 }

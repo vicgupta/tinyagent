@@ -4,7 +4,7 @@
 curl -fsSL https://raw.githubusercontent.com/vicgupta/tinyagent/main/install.sh | sh
 ```
 
-A minimal coding agent in a single static Go binary. It gives an LLM nine tools (`read_file`, `write_file`, `edit_file`, `list_files`, `grep`, `bash`, and `start_process`, `read_process`, `stop_process` for background commands), plus the opt-in `update_plan`, `skill`, `view_image`, and `apply_patch` tools, and keeps a linear message history until the model submits.
+A minimal coding agent in a single static Go binary. It gives an LLM nine tools (`read_file`, `write_file`, `edit_file`, `list_files`, `grep`, `bash`, and `start_process`, `read_process`, `stop_process` for background commands), plus the opt-in `update_plan`, `skill`, `view_image`, `apply_patch`, and `delegate` tools, and keeps a linear message history until the model submits.
 
 ## Install
 
@@ -93,6 +93,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--no-compact` | off | Never compact the history; see [Long runs](#long-runs) |
 | `--plan` | config `plan.enabled`, else off | Give the model the `update_plan` tool; see [Plan tool](#plan-tool) |
 | `--apply-patch` | config `apply_patch`, else off | Give the model the `apply_patch` tool for multi-file, multi-hunk edits, checked before any write; `--apply-patch=false` disables it. See [apply_patch](#apply_patch) |
+| `--subagents` | config `subagents.enabled`, else off | Give the model the `delegate` tool, which hands a task to a read-only subagent with a fresh context and returns only its report; `--subagents=false` disables it. See [Subagents](#subagents) |
 | `--tool-output-files` | config `tool_output_files.enabled`, else off | Save the full text of tool results over `max_output_chars` to a per-run file the model can page with `read_file` and `grep`; `--tool-output-files=false` disables it. See [Tool output files](#tool-output-files) |
 | `--images` | config `images.enabled`, else off | Let vision-capable models see images: the `view_image` tool and MCP image pass-through; see [Images](#images) |
 | `--plan-file` | — | Mirror the current plan to this Markdown file after each checkpoint save (requires the plan tool) |
@@ -330,6 +331,10 @@ plan:
   enabled: false          # give the model the update_plan tool (same as --plan)
 skills: false             # discover Agent Skills and offer the skill tool (same as --skills)
 apply_patch: false        # offer the apply_patch tool (same as --apply-patch)
+subagents:
+  enabled: false          # offer the delegate tool (same as --subagents)
+  model: ""               # child model, e.g. openai/gpt-5-mini; empty uses the parent model
+  max_steps: 30           # step cap per delegated task; 0 means the default (30)
 images:
   enabled: false          # view_image tool and MCP image pass-through (same as --images)
 max_image_bytes: 5242880  # largest image sent to the model (5 MiB); must be >= 1
@@ -566,6 +571,19 @@ The whole patch is parsed and checked before anything is written: update and del
 Writes are not transactional: if writing fails part-way (for example, a permission error), work stops and the error lists the operations that were applied, which are not rolled back, and those that were not. Like `edit_file`, the tool is not covered by `--sandbox`. A missing or non-string `input` is a [malformed tool call](#malformed-tool-calls); a patch that does not apply is an ordinary tool error.
 
 A checkpoint records whether `apply_patch` was enabled (`apply_patch_enabled`), and `--resume` keeps that setting: passing a conflicting `--apply-patch` exits 2, and the config's `apply_patch` is ignored on resume.
+
+### Subagents
+
+`--subagents` (or `subagents.enabled: true`) adds a `delegate` tool. A call such as `{"task": "find every caller of LoadConfig and say which ones ignore its error", "label": "callers"}` starts a child agent with a fresh context: the same system prompt and `AGENTS.md`, plus a notice that it is a subagent that must answer first and then give evidence with `file:line` references. The child runs to completion, and the parent gets back only its final report followed by a footer such as `[delegate d1: Submitted, 4 steps, 9200 in / 410 out tokens, $0.0123]`. It is off by default; with it off, requests, tools, and checkpoints are unchanged.
+
+- **Read-only.** The child has only `read_file`, `list_files`, and `grep`, whatever the parent has. It gets no `write_file`, `edit_file`, `apply_patch`, `bash`, process tools, MCP tools, `skill`, `view_image`, `update_plan`, or `delegate`, and calls to them are refused. Paths follow the parent's rules (`--cwd` and `file_access`). The tool is also offered with `--read-only`.
+- **Limits.** Each child stops after `subagents.max_steps` model steps (default 30); hitting the cap, or any other unfinished status, returns a tool error such as `error: delegate d1 did not finish: StepLimit` rather than a report. Child steps don't count toward `--step-limit`; they're reported separately as `subagent_steps`. Child tokens and cost do count toward the run's totals and `--cost-limit`, and the child only gets what's left of the budget, so a delegated task can end the whole run as `CostLimit`. `--time-limit` covers children too. Reports longer than `max_output_chars` are truncated like any tool output. Several `delegate` calls in one turn run one after another.
+- **Model.** `subagents.model` picks a different (typically cheaper) model; empty uses the parent's. `reasoning_effort` and `max_output_tokens` carry over only when the child uses the same provider as the parent. An unknown provider, or a missing key for a different provider, exits 2 before any request.
+- **Tokens.** Delegation saves the parent's context, not tokens overall: the child resends its own history each step, so a task the parent could answer with one `grep` is cheaper done directly. Use it for searches that would otherwise pull many large files into the parent's history.
+- **Observability.** `--json` and `--log-db` add `subagent.started` (`id`, `label`, `model`, `tool_call_id`, `parent_step`) and `subagent.finished` (`id`, `status`, `steps`, tokens, `cost_usd`) events, and the child's own events carry `"subagent": "d1"`. `-v` prints a line when each child starts and finishes; the child's model output is not streamed. Hooks run for child tool calls with `subagent` set in their input, and `pre_tool`/`post_tool` hooks also see the `delegate` call itself; stop hooks run only for the parent. With `-o`, the trajectory records `subagents_enabled`, `subagent_steps`, and a `subagents` array with each child's task, status, usage, report, and full message history.
+- **Resume.** A checkpoint records whether subagents were enabled, and `--resume` keeps that setting: a conflicting `--subagents` exits 2. A run interrupted mid-delegation resumes with that `delegate` call marked interrupted; the child is not resumed.
+
+Not in this version: children that can write or run commands, parallel children, nested delegation, and streaming the child's output.
 
 ## Exit status
 

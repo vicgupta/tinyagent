@@ -89,3 +89,25 @@ func needsResponsesAPI(errMsg string) bool {
 	}
 	return strings.Contains(m, "reasoning_effort") && (strings.Contains(m, "tool") || strings.Contains(m, "function"))
 }
+
+// MissingKeyEnv returns the API key variable a built-in provider's spec
+// needs when it is unset, or "" when it is set or not needed. An openai
+// spec with OPENAI_BASE_URL set may target a server without keys, so it
+// is never reported.
+func MissingKeyEnv(spec string) string {
+	if _, ok := ConfiguredProvider(spec); ok {
+		return ""
+	}
+	provider, _, ok := strings.Cut(spec, "/")
+	if !ok {
+		provider = "openai"
+	}
+	env := keyEnv[provider]
+	if env == "" || os.Getenv(env) != "" {
+		return ""
+	}
+	if provider == "openai" && os.Getenv("OPENAI_BASE_URL") != "" {
+		return ""
+	}
+	return env
+}

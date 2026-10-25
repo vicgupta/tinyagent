@@ -39,12 +39,13 @@ func ApplyPatchToolSignature(readOnly, plan, images, applyPatch bool) string {
 	return toolSignature(readOnly, plan, images, applyPatch)
 }
 
-// toolSignature takes the opt-in images and apply_patch settings, in that
-// order, after readonly and plan.
+// toolSignature takes the opt-in images, apply_patch and delegate settings,
+// in that order, after readonly and plan.
 func toolSignature(readonly, plan bool, opt ...bool) string {
 	img := len(opt) > 0 && opt[0]
 	patch := len(opt) > 1 && opt[1]
-	data, _ := json.Marshal(builtinSpecs(readonly, plan, img, patch))
+	delegate := len(opt) > 2 && opt[2]
+	data, _ := json.Marshal(builtinSpecs(readonly, plan, img, patch, delegate))
 	prefix := "tools-v1:"
 	if readonly {
 		prefix = "tools-read-only-v1:"
@@ -57,6 +58,9 @@ func toolSignature(readonly, plan bool, opt ...bool) string {
 	}
 	if patch {
 		prefix = "apply-patch-v1:" + prefix
+	}
+	if delegate {
+		prefix = "subagents-v1:" + prefix
 	}
 	return fmt.Sprintf("%s%x", prefix, sha256.Sum256(data))
 }
@@ -72,6 +76,9 @@ func builtinSpecs(readOnly, plan bool, opt ...bool) []model.ToolSpec {
 	if len(opt) > 1 && opt[1] && !readOnly {
 		specs = append(specs, tools.ApplyPatchSpec())
 	}
+	if len(opt) > 2 && opt[2] {
+		specs = append(specs, tools.DelegateSpec())
+	}
 	return specs
 }
 
@@ -85,10 +92,10 @@ func ValidateResume(t *trajectory.Trajectory, cfg config.AgentConfig, root strin
 	if root != t.Root {
 		return errors.New("--cwd does not match the checkpoint's canonical root")
 	}
-	if t.ToolSignature != toolSignature(t.ReadOnly, t.PlanEnabled, t.ImagesEnabled, t.ApplyPatchEnabled) {
+	if t.ToolSignature != toolSignature(t.ReadOnly, t.PlanEnabled, t.ImagesEnabled, t.ApplyPatchEnabled, t.SubagentsEnabled) {
 		return errors.New("tool compatibility has changed; start a fresh task")
 	}
-	names := toolNames(builtinSpecs(t.ReadOnly, t.PlanEnabled, t.ImagesEnabled, t.ApplyPatchEnabled))
+	names := toolNames(builtinSpecs(t.ReadOnly, t.PlanEnabled, t.ImagesEnabled, t.ApplyPatchEnabled, t.SubagentsEnabled))
 	var set *skills.Set
 	if t.SkillsEnabled {
 		set, _ = skills.Discover(root, skills.UserDir())

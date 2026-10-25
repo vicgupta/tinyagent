@@ -153,6 +153,9 @@ func (a *Agent) retainedChars(t *trajectory.Trajectory, v *view) int {
 // execTool runs a permitted call. A skill call whose instructions are still
 // in context gets a short note instead of a second copy.
 func (a *Agent) execTool(ctx context.Context, t *trajectory.Trajectory, call model.ToolCall) tools.Result {
+	if call.Function.Name == tools.DelegateToolName && a.Tools.Delegate {
+		return a.delegate(ctx, t, call)
+	}
 	if name, file, ok := skillCallArgs(call); ok && file == "" && a.Tools.Skills.Len() > 0 && a.view != nil && a.skillInContext(t, a.view, name) {
 		return tools.Result{Text: fmt.Sprintf("skill %q is already loaded earlier in this conversation; follow those instructions (no second copy was added)", name)}
 	}

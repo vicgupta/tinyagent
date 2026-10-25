@@ -23,6 +23,8 @@
 - Add a Responses API transport to the `openai` provider so tool calls work with reasoning on current OpenAI models, with encrypted reasoning replay and cached-token pricing. The new `openai_api` config key and `--openai-api` flag choose `auto` (default), `responses`, or `chat`.
 - Add opt-in tool output files (`--tool-output-files`, `tool_output_files` config): tool results over `max_output_chars` are saved in full to a per-run file under `.tinyagent/tool-output`, and the model gets a bounded preview with a notice naming the path to page with `read_file` and `grep`. `tool.result` events, `post_tool` hook input, and trajectories record `output_file`; old runs are pruned by `tool_output_files.max_runs` (default 20).
 
+- Add an opt-in `delegate` tool (`--subagents`, `subagents` config) that hands a task to a read-only subagent (`read_file`, `list_files`, `grep`) with a fresh context and returns only its final report plus a usage footer. Children are capped by `subagents.max_steps` (default 30), can use a different `subagents.model`, share the parent's cost and wall-time limits, run hooks with a `subagent` id, and are recorded as `subagent.started`/`subagent.finished` events and a `subagents` array in trajectories; `--resume` keeps the setting.
+
 ### Fixes
 
 - Responses cut off at the output-token limit are no longer treated as finished: their tool calls are not run, the model is asked to continue in smaller pieces, and after `max_truncations` (default 3) in a row the run ends with the new `OutputTruncated` status (exit 3).
@@ -30,6 +32,7 @@
 
 ### Changed
 
+- Configs that use the new `subagents` key fail to load on older tinyagent versions, which reject unknown keys.
 - Configs that use the new `providers` key fail to load on older tinyagent versions, which reject unknown keys.
 - The `openai` provider now uses the Responses API against `api.openai.com` (when `OPENAI_BASE_URL` is unset or points there). Set `openai_api: chat` to keep Chat Completions. Custom `OPENAI_BASE_URL` endpoints keep Chat Completions by default.
 
