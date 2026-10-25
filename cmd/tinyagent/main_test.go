@@ -259,6 +259,7 @@ const wantUsage = `Usage: tinyagent -t "<prompt>" [flags]    (or --task "<prompt
        echo "<prompt>" | tinyagent -t -
        tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]
        tinyagent --resume <finished.json> -t "<follow-up>" --cwd <dir> -o <new.json> [flags]
+       tinyagent --rewind <trajectory.json> --cwd <dir> [--to start|<step>|<id>] [--dry-run]
 
   -h, --help                         show this help and exit
 Task:
@@ -290,6 +291,11 @@ Output:
       --sandbox-allow-domain host    with --sandbox, let commands reach only this host (name, *.domain or IP, optional :port) over HTTP(S) via a filtering proxy; repeatable, replaces sandbox_allowed_domains
       --env name                     where bash and start_process run: local or container (default: config's environment, else local)
       --command-env mode             environment bash and start_process inherit: all, core or none (default: config's command_env.inherit, else all)
+      --snapshots                    snapshot the workspace before every tool batch that can change files, for --rewind; requires -o (default off; config snapshots)
+Rewind:
+      --rewind path                  restore --cwd to a workspace snapshot recorded in this trajectory JSON (see --to and --dry-run)
+      --to target                    with --rewind: start (the baseline, the default), a step number (the state before that step's tool batch), or a snapshot id
+      --dry-run                      with --rewind: print what would change and write nothing
 Other:
   -V, --version                      print the version and exit
       --update                       update to the latest release and exit
@@ -299,6 +305,7 @@ Examples:
   cat task.md | tinyagent -t - --step-limit 30 -o run.json
   tinyagent --resume run.json --cwd . --step-limit 60 -o continued.json
   tinyagent --resume review.json -t "fix the races you found" --cwd . -o fix.json
+  tinyagent --rewind run.json --cwd . --to 3 --dry-run
 `
 
 // runWith runs the CLI with args, returning the exit code and what went to

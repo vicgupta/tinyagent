@@ -105,6 +105,8 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--env` | config `environment`, else `local` | Where `bash`/`start_process` run: `local` (on the host) or `container` (Docker/Podman). See [Execution environments](#execution-environments) |
 | `--command-env` | config `command_env.inherit`, else `all` | Environment `bash`/`start_process` inherit: `all`, `core` or `none`. See [Command environment](#command-environment) |
 | `-o, --output` | — | Trajectory JSON, rewritten after every step |
+| `--snapshots` | config `snapshots`, else off | Snapshot the workspace before every tool batch that can change files, so `--rewind` can restore it. Requires `-o`. See [Rewind workspace changes](#rewind-workspace-changes) |
+| `--rewind <trajectory>` | | Restore `--cwd` to a snapshot recorded in that trajectory, with `--to start\|<step>\|<snapshot-id>` (default `start`) and `--dry-run` to preview. Makes no model request |
 | `-v, --verbose` | off | Print tool calls and their outputs |
 | `--json` | off | Write machine-readable run events as JSONL to stdout |
 | `--output-schema` | | End the run with a JSON result validated against this JSON Schema file (printed to stdout) |
@@ -132,6 +134,8 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 | `resume.interrupted_call` | `id`, `name` of a call that was in flight when the previous process stopped |
 | `resume.process_lost` | `id`, `pid`, `cmd` of a background process from the previous invocation |
 | `compaction` | `step`, `reason`, `stage`, `tokens_before`, `tokens_after`, `elided_messages`, `summarized_messages` |
+| `workspace.snapshot` | `id`, `step` (0 = baseline), `kind` (`baseline`, `step`, `final`, or `pre-rewind`), `time`, `files`, `bytes`, `skipped_ignored`, `skipped_large`, `large_paths` (up to 20, when any), `store`, `duration_ms`; only with [snapshots](#rewind-workspace-changes) on. Paths and counts only, never file contents |
+| `rewind.plan` / `rewind.result` | `--rewind --json` only: the target snapshot, each `{op, path}` change and counts; then `restored`, `not_restored`, `pre_rewind` and `error` (on a partial restore) |
 | `warning` / `error` | `message` |
 | `sandbox.network_denied` | `host`, `port`, `reason`; the sandbox allowlist proxy refused a request from a command (see [Network allowlist](#network-allowlist)) |
 | `provider.retry` | `attempt` (the upcoming attempt number), `reason` (`http_<status>` or `network`), `backoff_ms`; only emitted when a model request is retried |
@@ -205,7 +209,36 @@ Steps, cost, token counts, and cache totals remain cumulative. Step/cost limits 
 
 New JSON keeps the existing top-level trajectory fields and adds versioned metadata: `schema_version` (currently 2; version 1 files still load), `root`, `system_prompt`, `skip_agents_md`, `tools`, and `tool_signature`. Version 2 adds `pending_calls`, `processes`, `plan_enabled`, `plan`, and `plan_history`; runs with skills enabled also record `skills_enabled` and `skills` (name, scope, and path of each discovered skill). `resume` records the input path, previous status/submission, cumulative step, and continuation-message index, plus `follow_up: true` for a follow-up boundary; nested `previous` entries retain earlier resume boundaries. These audit paths are not read as configuration. Metadata excludes credentials and environment dumps. Checkpoints still contain prompts, code, and tool outputs: treat them as private, trusted local execution inputs. New checkpoint and temporary files use owner-only permissions (0600) where supported.
 
-A checkpoint restores **conversation state**, not files, Git state, shell variables, live processes, or external services. The model receives a continuation notice and stderr warns to inspect and revalidate the current workspace. Commands may have produced unrecorded side effects after the last save, especially during a hard crash in a tool batch. Historical process IDs cannot reattach to children from another invocation. There is no rollback or exactly-once execution guarantee; inspect current state before resuming.
+A checkpoint restores **conversation state**, not files (to restore files, record the run with `--snapshots` and use [`--rewind`](#rewind-workspace-changes)), Git state, shell variables, live processes, or external services. The model receives a continuation notice and stderr warns to inspect and revalidate the current workspace. Commands may have produced unrecorded side effects after the last save, especially during a hard crash in a tool batch. Historical process IDs cannot reattach to children from another invocation. There is no rollback or exactly-once execution guarantee; inspect current state before resuming.
+
+### Rewind workspace changes
+
+With `--snapshots` (or `snapshots: true` in the config), tinyagent records the workspace so you can put files back the way they were before the agent changed them. It is off by default and needs `-o`, because the trajectory file is the index of the snapshots.
+
+```sh
+tinyagent -t "refactor the parser" --cwd . --snapshots -o run.json
+tinyagent --rewind run.json --cwd . --dry-run          # preview: M/A/D lines and a count
+tinyagent --rewind run.json --cwd .                     # back to the start of the run
+tinyagent --rewind run.json --cwd . --to 4              # the state before step 4's tool batch
+```
+
+**When snapshots are taken.** A `baseline` after setup and before the first model request; a `step` snapshot before each tool batch that can change files (`write_file`, `edit_file`, `apply_patch`, `bash`, `start_process`, `stop_process`, and any MCP tool; batches of only read-only tools take none); and a `final` one when the run ends, whatever its status. Each is listed in the trajectory's `snapshots` array (`snapshots_enabled` is `true`), emitted as a `workspace.snapshot` event in `--json` and `--log-db`, and printed as one line with `-v`. With `--read-only` nothing can change files, so no snapshots are taken and stderr says so once.
+
+**What is in scope.** Regular files and symlinks (stored as links, not followed) under `--cwd`, with their mode bits. Left out, and never modified or deleted by a rewind:
+
+- `.git/`, the `.tinyagent/` directory (the store and the event log), and the `-o` trajectory and its temp files;
+- paths ignored by `.gitignore` files and `.git/info/exclude`, when `--cwd` is inside a Git repository (your global excludes file is not read);
+- files larger than `snapshots.max_file_bytes` (default 2 MiB). The snapshot records count them and list up to 20; a rewind warns that they were "not restored".
+
+**Rewind.** `--rewind <trajectory> --cwd <root>` needs `--cwd` given explicitly, resolving to the trajectory's root as for `--resume`. `--to` is `start` (the default: the baseline), a step number, or a snapshot id. A step number means the state before that step's tool batch; if that step has no snapshot (it only read files), the latest snapshot at or before it is used and the output says which. The plan prints one line per path, `M` (content or mode restored), `A` (created later, will be removed) and `D` (deleted later, will be recreated), then a count; `--dry-run` stops there. Otherwise tinyagent first takes a `pre-rewind` snapshot, records it in the trajectory file, and prints its id with the command that undoes the rewind (`--rewind run.json --cwd . --to <pre-rewind-id>`); then it restores each path and removes directories that only exist because of later changes. It makes no model request and needs no API key.
+
+A rewind exits 2 before writing anything when `--cwd` is missing or doesn't match, `--to` names no snapshot, the trajectory has no snapshots, or the store is missing or corrupt. A rewind isn't atomic across files: if a write fails it stops, lists what was and wasn't restored and the `pre-rewind` id, and exits 1.
+
+A rewind doesn't touch Git state (HEAD, the index, branches, stashes), so uncommitted changes you made before the run come back as they were. It restores files only: not processes, services, databases outside `--cwd`, or anything a command did elsewhere. With `--env container`, `--cwd` is mounted into the container, so files the container writes there are covered.
+
+**Resume.** `--resume` keeps the source trajectory's snapshots in the new trajectory, so either file can be rewound, including to a step of the original run. Whether the resumed run takes new snapshots depends on this invocation's `--snapshots`/config.
+
+**Storage.** Snapshots live in `<cwd>/.tinyagent/snapshots/`: file contents are stored once each by SHA-256, plus one small manifest per snapshot. Directories are created `0700` and files `0600`, and the store has its own `.gitignore` so it is never committed. It holds full copies of in-scope files, secrets included, so treat it like trajectory files. Nothing is pruned automatically; deleting `.tinyagent/snapshots` is safe and only makes old trajectories un-rewindable. Each snapshot walks the tree, which can take a moment on large trees; `duration_ms` in the event shows how long.
 
 ### Continue a finished run with a follow-up task
 
@@ -304,6 +337,9 @@ tool_output_files:        # save over-limit tool output; see Tool output files
   enabled: false          # same as --tool-output-files
   dir: .tinyagent/tool-output   # relative to --cwd; must stay inside it
   max_runs: 20            # keep this many earlier run directories; 0 keeps all
+snapshots:                # workspace snapshots for --rewind (same as --snapshots); `snapshots: true` also works
+  enabled: false
+  max_file_bytes: 2097152 # larger files are skipped and never restored (2 MiB); must be >= 1
 log_db:                   # opt-in SQLite event log; see Event log database
   enabled: false
   path: .tinyagent/tinyagent.db   # relative to --cwd
