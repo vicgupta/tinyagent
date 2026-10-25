@@ -17,11 +17,15 @@ import (
 )
 
 type Message struct {
-	Role       string         `json:"role"`
-	Content    string         `json:"content,omitempty"`
-	ToolCalls  []ToolCall     `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-	Extra      map[string]any `json:"extra,omitempty"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	// Images (tool results only, opt-in --images) are sent with the result
+	// in each provider's image form. Content already holds a placeholder for
+	// each one.
+	Images []Image        `json:"images,omitempty"`
+	Extra  map[string]any `json:"extra,omitempty"`
 }
 
 type ToolCall struct {

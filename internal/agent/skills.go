@@ -151,11 +151,11 @@ func (a *Agent) retainedChars(t *trajectory.Trajectory, v *view) int {
 
 // execTool runs a permitted call. A skill call whose instructions are still
 // in context gets a short note instead of a second copy.
-func (a *Agent) execTool(ctx context.Context, t *trajectory.Trajectory, call model.ToolCall) (string, bool) {
+func (a *Agent) execTool(ctx context.Context, t *trajectory.Trajectory, call model.ToolCall) (string, []model.Image, bool) {
 	if name, file, ok := skillCallArgs(call); ok && file == "" && a.Tools.Skills.Len() > 0 && a.view != nil && a.skillInContext(t, a.view, name) {
-		return fmt.Sprintf("skill %q is already loaded earlier in this conversation; follow those instructions (no second copy was added)", name), false
+		return fmt.Sprintf("skill %q is already loaded earlier in this conversation; follow those instructions (no second copy was added)", name), nil, false
 	}
-	return a.Tools.RunWithError(ctx, call)
+	return a.Tools.RunWithImages(ctx, call)
 }
 
 func (a *Agent) skillInContext(t *trajectory.Trajectory, v *view, name string) bool {

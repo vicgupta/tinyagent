@@ -66,7 +66,11 @@ type openAIChunk struct {
 func (o *OpenAI) Query(ctx context.Context, messages []Message, tools []ToolSpec) (Message, Cost, error) {
 	wire := make([]openAIMessage, len(messages))
 	for i, m := range messages {
-		wire[i] = openAIMessage{Role: m.Role, Content: m.Content, ToolCalls: m.ToolCalls, ToolCallID: m.ToolCallID}
+		content := m.Content
+		if len(m.Images) > 0 {
+			content += "\n" + chatImageNote
+		}
+		wire[i] = openAIMessage{Role: m.Role, Content: content, ToolCalls: m.ToolCalls, ToolCallID: m.ToolCallID}
 	}
 	body := map[string]any{"model": o.Model, "messages": wire}
 	if o.ReasoningEffort != "" {

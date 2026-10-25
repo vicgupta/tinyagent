@@ -45,6 +45,7 @@ type options struct {
 	outputSchema                                     string
 	planFile                                         string
 	plan                                             bool
+	images                                           bool
 	skills, noSkills                                 bool
 	reasoningEffort                                  string
 	execEnv                                          string
@@ -88,6 +89,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.sandbox, "sandbox", false, "confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths")
 	fs.BoolVar(&o.sandboxNetwork, "sandbox-network", false, "with --sandbox, allow commands to use the network")
 	fs.BoolVar(&o.plan, "plan", false, "enable the update_plan tool: a task plan saved in the checkpoint and pinned in every request (default off; config plan.enabled)")
+	fs.BoolVar(&o.images, "images", false, "let vision-capable models see images: the view_image tool and MCP image pass-through (default off; config images.enabled)")
 	fs.BoolVar(&o.skills, "skills", false, "discover Agent Skills in .agents/skills (project, up to the repo root, and ~/.agents/skills) and add the skill tool (default off; config skills)")
 	fs.BoolVar(&o.noSkills, "no-skills", false, "turn Agent Skills discovery off, overriding config skills; --no-skills=false turns it on")
 	fs.StringVar(&o.planFile, "plan-file", "", "with the plan enabled, also export the current plan as Markdown to this file after each save")
@@ -203,6 +205,9 @@ func run() int {
 	if o.planFile != "" && !cfg.Plan.Enabled {
 		return fail(errors.New("--plan-file requires the plan tool; pass --plan or set plan.enabled: true"))
 	}
+	if flagWasSet(fs, "images") {
+		cfg.Images.Enabled = o.images
+	}
 	if on, set, err := skillsFlag(fs, o); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
@@ -274,16 +279,19 @@ func run() int {
 		ModelName:       o.modelName,
 		ReasoningEffort: cfg.ReasoningEffort,
 		Tools: &tools.Executor{
-			Root:           root,
-			ReadOnly:       cfg.ReadOnly,
-			Env:            env,
-			BashTimeout:    time.Duration(cfg.BashTimeoutSec) * time.Second,
-			MaxOutputChars: cfg.MaxOutputChars,
-			MaxProcesses:   cfg.MaxBackgroundProcesses,
-			Stream:         streamTo(jsonStream(o.jsonOutput), progress),
-			ExternalSpecs:  mcpRegistry.Specs,
-			ExternalCall:   mcpRegistry.Call,
-			Plan:           cfg.Plan.Enabled,
+			Root:               root,
+			ReadOnly:           cfg.ReadOnly,
+			Env:                env,
+			BashTimeout:        time.Duration(cfg.BashTimeoutSec) * time.Second,
+			MaxOutputChars:     cfg.MaxOutputChars,
+			MaxProcesses:       cfg.MaxBackgroundProcesses,
+			Stream:             streamTo(jsonStream(o.jsonOutput), progress),
+			ExternalSpecs:      mcpRegistry.Specs,
+			ExternalCall:       mcpRegistry.Call,
+			Plan:               cfg.Plan.Enabled,
+			Images:             cfg.Images.Enabled,
+			MaxImageBytes:      cfg.MaxImageBytes,
+			ExternalCallImages: mcpRegistry.CallImages(cfg.MaxImageBytes),
 		},
 		Config:       cfg,
 		Hooks:        hookRunner,
@@ -431,6 +439,10 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return fail(errors.New("resume: --plan conflicts with the checkpoint's recorded plan setting; start a fresh task"))
 	}
 	cfg.Plan.Enabled = src.PlanEnabled
+	if flagWasSet(fs, "images") && o.images != src.ImagesEnabled {
+		return fail(errors.New("resume: --images conflicts with the checkpoint's recorded images setting; start a fresh task"))
+	}
+	cfg.Images.Enabled = src.ImagesEnabled
 	if on, set, err := skillsFlag(fs, *o); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
@@ -522,6 +534,8 @@ func runResume(o *options, fs *flag.FlagSet) int {
 			MaxProcesses:   cfg.MaxBackgroundProcesses,
 			Stream:         jsonStream(o.jsonOutput),
 			Plan:           src.PlanEnabled,
+			Images:         src.ImagesEnabled,
+			MaxImageBytes:  cfg.MaxImageBytes,
 		},
 		Config:       cfg,
 		Hooks:        hookRunner,

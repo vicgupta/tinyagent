@@ -45,6 +45,14 @@ func TestMCPFixtureProcess(t *testing.T) {
 	mcp.AddTool[map[string]any, any](s, &mcp.Tool{Name: "union", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"v": map[string]any{"anyOf": []any{map[string]any{"type": "string"}, map[string]any{"type": "number"}}}}}}, func(context.Context, *mcp.CallToolRequest, map[string]any) (*mcp.CallToolResult, any, error) {
 		return nil, nil, nil
 	})
+	png := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 92)...) // 100 bytes
+	mcp.AddTool[map[string]any, any](s, &mcp.Tool{Name: "shot", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *mcp.CallToolRequest, map[string]any) (*mcp.CallToolResult, any, error) {
+		content := []mcp.Content{&mcp.TextContent{Text: "screenshot"}, &mcp.ImageContent{MIMEType: "image/png", Data: png}, &mcp.ImageContent{MIMEType: "image/tiff\n", Data: []byte("II*\x00")}}
+		for range 9 {
+			content = append(content, &mcp.ImageContent{MIMEType: "image/png", Data: png})
+		}
+		return &mcp.CallToolResult{Content: content}, nil, nil
+	})
 	if err := s.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		os.Exit(3)
 	}
@@ -133,5 +141,35 @@ func TestCallTimeoutKeepsServerUsable(t *testing.T) {
 	got, isErr, _ = r.Call(context.Background(), "docs__fetch", `{"url":"u"}`)
 	if isErr || got != "fetched u" {
 		t.Errorf("call after a timeout = %q, isErr %v; want the server still usable", got, isErr)
+	}
+}
+
+func TestCallImagesPassesThroughWithCaps(t *testing.T) {
+	r, err := startFixture(t, config.MCPServer{Tools: []string{"shot"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, isErr, ok := r.Call(context.Background(), "docs__shot", `{}`)
+	if !ok || isErr || !strings.Contains(got, "screenshot") || !strings.Contains(got, "[omitted unsupported MCP content]") || strings.Contains(got, "sha256:") {
+		t.Fatalf("Call without images = %q", got)
+	}
+	text, images, isErr, ok := r.CallImages(1000)(context.Background(), "docs__shot", `{}`)
+	if !ok || isErr {
+		t.Fatalf("CallImages isErr %v ok %v", isErr, ok)
+	}
+	if len(images) != MaxImagesPerResult || images[0].MIMEType != "image/png" || images[0].Size() != 100 {
+		t.Fatalf("images = %d", len(images))
+	}
+	for _, want := range []string{"screenshot", "[image: image/png, 100 bytes, sha256:", "[omitted MCP image: image/tiff not supported]", "[omitted MCP image: more than 8 images in one result]"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("text lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, images[0].Data) {
+		t.Error("text contains base64 image data")
+	}
+	text, images, _, _ = r.CallImages(50)(context.Background(), "docs__shot", `{}`)
+	if len(images) != 0 || !strings.Contains(text, "[omitted MCP image: 100 bytes exceeds max_image_bytes]") {
+		t.Errorf("oversize: %d images, %q", len(images), text)
 	}
 }

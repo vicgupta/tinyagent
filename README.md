@@ -4,7 +4,7 @@
 curl -fsSL https://raw.githubusercontent.com/vicgupta/tinyagent/main/install.sh | sh
 ```
 
-A minimal coding agent in a single static Go binary. It gives an LLM nine tools (`read_file`, `write_file`, `edit_file`, `list_files`, `grep`, `bash`, and `start_process`, `read_process`, `stop_process` for background commands), plus the opt-in `update_plan` and `skill` tools, and keeps a linear message history until the model submits.
+A minimal coding agent in a single static Go binary. It gives an LLM nine tools (`read_file`, `write_file`, `edit_file`, `list_files`, `grep`, `bash`, and `start_process`, `read_process`, `stop_process` for background commands), plus the opt-in `update_plan`, `skill`, and `view_image` tools, and keeps a linear message history until the model submits.
 
 ## Install
 
@@ -90,6 +90,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--max-format-errors` | config `max_format_errors`, else 3 | Stop with `RepeatedFormatError` after this many consecutive steps whose tool calls are all malformed; must be >= 1. See [Malformed tool calls](#malformed-tool-calls) |
 | `--no-compact` | off | Never compact the history; see [Long runs](#long-runs) |
 | `--plan` | config `plan.enabled`, else off | Give the model the `update_plan` tool; see [Plan tool](#plan-tool) |
+| `--images` | config `images.enabled`, else off | Let vision-capable models see images: the `view_image` tool and MCP image pass-through; see [Images](#images) |
 | `--plan-file` | — | Mirror the current plan to this Markdown file after each checkpoint save (requires the plan tool) |
 | `--skills` | config `skills`, else off | Discover [Agent Skills](#agent-skills) and offer the `skill` tool |
 | `--no-skills` | — | Disable skills even if the config enables them (`--no-skills=false` enables) |
@@ -257,6 +258,9 @@ context_window: 200000    # tokens; overrides the built-in table, used for compa
 plan:
   enabled: false          # give the model the update_plan tool (same as --plan)
 skills: false             # discover Agent Skills and offer the skill tool (same as --skills)
+images:
+  enabled: false          # view_image tool and MCP image pass-through (same as --images)
+max_image_bytes: 5242880  # largest image sent to the model (5 MiB); must be >= 1
 log_db:                   # opt-in SQLite event log; see Event log database
   enabled: false
   path: .tinyagent/tinyagent.db   # relative to --cwd
@@ -350,6 +354,19 @@ Summaries lose detail. Put instructions that must hold for the whole run in `AGE
 `--plan` (or `plan: {enabled: true}`) adds an `update_plan` tool, off by default. The model sends the whole list each time: up to 50 items, each `{id, text, status}` with status `pending`, `in_progress`, `done`, or `blocked`, at most one `in_progress`, plus an optional `note`. The plan lives in the trajectory (`plan`, with every change in `plan_history`), not in the message history: before each request a `[Current plan]` block is pinned after the system prompt, so it survives compaction (the summarizer also sees it) and `--resume`. Each update emits `plan.updated`, and `--plan-file plan.md` mirrors the current plan as a Markdown checklist after each save (the checkpoint stays the source of truth). The tool is available with `--read-only`, since it touches nothing in the workspace.
 
 A checkpoint records whether the plan tool was enabled, and `--resume` keeps that setting: passing `--plan` to resume a run that started without it is an error, and the config's `plan.enabled` is ignored on resume. `--plan-file` requires the plan tool.
+
+### Images
+
+`--images` (or `images: {enabled: true}`) lets vision-capable models see images. It is off by default; with it off, requests, tools, and checkpoints are unchanged.
+
+- **`view_image`** takes a `path` inside `--cwd` and sends the file to the model. PNG, JPEG, GIF, and WebP are supported, detected from the file's bytes (not its extension); SVG, other formats, directories, paths outside the workspace, and files larger than `max_image_bytes` (default 5 MiB) are errors. It is available with `--read-only`, since it only reads.
+- **MCP image pass-through**: image content in an allowed MCP tool's result is sent to the model (up to 8 images per result, each within `max_image_bytes`). Unsupported, oversize, or extra images are replaced by an `[omitted MCP image: ...]` marker. With images off, MCP images are still `[omitted unsupported MCP content]`.
+
+Per provider: `anthropic` sends images as image blocks inside the tool result, and `codex` as `input_image` items in the function call output. The Chat Completions API (`openai`, `openrouter`, `ollama`) cannot carry images in tool results, so those providers get a text note saying the image was not shown; tinyagent does not inject images as a separate user message. (A Responses API transport for `openai`, #80, would allow it.)
+
+Image data never appears in text channels: the model's tool-result text, `--json` events, verbose output, hook input, and the event log see a placeholder like `[image: image/png, 48,213 bytes, sha256:1a2b3c4d5e6f]`. Privacy: the image bytes are sent to the model provider and stored base64 in the trajectory/checkpoint file, so treat those files like the images themselves. For compaction each image counts as about 1,600 tokens, and old images are elided (`[image elided: <path>, N bytes]`) like old tool output; the summarizer never sees image data.
+
+A checkpoint records whether images were enabled, and `--resume` keeps that setting: passing `--images` to resume a run that started without it (or the reverse) is an error, and the config's `images.enabled` is ignored on resume.
 
 ## Exit status
 

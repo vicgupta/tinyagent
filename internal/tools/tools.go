@@ -47,6 +47,14 @@ type Executor struct {
 	// Plan offers the opt-in update_plan tool (also in read-only mode). The
 	// agent handles its calls; the executor only advertises it.
 	Plan bool
+	// Images offers the opt-in view_image tool (also in read-only mode) and
+	// lets ExternalCallImages pass MCP images through. MaxImageBytes caps
+	// one image (0 = DefaultMaxImageBytes).
+	Images        bool
+	MaxImageBytes int
+	// ExternalCallImages, when set and Images is on, replaces ExternalCall
+	// and also returns the result's images.
+	ExternalCallImages func(ctx context.Context, name, args string) (out string, images []model.Image, isErr, ok bool)
 	// Skills, when it holds at least one skill, adds the read-only skill
 	// tool (also in read-only mode). nil or empty offers nothing.
 	Skills *skills.Set
@@ -157,19 +165,44 @@ func (e *Executor) Run(ctx context.Context, call model.ToolCall) string {
 // RunWithError executes a tool call and reports whether execution failed.
 // The returned text is still suitable for passing back to the model.
 func (e *Executor) RunWithError(ctx context.Context, call model.ToolCall) (string, bool) {
+	out, _, isErr := e.RunWithImages(ctx, call)
+	return out, isErr
+}
+
+// RunWithImages is RunWithError plus any images the result carries (only
+// with Images on). The text already holds a placeholder for each image.
+func (e *Executor) RunWithImages(ctx context.Context, call model.ToolCall) (string, []model.Image, bool) {
+	if e.Images && !e.ReadOnly && e.ExternalCallImages != nil {
+		if out, images, isErr, ok := e.ExternalCallImages(ctx, call.Function.Name, call.Function.Arguments); ok {
+			return truncate(out, e.MaxOutputChars), images, isErr
+		}
+	}
+	if e.Images && call.Function.Name == ViewImageToolName {
+		var a args
+		if strings.TrimSpace(call.Function.Arguments) != "" {
+			if err := json.Unmarshal([]byte(call.Function.Arguments), &a); err != nil {
+				return "error: invalid arguments JSON: " + err.Error(), nil, true
+			}
+		}
+		out, im, err := ViewImage(e.Root, a.Path, e.MaxImageBytes)
+		if err != nil {
+			return truncate("error: "+err.Error(), e.MaxOutputChars), nil, true
+		}
+		return out, []model.Image{*im}, false
+	}
 	// External tools are never dispatched in read-only mode: the check in
 	// run() below then rejects them with the read-only error, matching
 	// Catalog(), which also excludes them there.
 	if !e.ReadOnly && e.ExternalCall != nil {
 		if out, isErr, ok := e.ExternalCall(ctx, call.Function.Name, call.Function.Arguments); ok {
-			return truncate(out, e.MaxOutputChars), isErr
+			return truncate(out, e.MaxOutputChars), nil, isErr
 		}
 	}
 	out, err := e.run(ctx, call.Function.Name, call.Function.Arguments)
 	if err != nil {
 		out = "error: " + err.Error()
 	}
-	return truncate(out, e.MaxOutputChars), err != nil
+	return truncate(out, e.MaxOutputChars), nil, err != nil
 }
 
 // Catalog returns the fixed built-in and explicitly configured external tools.
@@ -180,6 +213,9 @@ func (e *Executor) Catalog() []model.ToolSpec {
 	out := Specs(e.ReadOnly)
 	if e.Plan {
 		out = append(out, PlanSpec())
+	}
+	if e.Images {
+		out = append(out, ViewImageSpec())
 	}
 	if e.Skills.Len() > 0 {
 		out = append(out, e.Skills.Spec())
