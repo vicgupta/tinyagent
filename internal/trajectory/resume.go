@@ -30,6 +30,37 @@ const ContinuationNotice = "The previous invocation stopped before this task fin
 	"the current workspace before continuing. Live processes and shell state are not " +
 	"restored; historical process IDs cannot be used to reattach to old processes."
 
+// FollowUpNotice is part of the versioned checkpoint contract. It starts the
+// user message at each follow-up boundary, where a finished run is continued
+// with a new instruction; the instruction follows it.
+const FollowUpNotice = "The previous invocation finished. The conversation above is its saved history. " +
+	"The workspace may have changed since it finished. Inspect and revalidate the current " +
+	"workspace before relying on earlier observations. Live processes and shell state are not " +
+	"restored. The user's follow-up task is below."
+
+// Finished reports whether status is a successful termination that can only
+// be continued with a follow-up task.
+func Finished(status string) bool {
+	return status == "Submitted" || status == "Completed"
+}
+
+// finalShape reports whether m is the final assistant message of a run that
+// ended with status: no tool calls, with the submit marker for Submitted and
+// without it for Completed.
+func finalShape(m model.Message, status string) bool {
+	if m.Role != "assistant" || m.ToolCallID != "" || len(m.ToolCalls) != 0 {
+		return false
+	}
+	marker := strings.Contains(m.Content, "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT")
+	switch status {
+	case "Submitted":
+		return marker
+	case "Completed":
+		return !marker
+	}
+	return false
+}
+
 // Load reads a trusted local checkpoint without modifying it. Parse diagnostics
 // intentionally omit decoder errors, which can contain transcript values.
 func Load(path string) (*Trajectory, error) {
@@ -137,10 +168,8 @@ func (t *Trajectory) Validate() error {
 	if t.Task == "" || t.Model == "" {
 		return errors.New("checkpoint is missing its task or model")
 	}
-	if t.ExitStatus == "Submitted" || t.ExitStatus == "Completed" {
-		return errors.New("checkpoint already finished; start a fresh task")
-	}
-	if !unfinished(t.ExitStatus) {
+	finished := Finished(t.ExitStatus)
+	if !finished && !unfinished(t.ExitStatus) {
 		return errors.New("checkpoint has an unsupported exit status")
 	}
 	if t.StopContinuations != 0 || t.StopReason != "" {
@@ -158,7 +187,11 @@ func (t *Trajectory) Validate() error {
 	boundaries := map[int]*ResumeInfo{}
 	end, steps := len(t.Messages), t.Steps
 	for b := t.Resume; b != nil; b = b.Previous {
-		if b.Message < 2 || b.Message >= end || b.Steps < 0 || b.Steps > steps || !unfinished(b.ExitStatus) || b.Source == "" {
+		okStatus := unfinished(b.ExitStatus)
+		if b.FollowUp {
+			okStatus = Finished(b.ExitStatus)
+		}
+		if (b.FollowUp && b.Message < 3) || b.Message < 2 || b.Message >= end || b.Steps < 0 || b.Steps > steps || !okStatus || b.Source == "" {
 			return errors.New("checkpoint has invalid resume provenance")
 		}
 		boundaries[b.Message] = b
@@ -183,13 +216,41 @@ func (t *Trajectory) Validate() error {
 	}
 	steps = 0
 	pendingOK := false
+	finalAt := -1 // index of the last final assistant message before a follow-up
 	for i := 2; i < len(t.Messages); {
 		m := t.Messages[i]
 		if b, ok := boundaries[i]; ok {
-			if b.Steps != steps || m.Role != "user" || !strings.HasPrefix(m.Content, ContinuationNotice) || len(m.ToolCalls) != 0 || m.ToolCallID != "" {
+			notice := ContinuationNotice
+			if b.FollowUp {
+				notice = FollowUpNotice
+			}
+			if b.Steps != steps || m.Role != "user" || !strings.HasPrefix(m.Content, notice) || len(m.ToolCalls) != 0 || m.ToolCallID != "" {
 				return errors.New("checkpoint has an invalid continuation notice")
 			}
+			if b.FollowUp && finalAt != i-1 {
+				return errors.New("checkpoint history before a follow-up is not a finished assistant turn")
+			}
 			delete(boundaries, i)
+			i++
+			continue
+		}
+		// A final assistant message is valid only as the last message of a
+		// finished run, or right before the follow-up boundary that
+		// continued it.
+		if next, ok := boundaries[i+1]; ok && next.FollowUp {
+			if !finalShape(m, next.ExitStatus) {
+				return errors.New("checkpoint history before a follow-up is not a finished assistant turn")
+			}
+			finalAt = i
+			steps++
+			i++
+			continue
+		}
+		if finished && i == len(t.Messages)-1 {
+			if !finalShape(m, t.ExitStatus) {
+				return errors.New("finished checkpoint does not end with a final assistant message")
+			}
+			steps++
 			i++
 			continue
 		}
@@ -239,6 +300,9 @@ func (t *Trajectory) Validate() error {
 	}
 	if steps != t.Steps {
 		return errors.New("checkpoint steps do not match the recorded history")
+	}
+	if finished && (len(t.Messages) < 3 || !finalShape(t.Messages[len(t.Messages)-1], t.ExitStatus)) {
+		return errors.New("finished checkpoint does not end with a final assistant message")
 	}
 	return nil
 }

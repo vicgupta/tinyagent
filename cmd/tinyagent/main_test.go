@@ -257,16 +257,17 @@ func TestDeadlineSpentBeforeRunIsTimeLimit(t *testing.T) {
 const wantUsage = `Usage: tinyagent -t "<prompt>" [flags]    (or --task "<prompt>")
        echo "<prompt>" | tinyagent -t -
        tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]
+       tinyagent --resume <finished.json> -t "<follow-up>" --cwd <dir> -o <new.json> [flags]
 
   -h, --help                      show this help and exit
 Task:
-  -t, --task string               task/prompt (required unless --resume); "-" reads it from stdin
+  -t, --task string               task/prompt (required unless --resume; with --resume of a finished run, the follow-up instruction); "-" reads it from stdin
   -m, --model string              provider/model; if unset, $AGENT_MODEL, then the config's model (default "openai/gpt-4o")
       --reasoning-effort level    provider reasoning effort: none, minimal, low, medium, high, xhigh, or max
       --openai-api api            openai provider transport: auto, responses, or chat
   -c, --config path               YAML config (default: user config if present, else built-in)
       --cwd dir                   working directory (default ".")
-      --resume path               continue an unfinished run from a trajectory JSON checkpoint
+      --resume path               continue an unfinished run from a trajectory JSON checkpoint, or a finished one with -t "<follow-up>"
 Limits:
       --step-limit n              max model calls, 0 = unlimited
       --cost-limit usd            max USD, 0 = unlimited
@@ -293,6 +294,7 @@ Examples:
   tinyagent -t "fix the failing test" -m anthropic/claude-sonnet-4
   cat task.md | tinyagent -t - --step-limit 30 -o run.json
   tinyagent --resume run.json --cwd . --step-limit 60 -o continued.json
+  tinyagent --resume review.json -t "fix the races you found" --cwd . -o fix.json
 `
 
 // runWith runs the CLI with args, returning the exit code and what went to
