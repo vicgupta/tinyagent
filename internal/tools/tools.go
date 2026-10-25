@@ -32,6 +32,8 @@ type Executor struct {
 	// ProcessBufferBytes caps the output kept per background process
 	// (0 = DefaultProcessBufferBytes); older output is dropped.
 	ProcessBufferBytes int
+	// Sandbox, if non-nil, confines bash and start_process commands.
+	Sandbox *Sandbox
 	// Stream receives bash output as it is produced when a call sets
 	// stream: true. nil discards it (the result is unchanged either way).
 	Stream        io.Writer
@@ -243,7 +245,7 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 		if stream {
 			live = e.Stream
 		}
-		return BashStream(ctx, e.Root, a.Command, timeout, live)
+		return bashStream(ctx, e.Sandbox, e.Root, a.Command, timeout, live)
 	case "start_process":
 		return e.StartProcess(a.Command)
 	case "read_process":

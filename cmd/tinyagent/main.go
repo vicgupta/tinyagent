@@ -41,7 +41,7 @@ type options struct {
 	stepLimit, timeLimit                             int
 	costLimit                                        float64
 	verbose, noStream, noAgentsMD, noCompact         bool
-	readOnly                                         bool
+	readOnly, sandbox, sandboxNetwork                bool
 	jsonOutput                                       bool
 	showHelp, showVersion, doUpdate                  bool
 }
@@ -73,6 +73,8 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.noAgentsMD, "no-agents-md", false, "don't add AGENTS.md (nearest, up to the repo root) to the system prompt")
 	fs.BoolVar(&o.noCompact, "no-compact", false, "don't compact the history when it nears the context window")
 	fs.BoolVar(&o.readOnly, "read-only", false, "allow only read_file, list_files, and grep; blocks edits and commands")
+	fs.BoolVar(&o.sandbox, "sandbox", false, "confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths")
+	fs.BoolVar(&o.sandboxNetwork, "sandbox-network", false, "with --sandbox, allow commands to use the network")
 	fs.BoolVar(&o.jsonOutput, "json", false, "write run events as JSONL to stdout")
 	fs.BoolVar(&o.showVersion, "version", false, "print the version and exit")
 	fs.BoolVar(&o.showVersion, "V", false, "shorthand for --version")
@@ -81,6 +83,9 @@ func newFlagSet(o *options) *flag.FlagSet {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == tools.SandboxHelperArg {
+		os.Exit(tools.RunSandboxHelper(os.Args[2:]))
+	}
 	os.Exit(run())
 }
 
@@ -142,6 +147,7 @@ func run() int {
 	if flagWasSet(fs, "read-only") {
 		cfg.ReadOnly = o.readOnly
 	}
+	applySandboxFlags(fs, &cfg, o)
 	o.modelName = resolveModel(fs, o.modelName, cfg.Model)
 	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 
@@ -155,6 +161,11 @@ func run() int {
 	if cfg.ReadOnly {
 		fmt.Fprintln(os.Stderr, "read-only mode: only read_file, list_files, and grep are available")
 	}
+	sb, err := startSandbox(cfg, root)
+	if err != nil {
+		return fail(err)
+	}
+	defer sb.Cleanup()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	// MCP discovery counts against the wall-clock limit. Agent.Run applies
@@ -188,6 +199,7 @@ func run() int {
 		Tools: &tools.Executor{
 			Root:           root,
 			ReadOnly:       cfg.ReadOnly,
+			Sandbox:        sb,
 			BashTimeout:    time.Duration(cfg.BashTimeoutSec) * time.Second,
 			MaxOutputChars: cfg.MaxOutputChars,
 			MaxProcesses:   cfg.MaxBackgroundProcesses,
@@ -272,6 +284,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return fail(errors.New("resume: --read-only conflicts with the checkpoint's recorded mode; start a fresh task"))
 	}
 	cfg.ReadOnly = src.ReadOnly
+	applySandboxFlags(fs, &cfg, *o)
 	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 
 	root, err := canonicalRoot(o.cwd)
@@ -305,6 +318,11 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if src.ReadOnly {
 		fmt.Fprintln(os.Stderr, "read-only mode: only read_file, list_files, and grep are available")
 	}
+	sb, err := startSandbox(cfg, root)
+	if err != nil {
+		return fail(err)
+	}
+	defer sb.Cleanup()
 
 	var onText func(string)
 	if !o.noStream && !o.jsonOutput {
@@ -334,6 +352,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		Tools: &tools.Executor{
 			Root:           root,
 			ReadOnly:       src.ReadOnly,
+			Sandbox:        sb,
 			BashTimeout:    time.Duration(cfg.BashTimeoutSec) * time.Second,
 			MaxOutputChars: cfg.MaxOutputChars,
 			MaxProcesses:   cfg.MaxBackgroundProcesses,
@@ -419,6 +438,31 @@ func canonicalRoot(path string) (string, error) {
 	return filepath.EvalSymlinks(root)
 }
 
+// applySandboxFlags lets --sandbox and --sandbox-network override the config.
+func applySandboxFlags(fs *flag.FlagSet, cfg *config.AgentConfig, o options) {
+	if flagWasSet(fs, "sandbox") {
+		cfg.Sandbox = o.sandbox
+	}
+	if flagWasSet(fs, "sandbox-network") {
+		cfg.SandboxNetwork = o.sandboxNetwork
+	}
+}
+
+// startSandbox returns the command sandbox the config asks for, or nil. It
+// fails if the host can't enforce it, and otherwise announces it on stderr.
+// Read-only runs have no command tools, so there is nothing to confine.
+func startSandbox(cfg config.AgentConfig, root string) (*tools.Sandbox, error) {
+	if !cfg.Sandbox || cfg.ReadOnly {
+		return nil, nil
+	}
+	sb, err := tools.NewSandbox(root, cfg.SandboxWritablePaths, cfg.SandboxNetwork)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Fprintln(os.Stderr, sb.Describe())
+	return sb, nil
+}
+
 // usageGroups lays out --help: each flag's shorthand, long name and value
 // placeholder, by group. Help text and defaults come from the FlagSet.
 var usageGroups = []struct {
@@ -428,7 +472,7 @@ var usageGroups = []struct {
 	{"", [][3]string{{"h", "help", ""}}},
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "resume", "path"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "no-compact", ""}}},
-	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "no-agents-md", ""}, {"", "read-only", ""}}},
+	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "sandbox", ""}, {"", "sandbox-network", ""}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}}},
 }
 

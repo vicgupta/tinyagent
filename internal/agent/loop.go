@@ -130,6 +130,10 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			},
 		}
 	}
+	t.Sandbox = nil
+	if sb := a.Tools.Sandbox; sb != nil {
+		t.Sandbox = &trajectory.SandboxInfo{Backend: sb.Backend, Writable: sb.Writable, Network: sb.Network}
+	}
 	specs := a.Tools.Catalog()
 	v := newView(t.Messages)
 
