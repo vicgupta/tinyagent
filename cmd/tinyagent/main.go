@@ -3,7 +3,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/vicgupta/tinyagent/internal/agent"
 	"github.com/vicgupta/tinyagent/internal/config"
+	"github.com/vicgupta/tinyagent/internal/eventlog"
 	"github.com/vicgupta/tinyagent/internal/hooks"
 	"github.com/vicgupta/tinyagent/internal/mcptools"
 	"github.com/vicgupta/tinyagent/internal/model"
@@ -49,6 +49,7 @@ type options struct {
 	verbose, noStream, noAgentsMD, noCompact         bool
 	readOnly, sandbox, sandboxNetwork                bool
 	jsonOutput                                       bool
+	logDB                                            optionalPath
 	showHelp, showVersion, doUpdate                  bool
 }
 
@@ -86,6 +87,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.planFile, "plan-file", "", "with the plan enabled, also export the current plan as Markdown to this file after each save")
 	fs.BoolVar(&o.jsonOutput, "json", false, "write run events as JSONL to stdout")
 	fs.StringVar(&o.outputSchema, "output-schema", "", "end the run with a JSON result validated against this JSON Schema file (printed to stdout)")
+	fs.Var(&o.logDB, "log-db", "also log run events to SQLite (default .tinyagent/tinyagent.db under --cwd); --log-db=false turns config log_db off")
 	fs.BoolVar(&o.showVersion, "version", false, "print the version and exit")
 	fs.BoolVar(&o.showVersion, "V", false, "shorthand for --version")
 	fs.BoolVar(&o.doUpdate, "update", false, "update to the latest release and exit")
@@ -259,9 +261,17 @@ func run() int {
 		NoCompact:    o.noCompact,
 		OutputSchema: schema,
 	}
-	events := startEvents(os.Stdout, o.jsonOutput, a, false, stop)
+	var events *runEvents
+	warn := func(msg string) { events.warn(msg) }
+	db, dbErr := openLogDB(fs, o, cfg, root, task, o.modelName, false, a, warn)
+	events = startEvents(os.Stdout, o.jsonOutput, a, false, stop, db)
 	if events.err != nil {
+		events.closeDB()
 		return 1
+	}
+	defer events.closeDB()
+	if dbErr != nil {
+		warn(dbErr.Error())
 	}
 	if o.output != "" {
 		a.OnStep = func(t *trajectory.Trajectory) error {
@@ -465,9 +475,17 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		Resume:       src,
 		ResumeSource: o.resume,
 	}
-	events := startEvents(os.Stdout, o.jsonOutput, a, true, stop)
+	var events *runEvents
+	warn := func(msg string) { events.warn(msg) }
+	db, dbErr := openLogDB(fs, *o, cfg, root, src.Task, modelName, true, a, warn)
+	events = startEvents(os.Stdout, o.jsonOutput, a, true, stop, db)
 	if events.err != nil {
+		events.closeDB()
 		return 1
+	}
+	defer events.closeDB()
+	if dbErr != nil {
+		warn(dbErr.Error())
 	}
 	initial := true
 	a.OnStep = func(t *trajectory.Trajectory) error {
@@ -571,7 +589,7 @@ var usageGroups = []struct {
 	{"", [][3]string{{"h", "help", ""}}},
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "resume", "path"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "no-compact", ""}}},
-	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "sandbox", ""}, {"", "sandbox-network", ""}}},
+	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "sandbox", ""}, {"", "sandbox-network", ""}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}}},
 }
 
@@ -791,44 +809,56 @@ func fail(err error) int {
 	return 1
 }
 
-type jsonEvents struct {
-	out     io.Writer
-	enabled bool
-	err     error
+// runEvents fans run events out to the enabled sinks: the --json JSONL
+// stream and the SQLite log. Both receive the same events.
+type runEvents struct {
+	fan  eventlog.Fanout
+	json *eventlog.JSONL
+	db   *eventlog.SQLite
+	err  error // first JSONL write error
 }
 
-func newJSONEvents(out io.Writer, enabled bool) *jsonEvents {
-	return &jsonEvents{out: out, enabled: enabled}
+func (e *runEvents) emit(kind string, fields map[string]any) {
+	e.fan.Emit(kind, fields)
+	if e.json != nil && e.err == nil {
+		e.err = e.json.Err()
+	}
 }
 
-func (e *jsonEvents) emit(kind string, fields map[string]any) {
-	if !e.enabled || e.err != nil {
-		return
+// warn reports a log-db problem on stderr and, with --json, as a warning
+// event. It is not sent to the database that failed.
+func (e *runEvents) warn(msg string) {
+	fmt.Fprintln(os.Stderr, "warning:", msg)
+	if e != nil && e.json != nil {
+		e.json.Emit("warning", map[string]any{"message": msg})
+		if e.err == nil {
+			e.err = e.json.Err()
+		}
 	}
-	event := make(map[string]any, len(fields)+1)
-	event["type"] = kind
-	for key, value := range fields {
-		event[key] = value
+}
+
+func (e *runEvents) closeDB() {
+	if e.db != nil {
+		e.db.Close()
+		e.db = nil
 	}
-	line, err := json.Marshal(event)
-	if err != nil {
-		e.err = err
-		return
-	}
-	line = append(line, '\n')
-	n, err := e.out.Write(line)
-	if err == nil && n != len(line) {
-		err = io.ErrShortWrite
-	}
-	e.err = err
 }
 
 // startEvents writes run.started (and the unpriced cost-limit warning) and
-// routes a's events to out. A failed write cancels the run through stop.
-// When disabled it returns a no-op stream.
-func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop func()) *jsonEvents {
-	events := newJSONEvents(out, enabled)
-	if !enabled {
+// routes a's events to the JSONL stream on out (when enabled) and to db
+// (when non-nil). A failed JSONL write cancels the run through stop. With
+// no sinks it returns a no-op stream and leaves a.OnEvent nil.
+func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop func(), db *eventlog.SQLite) *runEvents {
+	events := &runEvents{}
+	if enabled {
+		events.json = eventlog.NewJSONL(out)
+		events.fan = append(events.fan, events.json)
+	}
+	if db != nil {
+		events.db = db
+		events.fan = append(events.fan, db)
+	}
+	if len(events.fan) == 0 {
 		return events
 	}
 	events.emit("run.started", map[string]any{"schema_version": 1, "model": a.ModelName, "root": a.Tools.Root, "read_only": a.Tools.ReadOnly, "resumed": resumed})
@@ -844,13 +874,122 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	return events
 }
 
-// finish writes the closing events for t and returns the first write error.
-func (e *jsonEvents) finish(t *trajectory.Trajectory, elapsed time.Duration) error {
+// finish writes the closing events for t and returns the first JSONL write
+// error. The database gets result first and is flushed and closed, so any
+// log-db warning precedes the JSONL result, which stays the last line.
+func (e *runEvents) finish(t *trajectory.Trajectory, elapsed time.Duration) error {
+	if len(e.fan) == 0 {
+		return nil
+	}
 	if t.ExitStatus == agent.StatusError {
 		e.emit("error", map[string]any{"message": t.Submission})
 	}
-	e.emit("result", resultFields(t, elapsed))
+	result := resultFields(t, elapsed)
+	if e.db != nil {
+		e.db.Emit("result", result)
+		e.closeDB()
+	}
+	if e.json != nil {
+		e.json.Emit("result", result)
+		if e.err == nil {
+			e.err = e.json.Err()
+		}
+	}
 	return e.err
+}
+
+// optionalPath is a flag that may be given bare (--log-db) or with a value
+// (--log-db=path). --log-db=false turns it off.
+type optionalPath struct {
+	on   bool
+	path string
+}
+
+func (p *optionalPath) String() string   { return "" }
+func (p *optionalPath) IsBoolFlag() bool { return true }
+func (p *optionalPath) Set(v string) error {
+	switch v {
+	case "true":
+		p.on, p.path = true, ""
+	case "false":
+		p.on, p.path = false, ""
+	case "":
+		return errors.New("empty path")
+	default:
+		p.on, p.path = true, v
+	}
+	return nil
+}
+
+const defaultLogDB = ".tinyagent/tinyagent.db"
+
+// logDBPath returns whether the SQLite log is on and its file. --log-db
+// overrides config log_db.enabled; a --log-db path is relative to the shell,
+// a config path relative to root (--cwd).
+func logDBPath(fs *flag.FlagSet, o options, cfg config.LogDB, root string) (bool, string) {
+	on, path := cfg.Enabled, cfg.Path
+	if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			path = filepath.Join(home, path[2:])
+		}
+	}
+	if path != "" && !filepath.IsAbs(path) {
+		path = filepath.Join(root, path)
+	}
+	if flagWasSet(fs, "log-db") {
+		on = o.logDB.on
+		if o.logDB.path != "" {
+			path, _ = filepath.Abs(o.logDB.path)
+		}
+	}
+	if path == "" {
+		path = filepath.Join(root, defaultLogDB)
+	}
+	return on, path
+}
+
+// openLogDB opens the SQLite event log when it is enabled. A non-nil error
+// means the run goes ahead without it, after one warning.
+func openLogDB(fs *flag.FlagSet, o options, cfg config.AgentConfig, root, task, modelName string, resumed bool, a *agent.Agent, warn func(string)) (*eventlog.SQLite, error) {
+	on, path := logDBPath(fs, o, cfg.LogDB, root)
+	if !on {
+		return nil, nil
+	}
+	provider := "openai"
+	if p, _, ok := strings.Cut(modelName, "/"); ok {
+		provider = p
+	}
+	db, err := eventlog.Open(eventlog.Options{
+		Path: path, Level: cfg.LogDB.Level,
+		MaxDays: cfg.LogDB.MaxDays, MaxRuns: cfg.LogDB.MaxRuns, MaxPayloadBytes: cfg.LogDB.MaxPayloadBytes,
+		Redactor: eventlog.EnvRedactor(configuredSecrets(cfg)...),
+		Run:      eventlog.RunInfo{Cwd: root, Model: modelName, Provider: provider, Task: task, Version: currentVersion(), Resumed: resumed},
+		Step:     a.Step,
+		Warn:     warn,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%v; continuing without the event log", err)
+	}
+	return db, nil
+}
+
+// configuredSecrets returns the env values set for MCP servers and hooks in
+// the config, which the event log redacts.
+func configuredSecrets(cfg config.AgentConfig) []string {
+	var envs []string
+	for _, s := range cfg.MCPServers {
+		envs = append(envs, s.Env...)
+	}
+	for _, h := range append(append([]config.Hook(nil), cfg.Hooks.PreTool...), cfg.Hooks.PostTool...) {
+		envs = append(envs, h.Env...)
+	}
+	var vals []string
+	for _, kv := range envs {
+		if _, v, ok := strings.Cut(kv, "="); ok {
+			vals = append(vals, v)
+		}
+	}
+	return vals
 }
 
 // mcpServers returns the MCP servers to start. Read-only runs start none:
