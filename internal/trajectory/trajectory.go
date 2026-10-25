@@ -103,13 +103,22 @@ type Trajectory struct {
 	// ProviderAPI and ProviderBaseURL describe a config-defined provider
 	// (its id is the model spec's prefix); empty for built-in providers.
 	// Keys and header values are never recorded.
-	ProviderAPI     string          `json:"provider_api,omitempty"`
-	ProviderBaseURL string          `json:"provider_base_url,omitempty"`
-	Messages        []model.Message `json:"messages"`
-	Steps           int             `json:"steps"`
-	Cost            float64         `json:"cost"`
-	InputTokens     int             `json:"input_tokens"`
-	OutputTokens    int             `json:"output_tokens"`
+	ProviderAPI     string `json:"provider_api,omitempty"`
+	ProviderBaseURL string `json:"provider_base_url,omitempty"`
+	// FallbackModels is the fallback chain of the latest invocation
+	// (fallback_models, --fallback-model); empty without one.
+	FallbackModels []string `json:"fallback_models,omitempty"`
+	// ModelSwitches records each move down the fallback chain, in order.
+	ModelSwitches []ModelSwitch `json:"model_switches,omitempty"`
+	// ActiveModel is the model that served the latest request when a
+	// fallback chain is configured; Model stays the primary. Assistant
+	// messages then carry the serving model in Extra["model"].
+	ActiveModel  string          `json:"active_model,omitempty"`
+	Messages     []model.Message `json:"messages"`
+	Steps        int             `json:"steps"`
+	Cost         float64         `json:"cost"`
+	InputTokens  int             `json:"input_tokens"`
+	OutputTokens int             `json:"output_tokens"`
 	// Prompt-cache totals, included in InputTokens.
 	CacheReadTokens  int    `json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens int    `json:"cache_write_tokens,omitempty"`
@@ -315,6 +324,16 @@ type ResumeInfo struct {
 // SchemaVersion is the resume-metadata version written by this build.
 // Version 1 checkpoints (no pending calls, processes, or plan) still load.
 const SchemaVersion = 2
+
+// ModelSwitch is one fallback switch: at step Step (the step being
+// requested), the request failed on From with Reason after every retry and
+// was re-sent to To.
+type ModelSwitch struct {
+	Step   int    `json:"step"`
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Reason string `json:"reason"`
+}
 
 // Compaction describes one compaction of the model's view of the history.
 // Indexes refer to Trajectory.Messages.

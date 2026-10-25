@@ -119,7 +119,24 @@ func (a *Agent) contextWindow() int {
 	if a.Config.ContextWindow > 0 {
 		return a.Config.ContextWindow
 	}
-	return model.ContextWindow(a.ModelName)
+	return model.ContextWindow(a.activeModel())
+}
+
+// fallback returns the agent's fallback chain model, or nil without one.
+func (a *Agent) fallback() *model.Fallback {
+	if len(a.FallbackModels) == 0 {
+		return nil
+	}
+	fb, _ := a.Model.(*model.Fallback)
+	return fb
+}
+
+// activeModel is the spec of the model serving the next request.
+func (a *Agent) activeModel() string {
+	if fb := a.fallback(); fb != nil {
+		return fb.Active()
+	}
+	return a.ModelName
 }
 
 // needsCompaction reports whether the next request is estimated to be over

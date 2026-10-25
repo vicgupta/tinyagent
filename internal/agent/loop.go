@@ -63,6 +63,10 @@ const maxAgentsMD = 32 << 10
 type Agent struct {
 	Model     model.Model
 	ModelName string
+	// FallbackModels is the fallback chain recorded in the trajectory and
+	// run.started. Model must then be a *model.Fallback over ModelName
+	// followed by these specs; empty means no fallback.
+	FallbackModels []string
 	// ReasoningEffort is recorded in new trajectories; the Model sends it.
 	ReasoningEffort string
 	// OpenAIAPI is the openai provider's resolved transport, recorded in
@@ -328,6 +332,17 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		}
 	}
 	a.cur = t
+	t.FallbackModels, t.ActiveModel = a.FallbackModels, ""
+	if fb := a.fallback(); fb != nil {
+		t.ActiveModel = fb.Active()
+		ctx = model.WithFallbackObserver(ctx, func(s model.Switch) {
+			step := t.Steps + 1
+			t.ModelSwitches = append(t.ModelSwitches, trajectory.ModelSwitch{Step: step, From: s.From, To: s.To, Reason: s.Reason})
+			t.ActiveModel = s.To
+			fmt.Fprintf(a.Err, "model fallback: %s -> %s (%s) at step %d\n", s.From, s.To, s.Reason, step)
+			a.event("model.fallback", map[string]any{"step": step, "from": s.From, "to": s.To, "reason": s.Reason, "attempts": s.Attempts})
+		})
+	}
 	// The output budget may change on resume, so the current one is recorded.
 	t.MaxOutputTokens = a.Config.MaxOutputTokens
 	t.Sandbox, t.Environment, t.CommandEnv = nil, nil, nil

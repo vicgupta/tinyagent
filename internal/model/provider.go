@@ -350,8 +350,24 @@ func post(ctx context.Context, url string, headers map[string]string, body any) 
 		}
 		return nil, &httpError{status: resp.StatusCode, body: string(data)}
 	}
-	return nil, fmt.Errorf("giving up after %d attempts: %w", maxAttempts, lastErr)
+	return nil, &RetryExhaustedError{Attempts: maxAttempts, Reason: retryReason(lastErr), Err: lastErr}
 }
+
+// RetryExhaustedError is returned when a request still failed with a
+// transient cause (HTTP 429, 5xx or a network error) after every attempt.
+// Errors returned without retrying (other 4xx) are never this type, so
+// errors.As tells an outage apart from a setup or request problem.
+type RetryExhaustedError struct {
+	Attempts int
+	Reason   string // "http_<status>" or "network"; never a response body
+	Err      error  // the last attempt's error
+}
+
+func (e *RetryExhaustedError) Error() string {
+	return fmt.Sprintf("giving up after %d attempts: %v", e.Attempts, e.Err)
+}
+
+func (e *RetryExhaustedError) Unwrap() error { return e.Err }
 
 // readSSE calls fn for each data line of a server-sent event stream, with the
 // most recent event name. It stops at end of stream or an OpenAI "[DONE]".
