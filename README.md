@@ -93,6 +93,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `-o, --output` | — | Trajectory JSON, rewritten after every step |
 | `-v, --verbose` | off | Print tool calls and their outputs |
 | `--json` | off | Write machine-readable run events as JSONL to stdout |
+| `--output-schema` | | End the run with a JSON result validated against this JSON Schema file (printed to stdout) |
 | `--no-stream` | off | Wait for each full response instead of streaming it |
 | `--no-agents-md` | off | Don't append the nearest `AGENTS.md` (at or above `<cwd>`, up to the repo root; capped at 32KB) to the system prompt |
 | `-V, --version` | | Print the version and exit |
@@ -113,7 +114,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 | `hook` | `event` (`pre_tool` or `post_tool`), `tool_call_id`, `tool_name`, `command`, `decision` (`allow`, `deny`, `feedback`, or `error`), `duration_ms`; emitted between the call's `tool.call` and `tool.result` |
 | `compaction` | `step`, `reason`, `stage`, `tokens_before`, `tokens_after`, `elided_messages`, `summarized_messages` |
 | `warning` / `error` | `message` |
-| `result` | `status`, `submission`, cumulative `steps`, `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cost_usd`, invocation `duration_ms` |
+| `result` | `status`, `submission`, cumulative `steps`, `structured_output` (only with `--output-schema` and status `Submitted`), `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cost_usd`, invocation `duration_ms` |
 
 When the run starts, the final event is `result`, including for model errors, interruptions, and limit stops. Exit codes are unchanged. `--resume` reports cumulative trajectory accounting; `duration_ms` covers only the current invocation. Event streams can contain prompts, code, and tool output, so handle them with the same care as trajectory files. Credentials and environment dumps are not included.
 
@@ -129,6 +130,20 @@ tinyagent takes no positional arguments: quote the task and pass it with `-t`. A
 The limit flags must be >= 0, and `--cost-limit` must also be finite. A typo such as `--step-limit -1` or `--cost-limit NaN` is an error (exit 2) instead of quietly running without the cap. An explicit 0 means unlimited and overrides the config file's limit.
 
 Environment: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (any OpenAI-compatible endpoint), `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENROUTER_API_KEY`, `OLLAMA_HOST`, `CODEX_HOME`.
+
+### Structured output
+
+`--output-schema schema.json` makes the run end with one JSON object that conforms to a JSON Schema, for scripts and CI:
+
+```sh
+tinyagent -t "review this diff" --output-schema review.schema.json > review.json
+```
+
+The schema file (at most 64 KiB) must be a JSON object with `"type": "object"` at the root and is checked before any provider call; a bad schema exits 2. The model is given a `submit_result` tool whose parameters are the schema, and the run finishes only when it calls that tool, alone in its message, with arguments that validate. Invalid arguments, mixing `submit_result` with other tool calls, the completion marker, or a turn with no tool call are answered with the validation errors or a reminder; after 3 consecutive invalid attempts the run ends with status `InvalidOutput`. Hooks never run for `submit_result`.
+
+On success the status is `Submitted`, stdout contains only the compact JSON object and a newline, and the summary, streamed text, and `-v` output go to stderr. With `--json`, the object is the `structured_output` field of the `result` event instead. Any other outcome exits 1 with nothing on stdout. Trajectories (`-o`) record `structured_output`, `output_schema`, and `output_schema_digest`; `submission` holds the compact JSON string. Runs started with `--output-schema` cannot be resumed, and `--resume` with `--output-schema` exits 2.
+
+Supported keywords (the same subset as MCP tool schemas): `type`, `properties`, `required`, `additionalProperties: false`, `items`, `enum`, `const`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `pattern` (Go regexp syntax), `minItems`, `maxItems`, `uniqueItems`, `minProperties`, `maxProperties`. `format` is accepted but not enforced. Providers also see the schema, but tinyagent validates locally, so results never depend on provider-side strict modes.
 
 ### Resume an unfinished task
 
@@ -253,7 +268,7 @@ Summaries lose detail. Put instructions that must hold for the whole run in `AGE
 
 ## Exit status
 
-The run ends when the model writes `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` (`Submitted`), stops calling tools (`Completed`), or hits a limit (`StepLimitExceeded`, `CostLimitExceeded`, `TimeLimitExceeded`), Ctrl-C (`Interrupted`), or a non-retryable API error (`Error`). The process exits 0 only for `Submitted` and `Completed`.
+The run ends when the model writes `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` (`Submitted`), stops calling tools (`Completed`), or hits a limit (`StepLimitExceeded`, `CostLimitExceeded`, `TimeLimitExceeded`), Ctrl-C (`Interrupted`), a non-retryable API error (`Error`), or, with `--output-schema`, 3 consecutive invalid results (`InvalidOutput`). The process exits 0 only for `Submitted` and `Completed`.
 
 Every run ends with one summary line on stderr, so stdout keeps only the model's text:
 

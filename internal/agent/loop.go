@@ -18,6 +18,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/hooks"
 	"github.com/vicgupta/tinyagent/internal/model"
+	"github.com/vicgupta/tinyagent/internal/outschema"
 	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
 )
@@ -33,6 +34,9 @@ const (
 	StatusTimeLimit   = "TimeLimitExceeded"
 	StatusInterrupted = "Interrupted"
 	StatusError       = "Error"
+	// StatusInvalidOutput ends an --output-schema run that produced no valid
+	// submit_result within MaxInvalidOutputs consecutive attempts.
+	StatusInvalidOutput = "InvalidOutput"
 )
 
 // maxAgentsMD caps how much of AGENTS.md goes into the system prompt.
@@ -66,6 +70,9 @@ type Agent struct {
 	// state, and a continuation notice is appended before the first request.
 	Resume       *trajectory.Trajectory
 	ResumeSource string // audit-only input path for resume provenance
+	// OutputSchema, when non-nil, adds the submit_result tool and makes the
+	// run succeed only with a result that validates against it.
+	OutputSchema *outschema.Schema
 }
 
 // resumeNotice is appended to the model's history when a run is resumed, so
@@ -127,6 +134,8 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			MCPEnabled:            len(a.Tools.ExternalSpecs) > 0,
 			ExternalTools:         externalToolNames(a.Tools.ExternalSpecs),
 			ExternalToolSignature: externalToolSignature(a.Tools.ExternalSpecs),
+			OutputSchema:          a.outputSchemaParams(),
+			OutputSchemaDigest:    a.outputSchemaDigest(),
 			Messages: []model.Message{
 				{Role: "system", Content: system},
 				{Role: "user", Content: task},
@@ -138,7 +147,11 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		t.Sandbox = &trajectory.SandboxInfo{Backend: sb.Backend, Writable: sb.Writable, Network: sb.Network}
 	}
 	specs := a.Tools.Catalog()
+	if a.OutputSchema != nil {
+		specs = append(specs, SubmitToolSpec(a.OutputSchema))
+	}
 	v := newView(t.Messages)
+	invalidOutputs := 0
 
 	for {
 		if status, ok := a.checkLimits(ctx, t); !ok {
@@ -187,6 +200,24 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			a.event("assistant.message", map[string]any{"text": msg.Content})
 		}
 
+		if a.OutputSchema != nil {
+			done, result := a.structuredStep(ctx, t, v, msg, &invalidOutputs)
+			if done != nil {
+				return done
+			}
+			if result != nil {
+				t.StructuredOutput = result
+				return a.finish(t, StatusSubmitted, string(result))
+			}
+			if invalidOutputs >= MaxInvalidOutputs {
+				return a.finish(t, StatusInvalidOutput, fmt.Sprintf("no valid %s after %d consecutive invalid attempts", SubmitToolName, invalidOutputs))
+			}
+			if err := a.step(t); err != nil {
+				return a.saveFailed(t, err)
+			}
+			continue
+		}
+
 		if strings.Contains(msg.Content, SubmitMarker) {
 			sub := strings.TrimSpace(strings.Replace(msg.Content, SubmitMarker, "", 1))
 			return a.finish(t, StatusSubmitted, sub)
@@ -196,18 +227,28 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		}
 
 		for _, call := range msg.ToolCalls {
-			a.event("tool.call", map[string]any{"id": call.ID, "name": call.Function.Name, "arguments": eventArguments(call.Function.Arguments)})
-			out, isError := a.runTool(ctx, t, call)
-			a.event("tool.result", map[string]any{"id": call.ID, "name": call.Function.Name, "output": out, "is_error": isError})
-			t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: call.ID, Content: out})
-			v.add(t, t.Messages[len(t.Messages)-1])
-			if a.Verbose {
-				fmt.Fprintf(a.Out, "  -> %s\n", indent(out))
-			}
+			a.toolStep(ctx, t, v, call)
 		}
 		if err := a.step(t); err != nil {
 			return a.saveFailed(t, err)
 		}
+	}
+}
+
+// toolStep runs one tool call and records its events and result message.
+func (a *Agent) toolStep(ctx context.Context, t *trajectory.Trajectory, v *view, call model.ToolCall) bool {
+	a.event("tool.call", map[string]any{"id": call.ID, "name": call.Function.Name, "arguments": eventArguments(call.Function.Arguments)})
+	out, isError := a.runTool(ctx, t, call)
+	a.recordToolResult(t, v, call, out, isError)
+	return isError
+}
+
+func (a *Agent) recordToolResult(t *trajectory.Trajectory, v *view, call model.ToolCall, out string, isError bool) {
+	a.event("tool.result", map[string]any{"id": call.ID, "name": call.Function.Name, "output": out, "is_error": isError})
+	t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: call.ID, Content: out})
+	v.add(t, t.Messages[len(t.Messages)-1])
+	if a.Verbose {
+		fmt.Fprintf(a.Out, "  -> %s\n", indent(out))
 	}
 }
 
@@ -314,6 +355,9 @@ func (a *Agent) systemPrompt() string {
 	}
 	if a.Tools.ReadOnly {
 		system += "\n\n" + readOnlyNotice
+	}
+	if a.OutputSchema != nil {
+		system += "\n\n" + structuredOutputNotice
 	}
 	return system
 }
