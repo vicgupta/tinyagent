@@ -176,6 +176,10 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			t.ExitStatus, t.Submission = StatusError, "resume images setting differs from checkpoint"
 			return t
 		}
+		if t.ApplyPatchEnabled != a.Tools.ApplyPatch {
+			t.ExitStatus, t.Submission = StatusError, "resume apply_patch setting differs from checkpoint"
+			return t
+		}
 		t.ExitStatus, t.Submission = "", ""
 		if t.OpenAIAPI == "" {
 			t.OpenAIAPI = a.OpenAIAPI
@@ -213,9 +217,10 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			SystemPrompt:          system,
 			SkipAgentsMD:          a.SkipAgentsMD,
 			Tools:                 toolNames(a.Tools.Catalog()),
-			ToolSignature:         toolSignature(a.Tools.ReadOnly, a.Tools.Plan, a.Tools.Images),
+			ToolSignature:         toolSignature(a.Tools.ReadOnly, a.Tools.Plan, a.Tools.Images, a.Tools.ApplyPatch),
 			PlanEnabled:           a.Tools.Plan,
 			ImagesEnabled:         a.Tools.Images,
+			ApplyPatchEnabled:     a.Tools.ApplyPatch,
 			MCPEnabled:            len(a.Tools.ExternalSpecs) > 0,
 			ExternalTools:         externalToolNames(a.Tools.ExternalSpecs),
 			ExternalToolSignature: externalToolSignature(a.Tools.ExternalSpecs),

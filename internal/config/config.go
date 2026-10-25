@@ -87,6 +87,9 @@ type AgentConfig struct {
 	Images Images `yaml:"images,omitempty"`
 	// MaxImageBytes caps one image's raw size. Must be >= 1; default 5 MiB.
 	MaxImageBytes int `yaml:"max_image_bytes"`
+	// ApplyPatch offers the opt-in apply_patch tool (off by default;
+	// --apply-patch overrides it).
+	ApplyPatch bool `yaml:"apply_patch"`
 	// Skills turns on Agent Skills discovery from .agents/skills (off by
 	// default; --skills / --no-skills override it).
 	Skills bool `yaml:"skills"`

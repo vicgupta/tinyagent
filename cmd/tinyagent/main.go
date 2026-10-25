@@ -46,6 +46,7 @@ type options struct {
 	planFile                                         string
 	plan                                             bool
 	images                                           bool
+	applyPatch                                       bool
 	skills, noSkills                                 bool
 	reasoningEffort                                  string
 	openaiAPI                                        string
@@ -92,6 +93,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.sandbox, "sandbox", false, "confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths")
 	fs.BoolVar(&o.sandboxNetwork, "sandbox-network", false, "with --sandbox, allow commands to use the network")
 	fs.BoolVar(&o.plan, "plan", false, "enable the update_plan tool: a task plan saved in the checkpoint and pinned in every request (default off; config plan.enabled)")
+	fs.BoolVar(&o.applyPatch, "apply-patch", false, "add the apply_patch tool: multi-file, multi-hunk edits in the *** Begin Patch format, checked before any write (default off; config apply_patch)")
 	fs.BoolVar(&o.images, "images", false, "let vision-capable models see images: the view_image tool and MCP image pass-through (default off; config images.enabled)")
 	fs.BoolVar(&o.skills, "skills", false, "discover Agent Skills in .agents/skills (project, up to the repo root, and ~/.agents/skills) and add the skill tool (default off; config skills)")
 	fs.BoolVar(&o.noSkills, "no-skills", false, "turn Agent Skills discovery off, overriding config skills; --no-skills=false turns it on")
@@ -215,6 +217,9 @@ func run() int {
 	if flagWasSet(fs, "images") {
 		cfg.Images.Enabled = o.images
 	}
+	if flagWasSet(fs, "apply-patch") {
+		cfg.ApplyPatch = o.applyPatch
+	}
 	if on, set, err := skillsFlag(fs, o); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
@@ -317,6 +322,7 @@ func run() int {
 			ExternalCall:       mcpRegistry.Call,
 			Plan:               cfg.Plan.Enabled,
 			Images:             cfg.Images.Enabled,
+			ApplyPatch:         cfg.ApplyPatch,
 			MaxImageBytes:      cfg.MaxImageBytes,
 			ExternalCallImages: mcpRegistry.CallImages(cfg.MaxImageBytes),
 		},
@@ -497,6 +503,11 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return fail(errors.New("resume: --images conflicts with the checkpoint's recorded images setting; start a fresh task"))
 	}
 	cfg.Images.Enabled = src.ImagesEnabled
+	if flagWasSet(fs, "apply-patch") && o.applyPatch != src.ApplyPatchEnabled {
+		fmt.Fprintln(os.Stderr, "error: resume: --apply-patch conflicts with the checkpoint's recorded apply_patch setting; start a fresh task")
+		return 2
+	}
+	cfg.ApplyPatch = src.ApplyPatchEnabled
 	if on, set, err := skillsFlag(fs, *o); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
@@ -618,6 +629,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 			Stream:         jsonStream(o.jsonOutput),
 			Plan:           src.PlanEnabled,
 			Images:         src.ImagesEnabled,
+			ApplyPatch:     src.ApplyPatchEnabled,
 			MaxImageBytes:  cfg.MaxImageBytes,
 		},
 		Config:       cfg,

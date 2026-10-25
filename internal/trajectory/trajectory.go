@@ -116,6 +116,9 @@ type Trajectory struct {
 	// (view_image and MCP image pass-through) was on. A resume must use the
 	// same setting. Image bytes are stored inline, base64, in Messages.
 	ImagesEnabled bool `json:"images_enabled,omitempty"`
+	// ApplyPatchEnabled (schema 2) records whether the opt-in apply_patch
+	// tool was enabled. A resume must use the same setting.
+	ApplyPatchEnabled bool `json:"apply_patch_enabled,omitempty"`
 	// SkillsEnabled records whether Agent Skills discovery was on. A resume
 	// rediscovers skills and must rebuild the same catalog. Older
 	// checkpoints, without the field, resume with skills off.

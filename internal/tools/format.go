@@ -93,6 +93,9 @@ func (e *Executor) FormatCorrection(reason string) string {
 }
 
 func isBuiltin(name string) bool {
+	if name == ApplyPatchToolName {
+		return true
+	}
 	for _, s := range Specs() {
 		if s.Function.Name == name {
 			return true
