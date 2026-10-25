@@ -432,3 +432,8 @@ func schemaTypes(v any) (map[string]bool, error) {
 	}
 	return types, nil
 }
+
+// CheckSchema applies the JSON Schema subset accepted for MCP tool input
+// schemas to v: a root object, the supported keywords and types only, and the
+// size and nesting caps. It returns the schema with "$schema" dropped.
+func CheckSchema(v any) (map[string]any, error) { return schema(v) }

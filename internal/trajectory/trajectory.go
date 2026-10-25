@@ -32,6 +32,12 @@ type Trajectory struct {
 	CacheWriteTokens int    `json:"cache_write_tokens,omitempty"`
 	ExitStatus       string `json:"exit_status"`
 	Submission       string `json:"submission"`
+	// StructuredOutput is the validated result of an --output-schema run
+	// that ended Submitted; Submission holds the same JSON as a string.
+	StructuredOutput json.RawMessage `json:"structured_output,omitempty"`
+	// OutputSchema and OutputSchemaDigest record the --output-schema used.
+	OutputSchema       map[string]any `json:"output_schema,omitempty"`
+	OutputSchemaDigest string         `json:"output_schema_digest,omitempty"`
 	// Compactions records each time the context sent to the model was
 	// compacted. Messages always keeps the full, original history.
 	Compactions []Compaction `json:"compactions,omitempty"`

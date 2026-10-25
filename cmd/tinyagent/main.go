@@ -21,6 +21,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/hooks"
 	"github.com/vicgupta/tinyagent/internal/mcptools"
 	"github.com/vicgupta/tinyagent/internal/model"
+	"github.com/vicgupta/tinyagent/internal/outschema"
 	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
 	"github.com/vicgupta/tinyagent/internal/update"
@@ -39,6 +40,7 @@ var (
 // options holds the parsed command line.
 type options struct {
 	task, modelName, configPath, cwd, output, resume string
+	outputSchema                                     string
 	stepLimit, timeLimit                             int
 	costLimit                                        float64
 	verbose, noStream, noAgentsMD, noCompact         bool
@@ -77,6 +79,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.sandbox, "sandbox", false, "confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths")
 	fs.BoolVar(&o.sandboxNetwork, "sandbox-network", false, "with --sandbox, allow commands to use the network")
 	fs.BoolVar(&o.jsonOutput, "json", false, "write run events as JSONL to stdout")
+	fs.StringVar(&o.outputSchema, "output-schema", "", "end the run with a JSON result validated against this JSON Schema file (printed to stdout)")
 	fs.BoolVar(&o.showVersion, "version", false, "print the version and exit")
 	fs.BoolVar(&o.showVersion, "V", false, "shorthand for --version")
 	fs.BoolVar(&o.doUpdate, "update", false, "update to the latest release and exit")
@@ -128,6 +131,10 @@ func run() int {
 		return 0
 	}
 	if o.resume != "" {
+		if flagWasSet(fs, "output-schema") {
+			fmt.Fprintln(os.Stderr, "error: --resume and --output-schema are mutually exclusive; runs with an output schema cannot be resumed")
+			return 2
+		}
 		return runResume(&o, fs)
 	}
 	if o.task == "" {
@@ -138,6 +145,19 @@ func run() int {
 	task, err := readTask(o.task, os.Stdin)
 	if err != nil {
 		return fail(err)
+	}
+	var schema *outschema.Schema
+	if o.outputSchema != "" {
+		if schema, err = outschema.Load(o.outputSchema); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			return 2
+		}
+	}
+	// With a schema, stdout carries only the validated result (or JSONL), so
+	// progress text goes to stderr.
+	progress := io.Writer(os.Stdout)
+	if schema != nil {
+		progress = os.Stderr
 	}
 
 	cfgPath := config.Find(o.configPath)
@@ -189,7 +209,7 @@ func run() int {
 
 	var onText func(string)
 	if !o.noStream && !o.jsonOutput {
-		onText = func(s string) { os.Stdout.WriteString(s) }
+		onText = func(s string) { io.WriteString(progress, s) }
 	}
 	m, err := model.New(o.modelName, onText)
 	if err != nil {
@@ -209,18 +229,19 @@ func run() int {
 			BashTimeout:    time.Duration(cfg.BashTimeoutSec) * time.Second,
 			MaxOutputChars: cfg.MaxOutputChars,
 			MaxProcesses:   cfg.MaxBackgroundProcesses,
-			Stream:         jsonStream(o.jsonOutput),
+			Stream:         streamTo(jsonStream(o.jsonOutput), progress),
 			ExternalSpecs:  mcpRegistry.Specs,
 			ExternalCall:   mcpRegistry.Call,
 		},
 		Config:       cfg,
 		Hooks:        hookRunner,
-		Out:          runOutput(o.jsonOutput),
+		Out:          outputTo(runOutput(o.jsonOutput), progress),
 		Err:          os.Stderr,
 		Verbose:      o.verbose,
 		Streamed:     !o.noStream,
 		SkipAgentsMD: o.noAgentsMD,
 		NoCompact:    o.noCompact,
+		OutputSchema: schema,
 	}
 	events := startEvents(os.Stdout, o.jsonOutput, a, false, stop)
 	if events.err != nil {
@@ -245,10 +266,39 @@ func run() int {
 	if events.finish(t, elapsed) != nil {
 		return 1
 	}
+	if schema != nil {
+		if t.ExitStatus != agent.StatusSubmitted || t.StructuredOutput == nil {
+			return 1
+		}
+		if !o.jsonOutput {
+			if _, err := os.Stdout.Write(append(append([]byte(nil), t.StructuredOutput...), '\n')); err != nil {
+				return fail(err)
+			}
+		}
+		return 0
+	}
 	if t.ExitStatus == agent.StatusSubmitted || t.ExitStatus == agent.StatusCompleted {
 		return 0
 	}
 	return 1
+}
+
+// streamTo returns progress in place of os.Stdout for bash streaming; nil
+// (JSON mode) stays nil.
+func streamTo(w, progress io.Writer) io.Writer {
+	if w == nil {
+		return nil
+	}
+	return progress
+}
+
+// outputTo returns progress in place of os.Stdout for agent output;
+// io.Discard (JSON mode) is kept.
+func outputTo(w, progress io.Writer) io.Writer {
+	if w == io.Discard {
+		return w
+	}
+	return progress
 }
 
 // runResume continues an unfinished run from a validated checkpoint. It reuses
@@ -485,7 +535,7 @@ var usageGroups = []struct {
 	{"", [][3]string{{"h", "help", ""}}},
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "resume", "path"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "no-compact", ""}}},
-	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "sandbox", ""}, {"", "sandbox-network", ""}}},
+	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "sandbox", ""}, {"", "sandbox-network", ""}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}}},
 }
 
@@ -781,10 +831,14 @@ func jsonStream(jsonMode bool) io.Writer {
 }
 
 func resultFields(t *trajectory.Trajectory, elapsed time.Duration) map[string]any {
-	return map[string]any{
+	fields := map[string]any{
 		"status": t.ExitStatus, "submission": t.Submission, "steps": t.Steps,
 		"input_tokens": t.InputTokens, "output_tokens": t.OutputTokens,
 		"cache_read_tokens": t.CacheReadTokens, "cache_write_tokens": t.CacheWriteTokens,
 		"cost_usd": t.Cost, "duration_ms": elapsed.Milliseconds(),
 	}
+	if t.ExitStatus == agent.StatusSubmitted && t.StructuredOutput != nil {
+		fields["structured_output"] = t.StructuredOutput
+	}
+	return fields
 }

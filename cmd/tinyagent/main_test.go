@@ -255,30 +255,31 @@ const wantUsage = `Usage: tinyagent -t "<prompt>" [flags]    (or --task "<prompt
        echo "<prompt>" | tinyagent -t -
        tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]
 
-  -h, --help               show this help and exit
+  -h, --help                  show this help and exit
 Task:
-  -t, --task string        task/prompt (required unless --resume); "-" reads it from stdin
-  -m, --model string       provider/model; if unset, $AGENT_MODEL, then the config's model (default "openai/gpt-4o")
-  -c, --config path        YAML config (default: user config if present, else built-in)
-      --cwd dir            working directory (default ".")
-      --resume path        continue an unfinished run from a trajectory JSON checkpoint
+  -t, --task string           task/prompt (required unless --resume); "-" reads it from stdin
+  -m, --model string          provider/model; if unset, $AGENT_MODEL, then the config's model (default "openai/gpt-4o")
+  -c, --config path           YAML config (default: user config if present, else built-in)
+      --cwd dir               working directory (default ".")
+      --resume path           continue an unfinished run from a trajectory JSON checkpoint
 Limits:
-      --step-limit n       max model calls, 0 = unlimited
-      --cost-limit usd     max USD, 0 = unlimited
-      --time-limit sec     max wall-clock seconds, 0 = unlimited
-      --no-compact         don't compact the history when it nears the context window
+      --step-limit n          max model calls, 0 = unlimited
+      --cost-limit usd        max USD, 0 = unlimited
+      --time-limit sec        max wall-clock seconds, 0 = unlimited
+      --no-compact            don't compact the history when it nears the context window
 Output:
-  -o, --output path        write trajectory JSON
-  -v, --verbose            print tool outputs
-      --no-stream          wait for full responses instead of streaming
-      --json               write run events as JSONL to stdout
-      --no-agents-md       don't add AGENTS.md (nearest, up to the repo root) to the system prompt
-      --read-only          allow only read_file, list_files, and grep; blocks edits and commands
-      --sandbox            confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths
-      --sandbox-network    with --sandbox, allow commands to use the network
+  -o, --output path           write trajectory JSON
+  -v, --verbose               print tool outputs
+      --no-stream             wait for full responses instead of streaming
+      --json                  write run events as JSONL to stdout
+      --output-schema path    end the run with a JSON result validated against this JSON Schema file (printed to stdout)
+      --no-agents-md          don't add AGENTS.md (nearest, up to the repo root) to the system prompt
+      --read-only             allow only read_file, list_files, and grep; blocks edits and commands
+      --sandbox               confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths
+      --sandbox-network       with --sandbox, allow commands to use the network
 Other:
-  -V, --version            print the version and exit
-      --update             update to the latest release and exit
+  -V, --version               print the version and exit
+      --update                update to the latest release and exit
 
 Examples:
   tinyagent -t "fix the failing test" -m anthropic/claude-sonnet-4
@@ -339,7 +340,7 @@ func TestUsage(t *testing.T) {
 func TestUsageShowsModelDefaultFromEnv(t *testing.T) {
 	t.Setenv("AGENT_MODEL", "ollama/llama3.1")
 	_, got, _ := runWith(t, "--help")
-	if !strings.Contains(got, `  -m, --model string       provider/model; if unset, $AGENT_MODEL, then the config's model (default "ollama/llama3.1")`+"\n") {
+	if !strings.Contains(got, `  -m, --model string          provider/model; if unset, $AGENT_MODEL, then the config's model (default "ollama/llama3.1")`+"\n") {
 		t.Errorf("model row doesn't show $AGENT_MODEL:\n%s", got)
 	}
 }

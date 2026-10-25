@@ -5,6 +5,7 @@
 ### Features
 
 - Run user-configured `pre_tool` and `post_tool` hook commands around tool calls to deny calls or append feedback.
+- Add `--output-schema` to end runs with a validated JSON result on stdout (or `structured_output` in `--json`), with the new `InvalidOutput` status.
 
 ## v0.4.0 - 2026-10-24
 
