@@ -111,6 +111,9 @@ type Agent struct {
 	// the first request, before every tool batch that can change files, and
 	// at the end of the run (--snapshots).
 	Snapshots Snapshotter
+	// Worktree, when non-nil, records the --worktree checkout a fresh run
+	// works in; it is copied into the new trajectory.
+	Worktree *trajectory.WorktreeInfo
 
 	cur  *trajectory.Trajectory
 	view *view
@@ -311,6 +314,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			OutputSchemaDigest:    a.outputSchemaDigest(),
 			SkillsEnabled:         a.SkillsEnabled,
 			Skills:                skillInfos(a.Tools.Skills),
+			Worktree:              a.Worktree,
 			Messages: []model.Message{
 				{Role: "system", Content: system},
 				{Role: "user", Content: task},

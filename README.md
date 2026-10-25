@@ -85,6 +85,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--openai-api` | config `openai_api`, else `auto` | Transport for the `openai` provider: `auto`, `responses`, or `chat`; see [OpenAI transport](#openai-transport) |
 | `-c, --config` | user config, else built-in | YAML config file; see [Config](#config) |
 | `--cwd` | `.` | Root directory; tools can't reach outside it |
+| `--worktree[=name]` | off | Run in a new Git worktree at `<repo>/.tinyagent/worktrees/<name>` on branch `tinyagent/<name>`, created from `HEAD` of the repository containing `--cwd` and kept afterwards; the name is generated when omitted. Can't be combined with `--resume` or `--rewind`. See [Worktrees](#worktrees) |
 | `--step-limit` | 0 (unlimited) | Max model calls |
 | `--cost-limit` | 0 (unlimited) | Max USD |
 | `--time-limit` | 0 (unlimited) | Max wall-clock seconds; overrides `wall_time_seconds` |
@@ -129,7 +130,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 
 | Type | Fields |
 |---|---|
-| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `reasoning_effort` (only when set), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy), `file_access` (`deny_read`, `deny_write`; only with [file access](#restricting-file-access) rules), `web_fetch` (`allowed_domains`; only with [web fetch](#web-fetch) on), `additional_dirs` (`path`, `mode`; only with [additional directories](#additional-directories)) |
+| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `reasoning_effort` (only when set), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy), `file_access` (`deny_read`, `deny_write`; only with [file access](#restricting-file-access) rules), `web_fetch` (`allowed_domains`; only with [web fetch](#web-fetch) on), `additional_dirs` (`path`, `mode`; only with [additional directories](#additional-directories)), `worktree` (`path`, `branch`, `base_commit`, `repo_root`; only with [`--worktree`](#worktrees)) |
 | `assistant.message` | `text` (complete assistant message) |
 | `tool.call` | `id`, `name`, `arguments` (decoded JSON value, or a string if malformed) |
 | `tool.result` | `id`, `name`, `output` (same configured truncation as tool output), `is_error`; with [tool output files](#tool-output-files), a saved result also has `output_file` (path relative to `--cwd`) and `output_bytes` |
@@ -188,6 +189,24 @@ sqlite3 .tinyagent/tinyagent.db \
 
 At the default `level: metadata` no prompt, message, argument, or output bodies are stored: those fields are replaced with their lengths, and the task is stored only as a SHA-256 hash and length. `level: full` stores bodies, after redacting values of environment variables named `*_KEY`, `*_TOKEN`, `*_SECRET`, or `*_PASSWORD`, secrets set in MCP or hook `env`, and common token shapes; payloads over `max_payload_bytes` are truncated. Old runs are pruned when a run starts (`max_days`, `max_runs`; `0` keeps everything). Database errors never fail a run: tinyagent prints one warning and continues without the log. The trajectory JSON (`-o`) is unchanged and remains the resume format.
 
+### Worktrees
+
+`--worktree` runs a task in a fresh Git worktree, so it never touches your checkout and several runs can work on the same repository at once:
+
+```sh
+tinyagent --worktree=fix-login -t "fix the login redirect" --cwd ~/src/project -o run.json
+tinyagent --worktree -t "add tests for pkg/api" --cwd ~/src/project/pkg/api
+```
+
+- **What it creates.** A worktree at `<repo>/.tinyagent/worktrees/<name>` on a new branch `tinyagent/<name>`, from the current `HEAD` commit of the repository containing `--cwd`. The run's root becomes the matching path inside the worktree, so `--cwd ~/src/project/pkg/api` runs in `.tinyagent/worktrees/<name>/pkg/api`. A `.gitignore` containing `*` keeps `.tinyagent/worktrees` out of `git status`. The location isn't configurable.
+- **Names.** `--worktree=<name>` uses 1 to 64 letters, digits, `.`, `_` and `-`, not starting with `.` or `-`. Bare `--worktree` generates `run-YYYYMMDD-HHMMSS-<6 hex>`. An existing worktree directory or `tinyagent/<name>` branch is an error rather than being reused.
+- **Uncommitted changes aren't carried over.** The worktree starts from the last commit; if your checkout has uncommitted or untracked changes, tinyagent warns once and continues. Commit first if the task needs them.
+- **Setup output and errors.** Setup prints `worktree: <path> (branch tinyagent/<name> from <commit>)`, and the end-of-run summary prints `worktree kept: <path> (branch ...)`. `--cwd` outside a Git work tree, a repository with no commits, `git` missing from `PATH`, an invalid or taken name, a `--cwd` subdirectory missing at `HEAD`, or combining with `--resume`/`--rewind` exits 2 before any model request and leaves nothing behind. Ctrl-C during setup leaves either no worktree or a complete one.
+- **Hooks.** Repository hooks (such as `post-checkout`) don't run while the worktree is created. Filters and Git LFS behave as you configured them.
+- **Keeping and cleaning up.** The worktree and branch are kept after every run, successful or not; tinyagent never commits, merges or pushes. Review it with `git -C <path> diff`, then remove it with `git worktree remove <path>` and `git branch -D tinyagent/<name>`.
+- **Sandbox and container.** Git metadata lives in the main repository's `.git` directory, outside the worktree. With `--sandbox` it isn't writable, so `git commit` inside the worktree fails unless you add that directory to `sandbox_writable_paths` (which also lets commands change hooks and config); with `--env container` it isn't mounted, so `git` commands in the container fail.
+- **Resuming and rewinding.** Trajectories and `run.started` record `worktree`. To resume, follow up or rewind, pass the worktree path as `--cwd` (without `--worktree`).
+
 ### Resume an unfinished task
 
 ```sh
@@ -201,7 +220,7 @@ tinyagent --resume run.json --cwd ~/src/project --step-limit 40 -o continued.jso
 
 `--resume <trajectory.json>` is noninteractive and uses the saved task and model. Do not pass `--task` for an unfinished checkpoint (it is only for [follow-ups](#continue-a-finished-run-with-a-follow-up-task) of finished runs); an explicitly different `--model` is rejected. The saved model wins over `$AGENT_MODEL` and the config's default model. Credentials and provider endpoints come from the current normal setup, never the checkpoint. Paths to checkpoints are relative to the invoking shell's directory, independently of `--cwd`.
 
-An explicit `--cwd` must resolve to the recorded canonical root (directory symlinks are resolved). The effective system prompt must match the saved prompt, including `{{cwd}}`/`{{os}}` substitutions and the recorded AGENTS.md loading mode. Current config is used to reconstruct it without appending AGENTS.md twice. Changed instructions, a conflicting `--no-agents-md`, or changed tool definitions/compatibility require a fresh task. In particular, a task that edits its effective AGENTS.md cannot resume under changed instructions.
+An explicit `--cwd` must resolve to the recorded canonical root (directory symlinks are resolved). For a [`--worktree`](#worktrees) run, that is the path inside the worktree. The effective system prompt must match the saved prompt, including `{{cwd}}`/`{{os}}` substitutions and the recorded AGENTS.md loading mode. Current config is used to reconstruct it without appending AGENTS.md twice. Changed instructions, a conflicting `--no-agents-md`, or changed tool definitions/compatibility require a fresh task. In particular, a task that edits its effective AGENTS.md cannot resume under changed instructions.
 
 Only new-format, unfinished checkpoints are eligible: an in-progress save (including one left by a crash or `kill -9`) or a stop caused by a step/cost/time limit, interruption, or error. Successful `Submitted`/`Completed` runs are not resumed this way; continue them with a follow-up task instead (see below). Legacy logs, unsupported versions/state, and malformed or partial tool turns are refused before provider setup. Checkpoint loading is limited to regular files of at most **64 MiB**. Larger trajectories remain audit logs.
 
@@ -236,7 +255,7 @@ tinyagent --rewind run.json --cwd . --to 4              # the state before step 
 - paths ignored by `.gitignore` files and `.git/info/exclude`, when `--cwd` is inside a Git repository (your global excludes file is not read);
 - files larger than `snapshots.max_file_bytes` (default 2 MiB). The snapshot records count them and list up to 20; a rewind warns that they were "not restored".
 
-**Rewind.** `--rewind <trajectory> --cwd <root>` needs `--cwd` given explicitly, resolving to the trajectory's root as for `--resume`. `--to` is `start` (the default: the baseline), a step number, or a snapshot id. A step number means the state before that step's tool batch; if that step has no snapshot (it only read files), the latest snapshot at or before it is used and the output says which. The plan prints one line per path, `M` (content or mode restored), `A` (created later, will be removed) and `D` (deleted later, will be recreated), then a count; `--dry-run` stops there. Otherwise tinyagent first takes a `pre-rewind` snapshot, records it in the trajectory file, and prints its id with the command that undoes the rewind (`--rewind run.json --cwd . --to <pre-rewind-id>`); then it restores each path and removes directories that only exist because of later changes. It makes no model request and needs no API key.
+**Rewind.** `--rewind <trajectory> --cwd <root>` needs `--cwd` given explicitly, resolving to the trajectory's root as for `--resume`. For a [`--worktree`](#worktrees) run, pass the worktree path. `--to` is `start` (the default: the baseline), a step number, or a snapshot id. A step number means the state before that step's tool batch; if that step has no snapshot (it only read files), the latest snapshot at or before it is used and the output says which. The plan prints one line per path, `M` (content or mode restored), `A` (created later, will be removed) and `D` (deleted later, will be recreated), then a count; `--dry-run` stops there. Otherwise tinyagent first takes a `pre-rewind` snapshot, records it in the trajectory file, and prints its id with the command that undoes the rewind (`--rewind run.json --cwd . --to <pre-rewind-id>`); then it restores each path and removes directories that only exist because of later changes. It makes no model request and needs no API key.
 
 A rewind exits 2 before writing anything when `--cwd` is missing or doesn't match, `--to` names no snapshot, the trajectory has no snapshots, or the store is missing or corrupt. A rewind isn't atomic across files: if a write fails it stops, lists what was and wasn't restored and the `pre-rewind` id, and exits 1.
 

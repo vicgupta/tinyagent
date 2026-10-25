@@ -66,6 +66,7 @@ type options struct {
 	addDirRead, addDirWrite                          dirList
 	jsonOutput                                       bool
 	logDB                                            optionalPath
+	worktree                                         worktreeFlag
 	snapshots, dryRun                                bool
 	rewind, rewindTo                                 string
 	showHelp, showVersion, doUpdate                  bool
@@ -86,6 +87,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.configPath, "config", "", "YAML config (default: user config if present, else built-in)")
 	fs.StringVar(&o.configPath, "c", "", "shorthand for --config")
 	fs.StringVar(&o.cwd, "cwd", ".", "working directory")
+	fs.Var(&o.worktree, "worktree", "run in a new Git worktree on branch tinyagent/<name> from HEAD of the repo containing --cwd, kept afterwards (default name generated)")
 	fs.IntVar(&o.stepLimit, "step-limit", 0, "max model calls, 0 = unlimited")
 	fs.Float64Var(&o.costLimit, "cost-limit", 0, "max USD, 0 = unlimited")
 	fs.IntVar(&o.timeLimit, "time-limit", 0, "max wall-clock seconds, 0 = unlimited")
@@ -183,6 +185,10 @@ func run() int {
 		}
 		fmt.Println(msg)
 		return 0
+	}
+	if o.worktree.on && (o.resume != "" || o.rewind != "") {
+		fmt.Fprintln(os.Stderr, "error: --worktree can't be combined with --resume or --rewind; pass the worktree path as --cwd instead")
+		return 2
 	}
 	if o.rewind != "" {
 		if o.resume != "" {
@@ -322,6 +328,16 @@ func run() int {
 	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
 		return fail(fmt.Errorf("--cwd %s is not a directory", o.cwd))
 	}
+	var worktree *trajectory.WorktreeInfo
+	if o.worktree.on {
+		if root, worktree, err = setupWorktree(root, o.worktree.name, os.Stderr, o.verbose); err != nil {
+			if errors.Is(err, errInterruptedSetup) {
+				return fail(err)
+			}
+			fmt.Fprintln(os.Stderr, "error:", err)
+			return 2
+		}
+	}
 	outputFiles, err := toolOutputFiles(fs, o, cfg, root)
 	if err != nil {
 		return fail(err)
@@ -427,6 +443,7 @@ func run() int {
 		OutputSchema: schema,
 		Snapshots:    snaps,
 		Subagents:    subagents,
+		Worktree:     worktree,
 	}
 	var events *runEvents
 	warn := func(msg string) { events.warn(msg) }
@@ -467,6 +484,9 @@ func run() int {
 	t := a.Run(ctx, task)
 	elapsed := time.Since(start)
 	reportSummary(os.Stderr, o.modelName, t, elapsed)
+	if worktree != nil {
+		fmt.Fprintf(os.Stderr, "worktree kept: %s (branch %s)\n", worktree.Path, worktree.Branch)
+	}
 	if events.finish(t, elapsed) != nil {
 		return 1
 	}
@@ -802,6 +822,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		NoCompact:    o.noCompact,
 		Resume:       src,
 		ResumeSource: o.resume,
+		Worktree:     src.Worktree,
 		Snapshots:    snaps,
 		FollowUp:     followUp,
 		Subagents:    subagents,
@@ -1123,7 +1144,7 @@ var usageGroups = []struct {
 	flags [][3]string
 }{
 	{"", [][3]string{{"h", "help", ""}}},
-	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "resume", "path"}}},
+	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
@@ -1438,6 +1459,9 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	}
 	if wf := a.Tools.WebFetch; wf != nil {
 		started["web_fetch"] = map[string]any{"allowed_domains": wf.Domains}
+	}
+	if wt := a.Worktree; wt != nil {
+		started["worktree"] = map[string]any{"path": wt.Path, "branch": wt.Branch, "base_commit": wt.BaseCommit, "repo_root": wt.RepoRoot}
 	}
 	events.emit("run.started", started)
 	a.OnEvent = func(kind string, fields map[string]any) {
