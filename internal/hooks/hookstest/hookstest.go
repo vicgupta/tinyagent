@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -34,6 +35,8 @@ func Run() {
 //	stdin FILE        copy stdin to FILE, exit 0
 //	env FILE          write the environment to FILE, exit 0
 //	log FILE TAG      append TAG and a newline to FILE, exit 0
+//	gate DIR N TEXT   save stdin as DIR/<run>.json; print TEXT to stderr
+//	                  and exit 2 for the first N runs, then exit 0
 func Hook(t testing.TB, match, mode string, args ...string) config.Hook {
 	t.Helper()
 	exe, err := os.Executable()
@@ -76,6 +79,20 @@ func helper(mode string, args []string) int {
 		}
 		defer f.Close()
 		fmt.Fprintln(f, arg(1))
+	case "gate":
+		entries, err := os.ReadDir(arg(0))
+		if err != nil {
+			return 1
+		}
+		run := len(entries)
+		b, _ := io.ReadAll(os.Stdin)
+		if err := os.WriteFile(filepath.Join(arg(0), strconv.Itoa(run)+".json"), b, 0o644); err != nil {
+			return 1
+		}
+		if n, _ := strconv.Atoi(arg(1)); run < n {
+			fmt.Fprint(os.Stderr, arg(2))
+			return 2
+		}
 	default:
 		return 1
 	}

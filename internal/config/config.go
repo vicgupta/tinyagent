@@ -116,11 +116,21 @@ type LogDB struct {
 	MaxPayloadBytes int `yaml:"max_payload_bytes"`
 }
 
-// Hooks lists the commands run before and after matching tool calls.
+// Hooks lists the commands run before and after matching tool calls, and
+// the stop hooks that verify a run before it ends successfully.
 type Hooks struct {
 	PreTool  []Hook `yaml:"pre_tool,omitempty"`
 	PostTool []Hook `yaml:"post_tool,omitempty"`
+	// Stop hooks run when a run is about to end Submitted or Completed and
+	// can send the model back to work. Match and OnError are rejected.
+	Stop []Hook `yaml:"stop,omitempty"`
+	// MaxStopContinuations caps how many times stop hooks may send the
+	// model back to work in one run; nil means DefaultMaxStopContinuations.
+	MaxStopContinuations *int `yaml:"max_stop_continuations,omitempty"`
 }
+
+// DefaultMaxStopContinuations is the default hooks.max_stop_continuations.
+const DefaultMaxStopContinuations = 5
 
 // Hook runs one local command for tool calls whose name matches Match.
 type Hook struct {

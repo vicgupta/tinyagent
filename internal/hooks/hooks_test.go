@@ -55,6 +55,11 @@ func TestNewValidation(t *testing.T) {
 		{"post on_error", config.Hooks{PostTool: []config.Hook{{Command: abs, OnError: "deny"}}}, "on_error applies only to pre_tool"},
 		{"missing env", config.Hooks{PreTool: []config.Hook{{Command: abs, Env: []string{"HOOK_SET", "HOOK_SURELY_UNSET_VAR"}}}}, "forwarded environment variable HOOK_SURELY_UNSET_VAR is not set"},
 		{"bad env name", config.Hooks{PreTool: []config.Hook{{Command: abs, Env: []string{"A=B"}}}}, "invalid or duplicate"},
+		{"stop match", config.Hooks{Stop: []config.Hook{{Command: abs, Match: "bash"}}}, "hooks.stop[0]: match does not apply to stop hooks"},
+		{"stop on_error", config.Hooks{Stop: []config.Hook{{Command: abs, OnError: "deny"}}}, "on_error applies only to pre_tool"},
+		{"stop relative", config.Hooks{Stop: []config.Hook{{Command: "check"}}}, "hooks.stop[0]: command \"check\" must be an absolute path"},
+		{"zero max continuations", config.Hooks{MaxStopContinuations: intp(0)}, "hooks.max_stop_continuations must be between 1 and 50, got 0"},
+		{"large max continuations", config.Hooks{Stop: []config.Hook{{Command: abs}}, MaxStopContinuations: intp(51)}, "hooks.max_stop_continuations must be between 1 and 50, got 51"},
 	}
 	for _, c := range cases {
 		_, err := New(c.cfg, "/home/u/config.yaml")
@@ -232,5 +237,54 @@ func TestPreInterruptedDenies(t *testing.T) {
 	res := r.Pre(ctx, Input{ToolName: "bash", Root: t.TempDir()})
 	if len(res) != 1 || !res[0].Denied || res[0].Decision != Error {
 		t.Errorf("results = %+v", res)
+	}
+}
+
+func TestStopDecisions(t *testing.T) {
+	cases := []struct {
+		name, mode, arg, want, feedback string
+	}{
+		{"empty", "stdout", "", Allow, ""},
+		{"allow json", "stdout", `{"decision":"allow"}`, Allow, ""},
+		{"continue json", "stdout", `{"decision":"continue","reason":"run the tests"}`, Continue, "run the tests"},
+		{"block alias", "stdout", `{"decision":"block","reason":"b"}`, Continue, "b"},
+		{"deny alias", "stdout", `{"decision":"deny","reason":"d"}`, Continue, "d"},
+		{"exit 2", "exit2", "tests failed", Continue, "tests failed"},
+		{"unknown decision", "stdout", `{"decision":"maybe"}`, Error, ""},
+		{"invalid json", "stdout", "nope", Error, ""},
+		{"exit 3", "exit", "3", Error, ""},
+	}
+	for _, c := range cases {
+		r := mustNew(t, config.Hooks{Stop: []config.Hook{hookstest.Hook(t, "", c.mode, c.arg)}})
+		if !r.HasStop() || r.MaxStopContinuations() != config.DefaultMaxStopContinuations {
+			t.Fatalf("%s: HasStop/Max = %v/%d", c.name, r.HasStop(), r.MaxStopContinuations())
+		}
+		res := r.Stop(context.Background(), StopInput{Status: "Submitted", Root: t.TempDir()})
+		if len(res) != 1 || res[0].Decision != c.want || res[0].Event != Stop {
+			t.Errorf("%s: results = %+v", c.name, res)
+			continue
+		}
+		if c.want == Continue && (!strings.HasPrefix(res[0].Feedback, "[stop hook ") || !strings.HasSuffix(res[0].Feedback, "]\n"+c.feedback)) {
+			t.Errorf("%s: feedback = %q", c.name, res[0].Feedback)
+		}
+	}
+}
+
+func TestStopInputJSON(t *testing.T) {
+	out, root := filepath.Join(t.TempDir(), "in.json"), t.TempDir()
+	r := mustNew(t, config.Hooks{Stop: []config.Hook{hookstest.Hook(t, "", "stdin", out)}, MaxStopContinuations: intp(7)})
+	if r.MaxStopContinuations() != 7 {
+		t.Errorf("max = %d", r.MaxStopContinuations())
+	}
+	r.Stop(context.Background(), StopInput{Status: "Submitted", Submission: "s", StructuredOutput: json.RawMessage(`{"a":1}`), Root: root, Step: 3, Continuations: 2})
+	b, _ := os.ReadFile(out)
+	var got map[string]any
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["schema_version"] != float64(1) || got["event"] != "stop" || got["status"] != "Submitted" || got["submission"] != "s" ||
+		got["root"] != root || got["read_only"] != false || got["step"] != float64(3) || got["continuations"] != float64(2) ||
+		got["stop_hook_active"] != true || got["structured_output"].(map[string]any)["a"] != float64(1) {
+		t.Errorf("payload = %s", b)
 	}
 }

@@ -39,7 +39,18 @@ const (
 	StatusInvalidOutput = "InvalidOutput"
 	// StatusFormatError: too many consecutive steps of malformed tool calls.
 	StatusFormatError = "RepeatedFormatError"
+	// StatusVerificationFailed: stop hooks were still rejecting the result
+	// when the max_stop_continuations cap was reached.
+	StatusVerificationFailed = "VerificationFailed"
 )
+
+// stopNotice opens the user message that sends the model back to work after
+// a stop hook rejected its result. It is fixed text.
+const stopNotice = "The run was not accepted as finished: a stop hook checked your result and asked you to continue. Address the feedback below, then finish again."
+
+// notRunResult is the tool result for calls in a message that also carried
+// the submit marker, when a stop hook sent the model back to work.
+const notRunResult = "error: not run; this message submitted the task, so its tool calls were skipped. Call the tool again if you still need it"
 
 // maxAgentsMD caps how much of AGENTS.md goes into the system prompt.
 const maxAgentsMD = 32 << 10
@@ -68,7 +79,8 @@ type Agent struct {
 	// NoCompact turns off context compaction: the full history is always
 	// sent, and a context-overflow error ends the run.
 	NoCompact bool
-	// Hooks run around tool calls the executor permits; nil runs none.
+	// Hooks run around tool calls the executor permits, and stop hooks
+	// before a successful finish; nil runs none.
 	Hooks *hooks.Runner
 	// OnStep is called after every step, e.g. to save the trajectory. A
 	// non-nil error stops the run.
@@ -263,8 +275,10 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 				return done
 			}
 			if result != nil {
-				t.StructuredOutput = result
-				return a.finish(t, StatusSubmitted, string(result))
+				if done := a.finishSuccess(ctx, t, v, msg, StatusSubmitted, string(result), result); done != nil {
+					return done
+				}
+				continue
 			}
 			if invalidOutputs >= MaxInvalidOutputs {
 				return a.finish(t, StatusInvalidOutput, fmt.Sprintf("no valid %s after %d consecutive invalid attempts", SubmitToolName, invalidOutputs))
@@ -277,10 +291,16 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 
 		if strings.Contains(msg.Content, SubmitMarker) {
 			sub := strings.TrimSpace(strings.Replace(msg.Content, SubmitMarker, "", 1))
-			return a.finish(t, StatusSubmitted, sub)
+			if done := a.finishSuccess(ctx, t, v, msg, StatusSubmitted, sub, nil); done != nil {
+				return done
+			}
+			continue
 		}
 		if len(msg.ToolCalls) == 0 {
-			return a.finish(t, StatusCompleted, msg.Content)
+			if done := a.finishSuccess(ctx, t, v, msg, StatusCompleted, msg.Content, nil); done != nil {
+				return done
+			}
+			continue
 		}
 
 		// Write-ahead: persist the response and its pending calls before any
@@ -340,6 +360,70 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			return a.finish(t, StatusFormatError, "")
 		}
 	}
+}
+
+// finishSuccess ends the run with a successful status unless stop hooks
+// reject the result. It returns the final trajectory, or nil after appending
+// the hooks' feedback when the model must keep working.
+func (a *Agent) finishSuccess(ctx context.Context, t *trajectory.Trajectory, v *view, msg model.Message, status, submission string, structured json.RawMessage) *trajectory.Trajectory {
+	if !a.Hooks.HasStop() {
+		t.StructuredOutput = structured
+		return a.finish(t, status, submission)
+	}
+	results := a.Hooks.Stop(ctx, hooks.StopInput{
+		Status: status, Submission: submission, StructuredOutput: structured,
+		Root: a.Tools.Root, ReadOnly: a.Tools.ReadOnly, Step: t.Steps,
+		Continuations: t.StopContinuations,
+	})
+	var feedback []string
+	for _, r := range results {
+		a.stopHookRan(r)
+		if r.Decision == hooks.Continue {
+			feedback = append(feedback, r.Feedback)
+		}
+	}
+	if s, ok := ctxStatus(ctx); ok {
+		return a.finish(t, s, "")
+	}
+	if len(feedback) == 0 {
+		t.StructuredOutput = structured
+		return a.finish(t, status, submission)
+	}
+	reasons := strings.Join(feedback, "\n\n")
+	if t.StopContinuations >= a.Hooks.MaxStopContinuations() {
+		t.StopReason = reasons
+		return a.finish(t, StatusVerificationFailed, submission)
+	}
+	if strings.Contains(msg.Content, SubmitMarker) && structured == nil {
+		// Skipped calls still need results so the history stays valid.
+		for _, c := range msg.ToolCalls {
+			a.recordToolResult(t, v, c, notRunResult, true)
+		}
+	}
+	t.StopContinuations++
+	t.Messages = append(t.Messages, model.Message{Role: "user", Content: stopNotice + "\n\n" + reasons})
+	v.add(t, t.Messages[len(t.Messages)-1])
+	if err := a.step(t); err != nil {
+		return a.saveFailed(t, err)
+	}
+	return nil
+}
+
+// stopHookRan reports one stop hook run as an event, a verbose line, and,
+// for a failed hook, a warning.
+func (a *Agent) stopHookRan(r hooks.Result) {
+	a.event("hook", map[string]any{
+		"event": r.Event, "command": r.Command, "decision": r.Decision, "duration_ms": r.Duration.Milliseconds(),
+	})
+	if a.Verbose {
+		fmt.Fprintf(a.Err, "hook %s %s: %s (%s)\n", r.Event, r.Command, r.Decision, r.Duration.Round(time.Millisecond))
+	}
+	if r.Decision != hooks.Error {
+		return
+	}
+	msg := fmt.Sprintf("%s hook %s failed: %s; treated as accept", r.Event, r.Command, r.Reason)
+	fmt.Fprintln(a.Err, "warning:", msg)
+	a.event("warning", map[string]any{"message": msg})
 }
 
 // toolStep runs one tool call and records its events and result message.

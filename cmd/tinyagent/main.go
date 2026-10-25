@@ -810,6 +810,9 @@ func summaryLine(t *trajectory.Trajectory, elapsed time.Duration) string {
 	if t.ExitStatus == agent.StatusFormatError && t.LastFormatError != "" {
 		s += ": " + t.LastFormatError
 	}
+	if t.ExitStatus == agent.StatusVerificationFailed && t.StopReason != "" {
+		s += ": " + strings.Join(strings.Fields(t.StopReason), " ")
+	}
 	return s
 }
 
@@ -1132,13 +1135,25 @@ func configuredSecrets(cfg config.AgentConfig) []string {
 	for _, s := range cfg.MCPServers {
 		envs = append(envs, s.Env...)
 	}
-	for _, h := range append(append([]config.Hook(nil), cfg.Hooks.PreTool...), cfg.Hooks.PostTool...) {
-		envs = append(envs, h.Env...)
-	}
 	var vals []string
 	for _, kv := range envs {
 		if _, v, ok := strings.Cut(kv, "="); ok {
 			vals = append(vals, v)
+		}
+	}
+	// Hook env entries name variables forwarded from tinyagent's own
+	// environment; redact the values they had at startup.
+	var hookDefs []config.Hook
+	hookDefs = append(hookDefs, cfg.Hooks.PreTool...)
+	hookDefs = append(hookDefs, cfg.Hooks.PostTool...)
+	hookDefs = append(hookDefs, cfg.Hooks.Stop...)
+	for _, h := range hookDefs {
+		for _, name := range h.Env {
+			if _, v, ok := strings.Cut(name, "="); ok {
+				vals = append(vals, v)
+			} else if v := os.Getenv(name); v != "" {
+				vals = append(vals, v)
+			}
 		}
 	}
 	return vals
@@ -1179,6 +1194,12 @@ func resultFields(t *trajectory.Trajectory, elapsed time.Duration) map[string]an
 	}
 	if t.ExitStatus == agent.StatusSubmitted && t.StructuredOutput != nil {
 		fields["structured_output"] = t.StructuredOutput
+	}
+	if t.StopContinuations > 0 {
+		fields["stop_continuations"] = t.StopContinuations
+	}
+	if t.StopReason != "" {
+		fields["stop_reason"] = t.StopReason
 	}
 	return fields
 }
