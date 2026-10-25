@@ -122,7 +122,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 
 | Type | Fields |
 |---|---|
-| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `reasoning_effort` (only when set), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy) |
+| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `reasoning_effort` (only when set), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy), `file_access` (`deny_read`, `deny_write`; only with [file access](#restricting-file-access) rules) |
 | `assistant.message` | `text` (complete assistant message) |
 | `tool.call` | `id`, `name`, `arguments` (decoded JSON value, or a string if malformed) |
 | `tool.result` | `id`, `name`, `output` (same configured truncation as tool output), `is_error`; with [tool output files](#tool-output-files), a saved result also has `output_file` (path relative to `--cwd`) and `output_bytes` |
@@ -263,7 +263,7 @@ The lookup order is: `-c PATH` if given (a missing or unreadable file is an erro
 
 Every key is optional, but an unrecognized key (a typo like `step_limt`) is an error naming the file and the key, rather than silently ignored. Command-line flags override the file.
 
-Set `read_only: true` to make repository analysis the default. `--read-only` overrides the config value, including `--read-only=false`. In this mode, executor dispatch allows only `read_file`, `list_files`, and `grep`; writes, edits, shell commands, and background process tools are denied even if task text or repository instructions request them. Denials are returned to the model as tool errors. The restriction is model tool authority, not an OS sandbox (for that, see `--sandbox` under Sandboxing commands): an explicit `-o` trajectory destination can be written by the CLI, provider requests still send their context to the selected service, and the Codex provider may refresh its credential file. `--update` is an administrative action outside task-tool policy. Readable secrets, symlinks that point outside `--cwd`, existing lexical path behavior, and AGENTS.md discovery retain their existing limitations; read-only mode does not make an untrusted repository safe.
+Set `read_only: true` to make repository analysis the default. `--read-only` overrides the config value, including `--read-only=false`. In this mode, executor dispatch allows only `read_file`, `list_files`, and `grep`; writes, edits, shell commands, and background process tools are denied even if task text or repository instructions request them. Denials are returned to the model as tool errors. The restriction is model tool authority, not an OS sandbox (for that, see `--sandbox` under Sandboxing commands): an explicit `-o` trajectory destination can be written by the CLI, provider requests still send their context to the selected service, and the Codex provider may refresh its credential file. `--update` is an administrative action outside task-tool policy. Readable secrets (unless hidden with [`file_access`](#restricting-file-access) rules), symlinks that point outside `--cwd`, existing lexical path behavior, and AGENTS.md discovery retain their existing limitations; read-only mode does not make an untrusted repository safe.
 
 `model` saves a default model, so `tinyagent -t "fix the failing test"` needs no `-m`. The model is chosen in this order: `-m`/`--model` if given (even `-m openai/gpt-4o`), then a nonempty `$AGENT_MODEL`, then a nonempty `model` in the config, then `openai/gpt-4o`.
 
@@ -278,6 +278,9 @@ environment: local         # or container; see Execution environments
 command_env:               # omitted by default (inherit everything); see Command environment
   inherit: core            # all, core or none
   exclude_secrets: true
+file_access:               # omitted by default (no rules); see Restricting file access
+  deny_read: [".env", "*.pem", "secrets/"]
+  deny_write: [go.sum, "vendor/"]
 step_limit: 50
 cost_limit: 2.0
 wall_time_seconds: 1800
@@ -587,7 +590,7 @@ Toolchains that cache outside the repo (Go, npm, pip) fail under the sandbox wit
 - **Windows:** not supported.
 - **Fail closed:** if the host cannot enforce the requested policy, tinyagent exits before the first model request and says what is missing. It never runs commands unsandboxed.
 - On start, one `sandbox:` line (backend, writable roots, network) goes to stderr, and `-o` trajectories record it as `sandbox`. With `--resume`, the current invocation's settings apply. With `--read-only` there are no command tools, so nothing is sandboxed.
-- **Not covered:** the in-process file tools (`read_file`, `write_file`, ... and their symlink behavior), MCP servers, and provider requests. Commands can still read anything you can, including credentials, and inherit your environment variables (API keys included) unless you set a [command environment](#command-environment) policy. With `--sandbox-network` they can send it to any host; prefer a [network allowlist](#network-allowlist). The sandbox reduces risk; it does not make untrusted code safe.
+- **Not covered:** the in-process file tools (`read_file`, `write_file`, ... and their symlink behavior; see [Restricting file access](#restricting-file-access) for rules on them), MCP servers, and provider requests. Commands can still read anything you can, including credentials, and inherit your environment variables (API keys included) unless you set a [command environment](#command-environment) policy. With `--sandbox-network` they can send it to any host; prefer a [network allowlist](#network-allowlist). The sandbox reduces risk; it does not make untrusted code safe.
 
 ### Network allowlist
 
@@ -644,7 +647,24 @@ When a policy is set (or `--command-env` is passed), one line such as `command e
 
 For CI on untrusted input (issue bodies, PR diffs), use `inherit: core` with `exclude_secrets: true`; for reproducible runs, `inherit: none` with `set`. `core` and `none` can break toolchains that need other variables (`GOPATH`, `JAVA_HOME`, proxy settings): check the `-v` lists and add them to `pass`.
 
-This is not a sandbox. It does not protect credentials stored in files (`~/.aws/credentials`, `.env`, the Codex auth file), which commands can still read, and it does not redact secrets from tool output, trajectories or `--json`. `pass` and `set` deliberately give commands the values you name.
+This is not a sandbox. It does not protect credentials stored in files (`~/.aws/credentials`, `.env`, the Codex auth file), which commands can still read ([`file_access`](#restricting-file-access) rules hide them from the file tools only), and it does not redact secrets from tool output, trajectories or `--json`. `pass` and `set` deliberately give commands the values you name.
+
+## Restricting file access
+
+`file_access` (config only, from the user config or `-c`; a file inside `--cwd` is never read) denies the built-in file tools access to matching paths. It is off by default.
+
+```yaml
+file_access:
+  deny_read: [".env", "*.pem", "secrets/", "**/id_rsa"]   # also write-denied
+  deny_write: [go.sum, "/vendor/"]                        # readable, not writable
+```
+
+- **Patterns** are gitignore-style and relative to `--cwd`: `*`, `?` and `[...]` match within one path segment, `**` matches any number of segments, a leading `/` (or any `/` before the end) anchors the pattern to `--cwd`, a trailing `/` matches directories only, and a pattern without a slash matches a name at any depth. A rule on a directory covers everything below it. Empty patterns, `.`/`..` segments, bad glob syntax and `!` negation (reserved) are config errors (exit 2). Absolute and `~` paths are not supported. Matching ignores case on macOS and Windows.
+- **Reads:** `read_file`, `view_image`, and a `list_files` or `grep` aimed at a denied path return an error naming the rule, such as `.env is denied by file_access.deny_read rule ".env"`. Walks (`list_files`, `grep`) skip denied files and directories without opening them and end with a neutral count such as `(2 paths hidden by file_access rules)`, which names none of them. The count includes denied files only when they would have matched the pattern or `include`; a denied directory counts once.
+- **Writes:** `write_file`, `edit_file` and `apply_patch` refuse paths matching `deny_write` or `deny_read`. `apply_patch` checks every operation (including `Move to` destinations) before writing, so a patch that touches one denied path changes nothing.
+- **Symlinks:** a path is checked as named and through its resolved target (for a new file, through its deepest existing directory), so `innocent.txt -> .env` or a symlinked directory pointing into `secrets/` is denied too. Walks don't follow symlinked directories.
+- With `-v`, one stderr line gives the rule counts. `-o` trajectories and `--json` `run.started` record `file_access` (`deny_read`, `deny_write`). With `--resume`, the current invocation's rules apply. A `deny_read` rule that hides the [tool output](#tool-output-files) directory fails at startup, since the model is told to read it. AGENTS.md and skills loading are not affected.
+- **Not covered:** `bash`, `start_process`, hooks, MCP servers and execution environments can still read and write anything you can; combine with `--read-only`, [`--sandbox`](#sandboxing-commands) or a [command environment](#command-environment) policy as needed. Checks happen before each operation, so a file swapped for a symlink in between (a race) is not caught. This narrows what the model's file tools can touch; it is not a security boundary.
 
 ## Execution environments
 

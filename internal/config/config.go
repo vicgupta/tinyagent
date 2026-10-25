@@ -42,6 +42,9 @@ type AgentConfig struct {
 	// CommandEnv is the environment policy for local bash and start_process
 	// commands. The zero value inherits tinyagent's whole environment.
 	CommandEnv CommandEnv `yaml:"command_env"`
+	// FileAccess denies the built-in file tools access to matching paths.
+	// The zero value denies nothing.
+	FileAccess FileAccess `yaml:"file_access"`
 	// Model is the provider/model used when neither -m nor $AGENT_MODEL sets
 	// one. "" falls back to the built-in default.
 	Model string `yaml:"model"`
@@ -260,6 +263,58 @@ func checkEnvName(n string, glob bool) error {
 	return nil
 }
 
+// FileAccess lists gitignore-style patterns, relative to --cwd, that the
+// built-in file tools refuse. DenyRead paths are also write-denied. It does
+// not apply to bash, start_process, hooks or MCP servers.
+type FileAccess struct {
+	DenyRead  []string `yaml:"deny_read,omitempty"`
+	DenyWrite []string `yaml:"deny_write,omitempty"`
+}
+
+// Configured reports whether any rule is set.
+func (f FileAccess) Configured() bool { return len(f.DenyRead)+len(f.DenyWrite) > 0 }
+
+// Validate rejects empty patterns, ! negation (reserved for later) and bad
+// glob syntax.
+func (f FileAccess) Validate() error {
+	for _, l := range []struct {
+		key string
+		ps  []string
+	}{{"deny_read", f.DenyRead}, {"deny_write", f.DenyWrite}} {
+		for _, p := range l.ps {
+			if err := validateAccessPattern(p); err != nil {
+				return fmt.Errorf("file_access.%s: %w", l.key, err)
+			}
+		}
+	}
+	return nil
+}
+
+func validateAccessPattern(p string) error {
+	s := strings.TrimSpace(p)
+	if s == "" {
+		return errors.New("empty pattern")
+	}
+	if strings.HasPrefix(s, "!") {
+		return fmt.Errorf("pattern %q: ! negation is not supported", p)
+	}
+	s = strings.Trim(filepath.ToSlash(s), "/")
+	if s == "" {
+		return fmt.Errorf("pattern %q matches nothing", p)
+	}
+	for _, seg := range strings.Split(s, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return fmt.Errorf("pattern %q: empty, . or .. path segment", p)
+		}
+		if seg != "**" {
+			if _, err := path.Match(seg, ""); err != nil {
+				return fmt.Errorf("pattern %q: %w", p, err)
+			}
+		}
+	}
+	return nil
+}
+
 // InvalidError is a config error that should exit with usage status 2.
 type InvalidError struct{ Err error }
 
@@ -439,6 +494,9 @@ func Load(path string) (AgentConfig, error) {
 		return cfg, fmt.Errorf("config %s: environment %q must be local or container", path, cfg.Environment)
 	}
 	if err := cfg.CommandEnv.Validate(); err != nil {
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
+	}
+	if err := cfg.FileAccess.Validate(); err != nil {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
 	}
 	if r := cfg.Container.Runtime; r != "" && r != "docker" && r != "podman" {

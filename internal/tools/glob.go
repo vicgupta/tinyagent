@@ -15,14 +15,18 @@ const maxListEntries = 1000
 // recursively and returns matching files. A pattern without "/" matches base
 // names; a pattern with "/" matches paths relative to the listed directory.
 func ListFiles(root, path, pattern string) (string, error) {
-	return listFiles(root, path, pattern, "")
+	return listFiles(root, path, pattern, "", nil)
 }
 
 // listFiles is ListFiles that also skips the directory skip (an absolute
-// path; "" skips nothing extra) unless the walk starts inside it.
-func listFiles(root, path, pattern, skip string) (string, error) {
+// path; "" skips nothing extra) unless the walk starts inside it, and hides
+// paths fa denies for reading, ending with a count of them.
+func listFiles(root, path, pattern, skip string, fa *FileAccess) (string, error) {
 	dir, err := Resolve(root, path)
 	if err != nil {
+		return "", err
+	}
+	if err := fa.CheckRead(dir, displayPath(path)); err != nil {
 		return "", err
 	}
 	if pattern == "" {
@@ -31,20 +35,26 @@ func listFiles(root, path, pattern, skip string) (string, error) {
 			return "", err
 		}
 		var lines []string
+		hidden := 0
 		for _, e := range entries {
+			if fa.Hidden(filepath.Join(dir, e.Name())) {
+				hidden++
+				continue
+			}
 			name := e.Name()
 			if e.IsDir() {
 				name += "/"
 			}
 			lines = append(lines, name)
 		}
-		return strings.Join(lines, "\n"), nil
+		return withHiddenNote(strings.Join(lines, "\n"), hidden), nil
 	}
 	if _, err := filepath.Match(pattern, ""); err != nil {
 		return "", fmt.Errorf("bad pattern %q: %w", pattern, err)
 	}
 
 	var matches []string
+	hidden := 0
 	matchPath := strings.Contains(pattern, "/")
 	err = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -54,6 +64,10 @@ func listFiles(root, path, pattern, skip string) (string, error) {
 			if p != dir && (skipDir(d.Name()) || p == skip) {
 				return filepath.SkipDir
 			}
+			if p != dir && fa.Hidden(p) {
+				hidden++
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		subject := d.Name()
@@ -61,6 +75,10 @@ func listFiles(root, path, pattern, skip string) (string, error) {
 			subject = rel(dir, p)
 		}
 		if ok, _ := filepath.Match(pattern, subject); ok {
+			if fa.Hidden(p) {
+				hidden++
+				return nil
+			}
 			matches = append(matches, rel(root, p))
 			if len(matches) >= maxListEntries {
 				return fs.SkipAll
@@ -79,5 +97,13 @@ func listFiles(root, path, pattern, skip string) (string, error) {
 	if out == "" {
 		out = "no matches"
 	}
-	return out, nil
+	return withHiddenNote(out, hidden), nil
+}
+
+// displayPath is the path as the model named it, "." when omitted.
+func displayPath(p string) string {
+	if p == "" {
+		return "."
+	}
+	return p
 }

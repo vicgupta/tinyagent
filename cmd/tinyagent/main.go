@@ -279,6 +279,10 @@ func run() int {
 	if err != nil {
 		return fail(err)
 	}
+	fileAccess, err := newFileAccess(cfg, root, outputFiles, o.verbose)
+	if err != nil {
+		return configFail(err)
+	}
 	if cfg.ReadOnly {
 		fmt.Fprintln(os.Stderr, "read-only mode: only read_file, list_files, and grep are available")
 	}
@@ -348,6 +352,7 @@ func run() int {
 			Images:             cfg.Images.Enabled,
 			ApplyPatch:         cfg.ApplyPatch,
 			OutputFiles:        outputFiles,
+			FileAccess:         fileAccess,
 			MaxImageBytes:      cfg.MaxImageBytes,
 			ExternalCallImages: mcpRegistry.CallImages(cfg.MaxImageBytes),
 		},
@@ -574,6 +579,10 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if err != nil {
 		return fail(err)
 	}
+	fileAccess, err := newFileAccess(cfg, root, outputFiles, o.verbose)
+	if err != nil {
+		return configFail(err)
+	}
 
 	if o.output == "" {
 		return fail(errors.New("resume: --output is required to write the continued trajectory"))
@@ -674,6 +683,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 			Images:         src.ImagesEnabled,
 			ApplyPatch:     src.ApplyPatchEnabled,
 			OutputFiles:    outputFiles,
+			FileAccess:     fileAccess,
 			MaxImageBytes:  cfg.MaxImageBytes,
 		},
 		Config:       cfg,
@@ -1212,6 +1222,9 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 			started["command_env"] = ce
 		}
 	}
+	if fa := agent.FileAccessInfo(a.Tools.FileAccess); fa != nil {
+		started["file_access"] = fa
+	}
 	events.emit("run.started", started)
 	a.OnEvent = func(kind string, fields map[string]any) {
 		events.emit(kind, fields)
@@ -1290,6 +1303,30 @@ func toolOutputFiles(fs *flag.FlagSet, o options, cfg config.AgentConfig, root s
 		return nil, nil
 	}
 	return tools.NewOutputFiles(root, cfg.ToolOutputFiles.Dir, time.Now())
+}
+
+// newFileAccess compiles the file_access rules (nil when there are none),
+// rejecting a deny_read rule that would hide the tool output directory the
+// model is told to read. With verbose it prints the rule counts.
+func newFileAccess(cfg config.AgentConfig, root string, outputFiles *tools.OutputFiles, verbose bool) (*tools.FileAccess, error) {
+	fa, err := tools.NewFileAccess(root, cfg.FileAccess.DenyRead, cfg.FileAccess.DenyWrite)
+	if err != nil {
+		return nil, &config.InvalidError{Err: err}
+	}
+	if fa == nil {
+		return nil, nil
+	}
+	if outputFiles != nil {
+		dir := outputFiles.Dir
+		if fa.Hidden(dir) || fa.Hidden(filepath.Join(dir, "run", "call.txt")) {
+			return nil, &config.InvalidError{Err: fmt.Errorf("file_access.deny_read hides the tool output directory %s; the model could not read its saved output", dir)}
+		}
+	}
+	if verbose {
+		r, w := fa.Counts()
+		fmt.Fprintf(os.Stderr, "file_access: %d deny_read and %d deny_write rules (file tools only; bash, start_process, hooks and MCP servers are not restricted)\n", r, w)
+	}
+	return fa, nil
 }
 
 // startOutputFiles routes save failures to warn and prunes old run

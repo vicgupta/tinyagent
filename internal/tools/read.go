@@ -11,6 +11,11 @@ import (
 // or limit (max lines) returns just that range, ending in a "[lines A-B of N]"
 // note when the range isn't the whole file.
 func ReadFile(root, path string, offset, limit int) (string, error) {
+	return readFile(root, path, offset, limit, nil)
+}
+
+// readFile is ReadFile that refuses paths fa denies for reading.
+func readFile(root, path string, offset, limit int, fa *FileAccess) (string, error) {
 	if offset < 0 {
 		return "", errors.New("offset must be a line number >= 1")
 	}
@@ -19,6 +24,9 @@ func ReadFile(root, path string, offset, limit int) (string, error) {
 	}
 	full, err := Resolve(root, path)
 	if err != nil {
+		return "", err
+	}
+	if err := fa.CheckRead(full, path); err != nil {
 		return "", err
 	}
 	b, err := os.ReadFile(full)

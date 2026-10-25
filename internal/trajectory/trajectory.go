@@ -44,6 +44,13 @@ type CommandEnvInfo struct {
 	Passed         []string `json:"passed"`
 }
 
+// FileAccessInfo records the file_access rules the built-in file tools
+// enforced.
+type FileAccessInfo struct {
+	DenyRead  []string `json:"deny_read"`
+	DenyWrite []string `json:"deny_write"`
+}
+
 type Trajectory struct {
 	// Environment is set when bash and start_process ran outside the host,
 	// e.g. in a container.
@@ -53,6 +60,9 @@ type Trajectory struct {
 	// CommandEnv is set when a command_env policy filtered the environment
 	// of bash and start_process; it records this invocation's policy.
 	CommandEnv *CommandEnvInfo `json:"command_env,omitempty"`
+	// FileAccess is set when file_access rules restricted the file tools;
+	// it records this invocation's rules.
+	FileAccess *FileAccessInfo `json:"file_access,omitempty"`
 	// SandboxNetworkDenials lists the requests the allowlist proxy refused.
 	SandboxNetworkDenials []NetworkDenial `json:"sandbox_network_denials,omitempty"`
 	ReadOnly              bool            `json:"read_only"`

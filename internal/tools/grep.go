@@ -31,12 +31,14 @@ func Grep(root, pattern, path, include string, ignoreCase, fixedStrings bool) (s
 
 // GrepWithContext returns matches with up to contextLines surrounding lines.
 func GrepWithContext(root, pattern, path, include string, ignoreCase, fixedStrings bool, contextLines int) (string, error) {
-	return grepWithContext(root, pattern, path, include, ignoreCase, fixedStrings, contextLines, "")
+	return grepWithContext(root, pattern, path, include, ignoreCase, fixedStrings, contextLines, "", nil)
 }
 
 // grepWithContext is GrepWithContext that also skips the directory skip (an
-// absolute path; "" skips nothing extra) unless the search starts inside it.
-func grepWithContext(root, pattern, path, include string, ignoreCase, fixedStrings bool, contextLines int, skip string) (string, error) {
+// absolute path; "" skips nothing extra) unless the search starts inside it,
+// and never opens or reports paths fa denies for reading, ending with a count
+// of the ones it hid.
+func grepWithContext(root, pattern, path, include string, ignoreCase, fixedStrings bool, contextLines int, skip string, fa *FileAccess) (string, error) {
 	if fixedStrings {
 		pattern = regexp.QuoteMeta(pattern)
 	}
@@ -57,6 +59,10 @@ func grepWithContext(root, pattern, path, include string, ignoreCase, fixedStrin
 	if err != nil {
 		return "", err
 	}
+	if err := fa.CheckRead(start, displayPath(path)); err != nil {
+		return "", err
+	}
+	hidden := 0
 
 	var out []string
 	matches, sourceLines := 0, 0
@@ -69,6 +75,10 @@ func grepWithContext(root, pattern, path, include string, ignoreCase, fixedStrin
 			if p != start && (skipDir(d.Name()) || p == skip) {
 				return filepath.SkipDir
 			}
+			if p != start && fa.Hidden(p) {
+				hidden++
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if include != "" && p != start {
@@ -79,6 +89,10 @@ func grepWithContext(root, pattern, path, include string, ignoreCase, fixedStrin
 			if ok, _ := filepath.Match(include, subject); !ok {
 				return nil
 			}
+		}
+		if p != start && fa.Hidden(p) {
+			hidden++
+			return nil
 		}
 		if info, err := d.Info(); err != nil || info.Size() > maxGrepFileSize {
 			return nil
@@ -153,7 +167,7 @@ func grepWithContext(root, pattern, path, include string, ignoreCase, fixedStrin
 		return "", err
 	}
 	if len(out) == 0 {
-		return "no matches", nil
+		return withHiddenNote("no matches", hidden), nil
 	}
 	res := strings.Join(out, "\n")
 	if contextLines == 0 && matches >= maxGrepMatches {
@@ -162,5 +176,5 @@ func grepWithContext(root, pattern, path, include string, ignoreCase, fixedStrin
 	if contextLines > 0 && contextTruncated {
 		res += "\n... (results/context may be incomplete: stopped at output limit)"
 	}
-	return res, nil
+	return withHiddenNote(res, hidden), nil
 }

@@ -246,6 +246,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 	// The output budget may change on resume, so the current one is recorded.
 	t.MaxOutputTokens = a.Config.MaxOutputTokens
 	t.Sandbox, t.Environment, t.CommandEnv = nil, nil, nil
+	t.FileAccess = FileAccessInfo(a.Tools.FileAccess)
 	switch env := a.Tools.Env.(type) {
 	case tools.Local:
 		if sb := env.Sandbox; sb != nil {
@@ -925,6 +926,16 @@ func (a *Agent) recordProcesses(t *trajectory.Trajectory) {
 	for _, p := range ps {
 		t.Processes = append(t.Processes, trajectory.ProcessInfo{ID: p.ID, PID: p.PID, Command: p.Command})
 	}
+}
+
+// FileAccessInfo records f's rules for trajectories and run.started; nil
+// when f is nil.
+func FileAccessInfo(f *tools.FileAccess) *trajectory.FileAccessInfo {
+	if f == nil {
+		return nil
+	}
+	read, write := f.Rules()
+	return &trajectory.FileAccessInfo{DenyRead: append([]string{}, read...), DenyWrite: append([]string{}, write...)}
 }
 
 // CommandEnvInfo summarizes c by name for trajectories and run.started; nil
