@@ -308,3 +308,27 @@ func TestMaxOutputTokensConfig(t *testing.T) {
 		t.Error("defaults")
 	}
 }
+
+func TestSubagentsConfig(t *testing.T) {
+	if d := Default().Subagents; d.Enabled || d.Model != "" || d.MaxSteps != 0 {
+		t.Errorf("default subagents = %+v", d)
+	}
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	write(t, p, "subagents:\n  enabled: true\n  model: openai/gpt-5-mini\n  max_steps: 12\n")
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (Subagents{Enabled: true, Model: "openai/gpt-5-mini", MaxSteps: 12}); cfg.Subagents != want {
+		t.Errorf("subagents = %+v", cfg.Subagents)
+	}
+	for _, c := range []struct{ body, want string }{
+		{"subagents:\n  enabled: true\n  tools: [bash]\n", "tools"},
+		{"subagents:\n  max_steps: -2\n", "subagents.max_steps"},
+	} {
+		write(t, p, c.body)
+		if _, err := Load(p); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: err = %v, want one naming %s", c.body, err, c.want)
+		}
+	}
+}

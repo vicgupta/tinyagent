@@ -110,6 +110,10 @@ type AgentConfig struct {
 	// ApplyPatch offers the opt-in apply_patch tool (off by default;
 	// --apply-patch overrides it).
 	ApplyPatch bool `yaml:"apply_patch"`
+	// Subagents configures the opt-in delegate tool, which runs a
+	// read-only child agent (off by default; --subagents overrides
+	// Enabled).
+	Subagents Subagents `yaml:"subagents"`
 	// Skills turns on Agent Skills discovery from .agents/skills (off by
 	// default; --skills / --no-skills override it).
 	Skills bool `yaml:"skills"`
@@ -195,6 +199,21 @@ type Images struct {
 
 // DefaultMaxImageBytes is the default max_image_bytes (5 MiB).
 const DefaultMaxImageBytes = 5 << 20
+
+// Subagents configures the opt-in delegate tool.
+type Subagents struct {
+	Enabled bool `yaml:"enabled"`
+	// Model is the provider/model children use; "" means the parent's
+	// model.
+	Model string `yaml:"model"`
+	// MaxSteps caps each child's model calls; 0 means
+	// DefaultSubagentMaxSteps.
+	MaxSteps int `yaml:"max_steps"`
+}
+
+// DefaultSubagentMaxSteps is the step cap of a delegate child when
+// subagents.max_steps is 0.
+const DefaultSubagentMaxSteps = 30
 
 // Plan configures the persistent plan tool.
 type Plan struct {
@@ -534,6 +553,9 @@ func Load(path string) (AgentConfig, error) {
 	}
 	if cfg.MaxOutputTokens < 0 {
 		return cfg, fmt.Errorf("config %s: max_output_tokens must be a whole number >= 0, got %d", path, cfg.MaxOutputTokens)
+	}
+	if cfg.Subagents.MaxSteps < 0 {
+		return cfg, fmt.Errorf("config %s: subagents.max_steps must be a whole number >= 0, got %d", path, cfg.Subagents.MaxSteps)
 	}
 	if cfg.MaxTruncations < 1 {
 		return cfg, fmt.Errorf("config %s: max_truncations must be a whole number >= 1, got %d", path, cfg.MaxTruncations)

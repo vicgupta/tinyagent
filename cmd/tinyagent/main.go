@@ -48,6 +48,7 @@ type options struct {
 	plan                                             bool
 	images                                           bool
 	applyPatch                                       bool
+	subagents                                        bool
 	toolOutputFiles                                  bool
 	skills, noSkills                                 bool
 	reasoningEffort                                  string
@@ -102,6 +103,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.plan, "plan", false, "enable the update_plan tool: a task plan saved in the checkpoint and pinned in every request (default off; config plan.enabled)")
 	fs.BoolVar(&o.toolOutputFiles, "tool-output-files", false, "save the full text of over-limit tool results under .tinyagent/tool-output so the model can page it with read_file and grep (default off; config tool_output_files.enabled)")
 	fs.BoolVar(&o.applyPatch, "apply-patch", false, "add the apply_patch tool: multi-file, multi-hunk edits in the *** Begin Patch format, checked before any write (default off; config apply_patch)")
+	fs.BoolVar(&o.subagents, "subagents", false, "add the delegate tool: hand a task to a read-only subagent with a fresh context and get back only its report (default off; config subagents.enabled)")
 	fs.BoolVar(&o.images, "images", false, "let vision-capable models see images: the view_image tool and MCP image pass-through (default off; config images.enabled)")
 	fs.BoolVar(&o.skills, "skills", false, "discover Agent Skills in .agents/skills (project, up to the repo root, and ~/.agents/skills) and add the skill tool (default off; config skills)")
 	fs.BoolVar(&o.noSkills, "no-skills", false, "turn Agent Skills discovery off, overriding config skills; --no-skills=false turns it on")
@@ -249,6 +251,9 @@ func run() int {
 	if flagWasSet(fs, "apply-patch") {
 		cfg.ApplyPatch = o.applyPatch
 	}
+	if flagWasSet(fs, "subagents") {
+		cfg.Subagents.Enabled = o.subagents
+	}
 	if on, set, err := skillsFlag(fs, o); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
@@ -286,6 +291,11 @@ func run() int {
 	}
 	openaiAPI := model.OpenAITransport(o.modelName, cfg.OpenAIAPI)
 	if err := model.CheckProviderEnv(o.modelName); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	}
+	subagents, err := newSubagents(cfg, o.modelName, cfg.ReasoningEffort)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
 	}
@@ -378,6 +388,7 @@ func run() int {
 			Plan:               cfg.Plan.Enabled,
 			Images:             cfg.Images.Enabled,
 			ApplyPatch:         cfg.ApplyPatch,
+			Delegate:           subagents != nil,
 			OutputFiles:        outputFiles,
 			FileAccess:         fileAccess,
 			MaxImageBytes:      cfg.MaxImageBytes,
@@ -393,6 +404,7 @@ func run() int {
 		NoCompact:    o.noCompact,
 		OutputSchema: schema,
 		Snapshots:    snaps,
+		Subagents:    subagents,
 	}
 	var events *runEvents
 	warn := func(msg string) { events.warn(msg) }
@@ -576,6 +588,11 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return 2
 	}
 	cfg.ApplyPatch = src.ApplyPatchEnabled
+	if flagWasSet(fs, "subagents") && o.subagents != src.SubagentsEnabled {
+		fmt.Fprintln(os.Stderr, "error: resume: --subagents conflicts with the checkpoint's recorded subagents setting; start a fresh task")
+		return 2
+	}
+	cfg.Subagents.Enabled = src.SubagentsEnabled
 	if on, set, err := skillsFlag(fs, *o); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
@@ -692,6 +709,11 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if err := model.SetReasoningEffort(m, modelName, src.ReasoningEffort); err != nil {
 		return fail(fmt.Errorf("resume: %w", err))
 	}
+	subagents, err := newSubagents(cfg, modelName, src.ReasoningEffort)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: resume:", err)
+		return 2
+	}
 	if err := model.SetMaxOutputTokens(m, modelName, cfg.MaxOutputTokens); err != nil {
 		return fail(fmt.Errorf("resume: %w", err))
 	}
@@ -723,6 +745,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 			Plan:           src.PlanEnabled,
 			Images:         src.ImagesEnabled,
 			ApplyPatch:     src.ApplyPatchEnabled,
+			Delegate:       src.SubagentsEnabled,
 			OutputFiles:    outputFiles,
 			FileAccess:     fileAccess,
 			MaxImageBytes:  cfg.MaxImageBytes,
@@ -739,6 +762,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		ResumeSource: o.resume,
 		Snapshots:    snaps,
 		FollowUp:     followUp,
+		Subagents:    subagents,
 	}
 	var events *runEvents
 	warn := func(msg string) { events.warn(msg) }
@@ -1039,6 +1063,9 @@ func summaryLine(t *trajectory.Trajectory, elapsed time.Duration) string {
 	}
 	if t.Truncations > 0 {
 		s += fmt.Sprintf(", %d truncated responses", t.Truncations)
+	}
+	if n := len(t.Subagents); n > 0 {
+		s += fmt.Sprintf(", %d subagent runs (%d steps)", n, t.SubagentSteps)
 	}
 	if t.ExitStatus == agent.StatusError {
 		s += ": " + t.Submission
@@ -1512,6 +1539,10 @@ func resultFields(t *trajectory.Trajectory, elapsed time.Duration) map[string]an
 	}
 	if t.StopContinuations > 0 {
 		fields["stop_continuations"] = t.StopContinuations
+	}
+	if len(t.Subagents) > 0 {
+		fields["subagents"] = len(t.Subagents)
+		fields["subagent_steps"] = t.SubagentSteps
 	}
 	if t.StopReason != "" {
 		fields["stop_reason"] = t.StopReason

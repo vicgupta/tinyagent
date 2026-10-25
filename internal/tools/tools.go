@@ -61,6 +61,9 @@ type Executor struct {
 	// ApplyPatch offers the opt-in apply_patch tool (never in read-only
 	// mode).
 	ApplyPatch bool
+	// Delegate offers the opt-in delegate tool (also in read-only mode).
+	// The agent loop runs its calls; the executor never does.
+	Delegate bool
 	// OutputFiles, when set, saves the full text of over-limit results to a
 	// per-run file and keeps that directory out of grep and list_files
 	// walks. nil keeps plain truncation.
@@ -263,6 +266,9 @@ func (e *Executor) Catalog() []model.ToolSpec {
 	if e.ApplyPatch && !e.ReadOnly {
 		out = append(out, ApplyPatchSpec())
 	}
+	if e.Delegate {
+		out = append(out, DelegateSpec())
+	}
 	if e.Skills.Len() > 0 {
 		out = append(out, e.Skills.Spec())
 	}
@@ -321,6 +327,9 @@ func (e *Executor) Permits(name string) bool {
 func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 	if name == PlanToolName && e.Plan {
 		return "", errors.New("update_plan is handled by the agent loop")
+	}
+	if name == DelegateToolName && e.Delegate {
+		return "", errors.New("delegate is handled by the agent loop")
 	}
 	skillTool := name == skills.ToolName && e.Skills.Len() > 0
 	if e.ReadOnly && !skillTool && (name != "read_file" && name != "list_files" && name != "grep") {

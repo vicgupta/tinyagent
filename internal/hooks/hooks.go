@@ -166,6 +166,9 @@ type Input struct {
 	// OutputFile (post_tool only) is the saved full output, relative to
 	// Root, when tool_output_files saved this result.
 	OutputFile string `json:"output_file,omitempty"`
+	// Subagent is the delegate child's id (d1, d2, ...) when a subagent,
+	// not the main agent, made this call.
+	Subagent string `json:"subagent,omitempty"`
 }
 
 type payload struct {

@@ -157,6 +157,15 @@ type Trajectory struct {
 	// ApplyPatchEnabled (schema 2) records whether the opt-in apply_patch
 	// tool was enabled. A resume must use the same setting.
 	ApplyPatchEnabled bool `json:"apply_patch_enabled,omitempty"`
+	// SubagentsEnabled (schema 2) records whether the opt-in delegate tool
+	// was offered. A resume must use the same setting.
+	SubagentsEnabled bool `json:"subagents_enabled,omitempty"`
+	// Subagents records each delegate call's child run, in call order,
+	// with its full history. Their tokens and cost are included in the
+	// run totals; their model calls are counted in SubagentSteps, not
+	// Steps.
+	Subagents     []Subagent `json:"subagents,omitempty"`
+	SubagentSteps int        `json:"subagent_steps,omitempty"`
 	// ToolOutputFiles (schema 2) lists the over-limit tool results whose
 	// full text was saved with tool_output_files on.
 	ToolOutputFiles []ToolOutputFile `json:"tool_output_files,omitempty"`
@@ -353,4 +362,24 @@ func syncDir(dir string) error {
 		return err
 	}
 	return nil
+}
+
+// Subagent is one delegate child run.
+type Subagent struct {
+	ID         string `json:"id"`
+	ToolCallID string `json:"tool_call_id"`
+	Task       string `json:"task"`
+	Label      string `json:"label,omitempty"`
+	Model      string `json:"model"`
+	// ParentStep is the parent's step count when the call ran.
+	ParentStep       int             `json:"parent_step"`
+	Status           string          `json:"status"`
+	Steps            int             `json:"steps"`
+	InputTokens      int             `json:"input_tokens"`
+	OutputTokens     int             `json:"output_tokens"`
+	CacheReadTokens  int             `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int             `json:"cache_write_tokens,omitempty"`
+	Cost             float64         `json:"cost"`
+	Report           string          `json:"report,omitempty"`
+	Messages         []model.Message `json:"messages"`
 }
