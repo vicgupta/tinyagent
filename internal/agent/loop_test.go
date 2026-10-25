@@ -181,14 +181,14 @@ func TestRunDispatchesExternalToolsWithEvents(t *testing.T) {
 	}}
 	a := newAgent(t, m)
 	a.Tools.ExternalSpecs = []model.ToolSpec{{Type: "function", Function: model.FunctionSpec{Name: "docs__search"}}}
-	a.Tools.ExternalCall = func(_ context.Context, name, raw string) (string, bool) {
+	a.Tools.ExternalCall = func(_ context.Context, name, raw string) (string, bool, bool) {
 		if name != "docs__search" {
-			return "", false
+			return "", false, false
 		}
 		if raw == `{}` {
-			return "tool error: missing q", true
+			return "tool error: missing q", true, true
 		}
-		return "result for " + raw, true
+		return "result for " + raw, false, true
 	}
 	results := map[string]map[string]any{}
 	a.OnEvent = func(kind string, fields map[string]any) {

@@ -157,13 +157,14 @@ func run() int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	started := time.Now()
+	// MCP discovery counts against the wall-clock limit. Agent.Run applies
+	// the same limit again, and the earlier deadline set here wins.
 	if cfg.WallTimeSec > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(cfg.WallTimeSec)*time.Second)
 		defer cancel()
 	}
-	mcpRegistry, err := mcptools.Start(ctx, root, cfg.MCPServers, os.Stderr)
+	mcpRegistry, err := mcptools.Start(ctx, root, mcpServers(os.Stderr, cfg), os.Stderr)
 	if err != nil {
 		return fail(err)
 	}
@@ -202,19 +203,7 @@ func run() int {
 		SkipAgentsMD: o.noAgentsMD,
 		NoCompact:    o.noCompact,
 	}
-	events := newJSONEvents(os.Stdout, o.jsonOutput)
-	if o.jsonOutput {
-		events.emit("run.started", map[string]any{"schema_version": 1, "model": o.modelName, "root": root, "read_only": cfg.ReadOnly, "resumed": false})
-		a.OnEvent = func(kind string, fields map[string]any) {
-			events.emit(kind, fields)
-			if events.err != nil {
-				stop()
-			}
-		}
-		if cfg.CostLimit > 0 && model.Unpriced(o.modelName) {
-			events.emit("warning", map[string]any{"message": fmt.Sprintf("no pricing available for %s; --cost-limit cannot be enforced", o.modelName)})
-		}
-	}
+	events := startEvents(os.Stdout, o.jsonOutput, a, false, stop)
 	if events.err != nil {
 		return 1
 	}
@@ -230,29 +219,12 @@ func run() int {
 		}
 	}
 
-	if cfg.WallTimeSec > 0 {
-		remaining := time.Duration(cfg.WallTimeSec)*time.Second - time.Since(started)
-		if remaining <= 0 {
-			return fail(errors.New("wall-clock time limit expired during MCP discovery"))
-		}
-		cfg.WallTimeSec = int(remaining / time.Second)
-		if cfg.WallTimeSec == 0 {
-			cfg.WallTimeSec = 1
-		}
-		a.Config.WallTimeSec = cfg.WallTimeSec
-	}
-	runStart := time.Now()
+	start := time.Now()
 	t := a.Run(ctx, task)
-	elapsed := time.Since(runStart)
+	elapsed := time.Since(start)
 	reportSummary(os.Stderr, o.modelName, t, elapsed)
-	if o.jsonOutput {
-		if t.ExitStatus == agent.StatusError {
-			events.emit("error", map[string]any{"message": t.Submission})
-		}
-		events.emit("result", resultFields(t, elapsed))
-		if events.err != nil {
-			return 1
-		}
+	if events.finish(t, elapsed) != nil {
+		return 1
 	}
 	if t.ExitStatus == agent.StatusSubmitted || t.ExitStatus == agent.StatusCompleted {
 		return 0
@@ -289,8 +261,11 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if err != nil {
 		return fail(err)
 	}
-	if len(cfg.MCPServers) > 0 || src.MCPEnabled || len(src.ExternalTools) > 0 {
-		return fail(errors.New("resume: MCP-enabled runs cannot be resumed, and MCP configuration cannot be added to a built-in checkpoint; start a fresh task"))
+	if src.MCPEnabled || len(src.ExternalTools) > 0 {
+		return fail(errors.New("resume: MCP-enabled runs cannot be resumed; start a fresh task"))
+	}
+	if len(cfg.MCPServers) > 0 {
+		fmt.Fprintln(os.Stderr, "resume: configured MCP servers are not started; resumed runs use only the built-in tools")
 	}
 	applyFlagOverrides(fs, &cfg, o.stepLimit, o.costLimit, o.timeLimit)
 	if flagWasSet(fs, "read-only") && o.readOnly != src.ReadOnly {
@@ -374,19 +349,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		Resume:       src,
 		ResumeSource: o.resume,
 	}
-	events := newJSONEvents(os.Stdout, o.jsonOutput)
-	if o.jsonOutput {
-		events.emit("run.started", map[string]any{"schema_version": 1, "model": modelName, "root": root, "read_only": src.ReadOnly, "resumed": true})
-		a.OnEvent = func(kind string, fields map[string]any) {
-			events.emit(kind, fields)
-			if events.err != nil {
-				stop()
-			}
-		}
-		if cfg.CostLimit > 0 && model.Unpriced(modelName) {
-			events.emit("warning", map[string]any{"message": fmt.Sprintf("no pricing available for %s; --cost-limit cannot be enforced", modelName)})
-		}
-	}
+	events := startEvents(os.Stdout, o.jsonOutput, a, true, stop)
 	if events.err != nil {
 		return 1
 	}
@@ -405,18 +368,12 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	fmt.Fprintf(os.Stderr, "resuming %s from %s (previous status %s after %d steps)\n", modelName, o.resume, prevStatus, src.Steps)
 	fmt.Fprintln(os.Stderr, "note: inspect and revalidate the workspace; it may have changed and commands may have produced unrecorded side effects after the last save. Live processes are not restored")
 
-	started := time.Now()
+	start := time.Now()
 	t := a.Run(ctx, src.Task)
-	elapsed := time.Since(started)
+	elapsed := time.Since(start)
 	reportSummary(os.Stderr, modelName, t, elapsed)
-	if o.jsonOutput {
-		if t.ExitStatus == agent.StatusError {
-			events.emit("error", map[string]any{"message": t.Submission})
-		}
-		events.emit("result", resultFields(t, elapsed))
-		if events.err != nil {
-			return 1
-		}
+	if events.finish(t, elapsed) != nil {
+		return 1
 	}
 	if t.ExitStatus == agent.StatusSubmitted || t.ExitStatus == agent.StatusCompleted {
 		return 0
@@ -709,6 +666,47 @@ func (e *jsonEvents) emit(kind string, fields map[string]any) {
 		err = io.ErrShortWrite
 	}
 	e.err = err
+}
+
+// startEvents writes run.started (and the unpriced cost-limit warning) and
+// routes a's events to out. A failed write cancels the run through stop.
+// When disabled it returns a no-op stream.
+func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop func()) *jsonEvents {
+	events := newJSONEvents(out, enabled)
+	if !enabled {
+		return events
+	}
+	events.emit("run.started", map[string]any{"schema_version": 1, "model": a.ModelName, "root": a.Tools.Root, "read_only": a.Tools.ReadOnly, "resumed": resumed})
+	a.OnEvent = func(kind string, fields map[string]any) {
+		events.emit(kind, fields)
+		if events.err != nil {
+			stop()
+		}
+	}
+	if a.Config.CostLimit > 0 && model.Unpriced(a.ModelName) {
+		events.emit("warning", map[string]any{"message": fmt.Sprintf("no pricing available for %s; --cost-limit cannot be enforced", a.ModelName)})
+	}
+	return events
+}
+
+// finish writes the closing events for t and returns the first write error.
+func (e *jsonEvents) finish(t *trajectory.Trajectory, elapsed time.Duration) error {
+	if t.ExitStatus == agent.StatusError {
+		e.emit("error", map[string]any{"message": t.Submission})
+	}
+	e.emit("result", resultFields(t, elapsed))
+	return e.err
+}
+
+// mcpServers returns the MCP servers to start. Read-only runs start none:
+// a server is an arbitrary local executable, and its tools are never offered
+// there anyway.
+func mcpServers(w io.Writer, cfg config.AgentConfig) []config.MCPServer {
+	if cfg.ReadOnly && len(cfg.MCPServers) > 0 {
+		fmt.Fprintln(w, "read-only mode: configured MCP servers are not started")
+		return nil
+	}
+	return cfg.MCPServers
 }
 
 func runOutput(jsonMode bool) io.Writer {
