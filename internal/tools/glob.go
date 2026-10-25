@@ -15,6 +15,12 @@ const maxListEntries = 1000
 // recursively and returns matching files. A pattern without "/" matches base
 // names; a pattern with "/" matches paths relative to the listed directory.
 func ListFiles(root, path, pattern string) (string, error) {
+	return listFiles(root, path, pattern, "")
+}
+
+// listFiles is ListFiles that also skips the directory skip (an absolute
+// path; "" skips nothing extra) unless the walk starts inside it.
+func listFiles(root, path, pattern, skip string) (string, error) {
 	dir, err := Resolve(root, path)
 	if err != nil {
 		return "", err
@@ -45,7 +51,7 @@ func ListFiles(root, path, pattern string) (string, error) {
 			return nil // skip unreadable entries
 		}
 		if d.IsDir() {
-			if p != dir && skipDir(d.Name()) {
+			if p != dir && (skipDir(d.Name()) || p == skip) {
 				return filepath.SkipDir
 			}
 			return nil

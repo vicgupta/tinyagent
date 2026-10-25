@@ -8,6 +8,7 @@ import (
 
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/skills"
+	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
 )
 
@@ -151,11 +152,11 @@ func (a *Agent) retainedChars(t *trajectory.Trajectory, v *view) int {
 
 // execTool runs a permitted call. A skill call whose instructions are still
 // in context gets a short note instead of a second copy.
-func (a *Agent) execTool(ctx context.Context, t *trajectory.Trajectory, call model.ToolCall) (string, []model.Image, bool) {
+func (a *Agent) execTool(ctx context.Context, t *trajectory.Trajectory, call model.ToolCall) tools.Result {
 	if name, file, ok := skillCallArgs(call); ok && file == "" && a.Tools.Skills.Len() > 0 && a.view != nil && a.skillInContext(t, a.view, name) {
-		return fmt.Sprintf("skill %q is already loaded earlier in this conversation; follow those instructions (no second copy was added)", name), nil, false
+		return tools.Result{Text: fmt.Sprintf("skill %q is already loaded earlier in this conversation; follow those instructions (no second copy was added)", name)}
 	}
-	return a.Tools.RunWithImages(ctx, call)
+	return a.Tools.RunResult(ctx, call)
 }
 
 func (a *Agent) skillInContext(t *trajectory.Trajectory, v *view, name string) bool {

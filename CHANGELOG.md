@@ -17,6 +17,7 @@
 - Add opt-in image support (`--images`, `images.enabled`, `max_image_bytes`): a `view_image` tool and MCP image pass-through for Anthropic and Codex, with a text placeholder for Chat Completions providers.
 - Preserve Anthropic thinking blocks and Codex reasoning items across tool calls, and add a `reasoning_effort` config key and `--reasoning-effort` flag.
 - Add a Responses API transport to the `openai` provider so tool calls work with reasoning on current OpenAI models, with encrypted reasoning replay and cached-token pricing. The new `openai_api` config key and `--openai-api` flag choose `auto` (default), `responses`, or `chat`.
+- Add opt-in tool output files (`--tool-output-files`, `tool_output_files` config): tool results over `max_output_chars` are saved in full to a per-run file under `.tinyagent/tool-output`, and the model gets a bounded preview with a notice naming the path to page with `read_file` and `grep`. `tool.result` events, `post_tool` hook input, and trajectories record `output_file`; old runs are pruned by `tool_output_files.max_runs` (default 20).
 
 ### Fixes
 

@@ -61,8 +61,21 @@ type Executor struct {
 	// ApplyPatch offers the opt-in apply_patch tool (never in read-only
 	// mode).
 	ApplyPatch bool
+	// OutputFiles, when set, saves the full text of over-limit results to a
+	// per-run file and keeps that directory out of grep and list_files
+	// walks. nil keeps plain truncation.
+	OutputFiles *OutputFiles
 
 	procs registry
+}
+
+// outputSkip is the directory recursive walks skip: the saved-output
+// directory when OutputFiles is on.
+func (e *Executor) outputSkip() string {
+	if e.OutputFiles == nil {
+		return ""
+	}
+	return e.OutputFiles.Dir
 }
 
 // maxBashTimeoutSeconds caps the per-call bash timeout a model may request.
@@ -176,37 +189,59 @@ func (e *Executor) RunWithError(ctx context.Context, call model.ToolCall) (strin
 // RunWithImages is RunWithError plus any images the result carries (only
 // with Images on). The text already holds a placeholder for each image.
 func (e *Executor) RunWithImages(ctx context.Context, call model.ToolCall) (string, []model.Image, bool) {
+	r := e.RunResult(ctx, call)
+	return r.Text, r.Images, r.IsError
+}
+
+// Result is one tool call's outcome for the model.
+type Result struct {
+	Text    string
+	Images  []model.Image
+	IsError bool
+	// OutputFile is the saved full output (relative to Root, slash
+	// separated) when OutputFiles is on and the text was over the limit.
+	OutputFile  string
+	OutputBytes int
+	// Notice is the line ending Text that points at the saved file (or, for
+	// read_file, at the rest of the file); empty when none was added.
+	Notice string
+}
+
+// RunResult is RunWithImages plus where an over-limit result was saved.
+func (e *Executor) RunResult(ctx context.Context, call model.ToolCall) Result {
 	if e.Images && !e.ReadOnly && e.ExternalCallImages != nil {
 		if out, images, isErr, ok := e.ExternalCallImages(ctx, call.Function.Name, call.Function.Arguments); ok {
-			return truncate(out, e.MaxOutputChars), images, isErr
+			r := e.limit(call, out, isErr)
+			r.Images = images
+			return r
 		}
 	}
 	if e.Images && call.Function.Name == ViewImageToolName {
 		var a args
 		if strings.TrimSpace(call.Function.Arguments) != "" {
 			if err := json.Unmarshal([]byte(call.Function.Arguments), &a); err != nil {
-				return "error: invalid arguments JSON: " + err.Error(), nil, true
+				return Result{Text: "error: invalid arguments JSON: " + err.Error(), IsError: true}
 			}
 		}
 		out, im, err := ViewImage(e.Root, a.Path, e.MaxImageBytes)
 		if err != nil {
-			return truncate("error: "+err.Error(), e.MaxOutputChars), nil, true
+			return Result{Text: truncate("error: "+err.Error(), e.MaxOutputChars), IsError: true}
 		}
-		return out, []model.Image{*im}, false
+		return Result{Text: out, Images: []model.Image{*im}}
 	}
 	// External tools are never dispatched in read-only mode: the check in
 	// run() below then rejects them with the read-only error, matching
 	// Catalog(), which also excludes them there.
 	if !e.ReadOnly && e.ExternalCall != nil {
 		if out, isErr, ok := e.ExternalCall(ctx, call.Function.Name, call.Function.Arguments); ok {
-			return truncate(out, e.MaxOutputChars), nil, isErr
+			return e.limit(call, out, isErr)
 		}
 	}
 	out, err := e.run(ctx, call.Function.Name, call.Function.Arguments)
 	if err != nil {
 		out = "error: " + err.Error()
 	}
-	return truncate(out, e.MaxOutputChars), nil, err != nil
+	return e.limit(call, out, err != nil)
 }
 
 // Catalog returns the fixed built-in and explicitly configured external tools.
@@ -325,7 +360,7 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 		}
 		return ApplyPatch(e.Root, a.Input)
 	case "list_files":
-		return ListFiles(e.Root, a.Path, a.Pattern)
+		return listFiles(e.Root, a.Path, a.Pattern, e.outputSkip())
 	case "grep":
 		contextLines, err := contextLinesArg(a.ContextLines)
 		if err != nil {
@@ -342,7 +377,7 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return GrepWithContext(e.Root, a.Pattern, a.Path, a.Include, ignoreCase, fixedStrings, contextLines)
+		return grepWithContext(e.Root, a.Pattern, a.Path, a.Include, ignoreCase, fixedStrings, contextLines, e.outputSkip())
 	case "bash":
 		secs, err := intArg("timeout", a.Timeout)
 		if err != nil {

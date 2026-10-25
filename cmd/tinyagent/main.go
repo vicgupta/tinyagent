@@ -47,6 +47,7 @@ type options struct {
 	plan                                             bool
 	images                                           bool
 	applyPatch                                       bool
+	toolOutputFiles                                  bool
 	skills, noSkills                                 bool
 	reasoningEffort                                  string
 	openaiAPI                                        string
@@ -94,6 +95,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.sandbox, "sandbox", false, "confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths")
 	fs.BoolVar(&o.sandboxNetwork, "sandbox-network", false, "with --sandbox, allow commands to use the network")
 	fs.BoolVar(&o.plan, "plan", false, "enable the update_plan tool: a task plan saved in the checkpoint and pinned in every request (default off; config plan.enabled)")
+	fs.BoolVar(&o.toolOutputFiles, "tool-output-files", false, "save the full text of over-limit tool results under .tinyagent/tool-output so the model can page it with read_file and grep (default off; config tool_output_files.enabled)")
 	fs.BoolVar(&o.applyPatch, "apply-patch", false, "add the apply_patch tool: multi-file, multi-hunk edits in the *** Begin Patch format, checked before any write (default off; config apply_patch)")
 	fs.BoolVar(&o.images, "images", false, "let vision-capable models see images: the view_image tool and MCP image pass-through (default off; config images.enabled)")
 	fs.BoolVar(&o.skills, "skills", false, "discover Agent Skills in .agents/skills (project, up to the repo root, and ~/.agents/skills) and add the skill tool (default off; config skills)")
@@ -265,6 +267,10 @@ func run() int {
 	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
 		return fail(fmt.Errorf("--cwd %s is not a directory", o.cwd))
 	}
+	outputFiles, err := toolOutputFiles(fs, o, cfg, root)
+	if err != nil {
+		return fail(err)
+	}
 	if cfg.ReadOnly {
 		fmt.Fprintln(os.Stderr, "read-only mode: only read_file, list_files, and grep are available")
 	}
@@ -329,6 +335,7 @@ func run() int {
 			Plan:               cfg.Plan.Enabled,
 			Images:             cfg.Images.Enabled,
 			ApplyPatch:         cfg.ApplyPatch,
+			OutputFiles:        outputFiles,
 			MaxImageBytes:      cfg.MaxImageBytes,
 			ExternalCallImages: mcpRegistry.CallImages(cfg.MaxImageBytes),
 		},
@@ -354,6 +361,7 @@ func run() int {
 	if dbErr != nil {
 		warn(dbErr.Error())
 	}
+	startOutputFiles(outputFiles, cfg.ToolOutputFiles.MaxRuns, warn)
 	if cfg.Skills {
 		loadSkills(a, root, warn)
 	}
@@ -541,6 +549,10 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if root != src.Root {
 		return fail(fmt.Errorf("resume: --cwd %s does not match the checkpoint's root %s", root, src.Root))
 	}
+	outputFiles, err := toolOutputFiles(fs, *o, cfg, root)
+	if err != nil {
+		return fail(err)
+	}
 
 	if o.output == "" {
 		return fail(errors.New("resume: --output is required to write the continued trajectory"))
@@ -636,6 +648,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 			Plan:           src.PlanEnabled,
 			Images:         src.ImagesEnabled,
 			ApplyPatch:     src.ApplyPatchEnabled,
+			OutputFiles:    outputFiles,
 			MaxImageBytes:  cfg.MaxImageBytes,
 		},
 		Config:       cfg,
@@ -662,6 +675,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if dbErr != nil {
 		warn(dbErr.Error())
 	}
+	startOutputFiles(outputFiles, cfg.ToolOutputFiles.MaxRuns, warn)
 	if src.SkillsEnabled {
 		loadSkills(a, root, warn)
 	}
@@ -1207,6 +1221,36 @@ func (p *optionalPath) Set(v string) error {
 }
 
 const defaultLogDB = ".tinyagent/tinyagent.db"
+
+// toolOutputFiles returns the store for over-limit tool output, or nil when
+// the feature is off. --tool-output-files overrides tool_output_files.enabled.
+// The directory is checked even when the feature is off, so a bad setting
+// fails at startup rather than when it is first turned on.
+func toolOutputFiles(fs *flag.FlagSet, o options, cfg config.AgentConfig, root string) (*tools.OutputFiles, error) {
+	on := cfg.ToolOutputFiles.Enabled
+	if flagWasSet(fs, "tool-output-files") {
+		on = o.toolOutputFiles
+	}
+	if _, err := tools.ResolveOutputDir(root, cfg.ToolOutputFiles.Dir); err != nil {
+		return nil, err
+	}
+	if !on {
+		return nil, nil
+	}
+	return tools.NewOutputFiles(root, cfg.ToolOutputFiles.Dir, time.Now())
+}
+
+// startOutputFiles routes save failures to warn and prunes old run
+// directories before the run saves anything.
+func startOutputFiles(o *tools.OutputFiles, maxRuns int, warn func(string)) {
+	if o == nil {
+		return
+	}
+	o.Warn = warn
+	if err := o.Prune(maxRuns); err != nil {
+		warn("tool_output_files: pruning old runs: " + err.Error())
+	}
+}
 
 // logDBPath returns whether the SQLite log is on and its file. --log-db
 // overrides config log_db.enabled; a --log-db path is relative to the shell,

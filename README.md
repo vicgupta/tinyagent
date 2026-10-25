@@ -93,6 +93,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--no-compact` | off | Never compact the history; see [Long runs](#long-runs) |
 | `--plan` | config `plan.enabled`, else off | Give the model the `update_plan` tool; see [Plan tool](#plan-tool) |
 | `--apply-patch` | config `apply_patch`, else off | Give the model the `apply_patch` tool for multi-file, multi-hunk edits, checked before any write; `--apply-patch=false` disables it. See [apply_patch](#apply_patch) |
+| `--tool-output-files` | config `tool_output_files.enabled`, else off | Save the full text of tool results over `max_output_chars` to a per-run file the model can page with `read_file` and `grep`; `--tool-output-files=false` disables it. See [Tool output files](#tool-output-files) |
 | `--images` | config `images.enabled`, else off | Let vision-capable models see images: the `view_image` tool and MCP image pass-through; see [Images](#images) |
 | `--plan-file` | — | Mirror the current plan to this Markdown file after each checkpoint save (requires the plan tool) |
 | `--skills` | config `skills`, else off | Discover [Agent Skills](#agent-skills) and offer the `skill` tool |
@@ -123,7 +124,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 | `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `reasoning_effort` (only when set), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy) |
 | `assistant.message` | `text` (complete assistant message) |
 | `tool.call` | `id`, `name`, `arguments` (decoded JSON value, or a string if malformed) |
-| `tool.result` | `id`, `name`, `output` (same configured truncation as tool output), `is_error` |
+| `tool.result` | `id`, `name`, `output` (same configured truncation as tool output), `is_error`; with [tool output files](#tool-output-files), a saved result also has `output_file` (path relative to `--cwd`) and `output_bytes` |
 | `hook` | `event` (`pre_tool`, `post_tool`, or `stop`), `tool_call_id`, `tool_name`, `command`, `decision` (`allow`, `deny`, `feedback`, `continue`, or `error`), `duration_ms`; tool hooks are emitted between the call's `tool.call` and `tool.result`, and `stop` events have no tool fields |
 | `plan.updated` | `step`, `version`, `items` (`id`, `text`, `status`), `note`, `diff` |
 | `checkpoint.saved` | `step`, `path`, `pending` (tool calls without results yet) |
@@ -293,6 +294,10 @@ apply_patch: false        # offer the apply_patch tool (same as --apply-patch)
 images:
   enabled: false          # view_image tool and MCP image pass-through (same as --images)
 max_image_bytes: 5242880  # largest image sent to the model (5 MiB); must be >= 1
+tool_output_files:        # save over-limit tool output; see Tool output files
+  enabled: false          # same as --tool-output-files
+  dir: .tinyagent/tool-output   # relative to --cwd; must stay inside it
+  max_runs: 20            # keep this many earlier run directories; 0 keeps all
 log_db:                   # opt-in SQLite event log; see Event log database
   enabled: false
   path: .tinyagent/tinyagent.db   # relative to --cwd
@@ -375,7 +380,7 @@ MCP tool calls and results are stored in trajectories along with the external to
 
 Hooks are disabled unless `hooks` is configured. A `pre_tool` hook runs before a matching tool call and can deny it with a reason the model sees; a `post_tool` hook runs after it and can append feedback, such as formatter or linter output, to the result the model sees. Like MCP servers, hooks are trusted local executables running with your privileges: they are read only from the user config or the `-c` file, never from the repository, launched directly (no shell) with an absolute `command`, `--cwd` as the working directory, and the same minimal environment (`PATH`, the Windows process variables when present, and only the named `env` variables, which must be set at startup). Provider API keys are not passed unless named. Hooks are a guardrail and automation point, not a sandbox: they see a call's parsed arguments, not what a shell command actually does.
 
-Each hook gets one JSON object on stdin: `schema_version` (`1`), `event` (`pre_tool` or `post_tool`), `tool_name`, `tool_call_id`, `arguments` (decoded JSON, or the raw string if malformed), canonical `root`, `read_only`, and `step`; `post_tool` also gets `output` (the model-visible result after normal truncation) and `is_error`. The input can contain secrets from tool arguments and output.
+Each hook gets one JSON object on stdin: `schema_version` (`1`), `event` (`pre_tool` or `post_tool`), `tool_name`, `tool_call_id`, `arguments` (decoded JSON, or the raw string if malformed), canonical `root`, `read_only`, and `step`; `post_tool` also gets `output` (the model-visible result after normal truncation) and `is_error`, plus `output_file` when [tool output files](#tool-output-files) saved the full result. The input can contain secrets from tool arguments and output.
 
 | Event | Exit 0 | Exit 2 | Other exit, failure to start, timeout, or invalid stdout JSON |
 |---|---|---|---|
@@ -434,6 +439,25 @@ Per provider: `anthropic` sends images as image blocks inside the tool result, a
 Image data never appears in text channels: the model's tool-result text, `--json` events, verbose output, hook input, and the event log see a placeholder like `[image: image/png, 48,213 bytes, sha256:1a2b3c4d5e6f]`. Privacy: the image bytes are sent to the model provider and stored base64 in the trajectory/checkpoint file, so treat those files like the images themselves. For compaction each image counts as about 1,600 tokens, and old images are elided (`[image elided: <path>, N bytes]`) like old tool output; the summarizer never sees image data.
 
 A checkpoint records whether images were enabled, and `--resume` keeps that setting: passing `--images` to resume a run that started without it (or the reverse) is an error, and the config's `images.enabled` is ignored on resume.
+
+### Tool output files
+
+Tool results longer than `max_output_chars` are cut to a head and tail with a `... [N characters elided] ...` marker, and the middle is lost. `--tool-output-files` (or `tool_output_files.enabled: true`) keeps it: the full result text is saved to a file and the model-visible result becomes a shorter head/tail preview ending in one notice, for example:
+
+```
+[full output: 184,213 bytes, 2,941 lines, saved to .tinyagent/tool-output/20261025T140307.123Z-a1b2c3/call_abc.txt; use read_file with offset/limit or grep on that path]
+```
+
+The preview plus the notice never exceeds `max_output_chars`, and it is cut on UTF-8 boundaries. The model can then `read_file` the path with `offset`/`limit` or `grep` it. It is off by default; with it off, results, events, and checkpoints are unchanged and no directory is created.
+
+- **What is saved:** the exact full text the tool returned (for `bash`, including the `<returncode>`/`<output>` wrapper, so the command's line N is line N+2 of the file), for built-in tools, allowed MCP tools (whose results are already capped at 256 KiB), and error results. Results within the limit are never saved. `read_file` results are not copied, since the file is already on disk: a truncated `read_file` result ends with `[file has N lines; output was truncated, use read_file on <path> with offset/limit to read the rest]` instead. `grep` and `list_files` calls on the output directory itself are not saved again.
+- **Where:** one directory per run, `<dir>/<run id>/<tool call id>.txt`, where `dir` is `tool_output_files.dir` (default `.tinyagent/tool-output`, relative to `--cwd`) and the run id is a UTC timestamp plus a random suffix (`20261025T140307.123Z-a1b2c3`). `dir` must be inside `--cwd` and not `--cwd` itself; otherwise startup fails before any model request with an error naming `tool_output_files.dir`. The run directory is created (mode 0700) on the first save, and each file is written atomically with mode 0600. Files are written in `--read-only` mode too, since they are tinyagent's own output, not a workspace edit.
+- **Exclusions:** recursive `grep` and `list_files` walks skip the output directory, so saved copies never show up as duplicate matches; a `grep` or `list_files` whose `path` is inside the directory searches it normally. `bash` commands are not filtered.
+- **Retention:** at run start, the oldest run directories are deleted so at most `tool_output_files.max_runs` (default 20; 0 keeps all) earlier runs remain. Only directories named like run ids are touched.
+- **Errors:** if a file can't be written (for example, `.tinyagent` is not a writable directory), the result falls back to the normal truncation, stderr gets one warning for the run (also a `warning` event with `--json`), and the run continues.
+- **Recording:** with `--json`, a saved result's `tool.result` event adds `output_file` and `output_bytes`; `post_tool` hooks get `output_file`; with `-o`, the trajectory lists `tool_output_files` entries (`tool_call_id`, `output_file`, `output_bytes`). The event log stores the path and size as metadata. The setting is not pinned in checkpoints: `--resume` can turn it on or off.
+
+Privacy: saved files can contain anything a command printed, including secrets, just like trajectories and the event log. Add `.tinyagent/` to your `.gitignore`.
 
 ### apply_patch
 
@@ -585,7 +609,7 @@ Before the first model request tinyagent runs `<runtime> run -d --rm --init --la
 
 ## Notes
 
-- `read_file` takes optional `offset` (1-based start line) and `limit` (max lines) to read part of a large file. A partial read ends with `[lines A-B of N]`; with neither set, it returns the whole file as before. Binary files are rejected; use `bash` (for example, `file` or `xxd | head`) to inspect them.
+- `read_file` takes optional `offset` (1-based start line) and `limit` (max lines) to read part of a large file. A partial read ends with `[lines A-B of N]`; with neither set, it returns the whole file as before. With `--tool-output-files`, over-limit tool results are saved to files the model reads this way; see [Tool output files](#tool-output-files). Binary files are rejected; use `bash` (for example, `file` or `xxd | head`) to inspect them.
 - `edit_file` replaces exactly one occurrence of `old_str` and fails if it occurs zero or several times. Pass `replace_all: true` to replace every occurrence (for a rename); it still fails if there are none, and returns `ok (N replacements)`.
 - `grep` uses Go regular expressions by default. Set `fixed_strings: true` for literal text, e.g. `{"pattern":"func(","path":".","include":"*.go","fixed_strings":true}` finds literal `func(` in Go files without regex escaping.
 - `grep` accepts `ignore_case: true` for case-insensitive content searches, e.g. `{"pattern":"error","path":".","include":"*.log","ignore_case":true}` matches `error`, `Error`, and `ERROR` in `.log` files. The default is case-sensitive; inline regex flags such as `(?i)` still work. The `include` glob stays case-sensitive.
