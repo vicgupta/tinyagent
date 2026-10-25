@@ -39,6 +39,8 @@ func Hint(spec, errMsg string) string {
 			return fmt.Sprintf("%s was rejected by %s; check that it's current and has access to %s", env, provider, name)
 		case status == 404:
 			return fmt.Sprintf("%s has no model %q; check the name after %s/", provider, name, provider)
+		case provider == "openai" && status == 400 && needsResponsesAPI(errMsg):
+			return fmt.Sprintf("%s needs OpenAI's Responses API for this request; set openai_api: responses in tinyagent.yaml (or pass --openai-api responses)", name)
 		}
 	case "ollama":
 		switch {
@@ -56,4 +58,15 @@ func Hint(spec, errMsg string) string {
 		}
 	}
 	return ""
+}
+
+// needsResponsesAPI reports whether a Chat Completions error says the request
+// needs the Responses API, as OpenAI's reply to tools combined with reasoning
+// on newer models does.
+func needsResponsesAPI(errMsg string) bool {
+	m := strings.ToLower(errMsg)
+	if strings.Contains(m, "responses api") || strings.Contains(m, "/v1/responses") {
+		return true
+	}
+	return strings.Contains(m, "reasoning_effort") && (strings.Contains(m, "tool") || strings.Contains(m, "function"))
 }

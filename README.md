@@ -82,6 +82,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--resume` | — | Continue a validated unfinished trajectory; requires explicit matching `--cwd` and a new `-o` path |
 | `-m, --model` | `$AGENT_MODEL`, else config `model`, else `openai/gpt-4o` | `<provider>/<model>`; no `/` means openai. Providers: openai, openrouter, anthropic, ollama, codex |
 | `--reasoning-effort` | config `reasoning_effort`, else unset | Reasoning effort sent to the provider: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; see [Reasoning](#reasoning) |
+| `--openai-api` | config `openai_api`, else `auto` | Transport for the `openai` provider: `auto`, `responses`, or `chat`; see [OpenAI transport](#openai-transport) |
 | `-c, --config` | user config, else built-in | YAML config file; see [Config](#config) |
 | `--cwd` | `.` | Root directory; tools can't reach outside it |
 | `--step-limit` | 0 (unlimited) | Max model calls |
@@ -115,7 +116,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 
 | Type | Fields |
 |---|---|
-| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `reasoning_effort` (only when set) |
+| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `reasoning_effort` (only when set), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider) |
 | `assistant.message` | `text` (complete assistant message) |
 | `tool.call` | `id`, `name`, `arguments` (decoded JSON value, or a string if malformed) |
 | `tool.result` | `id`, `name`, `output` (same configured truncation as tool output), `is_error` |
@@ -265,6 +266,7 @@ log_db:                   # opt-in SQLite event log; see Event log database
   max_runs: 500           # keep at most this many runs; 0 keeps all
   max_payload_bytes: 65536
 reasoning_effort: medium  # optional; see Reasoning; --reasoning-effort wins
+openai_api: auto          # openai provider transport: auto, responses, or chat; --openai-api wins
 mcp_servers:                 # omitted by default; each entry runs a trusted local executable
   - alias: docs
     command: /usr/local/bin/team-docs-mcp
@@ -287,6 +289,20 @@ hooks:                       # omitted by default; see Tool hooks below
       timeout_seconds: 60
 ```
 
+### OpenAI transport
+
+The `openai` provider talks to OpenAI over the Responses API (`POST /v1/responses`) or Chat Completions (`POST /v1/chat/completions`). `openai_api` (config) or `--openai-api` (flag, which wins) picks one:
+
+| Value | Transport |
+|---|---|
+| `auto` (default) | Responses when `OPENAI_BASE_URL` is unset or is `https://api.openai.com/v1` (a trailing `/` is ignored); Chat Completions for any other base URL, so OpenAI-compatible servers keep working |
+| `responses` | Always the Responses API, at `OPENAI_BASE_URL` if set |
+| `chat` | Always Chat Completions, as before this setting existed |
+
+Newer OpenAI models only support tool calls together with reasoning on the Responses API. On Responses, tinyagent sends `store: false` (nothing is kept server-side), a `prompt_cache_key` stable for the run, flat function tools, and `reasoning: {effort}` when an effort is set. Reasoning items that come back with `encrypted_content` are kept in the assistant message (and the trajectory) and sent back before that turn's tool calls, so the model keeps its reasoning across tool calls. Cached input tokens (`input_tokens_details.cached_tokens`) are billed at the cache-read price. Streaming, `--no-stream`, retries, compaction, `--output-schema`, and `--resume` work the same on either transport.
+
+The setting only applies to the `openai` provider; `openrouter`, `ollama`, and the others ignore it. An unknown value exits 2 before any request, and `-v` prints the resolved transport. The resolved transport is recorded as `openai_api` in trajectories and in `run.started`, and `--resume` keeps it, since reasoning items only replay on the transport that produced them (a different `--openai-api` is refused, like `--model`); a checkpoint from before this setting resolves like a new run. If a Chat Completions request fails with a 400 that asks for the Responses API, tinyagent suggests `openai_api: responses`.
+
 ### Reasoning
 
 Reasoning models return state that must be sent back during tool use. tinyagent keeps it for the run and replays it unchanged:
@@ -299,14 +315,14 @@ Reasoning models return state that must be sent back during tool use. tinyagent 
 | Provider | Request field |
 |---|---|
 | `codex` | `reasoning.effort` |
-| `openai` | `reasoning_effort` |
+| `openai` | `reasoning.effort` on the Responses API; `reasoning_effort` on Chat Completions (see [OpenAI transport](#openai-transport)) |
 | `openrouter` | `reasoning.effort` |
 | `anthropic` | `output_config.effort` (thinking is not turned on explicitly) |
 | `ollama` | not supported; exits 2 |
 
 An unknown value exits 2 before any request. Which values a model accepts varies; a provider rejection is reported like any other model error and is not retried. The effort is recorded as `reasoning_effort` in trajectories and is kept on `--resume` (a different `--reasoning-effort` is refused, like `--model`). Higher effort means more output tokens, which providers bill and which count toward `--cost-limit`; on Anthropic, thinking also counts toward the request's 8192 `max_tokens`. Changing the effort invalidates provider prompt caches.
 
-Reasoning state is stored in each assistant message's `extra` (`anthropic_content`, `codex_reasoning`) in trajectories and checkpoints, so `--resume` replays it. It may include thinking text and encrypted reasoning blobs; treat trajectory files as private. Reasoning state is not shown in the terminal or in `--json` events.
+Reasoning state is stored in each assistant message's `extra` (`anthropic_content`, and `codex_reasoning` for Responses API reasoning items from both `codex` and `openai`) in trajectories and checkpoints, so `--resume` replays it. It may include thinking text and encrypted reasoning blobs; treat trajectory files as private. Reasoning state is not shown in the terminal or in `--json` events.
 
 ### Local MCP tools
 

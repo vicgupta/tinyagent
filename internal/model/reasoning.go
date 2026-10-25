@@ -13,7 +13,9 @@ const (
 	// response that contained thinking, in order, for verbatim replay.
 	ExtraAnthropicContent = "anthropic_content"
 	// ExtraCodexReasoning holds the Responses API reasoning output items
-	// (with encrypted_content), in order, for replay before the message.
+	// (with encrypted_content), in order, for replay before the message. Both
+	// codex and the openai Responses transport use it; the name predates the
+	// latter and is kept so existing trajectories still replay.
 	ExtraCodexReasoning = "codex_reasoning"
 )
 
@@ -45,6 +47,8 @@ func SetReasoningEffort(m Model, spec, effort string) error {
 	case *Anthropic:
 		p.ReasoningEffort = effort
 	case *Codex:
+		p.ReasoningEffort = effort
+	case *OpenAIResponses:
 		p.ReasoningEffort = effort
 	case *OpenAI:
 		switch provider {

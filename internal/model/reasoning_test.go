@@ -207,6 +207,7 @@ func TestReasoningEffortRequests(t *testing.T) {
 			rec := &recorder{replies: []string{c.reply}}
 			url := rec.server(t).URL
 			t.Setenv("OPENAI_API_KEY", "k")
+			t.Setenv("OPENAI_BASE_URL", url) // a custom base URL keeps Chat Completions
 			t.Setenv("ANTHROPIC_API_KEY", "k")
 			auth := writeCodexAuth(t, fakeJWT(map[string]any{"exp": time.Now().Add(time.Hour).Unix()}))
 			t.Setenv("CODEX_HOME", filepath.Dir(auth))

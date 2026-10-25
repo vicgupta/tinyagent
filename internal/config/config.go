@@ -61,6 +61,12 @@ type AgentConfig struct {
 	// model's default applies.
 	ReasoningEffort string `yaml:"reasoning_effort"`
 
+	// OpenAIAPI picks the openai provider's transport: auto (the default;
+	// the Responses API for api.openai.com, Chat Completions when
+	// OPENAI_BASE_URL points elsewhere), responses, or chat. Other providers
+	// ignore it.
+	OpenAIAPI string `yaml:"openai_api"`
+
 	MCPServers []MCPServer `yaml:"mcp_servers,omitempty"`
 
 	// Hooks are trusted local executables run around matching tool calls.

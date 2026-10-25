@@ -185,40 +185,6 @@ func (c *Codex) saveAuth(a *codexAuth) error {
 	return os.Rename(tmp.Name(), c.AuthFile)
 }
 
-// codexEvent covers the Responses API stream events we read.
-type codexEvent struct {
-	Type  string `json:"type"`
-	Delta string `json:"delta"`
-	Item  struct {
-		Type             string `json:"type"`
-		EncryptedContent string `json:"encrypted_content"`
-		CallID           string `json:"call_id"`
-		Name             string `json:"name"`
-		Arguments        string `json:"arguments"`
-		Content          []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	} `json:"item"`
-	Response struct {
-		Status string `json:"status"`
-		Usage  struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
-		} `json:"usage"`
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
-		IncompleteDetails *struct {
-			Reason string `json:"reason"`
-		} `json:"incomplete_details"`
-	} `json:"response"`
-	Message string `json:"message"`
-	Error   *struct {
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
 func (c *Codex) Query(ctx context.Context, messages []Message, tools []ToolSpec) (Message, Cost, error) {
 	a, err := c.loadAuth() // reread: the Codex CLI may have refreshed it
 	if err != nil {
@@ -234,21 +200,11 @@ func (c *Codex) Query(ctx context.Context, messages []Message, tools []ToolSpec)
 	}
 
 	instructions, input := toResponses(messages)
-	wireTools := make([]map[string]any, len(tools))
-	for i, t := range tools {
-		wireTools[i] = map[string]any{
-			"type":        "function",
-			"name":        t.Function.Name,
-			"description": t.Function.Description,
-			"parameters":  t.Function.Parameters,
-			"strict":      false,
-		}
-	}
 	body := map[string]any{
 		"model":            c.Model,
 		"instructions":     instructions,
 		"input":            input,
-		"tools":            wireTools,
+		"tools":            responsesTools(tools),
 		"tool_choice":      "auto",
 		"store":            false,
 		"stream":           true, // the Codex backend only streams
@@ -272,91 +228,15 @@ func (c *Codex) Query(ctx context.Context, messages []Message, tools []ToolSpec)
 	}
 	defer resp.Body.Close()
 
-	var (
-		msg   = Message{Role: "assistant"}
-		text  strings.Builder
-		cost  Cost
-		done  bool
-		state string
-		// reasoning items, kept only when they carry encrypted_content:
-		// with store=false an item without it cannot be sent back.
-		reasoning []json.RawMessage
-	)
-	err = readSSE(resp.Body, func(_, data string) error {
-		var ev codexEvent
-		if err := json.Unmarshal([]byte(data), &ev); err != nil {
-			return fmt.Errorf("decode stream event: %w", err)
-		}
-		switch ev.Type {
-		case "response.output_text.delta":
-			if c.OnText != nil {
-				c.OnText(ev.Delta)
-			}
-		case "response.output_item.done":
-			switch ev.Item.Type {
-			case "message":
-				for _, p := range ev.Item.Content {
-					if p.Type == "output_text" {
-						text.WriteString(p.Text)
-					}
-				}
-			case "reasoning":
-				if ev.Item.EncryptedContent != "" {
-					var raw struct {
-						Item json.RawMessage `json:"item"`
-					}
-					if json.Unmarshal([]byte(data), &raw) == nil {
-						reasoning = append(reasoning, raw.Item)
-					}
-				}
-			case "function_call":
-				msg.ToolCalls = append(msg.ToolCalls, ToolCall{
-					ID:       ev.Item.CallID,
-					Type:     "function",
-					Function: FunctionCall{Name: ev.Item.Name, Arguments: ev.Item.Arguments},
-				})
-			}
-		case "response.completed", "response.incomplete":
-			done = true
-			state = ev.Response.Status
-			if d := ev.Response.IncompleteDetails; d != nil && d.Reason != "" {
-				state = "incomplete: " + d.Reason
-			}
-			// Subscription usage isn't billed per token.
-			cost = Cost{InputTokens: ev.Response.Usage.InputTokens, OutputTokens: ev.Response.Usage.OutputTokens}
-		case "response.failed":
-			if e := ev.Response.Error; e != nil {
-				return fmt.Errorf("codex: %s", e.Message)
-			}
-			return fmt.Errorf("codex: response failed")
-		case "error":
-			if ev.Error != nil {
-				return fmt.Errorf("codex: %s", ev.Error.Message)
-			}
-			return fmt.Errorf("codex: %s", ev.Message)
-		}
-		return nil
-	})
+	msg, usage, err := readResponsesStream(resp.Body, c.OnText, "codex")
 	if err != nil {
 		if ctx.Err() != nil {
 			err = ctx.Err()
 		}
 		return Message{}, Cost{}, err
 	}
-	if !done {
-		return Message{}, Cost{}, fmt.Errorf("codex: stream ended before the response completed")
-	}
-	msg.Content = text.String()
-	if state != "" {
-		msg.Extra = map[string]any{"status": state}
-	}
-	if len(reasoning) > 0 {
-		if msg.Extra == nil {
-			msg.Extra = map[string]any{}
-		}
-		msg.Extra[ExtraCodexReasoning] = reasoning
-	}
-	return msg, cost, nil
+	// Subscription usage isn't billed per token.
+	return msg, Cost{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens}, nil
 }
 
 func (c *Codex) headers(a *codexAuth) map[string]string {
