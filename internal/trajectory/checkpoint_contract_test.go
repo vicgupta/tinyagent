@@ -41,7 +41,7 @@ func TestCheckpointValidationContract(t *testing.T) {
 	}{
 		{"valid repeated IDs", func(*Trajectory) {}, ""},
 		{"legacy", func(c *Trajectory) { c.SchemaVersion = 0 }, "metadata"},
-		{"version", func(c *Trajectory) { c.SchemaVersion++ }, "version"},
+		{"version", func(c *Trajectory) { c.SchemaVersion = 99 }, "version"},
 		{"mode", func(c *Trajectory) { c.SystemPrompt = "" }, "metadata"},
 		{"completed", func(c *Trajectory) { c.ExitStatus = "Completed" }, "finished"},
 		{"submitted", func(c *Trajectory) { c.ExitStatus = "Submitted" }, "finished"},
@@ -72,7 +72,7 @@ func TestCheckpointValidationContract(t *testing.T) {
 		{"extra instruction", func(c *Trajectory) {
 			c.Messages = append(c.Messages, model.Message{Role: "user", Content: ContinuationNotice})
 		}, "history"},
-		{"compacted", func(c *Trajectory) { c.Compactions = []Compaction{{Step: 1}} }, "compacted"},
+		{"bad compaction", func(c *Trajectory) { c.Compactions = []Compaction{{Step: 1}} }, "compaction"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

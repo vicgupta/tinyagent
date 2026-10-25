@@ -81,8 +81,9 @@ func TestRunSubmits(t *testing.T) {
 	if tr.InputTokens != 200 || tr.OutputTokens != 40 {
 		t.Errorf("tokens = %d in / %d out, want 200 / 40", tr.InputTokens, tr.OutputTokens)
 	}
-	if saves != 2 {
-		t.Errorf("saved %d times, want 2", saves)
+	// Write-ahead before the tool, after its result, and at termination.
+	if saves != 3 {
+		t.Errorf("saved %d times, want 3", saves)
 	}
 	if _, err := os.Stat(out); err != nil {
 		t.Error(err)

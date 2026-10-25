@@ -88,6 +88,8 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--time-limit` | 0 (unlimited) | Max wall-clock seconds; overrides `wall_time_seconds` |
 | `--max-format-errors` | config `max_format_errors`, else 3 | Stop with `RepeatedFormatError` after this many consecutive steps whose tool calls are all malformed; must be >= 1. See [Malformed tool calls](#malformed-tool-calls) |
 | `--no-compact` | off | Never compact the history; see [Long runs](#long-runs) |
+| `--plan` | config `plan.enabled`, else off | Give the model the `update_plan` tool; see [Plan tool](#plan-tool) |
+| `--plan-file` | — | Mirror the current plan to this Markdown file after each checkpoint save (requires the plan tool) |
 | `--read-only` | config `read_only`, else off | Permit only `read_file`, `list_files`, and `grep`; blocks edits, shell, and process tools. `--read-only=false` explicitly disables it. |
 | `--sandbox` | config `sandbox`, else off | Confine `bash`/`start_process` at the OS level: writes only under `--cwd`, a temp dir and `sandbox_writable_paths`, network off. See [Sandboxing commands](#sandboxing-commands) |
 | `--sandbox-network` | config `sandbox_network`, else off | With `--sandbox`, allow network access |
@@ -113,6 +115,10 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 | `tool.call` | `id`, `name`, `arguments` (decoded JSON value, or a string if malformed) |
 | `tool.result` | `id`, `name`, `output` (same configured truncation as tool output), `is_error` |
 | `hook` | `event` (`pre_tool` or `post_tool`), `tool_call_id`, `tool_name`, `command`, `decision` (`allow`, `deny`, `feedback`, or `error`), `duration_ms`; emitted between the call's `tool.call` and `tool.result` |
+| `plan.updated` | `step`, `version`, `items` (`id`, `text`, `status`), `note`, `diff` |
+| `checkpoint.saved` | `step`, `path`, `pending` (tool calls without results yet) |
+| `resume.interrupted_call` | `id`, `name` of a call that was in flight when the previous process stopped |
+| `resume.process_lost` | `id`, `pid`, `cmd` of a background process from the previous invocation |
 | `compaction` | `step`, `reason`, `stage`, `tokens_before`, `tokens_after`, `elided_messages`, `summarized_messages` |
 | `warning` / `error` | `message` |
 | `result` | `status`, `submission`, cumulative `steps`, `structured_output` (only with `--output-schema` and status `Submitted`), `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cost_usd`, invocation `duration_ms` |
@@ -149,25 +155,29 @@ Supported keywords (the same subset as MCP tool schemas): `type`, `properties`, 
 ### Resume an unfinished task
 
 ```sh
-# Save complete tool turns; this run stops at 20 cumulative model steps.
-tinyagent -t "fix the failing test" --cwd ~/src/project --step-limit 20 --no-compact -o run.json
+# Checkpoint before and after every tool call; this run stops at 20 cumulative model steps.
+tinyagent -t "fix the failing test" --cwd ~/src/project --step-limit 20 -o run.json
 
 # Inspect the workspace (for example, git diff) and rerun relevant checks.
 # Continue the same task with a ceiling of 40 total steps.
-tinyagent --resume run.json --cwd ~/src/project --step-limit 40 --no-compact -o continued.json
+tinyagent --resume run.json --cwd ~/src/project --step-limit 40 -o continued.json
 ```
 
 `--resume <trajectory.json>` is noninteractive and uses the saved task and model. Do not pass `--task`; an explicitly different `--model` is rejected. The saved model wins over `$AGENT_MODEL` and the config's default model. Credentials and provider endpoints come from the current normal setup, never the checkpoint. Paths to checkpoints are relative to the invoking shell's directory, independently of `--cwd`.
 
 An explicit `--cwd` must resolve to the recorded canonical root (directory symlinks are resolved). The effective system prompt must match the saved prompt, including `{{cwd}}`/`{{os}}` substitutions and the recorded AGENTS.md loading mode. Current config is used to reconstruct it without appending AGENTS.md twice. Changed instructions, a conflicting `--no-agents-md`, or changed tool definitions/compatibility require a fresh task. In particular, a task that edits its effective AGENTS.md cannot resume under changed instructions.
 
-Only new-format, unfinished checkpoints at a complete model-query boundary are eligible: an in-progress save or a stop caused by a step/cost/time limit, interruption, or error. Successful `Submitted`/`Completed` runs cannot be extended. Legacy logs, unsupported versions/state, malformed or partial tool turns, and **compacted checkpoints** are refused before provider setup. This release does not restore the separate compacted model view; use `--no-compact` when the ability to resume later is needed. Checkpoint loading is limited to regular files of at most **64 MiB**. Larger trajectories remain audit logs.
+Only new-format, unfinished checkpoints are eligible: an in-progress save (including one left by a crash or `kill -9`) or a stop caused by a step/cost/time limit, interruption, or error. Successful `Submitted`/`Completed` runs cannot be extended. Legacy logs, unsupported versions/state, and malformed or partial tool turns are refused before provider setup. Checkpoint loading is limited to regular files of at most **64 MiB**. Larger trajectories remain audit logs.
 
-A distinct `-o`/`--output` is required, and any existing destination is refused, including symlink and hard-link aliases of the source. The input stays unchanged. The validated starting state is saved to the new destination before the first request; completed tool turns and termination then replace it using a private temporary file. Initial publication requires filesystem hard-link support to publish atomically without replacing another file. A save failure in resume mode stops further work, prints an error, and exits nonzero, preserving the last complete checkpoint. Ordinary fresh-run save failures retain their existing warning behavior. Rename/link publication does not promise power-loss durability.
+With `-o`, the checkpoint is written before tools run (recording the calls as `pending_calls`) and again after each tool result. If the process dies mid-turn, `--resume` gives every call without a result the error result `[interrupted: tool did not complete before the agent stopped; it may have partially run — verify state before retrying]` and emits `resume.interrupted_call`. **Interrupted calls are never re-executed automatically**: a half-run `bash` or edit may have had side effects, so the model decides what to inspect or retry. Background processes started with `start_process` are recorded with their PID; they do not survive into a new invocation, so resume emits `resume.process_lost` and tells the model which ones are gone.
+
+Compacted runs resume too. The trajectory always keeps the full history; the model's compacted view is rebuilt from the last `compactions` record (its message map, elisions, and summary) plus the messages after it, so the resumed request is the same one the original process would have sent. `--no-compact` is no longer needed to keep a run resumable.
+
+A distinct `-o`/`--output` is required, and any existing destination is refused, including symlink and hard-link aliases of the source. The input stays unchanged. The validated starting state is saved to the new destination before the first request; completed tool turns and termination then replace it using a private temporary file. Initial publication requires filesystem hard-link support to publish atomically without replacing another file. A save failure in resume mode stops further work, prints an error, and exits nonzero, preserving the last complete checkpoint. Ordinary fresh-run save failures retain their existing warning behavior. Each save writes a private temporary file, fsyncs it, renames it over the checkpoint, and fsyncs the directory (where the platform supports it), so a crash or power loss leaves either the previous or the new complete checkpoint, never a partial one.
 
 Steps, cost, token counts, and cache totals remain cumulative. Step/cost limits are cumulative ceilings: if already exhausted, no model request is made; increase the ceiling explicitly (or set it to 0 for unlimited). Runtime limits, tool timeouts, output settings, and compaction settings use normal config/flag precedence. Wall time and the stderr elapsed duration restart for each invocation; stopped time is not charged. Normal streaming, summaries, and success/failure exit codes still apply. The next action is a new model query, which incurs ordinary context/token costs; loading a checkpoint never dispatches historical tool calls.
 
-New JSON keeps the existing top-level trajectory fields and adds versioned metadata: `schema_version` (currently 1), `root`, `system_prompt`, `skip_agents_md`, `tools`, and `tool_signature`. `resume` records the input path, previous status/submission, cumulative step, and continuation-message index; nested `previous` entries retain earlier resume boundaries. These audit paths are not read as configuration. Metadata excludes credentials and environment dumps. Checkpoints still contain prompts, code, and tool outputs: treat them as private, trusted local execution inputs. New checkpoint and temporary files use owner-only permissions (0600) where supported.
+New JSON keeps the existing top-level trajectory fields and adds versioned metadata: `schema_version` (currently 2; version 1 files still load), `root`, `system_prompt`, `skip_agents_md`, `tools`, and `tool_signature`. Version 2 adds `pending_calls`, `processes`, `plan_enabled`, `plan`, and `plan_history`. `resume` records the input path, previous status/submission, cumulative step, and continuation-message index; nested `previous` entries retain earlier resume boundaries. These audit paths are not read as configuration. Metadata excludes credentials and environment dumps. Checkpoints still contain prompts, code, and tool outputs: treat them as private, trusted local execution inputs. New checkpoint and temporary files use owner-only permissions (0600) where supported.
 
 A checkpoint restores **conversation state**, not files, Git state, shell variables, live processes, or external services. The model receives a continuation notice and stderr warns to inspect and revalidate the current workspace. Commands may have produced unrecorded side effects after the last save, especially during a hard crash in a tool batch. Historical process IDs cannot reattach to children from another invocation. There is no rollback or exactly-once execution guarantee; inspect current state before resuming.
 
@@ -209,6 +219,8 @@ max_background_processes: 4   # start_process processes running at once (0 uses 
 input_price_per_mtok: 3   # override the built-in price table
 output_price_per_mtok: 15
 context_window: 200000    # tokens; overrides the built-in table, used for compaction
+plan:
+  enabled: false          # give the model the update_plan tool (same as --plan)
 mcp_servers:                 # omitted by default; each entry runs a trusted local executable
   - alias: docs
     command: /usr/local/bin/team-docs-mcp
@@ -250,7 +262,7 @@ Each hook gets one JSON object on stdin: `schema_version` (`1`), `event` (`pre_t
 | `pre_tool` | Allow, unless stdout is `{"decision":"deny","reason":"..."}` | Deny; the reason is stderr | Apply `on_error`: deny by default (the reason names the hook and the failure), or allow with a warning |
 | `post_tool` | Optional stdout `{"feedback":"..."}` is appended to the result | stderr is appended to the result | Warning on stderr; the result is unchanged |
 
-A denied call is not executed; the model gets the error result `error: denied by pre_tool hook <command>: <reason>` and the run continues. Matching hooks run one at a time in config order: the first `pre_tool` deny stops the rest, and every matching `post_tool` hook runs, each appending its feedback under `[post_tool hook <command>]` (capped at 8 KiB per hook; the combined result still honors `max_output_chars`). Read-only denials and unknown tools are rejected before hooks, so hooks never run for them and cannot widen authority; with `--read-only`, hooks still run for `read_file`, `list_files`, and `grep`. MCP tools are matched by their exposed `<alias>__<tool>` name. Ctrl-C or the wall-time limit kills a running hook (its process group on Unix; only the process on Windows). `-v` prints one stderr line per hook run, `--json` emits a `hook` event, and trajectories record the model-visible results, including denial reasons and feedback. Resumed runs use the hooks in the current config.
+A denied call is not executed; the model gets the error result `error: denied by pre_tool hook <command>: <reason>` and the run continues. Matching hooks run one at a time in config order: the first `pre_tool` deny stops the rest, and every matching `post_tool` hook runs, each appending its feedback under `[post_tool hook <command>]` (capped at 8 KiB per hook; the combined result still honors `max_output_chars`). Read-only denials and unknown tools are rejected before hooks, so hooks never run for them and cannot widen authority; with `--read-only`, hooks still run for `read_file`, `list_files`, and `grep`. MCP tools are matched by their exposed `<alias>__<tool>` name. Ctrl-C or the wall-time limit kills a running hook (its process group on Unix; only the process on Windows). `-v` prints one stderr line per hook run, `--json` emits a `hook` event, and trajectories record the model-visible results, including denial reasons and feedback. Resumed runs use the hooks in the current config. Hooks do not run for `update_plan`, which only changes the run's plan.
 
 Two examples: a `post_tool` hook on `write_file|edit_file` that runs `gofmt -l` on the edited path and prints `{"feedback":"..."}` when it lists files, and a `pre_tool` hook on `write_file|edit_file` that exits 2 with `edit schema.sql and run make gen instead` when `arguments.path` is under `migrations/`.
 
@@ -267,6 +279,12 @@ If a provider rejects a request as too long (`prompt is too long`, `context_leng
 The window comes from a small built-in table (`internal/model/context.go`) or `context_window` in the config, which wins. Without either, only the retry-on-error path runs. Each compaction prints one line to stderr, such as `compacted context: ~182,000 → ~31,000 tokens (summarized 41 messages)`. The summary request's tokens and cost count toward the run's totals and `--cost-limit`, but not `--step-limit`. With `-o`, the trajectory keeps every original message, and `compactions` records each one: the step, the estimates before and after, the stage, the summary, and which messages the model was sent next.
 
 Summaries lose detail. Put instructions that must hold for the whole run in `AGENTS.md`, which is part of the system prompt and never compacted. `--no-compact` turns all of this off.
+
+### Plan tool
+
+`--plan` (or `plan: {enabled: true}`) adds an `update_plan` tool, off by default. The model sends the whole list each time: up to 50 items, each `{id, text, status}` with status `pending`, `in_progress`, `done`, or `blocked`, at most one `in_progress`, plus an optional `note`. The plan lives in the trajectory (`plan`, with every change in `plan_history`), not in the message history: before each request a `[Current plan]` block is pinned after the system prompt, so it survives compaction (the summarizer also sees it) and `--resume`. Each update emits `plan.updated`, and `--plan-file plan.md` mirrors the current plan as a Markdown checklist after each save (the checkpoint stays the source of truth). The tool is available with `--read-only`, since it touches nothing in the workspace.
+
+A checkpoint records whether the plan tool was enabled, and `--resume` keeps that setting: passing `--plan` to resume a run that started without it is an error, and the config's `plan.enabled` is ignored on resume. `--plan-file` requires the plan tool.
 
 ## Exit status
 

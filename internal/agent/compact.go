@@ -123,9 +123,53 @@ func (a *Agent) contextWindow() int {
 
 // needsCompaction reports whether the next request is estimated to be over
 // compactAt of a known context window.
-func (a *Agent) needsCompaction(v *view) bool {
+func (a *Agent) needsCompaction(t *trajectory.Trajectory, v *view) bool {
 	w := a.contextWindow()
-	return !a.NoCompact && w > 0 && float64(v.estimate()) > compactAt*float64(w)
+	return !a.NoCompact && w > 0 && float64(v.estimate()+a.planChars(t)/4) > compactAt*float64(w)
+}
+
+// viewFromTrajectory rebuilds the model's view of t: the last compaction's
+// view (with every recorded elision and the summary it references) followed
+// by the messages recorded after it. Without compactions it is Messages.
+func viewFromTrajectory(t *trajectory.Trajectory) *view {
+	if len(t.Compactions) == 0 {
+		return newView(t.Messages)
+	}
+	elided := map[int]bool{}
+	summary := ""
+	for _, c := range t.Compactions {
+		for _, ix := range c.Elided {
+			elided[ix] = true
+		}
+		if c.Summary != "" {
+			summary = c.Summary
+		}
+	}
+	last := t.Compactions[len(t.Compactions)-1]
+	v := &view{}
+	maxIdx := 1
+	appendMsg := func(ix int) {
+		m := t.Messages[ix]
+		if elided[ix] {
+			m.Content = fmt.Sprintf("%s%s chars]", elidedPrefix, formatInt(len(m.Content)))
+		}
+		v.msgs = append(v.msgs, m)
+		v.idx = append(v.idx, ix)
+	}
+	for _, ix := range last.View {
+		if ix == -1 {
+			v.msgs = append(v.msgs, model.Message{Role: "user", Content: summaryHeader + summary})
+			v.idx = append(v.idx, -1)
+			continue
+		}
+		appendMsg(ix)
+		maxIdx = max(maxIdx, ix)
+	}
+	for ix := maxIdx + 1; ix < len(t.Messages); ix++ {
+		v.msgs = append(v.msgs, t.Messages[ix])
+		v.idx = append(v.idx, ix)
+	}
+	return v
 }
 
 // compact shrinks the view: first by eliding old tool outputs, then, if that
@@ -188,6 +232,9 @@ func (a *Agent) compact(ctx context.Context, t *trajectory.Trajectory, v *view, 
 	}
 	rec.TokensAfter = after
 	rec.View = append([]int(nil), v.idx...)
+	if a.Tools.Plan && t.Plan != nil {
+		rec.PlanVersion = t.Plan.Version
+	}
 
 	changed := len(rec.Elided) > 0 || rec.Stage == "summarize"
 	if changed {
@@ -225,6 +272,9 @@ func (a *Agent) summarize(ctx context.Context, t *trajectory.Trajectory, task st
 				fmt.Fprintf(&sb, "[tool call %s] %s %s\n\n", c.ID, c.Function.Name, c.Function.Arguments)
 			}
 		}
+	}
+	if a.Tools.Plan {
+		fmt.Fprintf(&sb, "The agent's current plan (kept separately; it is shown to the agent every step):\n\n%s\n\n", renderPlan(t.Plan))
 	}
 	sb.WriteString(summarizerInstructions)
 	req := []model.Message{

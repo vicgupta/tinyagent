@@ -10,7 +10,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/vicgupta/tinyagent/internal/model"
 )
+
+// ToolCallRef is a recorded tool call.
+type ToolCallRef = model.ToolCall
 
 // maxCheckpointBytes bounds parsing and memory use. Larger trajectories remain
 // audit logs but cannot be resumed by this format.
@@ -69,7 +74,7 @@ func Load(path string) (*Trajectory, error) {
 	if err := dec.Decode(new(any)); err != io.EOF {
 		return nil, errors.New("invalid checkpoint JSON: trailing data")
 	}
-	if t.SchemaVersion != SchemaVersion {
+	if t.SchemaVersion != 1 && t.SchemaVersion != SchemaVersion {
 		return nil, t.Validate()
 	}
 	// A false loading mode must be explicit, rather than guessed from a
@@ -105,8 +110,14 @@ func (t *Trajectory) Validate() error {
 	if t.SchemaVersion == 0 {
 		return errors.New("checkpoint has no resume metadata (it predates --resume); start a fresh task")
 	}
-	if t.SchemaVersion != SchemaVersion {
-		return fmt.Errorf("checkpoint schema version %d is unsupported (want %d)", t.SchemaVersion, SchemaVersion)
+	if t.SchemaVersion != 1 && t.SchemaVersion != SchemaVersion {
+		return fmt.Errorf("checkpoint schema version %d is unsupported (want 1 or %d)", t.SchemaVersion, SchemaVersion)
+	}
+	if t.SchemaVersion == 1 && (len(t.PendingCalls) > 0 || len(t.Processes) > 0 || t.PlanEnabled || t.Plan != nil || len(t.PlanHistory) > 0) {
+		return errors.New("schema version 1 checkpoint has version 2 fields")
+	}
+	if err := t.validatePlan(); err != nil {
+		return err
 	}
 	if !filepath.IsAbs(t.Root) || filepath.Clean(t.Root) != t.Root || t.SystemPrompt == "" || len(t.Tools) == 0 || t.ToolSignature == "" {
 		return errors.New("checkpoint is missing required root, instruction, or tool compatibility metadata")
@@ -122,9 +133,6 @@ func (t *Trajectory) Validate() error {
 	}
 	if t.Steps < 0 || math.IsNaN(t.Cost) || math.IsInf(t.Cost, 0) || t.Cost < 0 || t.InputTokens < 0 || t.OutputTokens < 0 || t.CacheReadTokens < 0 || t.CacheWriteTokens < 0 || t.CacheReadTokens > t.InputTokens || t.CacheWriteTokens > t.InputTokens-t.CacheReadTokens {
 		return errors.New("checkpoint has invalid accounting counters")
-	}
-	if len(t.Compactions) > 0 {
-		return errors.New("checkpoint was compacted; resuming compacted model views is not yet supported; start a fresh task")
 	}
 	if len(t.Messages) < 2 || t.Messages[0].Role != "system" || t.Messages[0].Content != t.SystemPrompt || len(t.Messages[0].ToolCalls) != 0 || t.Messages[0].ToolCallID != "" {
 		return errors.New("checkpoint has an invalid system prompt")
@@ -159,10 +167,11 @@ func (t *Trajectory) Validate() error {
 		markers[idx] = true
 	}
 	steps = 0
+	pendingOK := false
 	for i := 2; i < len(t.Messages); {
 		m := t.Messages[i]
 		if b, ok := boundaries[i]; ok {
-			if b.Steps != steps || m.Role != "user" || m.Content != ContinuationNotice || len(m.ToolCalls) != 0 || m.ToolCallID != "" {
+			if b.Steps != steps || m.Role != "user" || !strings.HasPrefix(m.Content, ContinuationNotice) || len(m.ToolCalls) != 0 || m.ToolCallID != "" {
 				return errors.New("checkpoint has an invalid continuation notice")
 			}
 			delete(boundaries, i)
@@ -188,9 +197,13 @@ func (t *Trajectory) Validate() error {
 			ids[c.ID] = true
 		}
 		i++
-		for _, c := range m.ToolCalls {
+		for k, c := range m.ToolCalls {
 			if i >= len(t.Messages) {
-				return errors.New("checkpoint ends mid-turn: missing tool result")
+				if !pendingMatches(t.PendingCalls, m.ToolCalls[k:]) {
+					return errors.New("checkpoint ends mid-turn: missing tool result")
+				}
+				pendingOK = true
+				break
 			}
 			r := t.Messages[i]
 			if r.Role != "tool" || r.ToolCallID != c.ID || len(r.ToolCalls) != 0 {
@@ -200,11 +213,132 @@ func (t *Trajectory) Validate() error {
 		}
 		steps++
 	}
+	if len(t.PendingCalls) > 0 && !pendingOK {
+		return errors.New("checkpoint has pending tool calls that do not match its last tool turn")
+	}
+	if err := t.validateCompactions(); err != nil {
+		return err
+	}
 	if len(boundaries) != 0 {
 		return errors.New("checkpoint resume boundary is inside a tool turn")
 	}
 	if steps != t.Steps {
 		return errors.New("checkpoint steps do not match the recorded history")
+	}
+	return nil
+}
+
+// pendingMatches reports whether pending names exactly the calls without
+// results, in order.
+func pendingMatches(pending []PendingCall, calls []ToolCallRef) bool {
+	if len(pending) == 0 || len(pending) != len(calls) {
+		return false
+	}
+	for i, c := range calls {
+		if pending[i].ID != c.ID || pending[i].Name != c.Function.Name {
+			return false
+		}
+	}
+	return true
+}
+
+// validateCompactions checks that every recorded view can be rebuilt from
+// Messages: indexes in range and increasing, the system prompt and task
+// first, and a summary placeholder (-1) only right after them, backed by a
+// recorded summary.
+func (t *Trajectory) validateCompactions() error {
+	summary := false
+	for _, c := range t.Compactions {
+		bad := errors.New("checkpoint has an invalid compaction record")
+		if c.Step < 0 || c.Step > t.Steps || len(c.View) < 2 || c.View[0] != 0 || c.View[1] != 1 {
+			return bad
+		}
+		if c.Summary != "" {
+			summary = true
+		}
+		prev := 1
+		for k, ix := range c.View[2:] {
+			if ix == -1 {
+				if k != 0 || !summary {
+					return bad
+				}
+				continue
+			}
+			if ix <= prev || ix >= len(t.Messages) {
+				return bad
+			}
+			prev = ix
+		}
+		for _, ix := range append(append([]int(nil), c.Elided...), c.Summarized...) {
+			if ix < 2 || ix >= len(t.Messages) {
+				return bad
+			}
+		}
+		for _, ix := range c.Elided {
+			if t.Messages[ix].Role != "tool" {
+				return bad
+			}
+		}
+	}
+	return nil
+}
+
+// Plan limits enforced by update_plan and checkpoint validation.
+const (
+	MaxPlanItems    = 50
+	MaxPlanItemText = 500
+	MaxPlanNote     = 2000
+)
+
+// ValidatePlanItems checks one complete plan.
+func ValidatePlanItems(items []PlanItem, note string) error {
+	if len(items) > MaxPlanItems {
+		return fmt.Errorf("plan has %d items; the limit is %d", len(items), MaxPlanItems)
+	}
+	if len(note) > MaxPlanNote {
+		return fmt.Errorf("plan note exceeds %d characters", MaxPlanNote)
+	}
+	ids, active := map[string]bool{}, 0
+	for _, it := range items {
+		if strings.TrimSpace(it.ID) == "" || len(it.ID) > 64 {
+			return errors.New("every plan item needs a non-empty id of at most 64 characters")
+		}
+		if ids[it.ID] {
+			return fmt.Errorf("duplicate plan item id %q", it.ID)
+		}
+		ids[it.ID] = true
+		if strings.TrimSpace(it.Text) == "" || len(it.Text) > MaxPlanItemText {
+			return fmt.Errorf("plan item %q needs text of 1 to %d characters", it.ID, MaxPlanItemText)
+		}
+		switch it.Status {
+		case "pending", "done", "blocked":
+		case "in_progress":
+			active++
+		default:
+			return fmt.Errorf("plan item %q has invalid status %q (want pending, in_progress, done, or blocked)", it.ID, it.Status)
+		}
+	}
+	if active > 1 {
+		return errors.New("at most one plan item may be in_progress")
+	}
+	return nil
+}
+
+func (t *Trajectory) validatePlan() error {
+	if !t.PlanEnabled {
+		if t.Plan != nil || len(t.PlanHistory) > 0 {
+			return errors.New("checkpoint has a plan but the plan tool was not enabled")
+		}
+		return nil
+	}
+	if t.Plan == nil {
+		return nil
+	}
+	if t.Plan.Version < 1 || t.Plan.UpdatedStep < 0 || t.Plan.UpdatedStep > t.Steps {
+		return errors.New("checkpoint has an invalid plan")
+	}
+	if err := ValidatePlanItems(t.Plan.Items, t.Plan.Note); err != nil {
+		return fmt.Errorf("checkpoint has an invalid plan: %w", err)
 	}
 	return nil
 }

@@ -10,20 +10,40 @@ import (
 	"strings"
 
 	"github.com/vicgupta/tinyagent/internal/config"
+	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
 )
 
 // ToolSignature fingerprints the definitions plus an execution contract
 // version. Bump the prefix when tool semantics change without a spec change.
+// The plan tool is opt-in: without it the signature is unchanged, so
+// checkpoints from earlier builds still resume.
 func ToolSignature(readOnly ...bool) string {
-	readonly := len(readOnly) > 0 && readOnly[0]
-	data, _ := json.Marshal(tools.Specs(readonly))
+	return toolSignature(len(readOnly) > 0 && readOnly[0], false)
+}
+
+// PlanToolSignature is ToolSignature with update_plan enabled or not.
+func PlanToolSignature(readOnly, plan bool) string { return toolSignature(readOnly, plan) }
+
+func toolSignature(readonly, plan bool) string {
+	data, _ := json.Marshal(builtinSpecs(readonly, plan))
 	prefix := "tools-v1:"
 	if readonly {
 		prefix = "tools-read-only-v1:"
 	}
+	if plan {
+		prefix = "plan-v1:" + prefix
+	}
 	return fmt.Sprintf("%s%x", prefix, sha256.Sum256(data))
+}
+
+func builtinSpecs(readOnly, plan bool) []model.ToolSpec {
+	specs := tools.Specs(readOnly)
+	if plan {
+		specs = append(specs, tools.PlanSpec())
+	}
+	return specs
 }
 
 // ValidateResume runs before provider setup, using only the explicit execution
@@ -36,10 +56,10 @@ func ValidateResume(t *trajectory.Trajectory, cfg config.AgentConfig, root strin
 	if root != t.Root {
 		return errors.New("--cwd does not match the checkpoint's canonical root")
 	}
-	if t.ToolSignature != ToolSignature(t.ReadOnly) {
+	if t.ToolSignature != toolSignature(t.ReadOnly, t.PlanEnabled) {
 		return errors.New("tool compatibility has changed; start a fresh task")
 	}
-	names := toolNames(tools.Specs(t.ReadOnly))
+	names := toolNames(builtinSpecs(t.ReadOnly, t.PlanEnabled))
 	if len(names) != len(t.Tools) {
 		return errors.New("tool set has changed; start a fresh task")
 	}
