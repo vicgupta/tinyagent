@@ -97,6 +97,19 @@ type Trajectory struct {
 	PlanEnabled bool         `json:"plan_enabled,omitempty"`
 	Plan        *Plan        `json:"plan,omitempty"`
 	PlanHistory []PlanChange `json:"plan_history,omitempty"`
+	// SkillsEnabled records whether Agent Skills discovery was on. A resume
+	// rediscovers skills and must rebuild the same catalog. Older
+	// checkpoints, without the field, resume with skills off.
+	SkillsEnabled bool `json:"skills_enabled,omitempty"`
+	// Skills is the discovered catalog (not the skill bodies).
+	Skills []SkillInfo `json:"skills,omitempty"`
+}
+
+// SkillInfo identifies one discovered skill.
+type SkillInfo struct {
+	Name  string `json:"name"`
+	Scope string `json:"scope"`
+	Path  string `json:"path"`
 }
 
 // PendingCall identifies a tool call without a recorded result.

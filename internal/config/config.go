@@ -68,6 +68,9 @@ type AgentConfig struct {
 
 	// Plan configures the opt-in update_plan tool (off by default).
 	Plan Plan `yaml:"plan,omitempty"`
+	// Skills turns on Agent Skills discovery from .agents/skills (off by
+	// default; --skills / --no-skills override it).
+	Skills bool `yaml:"skills"`
 	// LogDB is the opt-in SQLite event log.
 	LogDB LogDB `yaml:"log_db"`
 }
