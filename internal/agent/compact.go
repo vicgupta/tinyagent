@@ -85,7 +85,8 @@ func (v *view) estimate() int {
 }
 
 func msgChars(m model.Message) int {
-	n := len(m.Content) + model.ReasoningChars(m)
+	// Each image counts as a fixed estimate, never its base64 length.
+	n := len(m.Content) + model.ReasoningChars(m) + len(m.Images)*model.ImageTokenEstimate*4
 	for _, c := range m.ToolCalls {
 		n += len(c.Function.Name) + len(c.Function.Arguments)
 	}
@@ -151,7 +152,7 @@ func viewFromTrajectory(t *trajectory.Trajectory) *view {
 	appendMsg := func(ix int) {
 		m := t.Messages[ix]
 		if elided[ix] {
-			m.Content = fmt.Sprintf("%s%s chars]", elidedPrefix, formatInt(len(m.Content)))
+			m = elide(m)
 		}
 		v.msgs = append(v.msgs, m)
 		v.idx = append(v.idx, ix)
@@ -192,12 +193,12 @@ func (a *Agent) compact(ctx context.Context, t *trajectory.Trajectory, v *view, 
 		if m.Role != "tool" || strings.HasPrefix(m.Content, elidedPrefix) {
 			continue
 		}
-		ph := fmt.Sprintf("%s%s chars]", elidedPrefix, formatInt(len(m.Content)))
-		if len(ph) >= len(m.Content) {
+		e := elide(*m)
+		if len(m.Images) == 0 && len(e.Content) >= len(m.Content) {
 			continue
 		}
-		freed += len(m.Content) - len(ph)
-		m.Content = ph
+		freed += msgChars(*m) - msgChars(e)
+		*m = e
 		rec.Elided = append(rec.Elided, v.idx[i])
 	}
 	after := max(before-freed/4, 0)
@@ -307,4 +308,19 @@ func formatInt(n int) string {
 		s = s[:i] + "," + s[i:]
 	}
 	return s
+}
+
+// elide replaces a tool result's text with a size note and each of its
+// images with an "[image elided: ...]" note.
+func elide(m model.Message) model.Message {
+	text := fmt.Sprintf("%s%s chars]", elidedPrefix, formatInt(len(m.Content)))
+	for _, im := range m.Images {
+		label := im.Label
+		if label == "" {
+			label = im.MIMEType
+		}
+		text += fmt.Sprintf("\n[image elided: %s, %s bytes]", label, formatInt(im.Size()))
+	}
+	m.Content, m.Images = text, nil
+	return m
 }

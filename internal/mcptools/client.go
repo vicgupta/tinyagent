@@ -220,21 +220,44 @@ func validateDefinitions(cfg []config.MCPServer) error {
 // Call executes only a catalogued tool, preserving the original JSON values.
 // ok is false when name is not catalogued; isErr marks a failed call.
 func (r *Registry) Call(ctx context.Context, name, raw string) (out string, isErr, ok bool) {
+	out, _, isErr, ok = r.call(ctx, name, raw, 0)
+	return out, isErr, ok
+}
+
+// MaxImagesPerResult caps how many images one MCP result may pass through;
+// later images get an omission marker.
+const MaxImagesPerResult = 8
+
+// CallImages is Call with image pass-through (--images): each PNG, JPEG,
+// GIF, or WebP image of at most maxImageBytes is returned as an image, and
+// the text gets its placeholder in the image's position. Other images get a
+// specific omission marker.
+func (r *Registry) CallImages(maxImageBytes int) func(ctx context.Context, name, raw string) (string, []model.Image, bool, bool) {
+	if maxImageBytes <= 0 {
+		maxImageBytes = 5 << 20
+	}
+	return func(ctx context.Context, name, raw string) (string, []model.Image, bool, bool) {
+		return r.call(ctx, name, raw, maxImageBytes)
+	}
+}
+
+// call runs a tool; maxImageBytes > 0 enables image pass-through.
+func (r *Registry) call(ctx context.Context, name, raw string, maxImageBytes int) (out string, images []model.Image, isErr, ok bool) {
 	t, ok := r.tools[name]
 	if !ok {
-		return "", false, false
+		return "", nil, false, false
 	}
 	if t.server.failed {
-		return "error: MCP server " + t.server.alias + " connection is unavailable after an earlier failure", true, true
+		return "error: MCP server " + t.server.alias + " connection is unavailable after an earlier failure", nil, true, true
 	}
 	var args map[string]any
 	decoder := json.NewDecoder(bytes.NewBufferString(raw))
 	decoder.UseNumber()
 	if err := decoder.Decode(&args); err != nil || args == nil {
-		return "error: invalid arguments JSON object", true, true
+		return "error: invalid arguments JSON object", nil, true, true
 	}
 	if decoder.Decode(new(any)) != io.EOF {
-		return "error: invalid arguments JSON object", true, true
+		return "error: invalid arguments JSON object", nil, true, true
 	}
 	cctx, cancel := context.WithTimeout(ctx, t.server.timeout)
 	defer cancel()
@@ -244,12 +267,12 @@ func (r *Registry) Call(ctx context.Context, name, raw string) (out string, isEr
 		// usable. Any other error means the connection itself is suspect.
 		if cctx.Err() != nil {
 			if ctx.Err() == nil {
-				return fmt.Sprintf("error: MCP tool %s timed out after %s", name, t.server.timeout), true, true
+				return fmt.Sprintf("error: MCP tool %s timed out after %s", name, t.server.timeout), nil, true, true
 			}
-			return "error: MCP tool " + name + " was interrupted: " + ctx.Err().Error(), true, true
+			return "error: MCP tool " + name + " was interrupted: " + ctx.Err().Error(), nil, true, true
 		}
 		t.server.failed = true
-		return truncate("error: MCP server " + t.server.alias + " call failed: " + err.Error()), true, true
+		return truncate("error: MCP server " + t.server.alias + " call failed: " + err.Error()), nil, true, true
 	}
 	var b strings.Builder
 	for _, c := range res.Content {
@@ -258,6 +281,19 @@ func (r *Registry) Call(ctx context.Context, name, raw string) (out string, isEr
 		}
 		if v, text := c.(*mcp.TextContent); text {
 			b.WriteString(v.Text)
+		} else if v, img := c.(*mcp.ImageContent); img && maxImageBytes > 0 {
+			switch {
+			case !model.ImageMIMETypes[v.MIMEType]:
+				fmt.Fprintf(&b, "[omitted MCP image: %s not supported]", safeMIME(v.MIMEType))
+			case len(v.Data) > maxImageBytes:
+				fmt.Fprintf(&b, "[omitted MCP image: %s bytes exceeds max_image_bytes]", model.FormatBytes(len(v.Data)))
+			case len(images) >= MaxImagesPerResult:
+				fmt.Fprintf(&b, "[omitted MCP image: more than %d images in one result]", MaxImagesPerResult)
+			default:
+				im := model.NewImage(v.MIMEType, name, v.Data)
+				images = append(images, im)
+				b.WriteString(im.Placeholder())
+			}
 		} else {
 			b.WriteString("[omitted unsupported MCP content]")
 		}
@@ -271,7 +307,7 @@ func (r *Registry) Call(ctx context.Context, name, raw string) (out string, isEr
 		b.Write(data)
 	}
 	if res.NeedsInput() {
-		return "error: MCP tool requested unsupported interactive input", true, true
+		return "error: MCP tool requested unsupported interactive input", nil, true, true
 	}
 	text := b.String()
 	if res.IsError {
@@ -280,7 +316,23 @@ func (r *Registry) Call(ctx context.Context, name, raw string) (out string, isEr
 	if text == "" {
 		text = "[MCP tool returned no text or structured JSON]"
 	}
-	return truncate(text), res.IsError, true
+	return truncate(text), images, res.IsError, true
+}
+
+// safeMIME bounds a server-supplied MIME type before it is shown.
+func safeMIME(s string) string {
+	if len(s) > 64 {
+		s = s[:64]
+	}
+	if s == "" {
+		return "unknown type"
+	}
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 func (r *Registry) Close() {

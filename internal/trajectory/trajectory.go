@@ -97,6 +97,10 @@ type Trajectory struct {
 	PlanEnabled bool         `json:"plan_enabled,omitempty"`
 	Plan        *Plan        `json:"plan,omitempty"`
 	PlanHistory []PlanChange `json:"plan_history,omitempty"`
+	// ImagesEnabled (schema 2) records whether the opt-in --images setting
+	// (view_image and MCP image pass-through) was on. A resume must use the
+	// same setting. Image bytes are stored inline, base64, in Messages.
+	ImagesEnabled bool `json:"images_enabled,omitempty"`
 }
 
 // PendingCall identifies a tool call without a recorded result.

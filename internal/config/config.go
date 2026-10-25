@@ -68,9 +68,22 @@ type AgentConfig struct {
 
 	// Plan configures the opt-in update_plan tool (off by default).
 	Plan Plan `yaml:"plan,omitempty"`
+	// Images configures the opt-in view_image tool and MCP image
+	// pass-through (off by default).
+	Images Images `yaml:"images,omitempty"`
+	// MaxImageBytes caps one image's raw size. Must be >= 1; default 5 MiB.
+	MaxImageBytes int `yaml:"max_image_bytes"`
 	// LogDB is the opt-in SQLite event log.
 	LogDB LogDB `yaml:"log_db"`
 }
+
+// Images turns on sending images to vision-capable models.
+type Images struct {
+	Enabled bool `yaml:"enabled"`
+}
+
+// DefaultMaxImageBytes is the default max_image_bytes (5 MiB).
+const DefaultMaxImageBytes = 5 << 20
 
 // Plan configures the persistent plan tool.
 type Plan struct {
@@ -145,6 +158,7 @@ func Default() AgentConfig {
 
 		MaxBackgroundProcesses: 4,
 		MaxFormatErrors:        DefaultMaxFormatErrors,
+		MaxImageBytes:          DefaultMaxImageBytes,
 		LogDB:                  LogDB{Level: "metadata", MaxDays: 30, MaxRuns: 500},
 	}
 }
@@ -209,6 +223,9 @@ func Load(path string) (AgentConfig, error) {
 	}
 	if cfg.MaxFormatErrors < 1 {
 		return cfg, fmt.Errorf("config %s: max_format_errors must be a whole number >= 1, got %d", path, cfg.MaxFormatErrors)
+	}
+	if cfg.MaxImageBytes < 1 {
+		return cfg, fmt.Errorf("config %s: max_image_bytes must be >= 1, got %d", path, cfg.MaxImageBytes)
 	}
 	if !ValidEnvironment(cfg.Environment) {
 		return cfg, fmt.Errorf("config %s: environment %q must be local or container", path, cfg.Environment)

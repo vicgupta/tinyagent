@@ -26,8 +26,15 @@ func ToolSignature(readOnly ...bool) string {
 // PlanToolSignature is ToolSignature with update_plan enabled or not.
 func PlanToolSignature(readOnly, plan bool) string { return toolSignature(readOnly, plan) }
 
-func toolSignature(readonly, plan bool) string {
-	data, _ := json.Marshal(builtinSpecs(readonly, plan))
+// ImagesToolSignature is ToolSignature with update_plan and view_image
+// enabled or not. Without images it equals PlanToolSignature.
+func ImagesToolSignature(readOnly, plan, images bool) string {
+	return toolSignature(readOnly, plan, images)
+}
+
+func toolSignature(readonly, plan bool, images ...bool) string {
+	img := len(images) > 0 && images[0]
+	data, _ := json.Marshal(builtinSpecs(readonly, plan, img))
 	prefix := "tools-v1:"
 	if readonly {
 		prefix = "tools-read-only-v1:"
@@ -35,13 +42,19 @@ func toolSignature(readonly, plan bool) string {
 	if plan {
 		prefix = "plan-v1:" + prefix
 	}
+	if img {
+		prefix = "images-v1:" + prefix
+	}
 	return fmt.Sprintf("%s%x", prefix, sha256.Sum256(data))
 }
 
-func builtinSpecs(readOnly, plan bool) []model.ToolSpec {
+func builtinSpecs(readOnly, plan bool, images ...bool) []model.ToolSpec {
 	specs := tools.Specs(readOnly)
 	if plan {
 		specs = append(specs, tools.PlanSpec())
+	}
+	if len(images) > 0 && images[0] {
+		specs = append(specs, tools.ViewImageSpec())
 	}
 	return specs
 }
@@ -56,10 +69,10 @@ func ValidateResume(t *trajectory.Trajectory, cfg config.AgentConfig, root strin
 	if root != t.Root {
 		return errors.New("--cwd does not match the checkpoint's canonical root")
 	}
-	if t.ToolSignature != toolSignature(t.ReadOnly, t.PlanEnabled) {
+	if t.ToolSignature != toolSignature(t.ReadOnly, t.PlanEnabled, t.ImagesEnabled) {
 		return errors.New("tool compatibility has changed; start a fresh task")
 	}
-	names := toolNames(builtinSpecs(t.ReadOnly, t.PlanEnabled))
+	names := toolNames(builtinSpecs(t.ReadOnly, t.PlanEnabled, t.ImagesEnabled))
 	if len(names) != len(t.Tools) {
 		return errors.New("tool set has changed; start a fresh task")
 	}

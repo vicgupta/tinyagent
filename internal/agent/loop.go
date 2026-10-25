@@ -137,6 +137,10 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			t.ExitStatus, t.Submission = StatusError, "resume plan setting differs from checkpoint"
 			return t
 		}
+		if t.ImagesEnabled != a.Tools.Images {
+			t.ExitStatus, t.Submission = StatusError, "resume images setting differs from checkpoint"
+			return t
+		}
 		t.ExitStatus, t.Submission = "", ""
 		a.closeInterrupted(t)
 		notice := resumeNotice
@@ -161,8 +165,9 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			SystemPrompt:          system,
 			SkipAgentsMD:          a.SkipAgentsMD,
 			Tools:                 toolNames(a.Tools.Catalog()),
-			ToolSignature:         toolSignature(a.Tools.ReadOnly, a.Tools.Plan),
+			ToolSignature:         toolSignature(a.Tools.ReadOnly, a.Tools.Plan, a.Tools.Images),
 			PlanEnabled:           a.Tools.Plan,
+			ImagesEnabled:         a.Tools.Images,
 			MCPEnabled:            len(a.Tools.ExternalSpecs) > 0,
 			ExternalTools:         externalToolNames(a.Tools.ExternalSpecs),
 			ExternalToolSignature: externalToolSignature(a.Tools.ExternalSpecs),
@@ -279,6 +284,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		for _, call := range msg.ToolCalls {
 			a.event("tool.call", map[string]any{"id": call.ID, "name": call.Function.Name, "arguments": eventArguments(call.Function.Arguments)})
 			var out string
+			var images []model.Image
 			var isError bool
 			formatError := false
 			if reason := a.Tools.FormatError(call); reason != "" {
@@ -290,14 +296,14 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			} else if call.Function.Name == tools.PlanToolName && a.Tools.Plan {
 				out, isError = a.updatePlan(t, call)
 			} else {
-				out, isError = a.runTool(ctx, t, call)
+				out, images, isError = a.runTool(ctx, t, call)
 			}
 			fields := map[string]any{"id": call.ID, "name": call.Function.Name, "output": out, "is_error": isError}
 			if formatError {
 				fields["format_error"] = true
 			}
 			a.event("tool.result", fields)
-			t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: call.ID, Content: out})
+			t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: call.ID, Content: out, Images: images})
 			t.PendingCalls = t.PendingCalls[1:]
 			if len(t.PendingCalls) == 0 {
 				t.PendingCalls = nil
@@ -325,14 +331,14 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 // toolStep runs one tool call and records its events and result message.
 func (a *Agent) toolStep(ctx context.Context, t *trajectory.Trajectory, v *view, call model.ToolCall) bool {
 	a.event("tool.call", map[string]any{"id": call.ID, "name": call.Function.Name, "arguments": eventArguments(call.Function.Arguments)})
-	out, isError := a.runTool(ctx, t, call)
-	a.recordToolResult(t, v, call, out, isError)
+	out, images, isError := a.runTool(ctx, t, call)
+	a.recordToolResult(t, v, call, out, isError, images...)
 	return isError
 }
 
-func (a *Agent) recordToolResult(t *trajectory.Trajectory, v *view, call model.ToolCall, out string, isError bool) {
+func (a *Agent) recordToolResult(t *trajectory.Trajectory, v *view, call model.ToolCall, out string, isError bool, images ...model.Image) {
 	a.event("tool.result", map[string]any{"id": call.ID, "name": call.Function.Name, "output": out, "is_error": isError})
-	t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: call.ID, Content: out})
+	t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: call.ID, Content: out, Images: images})
 	v.add(t, t.Messages[len(t.Messages)-1])
 	if a.Verbose {
 		fmt.Fprintf(a.Out, "  -> %s\n", indent(out))
@@ -351,9 +357,9 @@ func (a *Agent) maxFormatErrors() int {
 // runTool executes call with its matching hooks. Calls the executor rejects
 // (read-only denials, unknown tools) never reach hooks, so hooks cannot widen
 // tool authority.
-func (a *Agent) runTool(ctx context.Context, t *trajectory.Trajectory, call model.ToolCall) (string, bool) {
+func (a *Agent) runTool(ctx context.Context, t *trajectory.Trajectory, call model.ToolCall) (string, []model.Image, bool) {
 	if a.Hooks == nil || !a.Tools.Permits(call.Function.Name) {
-		return a.Tools.RunWithError(ctx, call)
+		return a.Tools.RunWithImages(ctx, call)
 	}
 	in := hooks.Input{
 		ToolName: call.Function.Name, ToolCallID: call.ID, Arguments: eventArguments(call.Function.Arguments),
@@ -362,10 +368,11 @@ func (a *Agent) runTool(ctx context.Context, t *trajectory.Trajectory, call mode
 	for _, r := range a.Hooks.Pre(ctx, in) {
 		a.hookRan(call, r)
 		if r.Denied {
-			return tools.Truncate(fmt.Sprintf("error: denied by pre_tool hook %s: %s", r.Command, r.Reason), a.Tools.MaxOutputChars), true
+			return tools.Truncate(fmt.Sprintf("error: denied by pre_tool hook %s: %s", r.Command, r.Reason), a.Tools.MaxOutputChars), nil, true
 		}
 	}
-	out, isError := a.Tools.RunWithError(ctx, call)
+	// Hooks see only the text, whose placeholders stand in for images.
+	out, images, isError := a.Tools.RunWithImages(ctx, call)
 	var feedback strings.Builder
 	for _, r := range a.Hooks.Post(ctx, in, out, isError) {
 		a.hookRan(call, r)
@@ -374,7 +381,7 @@ func (a *Agent) runTool(ctx context.Context, t *trajectory.Trajectory, call mode
 	if feedback.Len() > 0 {
 		out = tools.Truncate(out+feedback.String(), a.Tools.MaxOutputChars)
 	}
-	return out, isError
+	return out, images, isError
 }
 
 // hookRan reports one hook run as an event, a verbose line, and, for a

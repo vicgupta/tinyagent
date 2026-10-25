@@ -411,8 +411,16 @@ func toResponses(messages []Message) (string, []map[string]any) {
 				})
 			}
 		case "tool":
+			var output any = m.Content
+			if len(m.Images) > 0 {
+				parts := []map[string]any{{"type": "input_text", "text": m.Content}}
+				for _, im := range m.Images {
+					parts = append(parts, map[string]any{"type": "input_image", "image_url": im.DataURL()})
+				}
+				output = parts
+			}
 			input = append(input, map[string]any{
-				"type": "function_call_output", "call_id": m.ToolCallID, "output": m.Content,
+				"type": "function_call_output", "call_id": m.ToolCallID, "output": output,
 			})
 		}
 	}
