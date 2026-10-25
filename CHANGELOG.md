@@ -4,6 +4,7 @@
 
 ### Features
 
+- Add opt-in file access rules (`file_access.deny_read` / `deny_write` config) with gitignore-style patterns relative to `--cwd`. `read_file`, `view_image`, `write_file`, `edit_file` and `apply_patch` refuse denied paths (checked through symlinks), `list_files` and `grep` skip them and report only a count of hidden paths, and `deny_read` paths are also write-denied. Rules are config-only, recorded in trajectories and `run.started`, and do not restrict `bash`, `start_process`, hooks or MCP servers.
 - Add an opt-in command environment policy (`command_env` config, `--command-env all|core|none`) that controls which environment variables `bash` and `start_process` commands inherit: a trimmed `core` or empty base, `exclude_secrets` (secret-named variables and tinyagent's provider keys), `exclude`/`pass` globs and fixed `set` values. The default still inherits everything.
 - Define named model providers in config (`providers`) with an `api` (`chat`, `responses` or `anthropic`), `base_url`, an API key read from an environment variable, extra headers, and per-model price and context-window metadata, selected with `-m <id>/<model>`. Provider config errors and missing key variables exit 2 before any request; keys and header values are never recorded; `run.started` and trajectories record `provider_api` and `provider_base_url`, and `--resume` refuses a changed provider.
 - Add `--max-output-tokens` (config `max_output_tokens`) to set the per-request output-token budget for Anthropic, OpenAI, OpenRouter and Ollama.

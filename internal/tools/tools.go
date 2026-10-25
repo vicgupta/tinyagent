@@ -65,6 +65,10 @@ type Executor struct {
 	// per-run file and keeps that directory out of grep and list_files
 	// walks. nil keeps plain truncation.
 	OutputFiles *OutputFiles
+	// FileAccess denies the built-in file tools access to configured paths
+	// (file_access config). nil denies nothing. It does not apply to bash,
+	// start_process, hooks or MCP servers.
+	FileAccess *FileAccess
 
 	procs registry
 }
@@ -223,7 +227,7 @@ func (e *Executor) RunResult(ctx context.Context, call model.ToolCall) Result {
 				return Result{Text: "error: invalid arguments JSON: " + err.Error(), IsError: true}
 			}
 		}
-		out, im, err := ViewImage(e.Root, a.Path, e.MaxImageBytes)
+		out, im, err := viewImage(e.Root, a.Path, e.MaxImageBytes, e.FileAccess)
 		if err != nil {
 			return Result{Text: truncate("error: "+err.Error(), e.MaxOutputChars), IsError: true}
 		}
@@ -341,15 +345,15 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return ReadFile(e.Root, a.Path, offset, limit)
+		return readFile(e.Root, a.Path, offset, limit, e.FileAccess)
 	case "write_file":
-		return "ok", WriteFile(e.Root, a.Path, a.Content)
+		return "ok", writeFile(e.Root, a.Path, a.Content, e.FileAccess)
 	case "edit_file":
 		replaceAll, err := boolArg("replace_all", a.ReplaceAll)
 		if err != nil {
 			return "", err
 		}
-		n, err := EditFile(e.Root, a.Path, a.OldStr, a.NewStr, replaceAll)
+		n, err := editFile(e.Root, a.Path, a.OldStr, a.NewStr, replaceAll, e.FileAccess)
 		if err != nil || !replaceAll {
 			return "ok", err
 		}
@@ -358,9 +362,9 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 		if !e.ApplyPatch {
 			return "", fmt.Errorf("unknown tool %q", name)
 		}
-		return ApplyPatch(e.Root, a.Input)
+		return applyPatch(e.Root, a.Input, e.FileAccess)
 	case "list_files":
-		return listFiles(e.Root, a.Path, a.Pattern, e.outputSkip())
+		return listFiles(e.Root, a.Path, a.Pattern, e.outputSkip(), e.FileAccess)
 	case "grep":
 		contextLines, err := contextLinesArg(a.ContextLines)
 		if err != nil {
@@ -377,7 +381,7 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return grepWithContext(e.Root, a.Pattern, a.Path, a.Include, ignoreCase, fixedStrings, contextLines, e.outputSkip())
+		return grepWithContext(e.Root, a.Pattern, a.Path, a.Include, ignoreCase, fixedStrings, contextLines, e.outputSkip(), e.FileAccess)
 	case "bash":
 		secs, err := intArg("timeout", a.Timeout)
 		if err != nil {

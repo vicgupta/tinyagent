@@ -290,11 +290,14 @@ func applyHunks(content string, hunks []hunk) (string, []string, error) {
 
 // checkPatch validates every operation against the files under root and
 // computes all new contents in memory. It writes nothing.
-func checkPatch(root string, ops []patchOp) ([]fileChange, error) {
+func checkPatch(root string, ops []patchOp, fa *FileAccess) ([]fileChange, error) {
 	seen := map[string]int{}
 	claim := func(i int, op patchOp, p string) (string, error) {
 		full, err := Resolve(root, p)
 		if err != nil {
+			return "", fmt.Errorf("%s: %w", op.label(i), err)
+		}
+		if err := fa.CheckWrite(full, p); err != nil {
 			return "", fmt.Errorf("%s: %w", op.label(i), err)
 		}
 		if j, ok := seen[full]; ok {
@@ -410,11 +413,17 @@ func (c fileChange) write() error {
 // then applies the operations in order. A write failure after the check stops
 // the run and reports which operations were applied; those are not rolled back.
 func ApplyPatch(root, input string) (string, error) {
+	return applyPatch(root, input, nil)
+}
+
+// applyPatch is ApplyPatch that rejects the whole patch when any operation
+// touches a path fa denies for writing.
+func applyPatch(root, input string, fa *FileAccess) (string, error) {
 	ops, err := parsePatch(input)
 	if err != nil {
 		return "", fmt.Errorf("invalid patch: %w; nothing was written", err)
 	}
-	changes, err := checkPatch(root, ops)
+	changes, err := checkPatch(root, ops, fa)
 	if err != nil {
 		return "", fmt.Errorf("patch does not apply: %w\nNothing was written", err)
 	}

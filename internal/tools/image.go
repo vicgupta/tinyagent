@@ -34,6 +34,11 @@ func SniffImage(data []byte) string {
 // ViewImage reads an image under root. The text names the path, MIME type,
 // and size, followed by the image's placeholder.
 func ViewImage(root, path string, maxBytes int) (string, *model.Image, error) {
+	return viewImage(root, path, maxBytes, nil)
+}
+
+// viewImage is ViewImage that refuses paths fa denies for reading.
+func viewImage(root, path string, maxBytes int, fa *FileAccess) (string, *model.Image, error) {
 	if maxBytes <= 0 {
 		maxBytes = DefaultMaxImageBytes
 	}
@@ -42,6 +47,9 @@ func ViewImage(root, path string, maxBytes int) (string, *model.Image, error) {
 	}
 	full, err := Resolve(root, path)
 	if err != nil {
+		return "", nil, err
+	}
+	if err := fa.CheckRead(full, path); err != nil {
 		return "", nil, err
 	}
 	fi, err := os.Stat(full)

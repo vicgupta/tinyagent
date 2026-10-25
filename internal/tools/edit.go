@@ -9,11 +9,19 @@ import (
 // EditFile replaces the single occurrence of oldStr with newStr, or every
 // occurrence if replaceAll is set, and returns the number of replacements.
 func EditFile(root, path, oldStr, newStr string, replaceAll bool) (int, error) {
+	return editFile(root, path, oldStr, newStr, replaceAll, nil)
+}
+
+// editFile is EditFile that refuses paths fa denies for writing.
+func editFile(root, path, oldStr, newStr string, replaceAll bool, fa *FileAccess) (int, error) {
 	if oldStr == "" {
 		return 0, fmt.Errorf("old_str must not be empty")
 	}
 	full, err := Resolve(root, path)
 	if err != nil {
+		return 0, err
+	}
+	if err := fa.CheckWrite(full, path); err != nil {
 		return 0, err
 	}
 	b, err := os.ReadFile(full)
