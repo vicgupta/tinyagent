@@ -419,14 +419,22 @@ func ApplyPatch(root, input string) (string, error) {
 // applyPatch is ApplyPatch that rejects the whole patch when any operation
 // touches a path the scope denies for writing.
 func applyPatch(root, input string, sc *scope) (string, error) {
+	out, _, err := applyPatchFiles(root, input, sc)
+	return out, err
+}
+
+// applyPatchFiles is applyPatch that also returns the files it wrote
+// (added, updated or renamed-to; not deleted), in patch order.
+func applyPatchFiles(root, input string, sc *scope) (string, []string, error) {
 	ops, err := parsePatch(input)
 	if err != nil {
-		return "", fmt.Errorf("invalid patch: %w; nothing was written", err)
+		return "", nil, fmt.Errorf("invalid patch: %w; nothing was written", err)
 	}
 	changes, err := checkPatch(root, ops, sc)
 	if err != nil {
-		return "", fmt.Errorf("patch does not apply: %w\nNothing was written", err)
+		return "", nil, fmt.Errorf("patch does not apply: %w\nNothing was written", err)
 	}
+	var written []string
 	var sb strings.Builder
 	sb.WriteString("ok")
 	for i, c := range changes {
@@ -438,12 +446,19 @@ func applyPatch(root, input string, sc *scope) (string, error) {
 			for _, d := range changes[i:] {
 				pending = append(pending, d.summary)
 			}
-			return "", fmt.Errorf("%s failed: %w\napplied (not rolled back): %s\nnot applied: %s",
+			return "", nil, fmt.Errorf("%s failed: %w\napplied (not rolled back): %s\nnot applied: %s",
 				c.op.label(i), err, listOrNone(applied), strings.Join(pending, ", "))
 		}
 		sb.WriteString("\n" + c.summary)
+		switch {
+		case c.op.kind == "delete":
+		case c.dest != "":
+			written = append(written, c.dest)
+		default:
+			written = append(written, c.full)
+		}
 	}
-	return sb.String(), nil
+	return sb.String(), written, nil
 }
 
 func listOrNone(s []string) string {

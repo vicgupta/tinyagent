@@ -20,6 +20,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/eventlog"
 	"github.com/vicgupta/tinyagent/internal/hooks"
+	"github.com/vicgupta/tinyagent/internal/lsp"
 	"github.com/vicgupta/tinyagent/internal/mcptools"
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/outschema"
@@ -51,6 +52,7 @@ type options struct {
 	subagents                                        bool
 	webFetch                                         bool
 	webFetchAllowDomains                             domainList
+	lsp                                              bool
 	toolOutputFiles                                  bool
 	skills, noSkills                                 bool
 	reasoningEffort                                  string
@@ -112,6 +114,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.applyPatch, "apply-patch", false, "add the apply_patch tool: multi-file, multi-hunk edits in the *** Begin Patch format, checked before any write (default off; config apply_patch)")
 	fs.BoolVar(&o.webFetch, "web-fetch", false, "add the web_fetch tool: read an allowlisted http(s) URL as text, in tinyagent's own process, separate from command network access (default off; config web_fetch.enabled)")
 	fs.Var(&o.webFetchAllowDomains, "web-fetch-allow-domain", "with --web-fetch, let web_fetch read this host (name, *.domain or IP, optional :port); repeatable, replaces web_fetch.allowed_domains")
+	fs.BoolVar(&o.lsp, "lsp", false, "start the configured language servers (lsp.servers in the user config or -c): append compiler diagnostics to edit results and add the read-only lsp tool (default off; config lsp.enabled)")
 	fs.BoolVar(&o.subagents, "subagents", false, "add the delegate tool: hand a task to a read-only subagent with a fresh context and get back only its report (default off; config subagents.enabled)")
 	fs.BoolVar(&o.images, "images", false, "let vision-capable models see images: the view_image tool and MCP image pass-through (default off; config images.enabled)")
 	fs.BoolVar(&o.skills, "skills", false, "discover Agent Skills in .agents/skills (project, up to the repo root, and ~/.agents/skills) and add the skill tool (default off; config skills)")
@@ -274,6 +277,12 @@ func run() int {
 	if err != nil {
 		return configFail(err)
 	}
+	if flagWasSet(fs, "lsp") {
+		cfg.LSP.Enabled = o.lsp
+	}
+	if code := checkLSP(cfg, cfgPath, ""); code != 0 {
+		return code
+	}
 	if on, set, err := skillsFlag(fs, o); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
@@ -354,6 +363,10 @@ func run() int {
 	if cfg.ReadOnly {
 		fmt.Fprintln(os.Stderr, "read-only mode: only read_file, list_files, and grep are available")
 	}
+	lspTools := newLSP(cfg, root)
+	if lspTools != nil {
+		defer lspTools.Manager.Close()
+	}
 	warnSnapshotDirs(cfg, extraDirs)
 	snaps, err := openSnapshots(fs, o, cfg, root, o.output)
 	if err != nil {
@@ -426,6 +439,7 @@ func run() int {
 			ApplyPatch:         cfg.ApplyPatch,
 			Delegate:           subagents != nil,
 			WebFetch:           webFetch,
+			LSP:                lspTools,
 			OutputFiles:        outputFiles,
 			FileAccess:         fileAccess,
 			ExtraDirs:          extraDirs,
@@ -644,6 +658,11 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if err != nil {
 		return configFail(err)
 	}
+	if flagWasSet(fs, "lsp") && o.lsp != src.LSPEnabled {
+		fmt.Fprintln(os.Stderr, "error: resume: --lsp conflicts with the checkpoint's recorded lsp setting; start a fresh task")
+		return 2
+	}
+	cfg.LSP.Enabled = src.LSPEnabled
 	if on, set, err := skillsFlag(fs, *o); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
@@ -667,6 +686,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if msg := envConflict(cfg); msg != "" {
 		fmt.Fprintln(os.Stderr, "error: "+msg)
 		return 2
+	}
+	if code := checkLSP(cfg, cfgPath, "resume: "); code != 0 {
+		return code
 	}
 	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 
@@ -718,6 +740,10 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		fmt.Fprintln(os.Stderr, "read-only mode: only read_file, list_files, and grep are available")
 	}
 	warnSnapshotDirs(cfg, extraDirs)
+	lspTools := newLSP(cfg, root)
+	if lspTools != nil {
+		defer lspTools.Manager.Close()
+	}
 	snaps, err := openSnapshots(fs, *o, cfg, root, o.output, o.resume)
 	if err != nil {
 		return fail(err)
@@ -807,6 +833,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 			ApplyPatch:     src.ApplyPatchEnabled,
 			Delegate:       src.SubagentsEnabled,
 			WebFetch:       webFetch,
+			LSP:            lspTools,
 			OutputFiles:    outputFiles,
 			FileAccess:     fileAccess,
 			ExtraDirs:      extraDirs,
@@ -964,6 +991,56 @@ func envConflict(cfg config.AgentConfig) string {
 		}
 	}
 	return ""
+}
+
+// checkLSP reports language-server settings that can't start: enabled
+// without servers, a forwarded variable that is unset, or the sandbox or
+// container environment, which the servers (host processes) would escape.
+// It returns the exit code (0 when fine).
+func checkLSP(cfg config.AgentConfig, cfgPath, prefix string) int {
+	if !cfg.LSP.Enabled {
+		return 0
+	}
+	err := cfg.LSP.CheckEnabled(cfgPath)
+	if err == nil {
+		err = cfg.LSP.CheckEnv(cfgPath)
+	}
+	if err == nil && (cfg.Sandbox || cfg.Environment == "container") {
+		err = errors.New("lsp can't be combined with --sandbox or --env container: language servers run on the host, outside the sandbox or container; turn lsp off for this run")
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: "+prefix+err.Error())
+		return 2
+	}
+	return 0
+}
+
+// newLSP returns the executor's language-server settings, or nil when lsp
+// is off. No server starts until a file it handles is used; each server's
+// stderr goes to a per-run log under .tinyagent/lsp.
+func newLSP(cfg config.AgentConfig, root string) *tools.LSP {
+	l := cfg.LSP
+	if !l.Enabled {
+		return nil
+	}
+	m := lsp.New(lsp.Options{
+		Root:      root,
+		Servers:   l.Servers,
+		LogDir:    filepath.Join(root, ".tinyagent", "lsp"),
+		LogPrefix: fmt.Sprintf("%s-%d-", time.Now().UTC().Format("20060102T150405Z"), os.Getpid()),
+	})
+	var desc []string
+	for _, s := range l.Servers {
+		desc = append(desc, fmt.Sprintf("%s (%s)", s.Name, strings.Join(s.Extensions, ", ")))
+	}
+	fmt.Fprintf(os.Stderr, "lsp: %s\n", strings.Join(desc, "; "))
+	return &tools.LSP{
+		Manager:   m,
+		AfterEdit: l.DiagnosticsAfterEdit,
+		Wait:      time.Duration(l.DiagnosticsWaitMS) * time.Millisecond,
+		Max:       l.MaxDiagnostics,
+		Warnings:  l.Severity == "warning",
+	}
 }
 
 // newWebFetcher applies --web-fetch-allow-domain to cfg and returns the
@@ -1459,6 +1536,9 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	}
 	if wf := a.Tools.WebFetch; wf != nil {
 		started["web_fetch"] = map[string]any{"allowed_domains": wf.Domains}
+	}
+	if l := a.Tools.LSP; l != nil {
+		started["lsp"] = map[string]any{"servers": l.Manager.Names()}
 	}
 	if wt := a.Worktree; wt != nil {
 		started["worktree"] = map[string]any{"path": wt.Path, "branch": wt.Branch, "base_commit": wt.BaseCommit, "repo_root": wt.RepoRoot}

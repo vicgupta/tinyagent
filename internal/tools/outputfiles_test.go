@@ -107,7 +107,7 @@ func TestOutputFilesUnderLimitAndOffUnchanged(t *testing.T) { // AC1
 	}
 	off := &Executor{Root: t.TempDir(), MaxOutputChars: 1000, BashTimeout: 30 * time.Second}
 	r := off.RunResult(context.Background(), toolCall("a", "bash", map[string]any{"command": "seq 1 5000"}))
-	raw, _ := off.run(context.Background(), "bash", `{"command":"seq 1 5000"}`)
+	raw, _ := off.run(context.Background(), "bash", `{"command":"seq 1 5000"}`, nil)
 	if r.Text != Truncate(raw, 1000) || r.OutputFile != "" {
 		t.Errorf("feature off changed the result")
 	}
@@ -213,7 +213,7 @@ func TestOutputFilesWriteFailureFallsBack(t *testing.T) { // AC8
 	os.WriteFile(filepath.Join(e.Root, ".tinyagent"), []byte("x"), 0o644)
 	var warnings []string
 	e.OutputFiles.Warn = func(s string) { warnings = append(warnings, s) }
-	raw, _ := e.run(context.Background(), "bash", `{"command":"seq 1 3000"}`)
+	raw, _ := e.run(context.Background(), "bash", `{"command":"seq 1 3000"}`, nil)
 	for i := 0; i < 2; i++ {
 		r := e.RunResult(context.Background(), toolCall(fmt.Sprint("c", i), "bash", map[string]any{"command": "seq 1 3000"}))
 		if r.Text != Truncate(raw, 500) || r.OutputFile != "" || r.IsError {

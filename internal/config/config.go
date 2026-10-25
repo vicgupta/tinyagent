@@ -122,6 +122,10 @@ type AgentConfig struct {
 	// WebFetch configures the opt-in web_fetch tool (off by default;
 	// --web-fetch overrides Enabled).
 	WebFetch WebFetch `yaml:"web_fetch"`
+	// LSP configures opt-in language servers: diagnostics appended to edit
+	// results and the read-only lsp tool (off by default; --lsp overrides
+	// Enabled). It comes only from the user config or -c.
+	LSP LSP `yaml:"lsp"`
 	// Skills turns on Agent Skills discovery from .agents/skills (off by
 	// default; --skills / --no-skills override it).
 	Skills bool `yaml:"skills"`
@@ -534,6 +538,7 @@ func Default() AgentConfig {
 		MaxTruncations:         DefaultMaxTruncations,
 		MaxImageBytes:          DefaultMaxImageBytes,
 		WebFetch:               WebFetch{MaxBytes: DefaultWebFetchMaxBytes, TimeoutSeconds: DefaultWebFetchTimeoutSeconds},
+		LSP:                    DefaultLSP(),
 		LogDB:                  LogDB{Level: "metadata", MaxDays: 30, MaxRuns: 500},
 		ToolOutputFiles:        ToolOutputFiles{Dir: DefaultToolOutputDir, MaxRuns: DefaultToolOutputMaxRuns},
 		Snapshots:              Snapshots{MaxFileBytes: DefaultSnapshotMaxFileBytes},
@@ -584,6 +589,7 @@ func Load(path string) (AgentConfig, error) {
 		MaxOutputTokens yaml.Node `yaml:"max_output_tokens"`
 		MaxTruncations  yaml.Node `yaml:"max_truncations"`
 		CommandEnv      yaml.Node `yaml:"command_env"`
+		LSP             yaml.Node `yaml:"lsp"`
 	}
 	if yaml.Unmarshal(data, &probe) == nil {
 		for _, c := range []struct {
@@ -600,6 +606,11 @@ func Load(path string) (AgentConfig, error) {
 		}
 		if probe.CommandEnv.Kind != 0 {
 			if err := checkCommandEnv(&probe.CommandEnv); err != nil {
+				return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
+			}
+		}
+		if probe.LSP.Kind != 0 {
+			if err := checkStrict(&probe.LSP, "lsp", &LSP{}); err != nil {
 				return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
 			}
 		}
@@ -651,6 +662,9 @@ func Load(path string) (AgentConfig, error) {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
 	}
 	if err := cfg.WebFetch.Validate(); err != nil {
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
+	}
+	if err := cfg.LSP.Validate(); err != nil {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
 	}
 	if err := validateAdditionalDirs(cfg.AdditionalDirs); err != nil {

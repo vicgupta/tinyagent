@@ -21,7 +21,7 @@ func TestWebFetchUnaffectedBySandbox(t *testing.T) {
 	}
 	e := &Executor{Root: root, Env: Local{Sandbox: sb}, WebFetch: f, MaxOutputChars: 10000}
 	defer e.Close()
-	out, err := e.run(context.Background(), WebFetchToolName, fmt.Sprintf(`{"url":%q}`, srv.URL+"/"))
+	out, err := e.run(context.Background(), WebFetchToolName, fmt.Sprintf(`{"url":%q}`, srv.URL+"/"), nil)
 	if err != nil || !strings.Contains(out, "fixture-ok") {
 		t.Fatalf("web_fetch under the sandbox: %q, %v", out, err)
 	}

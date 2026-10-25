@@ -15,11 +15,13 @@ import (
 	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/hooks"
 	"github.com/vicgupta/tinyagent/internal/hooks/hookstest"
+	"github.com/vicgupta/tinyagent/internal/lsp/lsptest"
 	"github.com/vicgupta/tinyagent/internal/model"
 )
 
 func TestMain(m *testing.M) {
 	hookstest.Run()
+	lsptest.Run()
 	os.Exit(m.Run())
 }
 
