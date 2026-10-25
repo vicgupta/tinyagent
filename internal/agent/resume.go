@@ -39,6 +39,12 @@ func WebFetchToolSignature(readOnly, plan, images, applyPatch, delegate, webFetc
 	return toolSignature(readOnly, plan, images, applyPatch, delegate, webFetch)
 }
 
+// LSPToolSignature is the signature with every opt-in tool flag, lsp
+// last.
+func LSPToolSignature(readOnly, plan, images, applyPatch, delegate, webFetch, lsp bool) string {
+	return toolSignature(readOnly, plan, images, applyPatch, delegate, webFetch, lsp)
+}
+
 // ApplyPatchToolSignature is ImagesToolSignature with apply_patch enabled or
 // not. Without apply_patch it equals ImagesToolSignature.
 func ApplyPatchToolSignature(readOnly, plan, images, applyPatch bool) string {
@@ -52,7 +58,8 @@ func toolSignature(readonly, plan bool, opt ...bool) string {
 	patch := len(opt) > 1 && opt[1]
 	delegate := len(opt) > 2 && opt[2]
 	webFetch := len(opt) > 3 && opt[3]
-	data, _ := json.Marshal(builtinSpecs(readonly, plan, img, patch, delegate, webFetch))
+	lsp := len(opt) > 4 && opt[4]
+	data, _ := json.Marshal(builtinSpecs(readonly, plan, img, patch, delegate, webFetch, lsp))
 	prefix := "tools-v1:"
 	if readonly {
 		prefix = "tools-read-only-v1:"
@@ -71,6 +78,9 @@ func toolSignature(readonly, plan bool, opt ...bool) string {
 	}
 	if webFetch {
 		prefix = "web-fetch-v1:" + prefix
+	}
+	if lsp {
+		prefix = "lsp-v1:" + prefix
 	}
 	return fmt.Sprintf("%s%x", prefix, sha256.Sum256(data))
 }
@@ -92,6 +102,9 @@ func builtinSpecs(readOnly, plan bool, opt ...bool) []model.ToolSpec {
 	if len(opt) > 3 && opt[3] {
 		specs = append(specs, tools.WebFetchSpec())
 	}
+	if len(opt) > 4 && opt[4] {
+		specs = append(specs, tools.LSPSpec())
+	}
 	return specs
 }
 
@@ -105,10 +118,10 @@ func ValidateResume(t *trajectory.Trajectory, cfg config.AgentConfig, root strin
 	if root != t.Root {
 		return errors.New("--cwd does not match the checkpoint's canonical root")
 	}
-	if t.ToolSignature != toolSignature(t.ReadOnly, t.PlanEnabled, t.ImagesEnabled, t.ApplyPatchEnabled, t.SubagentsEnabled, t.WebFetchEnabled) {
+	if t.ToolSignature != toolSignature(t.ReadOnly, t.PlanEnabled, t.ImagesEnabled, t.ApplyPatchEnabled, t.SubagentsEnabled, t.WebFetchEnabled, t.LSPEnabled) {
 		return errors.New("tool compatibility has changed; start a fresh task")
 	}
-	names := toolNames(builtinSpecs(t.ReadOnly, t.PlanEnabled, t.ImagesEnabled, t.ApplyPatchEnabled, t.SubagentsEnabled, t.WebFetchEnabled))
+	names := toolNames(builtinSpecs(t.ReadOnly, t.PlanEnabled, t.ImagesEnabled, t.ApplyPatchEnabled, t.SubagentsEnabled, t.WebFetchEnabled, t.LSPEnabled))
 	var set *skills.Set
 	if t.SkillsEnabled {
 		set, _ = skills.Discover(root, skills.UserDir())

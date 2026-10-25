@@ -4,7 +4,7 @@
 curl -fsSL https://raw.githubusercontent.com/vicgupta/tinyagent/main/install.sh | sh
 ```
 
-A minimal coding agent in a single static Go binary. It gives an LLM nine tools (`read_file`, `write_file`, `edit_file`, `list_files`, `grep`, `bash`, and `start_process`, `read_process`, `stop_process` for background commands), plus the opt-in `update_plan`, `skill`, `view_image`, `apply_patch`, `delegate`, and `web_fetch` tools, and keeps a linear message history until the model submits.
+A minimal coding agent in a single static Go binary. It gives an LLM nine tools (`read_file`, `write_file`, `edit_file`, `list_files`, `grep`, `bash`, and `start_process`, `read_process`, `stop_process` for background commands), plus the opt-in `update_plan`, `skill`, `view_image`, `apply_patch`, `delegate`, `web_fetch`, and `lsp` tools, and keeps a linear message history until the model submits.
 
 ## Install
 
@@ -96,6 +96,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--apply-patch` | config `apply_patch`, else off | Give the model the `apply_patch` tool for multi-file, multi-hunk edits, checked before any write; `--apply-patch=false` disables it. See [apply_patch](#apply_patch) |
 | `--subagents` | config `subagents.enabled`, else off | Give the model the `delegate` tool, which hands a task to a read-only subagent with a fresh context and returns only its report; `--subagents=false` disables it. See [Subagents](#subagents) |
 | `--web-fetch` | config `web_fetch.enabled`, else off | Give the model the `web_fetch` tool, which reads pages from allowlisted hosts as text; needs a nonempty allowlist. `--web-fetch=false` disables it. See [Web fetch](#web-fetch) |
+| `--lsp` | config `lsp.enabled`, else off | Start the language servers configured in `lsp.servers` (user config or `-c` only): append compiler diagnostics to `write_file`, `edit_file` and `apply_patch` results and add the read-only `lsp` tool. Needs at least one server; `--lsp=false` disables it. See [Language servers (LSP)](#language-servers-lsp) |
 | `--web-fetch-allow-domain <host>` | config `web_fetch.allowed_domains`, else none | Hosts `web_fetch` may read. Repeatable; replaces the config list; requires `--web-fetch` (or `web_fetch.enabled: true`). See [Web fetch](#web-fetch) |
 | `--tool-output-files` | config `tool_output_files.enabled`, else off | Save the full text of tool results over `max_output_chars` to a per-run file the model can page with `read_file` and `grep`; `--tool-output-files=false` disables it. See [Tool output files](#tool-output-files) |
 | `--images` | config `images.enabled`, else off | Let vision-capable models see images: the `view_image` tool and MCP image pass-through; see [Images](#images) |
@@ -130,7 +131,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 
 | Type | Fields |
 |---|---|
-| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `reasoning_effort` (only when set), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy), `file_access` (`deny_read`, `deny_write`; only with [file access](#restricting-file-access) rules), `web_fetch` (`allowed_domains`; only with [web fetch](#web-fetch) on), `additional_dirs` (`path`, `mode`; only with [additional directories](#additional-directories)), `worktree` (`path`, `branch`, `base_commit`, `repo_root`; only with [`--worktree`](#worktrees)) |
+| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `reasoning_effort` (only when set), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy), `file_access` (`deny_read`, `deny_write`; only with [file access](#restricting-file-access) rules), `web_fetch` (`allowed_domains`; only with [web fetch](#web-fetch) on), `lsp` (`servers`, the configured names; only with [language servers](#language-servers-lsp) on), `additional_dirs` (`path`, `mode`; only with [additional directories](#additional-directories)), `worktree` (`path`, `branch`, `base_commit`, `repo_root`; only with [`--worktree`](#worktrees)) |
 | `assistant.message` | `text` (complete assistant message) |
 | `tool.call` | `id`, `name`, `arguments` (decoded JSON value, or a string if malformed) |
 | `tool.result` | `id`, `name`, `output` (same configured truncation as tool output), `is_error`; with [tool output files](#tool-output-files), a saved result also has `output_file` (path relative to `--cwd`) and `output_bytes` |
@@ -145,6 +146,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 | `warning` / `error` | `message` |
 | `sandbox.network_denied` | `host`, `port`, `reason`; the sandbox allowlist proxy refused a request from a command (see [Network allowlist](#network-allowlist)) |
 | `web_fetch` | `url`, `final_url`, `status`, `content_type`, `bytes`, `truncated`, `duration_ms`, and `denied_reason` (for a refused URL) or `error` (for a failed fetch); one per fetch attempt, emitted before its `tool.result` (see [Web fetch](#web-fetch)) |
+| `lsp.server` | `name`, `state` (`started`, `unavailable`, `crashed` or `stopped`), `reason` (for `unavailable` and `crashed`); one per language-server state change (see [Language servers (LSP)](#language-servers-lsp)) |
 | `provider.retry` | `attempt` (the upcoming attempt number), `reason` (`http_<status>` or `network`), `backoff_ms`; only emitted when a model request is retried |
 | `result` | `status`, `submission`, cumulative `steps`, `structured_output` (only with `--output-schema` and status `Submitted`), `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cost_usd`, invocation `duration_ms` |
 
@@ -321,7 +323,7 @@ The lookup order is: `-c PATH` if given (a missing or unreadable file is an erro
 
 Every key is optional, but an unrecognized key (a typo like `step_limt`) is an error naming the file and the key, rather than silently ignored. Command-line flags override the file.
 
-Set `read_only: true` to make repository analysis the default. `--read-only` overrides the config value, including `--read-only=false`. In this mode, executor dispatch allows only `read_file`, `list_files`, and `grep`; writes, edits, shell commands, and background process tools are denied even if task text or repository instructions request them. Denials are returned to the model as tool errors. The restriction is model tool authority, not an OS sandbox (for that, see `--sandbox` under Sandboxing commands): an explicit `-o` trajectory destination can be written by the CLI, provider requests still send their context to the selected service, and the Codex provider may refresh its credential file, and the opt-in [`web_fetch`](#web-fetch) tool, which only reads allowlisted URLs, stays available when enabled. `--update` is an administrative action outside task-tool policy. Readable secrets (unless hidden with [`file_access`](#restricting-file-access) rules), symlinks that point outside `--cwd`, existing lexical path behavior, and AGENTS.md discovery retain their existing limitations; read-only mode does not make an untrusted repository safe.
+Set `read_only: true` to make repository analysis the default. `--read-only` overrides the config value, including `--read-only=false`. In this mode, executor dispatch allows only `read_file`, `list_files`, and `grep`; writes, edits, shell commands, and background process tools are denied even if task text or repository instructions request them. Denials are returned to the model as tool errors. The restriction is model tool authority, not an OS sandbox (for that, see `--sandbox` under Sandboxing commands): an explicit `-o` trajectory destination can be written by the CLI, provider requests still send their context to the selected service, and the Codex provider may refresh its credential file, and the opt-in [`web_fetch`](#web-fetch) tool, which only reads allowlisted URLs, stays available when enabled, as does the read-only [`lsp`](#language-servers-lsp) tool (its servers are still started and write logs under `.tinyagent/lsp`). `--update` is an administrative action outside task-tool policy. Readable secrets (unless hidden with [`file_access`](#restricting-file-access) rules), symlinks that point outside `--cwd`, existing lexical path behavior, and AGENTS.md discovery retain their existing limitations; read-only mode does not make an untrusted repository safe.
 
 `model` saves a default model, so `tinyagent -t "fix the failing test"` needs no `-m`. The model is chosen in this order: `-m`/`--model` if given (even `-m openai/gpt-4o`), then a nonempty `$AGENT_MODEL`, then a nonempty `model` in the config, then `openai/gpt-4o`.
 
@@ -366,6 +368,13 @@ web_fetch:
   allowed_domains: []     # hosts it may read, e.g. [pkg.go.dev, "*.python.org"]; required when enabled
   max_bytes: 2097152      # response bytes read per fetch (2 MiB); must be >= 1
   timeout_seconds: 20     # per fetch, including redirects; 1 to 120
+lsp:                      # language servers; see Language servers (LSP)
+  enabled: false          # same as --lsp
+  diagnostics_after_edit: true  # append diagnostics to edit results; false keeps only the lsp tool
+  diagnostics_wait_ms: 3000     # longest wait for diagnostics after an edit; 100 to 30000
+  max_diagnostics: 20     # per file; 1 to 200
+  severity: error         # error, or warning (errors and warnings)
+  servers: []             # name, command, args, extensions, env, initialization_options, startup_timeout_seconds
 images:
   enabled: false          # view_image tool and MCP image pass-through (same as --images)
 max_image_bytes: 5242880  # largest image sent to the model (5 MiB); must be >= 1
@@ -634,6 +643,47 @@ web_fetch:
 - **Where it is offered.** It only reads, so it is offered with `--read-only`. [Subagents](#subagents) never get it. `pre_tool`/`post_tool` [hooks](#tool-hooks) match it as `web_fetch` and see `arguments` as `{"url": "..."}`; a denied call makes no request.
 - **Observability.** `-v` prints one line per fetch (URL, status, type, bytes, time, or the refusal reason). `--json` and `--log-db` emit a `web_fetch` event per attempt and list `allowed_domains` in `run.started`; `-o` trajectories record `web_fetch_enabled` and `web_fetch.allowed_domains`.
 - **Resume.** A checkpoint records whether `web_fetch` was enabled, and `--resume` keeps that setting: passing a conflicting `--web-fetch` exits 2, and the config's `web_fetch.enabled` is ignored on resume. The allowlist and limits come from the current invocation.
+
+### Language servers (LSP)
+
+`--lsp` (or `lsp.enabled: true`) starts language servers you configure, so the model sees compiler errors right after it edits a file instead of on its next build, and can jump to definitions and references. It is off by default; with it off, requests, tools, and checkpoints are unchanged and no server starts.
+
+```yaml
+lsp:
+  enabled: true
+  diagnostics_after_edit: true  # default
+  diagnostics_wait_ms: 3000     # 100 to 30000
+  max_diagnostics: 20           # per file, 1 to 200
+  severity: error               # or warning
+  servers:
+    - name: go                  # letters, digits, - and _
+      command: gopls
+      extensions: [.go]
+      env: [HOME, GOPATH, GOFLAGS]   # host variables to forward; each must be set
+    - name: ts
+      command: typescript-language-server
+      args: [--stdio]
+      extensions: [.ts, .tsx]
+      initialization_options: {}
+      startup_timeout_seconds: 15    # start and initialize, 1 to 300
+```
+
+- **Trust.** Servers are executables you choose, like [MCP servers](#local-mcp-tools): they are read only from the user config or `-c`, never from a repository file, and launched directly (no shell) in `--cwd` with a minimal environment: `PATH` (on Windows also `SystemRoot`, `WINDIR`, `USERPROFILE`, `TEMP`, `TMP`) plus the variables named in `env`. Many servers need more (gopls wants `HOME` or `GOPATH`/`GOCACHE`); forward them by name. A named variable that is unset, an empty `servers` list while enabled, a duplicate name or extension, or a value out of range exits 2 before any model request. Servers run on the host, so `--lsp` with `--sandbox` or `--env container` exits 2.
+- **Lifecycle.** A server starts the first time a file with one of its extensions is edited or queried, one process per server per run. A server that can't start (missing binary, failed `initialize`, timeout) is marked unavailable for the run with one stderr warning; the run continues. A server that crashes is restarted once, then marked unavailable. On every exit (submit, limits, errors, interrupt) tinyagent sends `shutdown`/`exit` and then kills the server's process group. Each server's stderr goes to a log under `.tinyagent/lsp` in `--cwd` (1 MiB per server, the newest 50 kept).
+- **Diagnostics after edits.** After a successful `write_file`, `edit_file` or `apply_patch` (with `diagnostics_after_edit`), tinyagent syncs each changed file with its server and waits up to `diagnostics_wait_ms` for diagnostics, then appends them to the tool result:
+
+  ```text
+  ok
+  [lsp go: 2 errors in internal/a.go]
+  internal/a.go:12:5: undefined: fooBar
+  internal/a.go:30:2: missing return
+  ```
+
+  Positions are 1-based lines and columns (columns in characters). Errors only by default; `severity: warning` adds warnings (prefixed `warning:`). Beyond `max_diagnostics` a line such as `[lsp go: omitted 7 more diagnostics in a.go]` follows, and if the server is slow, `[lsp go: diagnostics not ready after 3000 ms for a.go]`. A clean file adds nothing. Notes are appended before `post_tool` [hooks](#tool-hooks) run, so hooks, `tool.result` events, [tool output files](#tool-output-files) and trajectories all see them. They report every current error in the file, not only new ones, and a server that hasn't finished indexing may report false positives; treat them as hints and confirm with a build.
+- **The `lsp` tool.** `{"operation": "diagnostics" | "definition" | "references", "path": "...", "line": n, "column": n}` (1-based; `line` and `column` only for `definition` and `references`). `diagnostics` returns the file's current diagnostics, or `[lsp go: no errors in a.go]`. `definition` and `references` return up to 100 `path:line:col: <source line>` locations, sorted and deduplicated; locations outside `--cwd` and its [additional directories](#additional-directories), or denied by [file access](#restricting-file-access) rules, are left out and counted. `path` follows the same rules as `read_file`, and a file with no configured server is a tool error. The tool only reads, so it is offered with `--read-only` (where edits, and so post-edit diagnostics, can't happen); [subagents](#subagents) never get it. Hooks match it as `lsp`.
+- **Privacy and cost.** Servers read the files you edit or query (and whatever else they index under `--cwd`); some servers download modules or toolchains or use a lot of memory on large repositories. Files over 4 MiB are not sent.
+- **Observability.** `--json` and `--log-db` emit an `lsp.server` event per state change and list `servers` under `lsp` in `run.started`; `-v` prints `lsp: go started` and similar lines; on start, one line such as `lsp: go (.go); ts (.ts, .tsx)` goes to stderr. `-o` trajectories record `lsp_enabled` and `lsp_servers`.
+- **Resume.** A checkpoint records whether `lsp` was enabled, and `--resume` keeps that setting: passing a conflicting `--lsp` (including `--lsp=false`) exits 2, and the config's `lsp.enabled` is ignored on resume. Servers and limits come from the current invocation.
 
 ## Exit status
 

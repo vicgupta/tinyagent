@@ -193,6 +193,12 @@ type Trajectory struct {
 	// WebFetch is set when web_fetch was offered; it records this
 	// invocation's allowlist.
 	WebFetch *WebFetchInfo `json:"web_fetch,omitempty"`
+	// LSPEnabled (schema 2) records whether language servers (the lsp
+	// tool and post-edit diagnostics) were on. A resume must use the same
+	// setting.
+	LSPEnabled bool `json:"lsp_enabled,omitempty"`
+	// LSPServers names this invocation's configured language servers.
+	LSPServers []string `json:"lsp_servers,omitempty"`
 	// Subagents records each delegate call's child run, in call order,
 	// with its full history. Their tokens and cost are included in the
 	// run totals; their model calls are counted in SubagentSteps, not

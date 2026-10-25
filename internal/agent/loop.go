@@ -17,6 +17,7 @@ import (
 
 	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/hooks"
+	"github.com/vicgupta/tinyagent/internal/lsp"
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/outschema"
 	"github.com/vicgupta/tinyagent/internal/sandboxnet"
@@ -258,6 +259,10 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			t.ExitStatus, t.Submission = StatusError, "resume web_fetch setting differs from checkpoint"
 			return t
 		}
+		if t.LSPEnabled != (a.Tools.LSP != nil) {
+			t.ExitStatus, t.Submission = StatusError, "resume lsp setting differs from checkpoint"
+			return t
+		}
 		t.ExitStatus, t.Submission = "", ""
 		if t.OpenAIAPI == "" {
 			t.OpenAIAPI = a.OpenAIAPI
@@ -301,12 +306,13 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			SystemPrompt:          system,
 			SkipAgentsMD:          a.SkipAgentsMD,
 			Tools:                 toolNames(a.Tools.Catalog()),
-			ToolSignature:         toolSignature(a.Tools.ReadOnly, a.Tools.Plan, a.Tools.Images, a.Tools.ApplyPatch, a.Tools.Delegate, a.Tools.WebFetch != nil),
+			ToolSignature:         toolSignature(a.Tools.ReadOnly, a.Tools.Plan, a.Tools.Images, a.Tools.ApplyPatch, a.Tools.Delegate, a.Tools.WebFetch != nil, a.Tools.LSP != nil),
 			PlanEnabled:           a.Tools.Plan,
 			ImagesEnabled:         a.Tools.Images,
 			ApplyPatchEnabled:     a.Tools.ApplyPatch,
 			SubagentsEnabled:      a.Tools.Delegate,
 			WebFetchEnabled:       a.Tools.WebFetch != nil,
+			LSPEnabled:            a.Tools.LSP != nil,
 			MCPEnabled:            len(a.Tools.ExternalSpecs) > 0,
 			ExternalTools:         externalToolNames(a.Tools.ExternalSpecs),
 			ExternalToolSignature: externalToolSignature(a.Tools.ExternalSpecs),
@@ -330,6 +336,10 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 	t.WebFetch = nil
 	if wf := a.Tools.WebFetch; wf != nil {
 		t.WebFetch = &trajectory.WebFetchInfo{AllowedDomains: wf.Domains}
+	}
+	t.LSPServers = nil
+	if l := a.Tools.LSP; l != nil && l.Manager != nil {
+		t.LSPServers = l.Manager.Names()
 	}
 	switch env := a.Tools.Env.(type) {
 	case tools.Local:
@@ -488,6 +498,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			} else {
 				res = a.runTool(ctx, t, call)
 				a.recordWebFetches()
+				a.recordLSPEvents()
 				out, images, isError = res.Text, res.Images, res.IsError
 				switch stop := a.takeDelegateStop(); stop {
 				case StatusInterrupted, StatusTimeLimit:
@@ -940,6 +951,10 @@ func ctxStatus(ctx context.Context) (string, bool) {
 
 func (a *Agent) closeTools(t *trajectory.Trajectory) {
 	a.recordProcesses(t)
+	if l := a.Tools.LSP; l != nil && l.Manager != nil {
+		l.Manager.Close()
+		a.recordLSPEvents()
+	}
 	if summary := a.Tools.Close(); summary != "" {
 		t.BackgroundProcesses = summary
 		if a.Verbose {
@@ -990,6 +1005,37 @@ func (a *Agent) recordNetworkDenials(t *trajectory.Trajectory) {
 		a.event("sandbox.network_denied", map[string]any{"host": d.Host, "port": d.Port, "reason": d.Reason})
 		if a.Verbose {
 			fmt.Fprintf(a.Err, "sandbox: network denied: %s port %d: %s\n", d.Host, d.Port, d.Reason)
+		}
+	}
+}
+
+// recordLSPEvents emits an lsp.server event, and with -v a stderr line,
+// for each language-server state change since the last call. A server
+// becoming unavailable also warns once, on stderr and as a warning event.
+func (a *Agent) recordLSPEvents() {
+	l := a.Tools.LSP
+	if l == nil || l.Manager == nil {
+		return
+	}
+	for _, ev := range l.Manager.TakeEvents() {
+		fields := map[string]any{"name": ev.Server, "state": ev.State}
+		if ev.Reason != "" {
+			fields["reason"] = ev.Reason
+		}
+		a.event("lsp.server", fields)
+		if a.Verbose {
+			if ev.Reason != "" {
+				fmt.Fprintf(a.Err, "lsp: %s %s: %s\n", ev.Server, ev.State, ev.Reason)
+			} else {
+				fmt.Fprintf(a.Err, "lsp: %s %s\n", ev.Server, ev.State)
+			}
+		}
+		if ev.State == lsp.StateUnavailable {
+			msg := fmt.Sprintf("lsp server %s is unavailable for this run: %s", ev.Server, ev.Reason)
+			if a.Err != nil {
+				fmt.Fprintln(a.Err, "warning:", msg)
+			}
+			a.event("warning", map[string]any{"message": msg})
 		}
 	}
 }

@@ -290,7 +290,7 @@ func TestWebFetchExecutor(t *testing.T) { // AC3, AC7
 	if !e.Permits(WebFetchToolName) {
 		t.Fatal("web_fetch not offered in read-only mode")
 	}
-	out, err := e.run(context.Background(), WebFetchToolName, fmt.Sprintf(`{"url":%q}`, srv.URL))
+	out, err := e.run(context.Background(), WebFetchToolName, fmt.Sprintf(`{"url":%q}`, srv.URL), nil)
 	if err != nil || !strings.HasSuffix(out, "\nhello") {
 		t.Errorf("out %q, err %v", out, err)
 	}
@@ -298,7 +298,7 @@ func TestWebFetchExecutor(t *testing.T) { // AC3, AC7
 	if off.Permits(WebFetchToolName) {
 		t.Error("web_fetch offered while off")
 	}
-	if _, err := off.run(context.Background(), WebFetchToolName, `{"url":"http://x"}`); err == nil {
+	if _, err := off.run(context.Background(), WebFetchToolName, `{"url":"http://x"}`, nil); err == nil {
 		t.Error("web_fetch ran while off")
 	}
 }

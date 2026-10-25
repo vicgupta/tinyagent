@@ -67,6 +67,11 @@ type Executor struct {
 	// WebFetch, when set, offers the opt-in web_fetch tool (also in
 	// read-only mode). nil leaves it off.
 	WebFetch *WebFetcher
+	// LSP, when set, offers the opt-in read-only lsp tool (also in
+	// read-only mode) and, with AfterEdit, appends language-server
+	// diagnostics to write_file, edit_file and apply_patch results. nil
+	// leaves both off.
+	LSP *LSP
 	// OutputFiles, when set, saves the full text of over-limit results to a
 	// per-run file and keeps that directory out of grep and list_files
 	// walks. nil keeps plain truncation.
@@ -118,6 +123,9 @@ type args struct {
 	File         string          `json:"file"`
 	Input        string          `json:"input"`
 	URL          string          `json:"url"`
+	Operation    string          `json:"operation"`
+	Line         json.Number     `json:"line"`
+	Column       json.Number     `json:"column"`
 }
 
 // Specs returns the OpenAI tool definitions for all tools.
@@ -253,9 +261,16 @@ func (e *Executor) RunResult(ctx context.Context, call model.ToolCall) Result {
 			return e.limit(call, out, isErr)
 		}
 	}
-	out, err := e.run(ctx, call.Function.Name, call.Function.Arguments)
+	var edited []string
+	out, err := e.run(ctx, call.Function.Name, call.Function.Arguments, &edited)
 	if err != nil {
 		out = "error: " + err.Error()
+	} else if len(edited) > 0 && e.LSP != nil && e.LSP.AfterEdit && !e.ReadOnly {
+		// Diagnostics join the result before truncation and hooks, so
+		// post_tool hooks, events and the trajectory all see them.
+		if note := e.lspAfterEdit(ctx, edited); note != "" {
+			out += "\n" + note
+		}
 	}
 	return e.limit(call, out, err != nil)
 }
@@ -280,6 +295,9 @@ func (e *Executor) Catalog() []model.ToolSpec {
 	}
 	if e.WebFetch != nil {
 		out = append(out, WebFetchSpec())
+	}
+	if e.LSP != nil {
+		out = append(out, LSPSpec())
 	}
 	if e.Skills.Len() > 0 {
 		out = append(out, e.Skills.Spec())
@@ -336,7 +354,9 @@ func (e *Executor) Permits(name string) bool {
 	return false
 }
 
-func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
+// run executes a built-in tool. Successful file edits append the files
+// they wrote to edited.
+func (e *Executor) run(ctx context.Context, name, raw string, edited *[]string) (string, error) {
 	if name == PlanToolName && e.Plan {
 		return "", errors.New("update_plan is handled by the agent loop")
 	}
@@ -345,7 +365,8 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 	}
 	skillTool := name == skills.ToolName && e.Skills.Len() > 0
 	webFetch := name == WebFetchToolName && e.WebFetch != nil
-	if e.ReadOnly && !skillTool && !webFetch && (name != "read_file" && name != "list_files" && name != "grep") {
+	lspTool := name == LSPToolName && e.LSP != nil
+	if e.ReadOnly && !skillTool && !webFetch && !lspTool && (name != "read_file" && name != "list_files" && name != "grep") {
 		return "", fmt.Errorf("tool %q is unavailable in read-only mode; only read_file, list_files, and grep are allowed", name)
 	}
 	var a args
@@ -360,6 +381,9 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 	if skillTool {
 		return e.Skills.Load(a.Name, a.File)
 	}
+	if lspTool {
+		return e.lspTool(ctx, a)
+	}
 	switch name {
 	case "read_file":
 		offset, err := intArg("offset", a.Offset)
@@ -372,13 +396,20 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 		}
 		return readFile(e.Root, a.Path, offset, limit, e.scope())
 	case "write_file":
-		return "ok", writeFile(e.Root, a.Path, a.Content, e.scope())
+		if err := writeFile(e.Root, a.Path, a.Content, e.scope()); err != nil {
+			return "ok", err
+		}
+		e.noteEdited(edited, a.Path)
+		return "ok", nil
 	case "edit_file":
 		replaceAll, err := boolArg("replace_all", a.ReplaceAll)
 		if err != nil {
 			return "", err
 		}
 		n, err := editFile(e.Root, a.Path, a.OldStr, a.NewStr, replaceAll, e.scope())
+		if err == nil {
+			e.noteEdited(edited, a.Path)
+		}
 		if err != nil || !replaceAll {
 			return "ok", err
 		}
@@ -387,7 +418,11 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 		if !e.ApplyPatch {
 			return "", fmt.Errorf("unknown tool %q", name)
 		}
-		return applyPatch(e.Root, a.Input, e.scope())
+		out, written, err := applyPatchFiles(e.Root, a.Input, e.scope())
+		if err == nil && edited != nil {
+			*edited = append(*edited, written...)
+		}
+		return out, err
 	case "list_files":
 		return listFiles(e.Root, a.Path, a.Pattern, e.outputSkip(), e.scope())
 	case "grep":
