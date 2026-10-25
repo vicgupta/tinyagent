@@ -49,6 +49,26 @@ type AgentConfig struct {
 	ContextWindow int `yaml:"context_window"`
 
 	MCPServers []MCPServer `yaml:"mcp_servers,omitempty"`
+
+	// Hooks are trusted local executables run around matching tool calls.
+	Hooks Hooks `yaml:"hooks,omitempty"`
+}
+
+// Hooks lists the commands run before and after matching tool calls.
+type Hooks struct {
+	PreTool  []Hook `yaml:"pre_tool,omitempty"`
+	PostTool []Hook `yaml:"post_tool,omitempty"`
+}
+
+// Hook runs one local command for tool calls whose name matches Match.
+type Hook struct {
+	Match   string   `yaml:"match,omitempty"` // whole-name Go regexp; "" matches every tool
+	Command string   `yaml:"command"`
+	Args    []string `yaml:"args,omitempty"`
+	Env     []string `yaml:"env,omitempty"`
+	// TimeoutSec is nil when unset (30 seconds); 0 is rejected.
+	TimeoutSec *int   `yaml:"timeout_seconds,omitempty"`
+	OnError    string `yaml:"on_error,omitempty"` // pre_tool only: deny (default) or allow
 }
 
 // MCPServer grants access to selected tools from one local stdio server.

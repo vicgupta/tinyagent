@@ -681,3 +681,25 @@ func TestHelpIgnoresMalformedUserConfig(t *testing.T) {
 		t.Errorf("--help exit = %d, want 0 and the model fallback documented:\n%s", code, got)
 	}
 }
+
+func TestInvalidHookConfigFailsBeforeProvider(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("hooks:\n  post_tool:\n    - command: fmt-check\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var requests atomic.Int32
+	srv := fakeOpenAI(t, &requests)
+	t.Setenv("OPENAI_BASE_URL", srv.URL)
+	t.Setenv("OPENAI_API_KEY", "fake")
+	var code int
+	stderr := captureStderr(t, func() {
+		code, _, _ = runWith(t, "-t", "x", "-m", "openai/gpt-4o", "--no-stream", "--cwd", dir, "-c", cfgPath)
+	})
+	if code != 1 || requests.Load() != 0 {
+		t.Fatalf("exit = %d, requests = %d; want 1, 0", code, requests.Load())
+	}
+	if !strings.Contains(stderr, cfgPath) || !strings.Contains(stderr, "hooks.post_tool[0]: command \"fmt-check\" must be an absolute path") {
+		t.Errorf("stderr = %q", stderr)
+	}
+}

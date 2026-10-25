@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- Run user-configured `pre_tool` and `post_tool` hook commands around tool calls to deny calls or append feedback.
+
 ## v0.4.0 - 2026-10-24
 
 This release adds controls and integrations for longer, more scriptable agent runs, along with stronger file and tool handling.
