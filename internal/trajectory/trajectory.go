@@ -19,7 +19,17 @@ type SandboxInfo struct {
 	Network  bool     `json:"network"`
 }
 
+// EnvironmentInfo records the non-local environment bash commands ran in.
+type EnvironmentInfo struct {
+	Name    string `json:"name"`
+	Runtime string `json:"runtime,omitempty"`
+	Image   string `json:"image,omitempty"`
+}
+
 type Trajectory struct {
+	// Environment is set when bash and start_process ran outside the host,
+	// e.g. in a container.
+	Environment *EnvironmentInfo `json:"environment,omitempty"`
 	// Sandbox is set when bash and start_process ran in an OS sandbox.
 	Sandbox  *SandboxInfo `json:"sandbox,omitempty"`
 	ReadOnly bool         `json:"read_only"`

@@ -34,7 +34,7 @@ func sandboxOrSkip(t *testing.T, root string, extra []string, network bool) *San
 
 func runSandboxed(t *testing.T, sb *Sandbox, root, cmd string) string {
 	t.Helper()
-	out, err := bashStream(context.Background(), sb, root, cmd, 10*time.Second, nil)
+	out, err := bashStream(context.Background(), Local{Sandbox: sb}, root, cmd, 10*time.Second, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestSandboxStartProcess(t *testing.T) {
 	}
 	defer os.RemoveAll(outside)
 	sb := sandboxOrSkip(t, root, nil, false)
-	e := &Executor{Root: root, Sandbox: sb}
+	e := &Executor{Root: root, Env: Local{Sandbox: sb}}
 	defer e.Close()
 	if _, err := e.StartProcess(`sh -c 'echo x > ` + filepath.Join(outside, "p") + `'; sleep 1`); err != nil {
 		t.Fatal(err)

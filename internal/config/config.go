@@ -24,6 +24,11 @@ type AgentConfig struct {
 	SandboxNetwork bool `yaml:"sandbox_network"`
 	// SandboxWritablePaths are extra absolute directories commands may write.
 	SandboxWritablePaths []string `yaml:"sandbox_writable_paths,omitempty"`
+	// Environment selects where bash and start_process commands run:
+	// "local" (the default, also "") or "container".
+	Environment string `yaml:"environment"`
+	// Container configures the "container" environment.
+	Container Container `yaml:"container"`
 	// Model is the provider/model used when neither -m nor $AGENT_MODEL sets
 	// one. "" falls back to the built-in default.
 	Model string `yaml:"model"`
@@ -104,6 +109,18 @@ type Hook struct {
 	// TimeoutSec is nil when unset (30 seconds); 0 is rejected.
 	TimeoutSec *int   `yaml:"timeout_seconds,omitempty"`
 	OnError    string `yaml:"on_error,omitempty"` // pre_tool only: deny (default) or allow
+}
+
+// Container is the image and runtime used by the "container" environment.
+type Container struct {
+	Runtime string   `yaml:"runtime"` // docker (default) or podman
+	Image   string   `yaml:"image"`
+	RunArgs []string `yaml:"run_args,omitempty"` // extra `run` arguments
+}
+
+// ValidEnvironment reports whether name is a known environment.
+func ValidEnvironment(name string) bool {
+	return name == "" || name == "local" || name == "container"
 }
 
 // MCPServer grants access to selected tools from one local stdio server.
@@ -192,6 +209,12 @@ func Load(path string) (AgentConfig, error) {
 	}
 	if cfg.MaxFormatErrors < 1 {
 		return cfg, fmt.Errorf("config %s: max_format_errors must be a whole number >= 1, got %d", path, cfg.MaxFormatErrors)
+	}
+	if !ValidEnvironment(cfg.Environment) {
+		return cfg, fmt.Errorf("config %s: environment %q must be local or container", path, cfg.Environment)
+	}
+	if r := cfg.Container.Runtime; r != "" && r != "docker" && r != "podman" {
+		return cfg, fmt.Errorf("config %s: container.runtime %q must be docker or podman", path, r)
 	}
 	for _, p := range cfg.SandboxWritablePaths {
 		if !filepath.IsAbs(p) {

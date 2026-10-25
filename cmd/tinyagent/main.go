@@ -45,6 +45,7 @@ type options struct {
 	planFile                                         string
 	plan                                             bool
 	reasoningEffort                                  string
+	execEnv                                          string
 	stepLimit, timeLimit, maxFormatErrors            int
 	costLimit                                        float64
 	verbose, noStream, noAgentsMD, noCompact         bool
@@ -87,6 +88,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.plan, "plan", false, "enable the update_plan tool: a task plan saved in the checkpoint and pinned in every request (default off; config plan.enabled)")
 	fs.StringVar(&o.planFile, "plan-file", "", "with the plan enabled, also export the current plan as Markdown to this file after each save")
 	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "provider reasoning effort: none, minimal, low, medium, high, xhigh, or max")
+	fs.StringVar(&o.execEnv, "env", "", "where bash and start_process run: local or container (default: config's environment, else local)")
 	fs.BoolVar(&o.jsonOutput, "json", false, "write run events as JSONL to stdout")
 	fs.StringVar(&o.outputSchema, "output-schema", "", "end the run with a JSON result validated against this JSON Schema file (printed to stdout)")
 	fs.Var(&o.logDB, "log-db", "also log run events to SQLite (default .tinyagent/tinyagent.db under --cwd); --log-db=false turns config log_db off")
@@ -118,6 +120,10 @@ func run() int {
 	if fs.NArg() > 0 {
 		fmt.Fprintf(fs.Output(), "error: unexpected positional argument %q; pass the task with -t/--task\n", fs.Arg(0))
 		fs.Usage()
+		return 2
+	}
+	if !config.ValidEnvironment(o.execEnv) {
+		fmt.Fprintf(fs.Output(), "error: --env %q must be local or container\n", o.execEnv)
 		return 2
 	}
 	if msg := validateLimits(o); msg != "" {
@@ -193,6 +199,10 @@ func run() int {
 	if o.planFile != "" && !cfg.Plan.Enabled {
 		return fail(errors.New("--plan-file requires the plan tool; pass --plan or set plan.enabled: true"))
 	}
+	if msg := envConflict(cfg); msg != "" {
+		fmt.Fprintln(os.Stderr, "error: "+msg)
+		return 2
+	}
 	o.modelName = resolveModel(fs, o.modelName, cfg.Model)
 	if flagWasSet(fs, "reasoning-effort") {
 		cfg.ReasoningEffort = o.reasoningEffort
@@ -213,13 +223,13 @@ func run() int {
 	if cfg.ReadOnly {
 		fmt.Fprintln(os.Stderr, "read-only mode: only read_file, list_files, and grep are available")
 	}
-	sb, err := startSandbox(cfg, root)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	env, closeEnv, err := startEnvironment(ctx, cfg, root)
 	if err != nil {
 		return fail(err)
 	}
-	defer sb.Cleanup()
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
+	defer closeEnv()
 	// MCP discovery counts against the wall-clock limit. Agent.Run applies
 	// the same limit again, and the earlier deadline set here wins.
 	if cfg.WallTimeSec > 0 {
@@ -256,7 +266,7 @@ func run() int {
 		Tools: &tools.Executor{
 			Root:           root,
 			ReadOnly:       cfg.ReadOnly,
-			Sandbox:        sb,
+			Env:            env,
 			BashTimeout:    time.Duration(cfg.BashTimeoutSec) * time.Second,
 			MaxOutputChars: cfg.MaxOutputChars,
 			MaxProcesses:   cfg.MaxBackgroundProcesses,
@@ -412,6 +422,10 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return fail(errors.New("--plan-file requires the plan tool, and this checkpoint was recorded without it"))
 	}
 	applySandboxFlags(fs, &cfg, *o)
+	if msg := envConflict(cfg); msg != "" {
+		fmt.Fprintln(os.Stderr, "error: "+msg)
+		return 2
+	}
 	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 
 	root, err := canonicalRoot(o.cwd)
@@ -445,11 +459,13 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if src.ReadOnly {
 		fmt.Fprintln(os.Stderr, "read-only mode: only read_file, list_files, and grep are available")
 	}
-	sb, err := startSandbox(cfg, root)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	env, closeEnv, err := startEnvironment(ctx, cfg, root)
 	if err != nil {
 		return fail(err)
 	}
-	defer sb.Cleanup()
+	defer closeEnv()
 
 	var onText func(string)
 	if !o.noStream && !o.jsonOutput {
@@ -466,9 +482,6 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	}
 	warnUnpriced(os.Stderr, modelName, cfg.CostLimit)
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-
 	// The agent records this boundary and clears the active termination before
 	// persisting the new starting state.
 	prevStatus := src.ExitStatus
@@ -483,7 +496,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		Tools: &tools.Executor{
 			Root:           root,
 			ReadOnly:       src.ReadOnly,
-			Sandbox:        sb,
+			Env:            env,
 			BashTimeout:    time.Duration(cfg.BashTimeoutSec) * time.Second,
 			MaxOutputChars: cfg.MaxOutputChars,
 			MaxProcesses:   cfg.MaxBackgroundProcesses,
@@ -581,8 +594,12 @@ func canonicalRoot(path string) (string, error) {
 	return filepath.EvalSymlinks(root)
 }
 
-// applySandboxFlags lets --sandbox and --sandbox-network override the config.
+// applySandboxFlags lets --sandbox, --sandbox-network and --env override the
+// config.
 func applySandboxFlags(fs *flag.FlagSet, cfg *config.AgentConfig, o options) {
+	if flagWasSet(fs, "env") {
+		cfg.Environment = o.execEnv
+	}
 	if flagWasSet(fs, "sandbox") {
 		cfg.Sandbox = o.sandbox
 	}
@@ -591,19 +608,44 @@ func applySandboxFlags(fs *flag.FlagSet, cfg *config.AgentConfig, o options) {
 	}
 }
 
-// startSandbox returns the command sandbox the config asks for, or nil. It
-// fails if the host can't enforce it, and otherwise announces it on stderr.
-// Read-only runs have no command tools, so there is nothing to confine.
-func startSandbox(cfg config.AgentConfig, root string) (*tools.Sandbox, error) {
-	if !cfg.Sandbox || cfg.ReadOnly {
-		return nil, nil
+// envConflict reports settings that can't be combined.
+func envConflict(cfg config.AgentConfig) string {
+	if cfg.Environment == "container" && cfg.Sandbox && !cfg.ReadOnly {
+		return "--sandbox applies only to the local environment; it can't be combined with the container environment"
+	}
+	return ""
+}
+
+// startEnvironment returns the environment the config asks for and a
+// function that releases it. It fails if the environment can't be set up
+// (never falling back to an unconfined local one), and otherwise announces
+// any sandbox or container on stderr. Read-only runs have no command tools,
+// so they get a plain local environment.
+func startEnvironment(ctx context.Context, cfg config.AgentConfig, root string) (tools.Environment, func(), error) {
+	if cfg.ReadOnly {
+		return tools.Local{}, func() {}, nil
+	}
+	if cfg.Environment == "container" {
+		c, err := tools.StartContainer(ctx, cfg.Container.Runtime, cfg.Container.Image, cfg.Container.RunArgs, root)
+		if err != nil {
+			return nil, nil, err
+		}
+		fmt.Fprintln(os.Stderr, c.Describe())
+		return c, func() {
+			if err := c.Close(); err != nil {
+				fmt.Fprintln(os.Stderr, "warning:", err)
+			}
+		}, nil
+	}
+	if !cfg.Sandbox {
+		return tools.Local{}, func() {}, nil
 	}
 	sb, err := tools.NewSandbox(root, cfg.SandboxWritablePaths, cfg.SandboxNetwork)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	fmt.Fprintln(os.Stderr, sb.Describe())
-	return sb, nil
+	return tools.Local{Sandbox: sb}, sb.Cleanup, nil
 }
 
 // usageGroups lays out --help: each flag's shorthand, long name and value
@@ -615,7 +657,7 @@ var usageGroups = []struct {
 	{"", [][3]string{{"h", "help", ""}}},
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "resume", "path"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "no-compact", ""}}},
-	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "sandbox", ""}, {"", "sandbox-network", ""}}},
+	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "env", "name"}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}}},
 }
 
