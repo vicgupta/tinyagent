@@ -59,6 +59,9 @@ type Agent struct {
 	// SkipAgentsMD stops Run from appending the nearest AGENTS.md at or above
 	// <root> to the system prompt.
 	SkipAgentsMD bool
+	// SkillsEnabled records that skills discovery was on for this run; the
+	// discovered skills are Tools.Skills.
+	SkillsEnabled bool
 	// NoCompact turns off context compaction: the full history is always
 	// sent, and a context-overflow error ends the run.
 	NoCompact bool
@@ -78,7 +81,8 @@ type Agent struct {
 	// run succeed only with a result that validates against it.
 	OutputSchema *outschema.Schema
 
-	cur *trajectory.Trajectory
+	cur  *trajectory.Trajectory
+	view *view
 }
 
 // Step returns the current run's completed model calls, or 0 before Run
@@ -168,6 +172,8 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			ExternalToolSignature: externalToolSignature(a.Tools.ExternalSpecs),
 			OutputSchema:          a.outputSchemaParams(),
 			OutputSchemaDigest:    a.outputSchemaDigest(),
+			SkillsEnabled:         a.SkillsEnabled,
+			Skills:                skillInfos(a.Tools.Skills),
 			Messages: []model.Message{
 				{Role: "system", Content: system},
 				{Role: "user", Content: task},
@@ -189,6 +195,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		specs = append(specs, SubmitToolSpec(a.OutputSchema))
 	}
 	v := viewFromTrajectory(t)
+	a.view = v
 	invalidOutputs := 0
 
 	for {
@@ -204,7 +211,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			}
 		}
 
-		msg, cost, err := a.Model.Query(ctx, a.withPlan(t, v), specs)
+		msg, cost, err := a.Model.Query(ctx, a.request(t, v), specs)
 		if err != nil && !a.NoCompact && model.IsContextOverflow(err) && ctx.Err() == nil {
 			if cerr := a.compact(ctx, t, v, "overflow"); cerr != nil {
 				return a.compactFailed(ctx, t, fmt.Errorf("%w: %v", cerr, err))
@@ -212,7 +219,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			if status, ok := a.checkLimits(ctx, t); !ok {
 				return a.finish(t, status, "")
 			}
-			msg, cost, err = a.Model.Query(ctx, a.withPlan(t, v), specs)
+			msg, cost, err = a.Model.Query(ctx, a.request(t, v), specs)
 			if err != nil && model.IsContextOverflow(err) {
 				err = fmt.Errorf("%w: %v", errStillTooLong, err)
 			}
@@ -353,7 +360,7 @@ func (a *Agent) maxFormatErrors() int {
 // tool authority.
 func (a *Agent) runTool(ctx context.Context, t *trajectory.Trajectory, call model.ToolCall) (string, bool) {
 	if a.Hooks == nil || !a.Tools.Permits(call.Function.Name) {
-		return a.Tools.RunWithError(ctx, call)
+		return a.execTool(ctx, t, call)
 	}
 	in := hooks.Input{
 		ToolName: call.Function.Name, ToolCallID: call.ID, Arguments: eventArguments(call.Function.Arguments),
@@ -365,7 +372,7 @@ func (a *Agent) runTool(ctx context.Context, t *trajectory.Trajectory, call mode
 			return tools.Truncate(fmt.Sprintf("error: denied by pre_tool hook %s: %s", r.Command, r.Reason), a.Tools.MaxOutputChars), true
 		}
 	}
-	out, isError := a.Tools.RunWithError(ctx, call)
+	out, isError := a.execTool(ctx, t, call)
 	var feedback strings.Builder
 	for _, r := range a.Hooks.Post(ctx, in, out, isError) {
 		a.hookRan(call, r)
@@ -449,6 +456,7 @@ func (a *Agent) systemPrompt() string {
 		}
 		system += section
 	}
+	system += a.Tools.Skills.Catalog()
 	if a.Tools.ReadOnly {
 		system += "\n\n" + readOnlyNotice
 	}
