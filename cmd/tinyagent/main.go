@@ -23,6 +23,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/mcptools"
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/outschema"
+	"github.com/vicgupta/tinyagent/internal/skills"
 	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
 	"github.com/vicgupta/tinyagent/internal/update"
@@ -45,6 +46,7 @@ type options struct {
 	planFile                                         string
 	plan                                             bool
 	images                                           bool
+	skills, noSkills                                 bool
 	reasoningEffort                                  string
 	execEnv                                          string
 	stepLimit, timeLimit, maxFormatErrors            int
@@ -88,6 +90,8 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.sandboxNetwork, "sandbox-network", false, "with --sandbox, allow commands to use the network")
 	fs.BoolVar(&o.plan, "plan", false, "enable the update_plan tool: a task plan saved in the checkpoint and pinned in every request (default off; config plan.enabled)")
 	fs.BoolVar(&o.images, "images", false, "let vision-capable models see images: the view_image tool and MCP image pass-through (default off; config images.enabled)")
+	fs.BoolVar(&o.skills, "skills", false, "discover Agent Skills in .agents/skills (project, up to the repo root, and ~/.agents/skills) and add the skill tool (default off; config skills)")
+	fs.BoolVar(&o.noSkills, "no-skills", false, "turn Agent Skills discovery off, overriding config skills; --no-skills=false turns it on")
 	fs.StringVar(&o.planFile, "plan-file", "", "with the plan enabled, also export the current plan as Markdown to this file after each save")
 	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "provider reasoning effort: none, minimal, low, medium, high, xhigh, or max")
 	fs.StringVar(&o.execEnv, "env", "", "where bash and start_process run: local or container (default: config's environment, else local)")
@@ -204,6 +208,12 @@ func run() int {
 	if flagWasSet(fs, "images") {
 		cfg.Images.Enabled = o.images
 	}
+	if on, set, err := skillsFlag(fs, o); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	} else if set {
+		cfg.Skills = on
+	}
 	if msg := envConflict(cfg); msg != "" {
 		fmt.Fprintln(os.Stderr, "error: "+msg)
 		return 2
@@ -304,6 +314,9 @@ func run() int {
 	defer events.closeDB()
 	if dbErr != nil {
 		warn(dbErr.Error())
+	}
+	if cfg.Skills {
+		loadSkills(a, root, warn)
 	}
 	if o.output != "" {
 		a.OnStep = func(t *trajectory.Trajectory) error {
@@ -430,6 +443,13 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return fail(errors.New("resume: --images conflicts with the checkpoint's recorded images setting; start a fresh task"))
 	}
 	cfg.Images.Enabled = src.ImagesEnabled
+	if on, set, err := skillsFlag(fs, *o); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	} else if set && on != src.SkillsEnabled {
+		return fail(errors.New("resume: --skills/--no-skills conflicts with the checkpoint's recorded skills setting; start a fresh task"))
+	}
+	cfg.Skills = src.SkillsEnabled
 	if o.planFile != "" && !cfg.Plan.Enabled {
 		return fail(errors.New("--plan-file requires the plan tool, and this checkpoint was recorded without it"))
 	}
@@ -539,6 +559,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	defer events.closeDB()
 	if dbErr != nil {
 		warn(dbErr.Error())
+	}
+	if src.SkillsEnabled {
+		loadSkills(a, root, warn)
 	}
 	initial := true
 	a.OnStep = func(t *trajectory.Trajectory) error {
@@ -1189,4 +1212,35 @@ func checkReasoningEffort(spec, effort string) error {
 		return nil
 	}
 	return fmt.Errorf("--reasoning-effort/reasoning_effort is not supported by the %s provider", provider)
+}
+
+// skillsFlag returns the skills setting from --skills and --no-skills, and
+// whether either was set. Contradictory values are an error.
+func skillsFlag(fs *flag.FlagSet, o options) (on, set bool, err error) {
+	a, b := flagWasSet(fs, "skills"), flagWasSet(fs, "no-skills")
+	switch {
+	case a && b && o.skills == o.noSkills:
+		return false, false, errors.New("--skills and --no-skills conflict")
+	case a:
+		return o.skills, true, nil
+	case b:
+		return !o.noSkills, true, nil
+	}
+	return false, false, nil
+}
+
+// loadSkills discovers skills for a run rooted at root, reporting each
+// problem through warn and, with -v, one line per skill.
+func loadSkills(a *agent.Agent, root string, warn func(string)) {
+	set, warnings := skills.Discover(root, skills.UserDir())
+	for _, w := range warnings {
+		warn(w)
+	}
+	a.SkillsEnabled = true
+	a.Tools.Skills = set
+	if a.Verbose {
+		for _, k := range set.Skills {
+			fmt.Fprintf(a.Out, "loaded skill %s (%s) from %s\n", k.Name, k.Scope, k.Path)
+		}
+	}
 }

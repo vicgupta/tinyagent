@@ -126,7 +126,7 @@ func (a *Agent) contextWindow() int {
 // compactAt of a known context window.
 func (a *Agent) needsCompaction(t *trajectory.Trajectory, v *view) bool {
 	w := a.contextWindow()
-	return !a.NoCompact && w > 0 && float64(v.estimate()+a.planChars(t)/4) > compactAt*float64(w)
+	return !a.NoCompact && w > 0 && float64(v.estimate()+(a.planChars(t)+a.retainedChars(t, v))/4) > compactAt*float64(w)
 }
 
 // viewFromTrajectory rebuilds the model's view of t: the last compaction's
@@ -188,9 +188,10 @@ func (a *Agent) compact(ctx context.Context, t *trajectory.Trajectory, v *view, 
 
 	// Stage 1: elide old tool outputs.
 	freed := 0
+	loads := a.skillLoads(t)
 	for i := 2; i < b; i++ {
 		m := &v.msgs[i]
-		if m.Role != "tool" || strings.HasPrefix(m.Content, elidedPrefix) {
+		if m.Role != "tool" || strings.HasPrefix(m.Content, elidedPrefix) || isSkillLoad(loads, v.idx[i]) {
 			continue
 		}
 		e := elide(*m)

@@ -73,6 +73,9 @@ type AgentConfig struct {
 	Images Images `yaml:"images,omitempty"`
 	// MaxImageBytes caps one image's raw size. Must be >= 1; default 5 MiB.
 	MaxImageBytes int `yaml:"max_image_bytes"`
+	// Skills turns on Agent Skills discovery from .agents/skills (off by
+	// default; --skills / --no-skills override it).
+	Skills bool `yaml:"skills"`
 	// LogDB is the opt-in SQLite event log.
 	LogDB LogDB `yaml:"log_db"`
 }

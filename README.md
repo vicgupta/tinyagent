@@ -4,7 +4,7 @@
 curl -fsSL https://raw.githubusercontent.com/vicgupta/tinyagent/main/install.sh | sh
 ```
 
-A minimal coding agent in a single static Go binary. It gives an LLM nine tools (`read_file`, `write_file`, `edit_file`, `list_files`, `grep`, `bash`, and `start_process`, `read_process`, `stop_process` for background commands; opt-in `update_plan` and `view_image` tools add more) and keeps a linear message history until the model submits.
+A minimal coding agent in a single static Go binary. It gives an LLM nine tools (`read_file`, `write_file`, `edit_file`, `list_files`, `grep`, `bash`, and `start_process`, `read_process`, `stop_process` for background commands), plus the opt-in `update_plan`, `skill`, and `view_image` tools, and keeps a linear message history until the model submits.
 
 ## Install
 
@@ -92,6 +92,8 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--plan` | config `plan.enabled`, else off | Give the model the `update_plan` tool; see [Plan tool](#plan-tool) |
 | `--images` | config `images.enabled`, else off | Let vision-capable models see images: the `view_image` tool and MCP image pass-through; see [Images](#images) |
 | `--plan-file` | — | Mirror the current plan to this Markdown file after each checkpoint save (requires the plan tool) |
+| `--skills` | config `skills`, else off | Discover [Agent Skills](#agent-skills) and offer the `skill` tool |
+| `--no-skills` | — | Disable skills even if the config enables them (`--no-skills=false` enables) |
 | `--read-only` | config `read_only`, else off | Permit only `read_file`, `list_files`, and `grep`; blocks edits, shell, and process tools. `--read-only=false` explicitly disables it. |
 | `--sandbox` | config `sandbox`, else off | Confine `bash`/`start_process` at the OS level: writes only under `--cwd`, a temp dir and `sandbox_writable_paths`, network off. See [Sandboxing commands](#sandboxing-commands) |
 | `--sandbox-network` | config `sandbox_network`, else off | With `--sandbox`, allow network access |
@@ -194,13 +196,29 @@ A distinct `-o`/`--output` is required, and any existing destination is refused,
 
 Steps, cost, token counts, and cache totals remain cumulative. Step/cost limits are cumulative ceilings: if already exhausted, no model request is made; increase the ceiling explicitly (or set it to 0 for unlimited). Runtime limits, tool timeouts, output settings, and compaction settings use normal config/flag precedence. Wall time and the stderr elapsed duration restart for each invocation; stopped time is not charged. Normal streaming, summaries, and success/failure exit codes still apply. The next action is a new model query, which incurs ordinary context/token costs; loading a checkpoint never dispatches historical tool calls.
 
-New JSON keeps the existing top-level trajectory fields and adds versioned metadata: `schema_version` (currently 2; version 1 files still load), `root`, `system_prompt`, `skip_agents_md`, `tools`, and `tool_signature`. Version 2 adds `pending_calls`, `processes`, `plan_enabled`, `plan`, and `plan_history`. `resume` records the input path, previous status/submission, cumulative step, and continuation-message index; nested `previous` entries retain earlier resume boundaries. These audit paths are not read as configuration. Metadata excludes credentials and environment dumps. Checkpoints still contain prompts, code, and tool outputs: treat them as private, trusted local execution inputs. New checkpoint and temporary files use owner-only permissions (0600) where supported.
+New JSON keeps the existing top-level trajectory fields and adds versioned metadata: `schema_version` (currently 2; version 1 files still load), `root`, `system_prompt`, `skip_agents_md`, `tools`, and `tool_signature`. Version 2 adds `pending_calls`, `processes`, `plan_enabled`, `plan`, and `plan_history`; runs with skills enabled also record `skills_enabled` and `skills` (name, scope, and path of each discovered skill). `resume` records the input path, previous status/submission, cumulative step, and continuation-message index; nested `previous` entries retain earlier resume boundaries. These audit paths are not read as configuration. Metadata excludes credentials and environment dumps. Checkpoints still contain prompts, code, and tool outputs: treat them as private, trusted local execution inputs. New checkpoint and temporary files use owner-only permissions (0600) where supported.
 
 A checkpoint restores **conversation state**, not files, Git state, shell variables, live processes, or external services. The model receives a continuation notice and stderr warns to inspect and revalidate the current workspace. Commands may have produced unrecorded side effects after the last save, especially during a hard crash in a tool batch. Historical process IDs cannot reattach to children from another invocation. There is no rollback or exactly-once execution guarantee; inspect current state before resuming.
 
 ### Project instructions (AGENTS.md)
 
 Unless `--no-agents-md` is set, tinyagent looks for `AGENTS.md` starting at `--cwd` and walking up through its parents, stopping at the repository root (the nearest directory containing `.git`). The nearest file wins, and only that one is added to the system prompt. Without a `.git` above `--cwd`, only `<cwd>/AGENTS.md` is checked. The lookup never goes above the repository root, and `-v` prints which file was loaded. This only changes the prompt: tools are still confined to `--cwd`.
+
+### Agent Skills
+
+With `--skills` (or `skills: true`), tinyagent discovers [Agent Skills](https://agentskills.io): folders containing a `SKILL.md` with YAML frontmatter (`name` and `description`) and Markdown instructions, optionally with `scripts/`, `references/`, or `assets/`. Skills are off by default.
+
+- **Locations:** `.agents/skills/<name>/SKILL.md` in `--cwd` and each parent up to the repository root (same walk as AGENTS.md), then `~/.agents/skills/<name>/SKILL.md`. Symlinked skill folders are followed. `.claude/skills` is not scanned; symlink those skills into `.agents/skills` to use them.
+- **Precedence:** on a name clash the nearest project directory wins, and project skills beat user skills; each shadowed skill produces a warning naming both paths.
+- **Validation:** a skill with no description or unparseable frontmatter is skipped with a warning. Name problems (wrong format, mismatch with its folder) only warn. A `SKILL.md` over 1 MiB is skipped.
+- **Progressive disclosure:** only the names and descriptions go into the system prompt (a "Skills" section, capped at 8,000 characters: descriptions are shortened first, then skills are omitted with a warning). The `skill` tool loads one skill's instructions (frontmatter stripped) wrapped in `<skill_content name="...">`, with its directory and up to 100 bundled file paths. `{"name": ..., "file": "references/x.md"}` reads one bundled text file (1 MiB cap; no absolute paths, `..`, or symlinks that leave the skill folder; binaries refused). Results also honor `max_output_chars`. Loading a skill that is still in context returns a short note instead of a second copy.
+- **Other tools are unchanged:** `read_file` and friends stay confined to `--cwd`, so user skills are reachable only through the `skill` tool. Run bundled scripts with `bash` as usual.
+- **Read-only and hooks:** the `skill` tool only reads, so it is available with `--read-only`. `pre_tool`/`post_tool` hooks match it as `skill`.
+- **Compaction:** loaded skill instructions are never elided by stage-1 compaction. When old turns are summarized, the latest instructions of each loaded skill are re-attached after the summary (up to 32 KiB combined; any skill left out is named so the model can reload it).
+- **Resume:** the checkpoint records whether skills were enabled and which were found. `--resume` keeps that setting (passing a conflicting `--skills`/`--no-skills` is an error) and refuses to continue if the skills catalog changed. Checkpoints from before this feature resume with skills off.
+- With no skills found, the prompt and tool list are exactly as without `--skills`. `-v` prints each loaded skill and its path; warnings go to stderr and, with `--json`, as `warning` events.
+
+**Trust:** skill instructions are prompt input. A project skill from a repository you don't trust can steer the agent like a malicious AGENTS.md, and bundled scripts run with your permissions if the agent invokes them. Skill text sent to the model goes to your model provider like any other prompt, and the trajectory records loaded skill content.
 
 ## Config
 
@@ -239,6 +257,7 @@ output_price_per_mtok: 15
 context_window: 200000    # tokens; overrides the built-in table, used for compaction
 plan:
   enabled: false          # give the model the update_plan tool (same as --plan)
+skills: false             # discover Agent Skills and offer the skill tool (same as --skills)
 images:
   enabled: false          # view_image tool and MCP image pass-through (same as --images)
 max_image_bytes: 5242880  # largest image sent to the model (5 MiB); must be >= 1

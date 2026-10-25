@@ -11,6 +11,7 @@ import (
 
 	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/model"
+	"github.com/vicgupta/tinyagent/internal/skills"
 	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
 )
@@ -73,6 +74,13 @@ func ValidateResume(t *trajectory.Trajectory, cfg config.AgentConfig, root strin
 		return errors.New("tool compatibility has changed; start a fresh task")
 	}
 	names := toolNames(builtinSpecs(t.ReadOnly, t.PlanEnabled, t.ImagesEnabled))
+	var set *skills.Set
+	if t.SkillsEnabled {
+		set, _ = skills.Discover(root, skills.UserDir())
+		if set.Len() > 0 {
+			names = append(names, skills.ToolName)
+		}
+	}
 	if len(names) != len(t.Tools) {
 		return errors.New("tool set has changed; start a fresh task")
 	}
@@ -89,11 +97,12 @@ func ValidateResume(t *trajectory.Trajectory, cfg config.AgentConfig, root strin
 		}
 		system += section
 	}
+	system += set.Catalog()
 	if t.ReadOnly {
 		system += "\n\n" + readOnlyNotice
 	}
 	if system != t.SystemPrompt {
-		return errors.New("effective system prompt or AGENTS.md has changed; start a fresh task")
+		return errors.New("effective system prompt, AGENTS.md, or skills catalog has changed; start a fresh task")
 	}
 	return nil
 }

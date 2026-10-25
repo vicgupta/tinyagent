@@ -101,6 +101,19 @@ type Trajectory struct {
 	// (view_image and MCP image pass-through) was on. A resume must use the
 	// same setting. Image bytes are stored inline, base64, in Messages.
 	ImagesEnabled bool `json:"images_enabled,omitempty"`
+	// SkillsEnabled records whether Agent Skills discovery was on. A resume
+	// rediscovers skills and must rebuild the same catalog. Older
+	// checkpoints, without the field, resume with skills off.
+	SkillsEnabled bool `json:"skills_enabled,omitempty"`
+	// Skills is the discovered catalog (not the skill bodies).
+	Skills []SkillInfo `json:"skills,omitempty"`
+}
+
+// SkillInfo identifies one discovered skill.
+type SkillInfo struct {
+	Name  string `json:"name"`
+	Scope string `json:"scope"`
+	Path  string `json:"path"`
 }
 
 // PendingCall identifies a tool call without a recorded result.

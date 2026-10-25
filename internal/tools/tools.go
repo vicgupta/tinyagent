@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/vicgupta/tinyagent/internal/model"
+	"github.com/vicgupta/tinyagent/internal/skills"
 )
 
 func isBinary(data []byte) bool {
@@ -54,6 +55,9 @@ type Executor struct {
 	// ExternalCallImages, when set and Images is on, replaces ExternalCall
 	// and also returns the result's images.
 	ExternalCallImages func(ctx context.Context, name, args string) (out string, images []model.Image, isErr, ok bool)
+	// Skills, when it holds at least one skill, adds the read-only skill
+	// tool (also in read-only mode). nil or empty offers nothing.
+	Skills *skills.Set
 
 	procs registry
 }
@@ -79,6 +83,8 @@ type args struct {
 	ID           string          `json:"id"`
 	Tail         json.Number     `json:"tail"`
 	ContextLines json.RawMessage `json:"context_lines"`
+	Name         string          `json:"name"`
+	File         string          `json:"file"`
 }
 
 // Specs returns the OpenAI tool definitions for all tools.
@@ -211,6 +217,9 @@ func (e *Executor) Catalog() []model.ToolSpec {
 	if e.Images {
 		out = append(out, ViewImageSpec())
 	}
+	if e.Skills.Len() > 0 {
+		out = append(out, e.Skills.Spec())
+	}
 	if e.ReadOnly {
 		return out
 	}
@@ -267,7 +276,8 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 	if name == PlanToolName && e.Plan {
 		return "", errors.New("update_plan is handled by the agent loop")
 	}
-	if e.ReadOnly && (name != "read_file" && name != "list_files" && name != "grep") {
+	skillTool := name == skills.ToolName && e.Skills.Len() > 0
+	if e.ReadOnly && !skillTool && (name != "read_file" && name != "list_files" && name != "grep") {
 		return "", fmt.Errorf("tool %q is unavailable in read-only mode; only read_file, list_files, and grep are allowed", name)
 	}
 	var a args
@@ -275,6 +285,9 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 		if err := json.Unmarshal([]byte(raw), &a); err != nil {
 			return "", fmt.Errorf("invalid arguments JSON: %w", err)
 		}
+	}
+	if skillTool {
+		return e.Skills.Load(a.Name, a.File)
 	}
 	switch name {
 	case "read_file":
