@@ -72,6 +72,8 @@ type OpenAIResponses struct {
 	OnText  func(string) // if set, stream and report text deltas
 	// ReasoningEffort, if set, is sent as reasoning.effort.
 	ReasoningEffort string
+	// MaxOutputTokens, if > 0, is sent as max_output_tokens.
+	MaxOutputTokens int
 
 	session string // prompt cache key, one per run
 }
@@ -99,6 +101,9 @@ func (o *OpenAIResponses) Query(ctx context.Context, messages []Message, tools [
 	}
 	if o.ReasoningEffort != "" {
 		body["reasoning"] = map[string]string{"effort": o.ReasoningEffort}
+	}
+	if o.MaxOutputTokens > 0 {
+		body["max_output_tokens"] = o.MaxOutputTokens
 	}
 	headers := map[string]string{}
 	if o.APIKey != "" {
@@ -268,6 +273,9 @@ func (o *responsesOutput) message(state string) Message {
 	}
 	if state != "" {
 		msg.Extra = map[string]any{"status": state}
+	}
+	if responsesTruncated(state) {
+		markTruncated(&msg, state)
 	}
 	if len(o.reasoning) > 0 {
 		if msg.Extra == nil {

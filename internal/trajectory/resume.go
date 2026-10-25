@@ -207,6 +207,9 @@ func (t *Trajectory) Validate() error {
 	if t.FormatErrors < 0 || t.ConsecutiveFormatErrors < 0 || t.ConsecutiveFormatErrors > t.Steps || len(t.FormatErrorMessages) != t.FormatErrors {
 		return errors.New("checkpoint has invalid format-error counters")
 	}
+	if t.Truncations < 0 || t.ConsecutiveTruncations < 0 || t.ConsecutiveTruncations > t.Truncations || t.Truncations > t.Steps || t.MaxOutputTokens < 0 {
+		return errors.New("checkpoint has invalid truncation counters")
+	}
 	markers := map[int]bool{}
 	for _, idx := range t.FormatErrorMessages {
 		if idx < 2 || idx >= len(t.Messages) || markers[idx] || t.Messages[idx].Role != "tool" {

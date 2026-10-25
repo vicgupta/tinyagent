@@ -273,6 +273,7 @@ Limits:
       --cost-limit usd            max USD, 0 = unlimited
       --time-limit sec            max wall-clock seconds, 0 = unlimited
       --max-format-errors n       stop after this many consecutive steps of malformed tool calls (>= 1) (default 3)
+      --max-output-tokens n       per-request output-token budget sent to the provider, 0 = provider default (8192 for anthropic; config max_output_tokens)
       --no-compact                don't compact the history when it nears the context window
 Output:
   -o, --output path               write trajectory JSON

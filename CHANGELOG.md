@@ -4,6 +4,7 @@
 
 ### Features
 
+- Add `--max-output-tokens` (config `max_output_tokens`) to set the per-request output-token budget for Anthropic, OpenAI, OpenRouter and Ollama.
 - Continue a finished (`Submitted`/`Completed`) run with a follow-up task: `--resume <trajectory> -t "<follow-up>"` sends the saved conversation plus a follow-up notice and the new instruction, keeps step/cost totals cumulative, and records `follow_up` in the resume provenance and `run.started`.
 - Discover Agent Skills (`SKILL.md`) from `.agents/skills` in the project and `~/.agents/skills`, list them in the system prompt, and load them on demand with a new `skill` tool (opt-in via `--skills` or `skills: true`).
 - Run user-configured `pre_tool` and `post_tool` hook commands around tool calls to deny calls or append feedback.
@@ -17,6 +18,7 @@
 
 ### Fixes
 
+- Responses cut off at the output-token limit are no longer treated as finished: their tool calls are not run, the model is asked to continue in smaller pieces, and after `max_truncations` (default 3) in a row the run ends with the new `OutputTruncated` status (exit 3).
 - The event log now redacts the values of environment variables that hooks forward by name (including the new stop hooks).
 
 ### Changed

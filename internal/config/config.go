@@ -40,6 +40,14 @@ type AgentConfig struct {
 	// MaxFormatErrors ends the run after this many consecutive steps whose
 	// tool calls are all malformed. Must be >= 1; default 3.
 	MaxFormatErrors int `yaml:"max_format_errors"`
+	// MaxOutputTokens is the per-request output-token budget sent to the
+	// provider; 0 (the default) keeps the provider default (8192 for
+	// Anthropic). Not to be confused with MaxOutputChars, which caps tool
+	// output.
+	MaxOutputTokens int `yaml:"max_output_tokens"`
+	// MaxTruncations ends the run after this many consecutive responses cut
+	// off at the output-token limit. Must be >= 1; default 3.
+	MaxTruncations int `yaml:"max_truncations"`
 
 	BashTimeoutSec int `yaml:"bash_timeout_seconds"`
 	MaxOutputChars int `yaml:"max_output_chars"`
@@ -169,6 +177,9 @@ type MCPServer struct {
 // DefaultMaxFormatErrors is the default MaxFormatErrors.
 const DefaultMaxFormatErrors = 3
 
+// DefaultMaxTruncations is the default MaxTruncations.
+const DefaultMaxTruncations = 3
+
 func Default() AgentConfig {
 	return AgentConfig{
 		SystemPrompt:   embed.SystemPrompt(),
@@ -177,6 +188,7 @@ func Default() AgentConfig {
 
 		MaxBackgroundProcesses: 4,
 		MaxFormatErrors:        DefaultMaxFormatErrors,
+		MaxTruncations:         DefaultMaxTruncations,
 		MaxImageBytes:          DefaultMaxImageBytes,
 		LogDB:                  LogDB{Level: "metadata", MaxDays: 30, MaxRuns: 500},
 	}
@@ -223,10 +235,21 @@ func Load(path string) (AgentConfig, error) {
 	}
 	var probe struct {
 		MaxFormatErrors yaml.Node `yaml:"max_format_errors"`
+		MaxOutputTokens yaml.Node `yaml:"max_output_tokens"`
+		MaxTruncations  yaml.Node `yaml:"max_truncations"`
 	}
-	if yaml.Unmarshal(data, &probe) == nil && probe.MaxFormatErrors.Kind != 0 {
-		if n := &probe.MaxFormatErrors; n.Kind != yaml.ScalarNode || n.ShortTag() != "!!int" {
-			return cfg, fmt.Errorf("config %s: max_format_errors must be a whole number >= 1, got %q", path, n.Value)
+	if yaml.Unmarshal(data, &probe) == nil {
+		for _, c := range []struct {
+			key, want string
+			n         *yaml.Node
+		}{
+			{"max_format_errors", ">= 1", &probe.MaxFormatErrors},
+			{"max_output_tokens", ">= 0", &probe.MaxOutputTokens},
+			{"max_truncations", ">= 1", &probe.MaxTruncations},
+		} {
+			if n := c.n; n.Kind != 0 && (n.Kind != yaml.ScalarNode || n.ShortTag() != "!!int") {
+				return cfg, fmt.Errorf("config %s: %s must be a whole number %s, got %q", path, c.key, c.want, n.Value)
+			}
 		}
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
@@ -242,6 +265,12 @@ func Load(path string) (AgentConfig, error) {
 	}
 	if cfg.MaxFormatErrors < 1 {
 		return cfg, fmt.Errorf("config %s: max_format_errors must be a whole number >= 1, got %d", path, cfg.MaxFormatErrors)
+	}
+	if cfg.MaxOutputTokens < 0 {
+		return cfg, fmt.Errorf("config %s: max_output_tokens must be a whole number >= 0, got %d", path, cfg.MaxOutputTokens)
+	}
+	if cfg.MaxTruncations < 1 {
+		return cfg, fmt.Errorf("config %s: max_truncations must be a whole number >= 1, got %d", path, cfg.MaxTruncations)
 	}
 	if cfg.MaxImageBytes < 1 {
 		return cfg, fmt.Errorf("config %s: max_image_bytes must be >= 1, got %d", path, cfg.MaxImageBytes)

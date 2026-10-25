@@ -242,3 +242,23 @@ func TestEnvironmentConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestMaxOutputTokensConfig(t *testing.T) {
+	d := t.TempDir()
+	p := d + "/c.yaml"
+	for body, bad := range map[string]bool{
+		"max_output_tokens: 4096\nmax_truncations: 2\n": false,
+		"max_output_tokens: -1\n":                       true,
+		"max_output_tokens: 1.5\n":                      true,
+		"max_truncations: 0\n":                          true,
+	} {
+		os.WriteFile(p, []byte(body), 0o644)
+		_, err := Load(p)
+		if (err != nil) != bad {
+			t.Errorf("%q: err = %v", body, err)
+		}
+	}
+	if Default().MaxTruncations != 3 || Default().MaxOutputTokens != 0 {
+		t.Error("defaults")
+	}
+}
