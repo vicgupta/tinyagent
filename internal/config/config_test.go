@@ -219,6 +219,16 @@ func TestSandboxConfig(t *testing.T) {
 			t.Errorf("%q: err=%v", body, err)
 		}
 	}
+	cfg, err = Load(write("sandbox: true\nsandbox_allowed_domains: [proxy.golang.org, \"*.npmjs.org\", \"api.example.com:8443\"]\n"))
+	if err != nil || len(cfg.SandboxAllowedDomains) != 3 {
+		t.Fatalf("cfg=%+v err=%v", cfg, err)
+	}
+	for _, entry := range []string{`"*"`, `"foo.*.com"`, `"host:0"`} {
+		p := write("sandbox_allowed_domains: [ok.example, " + entry + "]\n")
+		if _, err := Load(p); err == nil || !strings.Contains(err.Error(), p) || !strings.Contains(err.Error(), "sandbox_allowed_domains entry "+entry) {
+			t.Errorf("%s: err=%v", entry, err)
+		}
+	}
 	if _, err := Load(write("sandox: true\n")); err == nil || !strings.Contains(err.Error(), "sandox") {
 		t.Errorf("misspelled key accepted: %v", err)
 	}

@@ -5,13 +5,14 @@ package tools
 import (
 	"context"
 	"fmt"
+	"net"
 	"os/exec"
 	"strings"
 )
 
 const sandboxExec = "/usr/bin/sandbox-exec"
 
-func probeSandbox(network bool) (string, error) {
+func probeSandbox(network, proxied bool) (string, error) {
 	if _, err := exec.LookPath(sandboxExec); err != nil {
 		return "", fmt.Errorf("sandbox: %s not found; run without --sandbox", sandboxExec)
 	}
@@ -20,6 +21,14 @@ func probeSandbox(network bool) (string, error) {
 
 func (s *Sandbox) wrap(ctx context.Context, command string) *exec.Cmd {
 	return exec.CommandContext(ctx, sandboxExec, "-p", s.profile(), bashPath(), "-c", command)
+}
+
+func (s *Sandbox) listenProxy() (net.Listener, string, error) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, "", err
+	}
+	return ln, "http://" + ln.Addr().String(), nil
 }
 
 func (s *Sandbox) profile() string {
@@ -33,6 +42,10 @@ func (s *Sandbox) profile() string {
 	}
 	if !s.Network {
 		b.WriteString("(deny network*)\n")
+	}
+	if s.proxy != nil {
+		// Seatbelt matches only localhost or * as the remote host.
+		fmt.Fprintf(&b, "(allow network-outbound (remote ip \"localhost:%d\"))\n", s.proxy.Addr().(*net.TCPAddr).Port)
 	}
 	return b.String()
 }

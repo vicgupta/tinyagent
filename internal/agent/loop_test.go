@@ -16,6 +16,7 @@ import (
 
 	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/model"
+	"github.com/vicgupta/tinyagent/internal/sandboxnet"
 	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
 )
@@ -574,5 +575,54 @@ func TestRunRecordsEnvironment(t *testing.T) {
 	tr := a.Run(context.Background(), "q")
 	if want := (trajectory.EnvironmentInfo{Name: "container", Runtime: "podman", Image: "golang:1.23"}); tr.Environment == nil || *tr.Environment != want {
 		t.Errorf("environment = %+v, want %+v", tr.Environment, want)
+	}
+}
+
+// denyingEnv is a local environment whose allowlist proxy refused requests.
+type denyingEnv struct {
+	tools.Local
+	denials []sandboxnet.Denial
+}
+
+func (d *denyingEnv) TakeNetworkDenials() []sandboxnet.Denial {
+	out := d.denials
+	d.denials = nil
+	return out
+}
+
+func TestRunRecordsNetworkDenials(t *testing.T) {
+	a := newAgent(t, &scripted{replies: []model.Message{
+		{Role: "assistant", ToolCalls: []model.ToolCall{call("1", "bash", `{"command":"true"}`)}},
+		{Role: "assistant", Content: "answer"},
+	}})
+	env := &denyingEnv{denials: []sandboxnet.Denial{{Host: "evil.example", Port: 443, Reason: sandboxnet.ReasonNotAllowed}}}
+	a.Tools.Env = env
+	var events []map[string]any
+	a.OnEvent = func(kind string, fields map[string]any) {
+		if kind == "sandbox.network_denied" {
+			events = append(events, fields)
+		}
+	}
+	var stderr strings.Builder
+	a.Err, a.Verbose = &stderr, true
+	tr := a.Run(context.Background(), "q")
+	want := trajectory.NetworkDenial{Host: "evil.example", Port: 443, Reason: sandboxnet.ReasonNotAllowed}
+	if len(tr.SandboxNetworkDenials) != 1 || tr.SandboxNetworkDenials[0] != want {
+		t.Errorf("trajectory denials = %+v", tr.SandboxNetworkDenials)
+	}
+	if len(events) != 1 || events[0]["host"] != "evil.example" || events[0]["port"] != 443 || events[0]["reason"] != sandboxnet.ReasonNotAllowed {
+		t.Errorf("events = %+v", events)
+	}
+	if !strings.Contains(stderr.String(), "sandbox: network denied: evil.example port 443") {
+		t.Errorf("verbose stderr = %q", stderr.String())
+	}
+}
+
+func TestRunRecordsSandboxAllowlist(t *testing.T) {
+	a := newAgent(t, &scripted{replies: []model.Message{{Role: "assistant", Content: "answer"}}})
+	a.Tools.Env = tools.Local{Sandbox: &tools.Sandbox{Backend: "x", Writable: []string{"/w"}, AllowedDomains: []string{"*.example.test"}}}
+	tr := a.Run(context.Background(), "q")
+	if tr.Sandbox == nil || tr.Sandbox.Network || len(tr.Sandbox.AllowedDomains) != 1 || tr.Sandbox.AllowedDomains[0] != "*.example.test" {
+		t.Errorf("sandbox = %+v", tr.Sandbox)
 	}
 }

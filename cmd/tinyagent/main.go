@@ -23,6 +23,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/mcptools"
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/outschema"
+	"github.com/vicgupta/tinyagent/internal/sandboxnet"
 	"github.com/vicgupta/tinyagent/internal/skills"
 	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
@@ -58,6 +59,7 @@ type options struct {
 	costLimit                                        float64
 	verbose, noStream, noAgentsMD, noCompact         bool
 	readOnly, sandbox, sandboxNetwork                bool
+	sandboxAllowDomains                              domainList
 	jsonOutput                                       bool
 	logDB                                            optionalPath
 	showHelp, showVersion, doUpdate                  bool
@@ -94,6 +96,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.readOnly, "read-only", false, "allow only read_file, list_files, and grep; blocks edits and commands")
 	fs.BoolVar(&o.sandbox, "sandbox", false, "confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths")
 	fs.BoolVar(&o.sandboxNetwork, "sandbox-network", false, "with --sandbox, allow commands to use the network")
+	fs.Var(&o.sandboxAllowDomains, "sandbox-allow-domain", "with --sandbox, let commands reach only this host (name, *.domain or IP, optional :port) over HTTP(S) via a filtering proxy; repeatable, replaces sandbox_allowed_domains")
 	fs.BoolVar(&o.plan, "plan", false, "enable the update_plan tool: a task plan saved in the checkpoint and pinned in every request (default off; config plan.enabled)")
 	fs.BoolVar(&o.toolOutputFiles, "tool-output-files", false, "save the full text of over-limit tool results under .tinyagent/tool-output so the model can page it with read_file and grep (default off; config tool_output_files.enabled)")
 	fs.BoolVar(&o.applyPatch, "apply-patch", false, "add the apply_patch tool: multi-file, multi-hunk edits in the *** Begin Patch format, checked before any write (default off; config apply_patch)")
@@ -777,8 +780,8 @@ func canonicalRoot(path string) (string, error) {
 	return filepath.EvalSymlinks(root)
 }
 
-// applySandboxFlags lets --sandbox, --sandbox-network, --env and
-// --command-env override the config.
+// applySandboxFlags lets --sandbox, --sandbox-network,
+// --sandbox-allow-domain, --env and --command-env override the config.
 func applySandboxFlags(fs *flag.FlagSet, cfg *config.AgentConfig, o options) {
 	if flagWasSet(fs, "env") {
 		cfg.Environment = o.execEnv
@@ -791,6 +794,9 @@ func applySandboxFlags(fs *flag.FlagSet, cfg *config.AgentConfig, o options) {
 	}
 	if flagWasSet(fs, "command-env") {
 		cfg.CommandEnv.Inherit = o.commandEnv
+	}
+	if flagWasSet(fs, "sandbox-allow-domain") {
+		cfg.SandboxAllowedDomains = o.sandboxAllowDomains
 	}
 }
 
@@ -810,7 +816,27 @@ func envConflict(cfg config.AgentConfig) string {
 	if cfg.Environment == "container" && cfg.Sandbox && !cfg.ReadOnly {
 		return "--sandbox applies only to the local environment; it can't be combined with the container environment"
 	}
+	if len(cfg.SandboxAllowedDomains) > 0 {
+		if !cfg.Sandbox {
+			return "sandbox_allowed_domains (--sandbox-allow-domain) requires --sandbox (sandbox: true)"
+		}
+		if cfg.SandboxNetwork {
+			return "sandbox_allowed_domains (--sandbox-allow-domain) can't be combined with --sandbox-network (sandbox_network: true), which allows every host"
+		}
+	}
 	return ""
+}
+
+// domainList is the repeatable --sandbox-allow-domain flag.
+type domainList []string
+
+func (d *domainList) String() string { return strings.Join(*d, ",") }
+func (d *domainList) Set(v string) error {
+	if _, err := sandboxnet.ParseRule(v); err != nil {
+		return err
+	}
+	*d = append(*d, v)
+	return nil
 }
 
 // startEnvironment returns the environment the config asks for and a
@@ -845,7 +871,7 @@ func startEnvironment(ctx context.Context, cfg config.AgentConfig, root string, 
 		describeCommandEnv(os.Stderr, ce, verbose)
 		return tools.Local{CommandEnv: ce}, func() {}, nil
 	}
-	sb, err := tools.NewSandbox(root, cfg.SandboxWritablePaths, cfg.SandboxNetwork)
+	sb, err := tools.NewSandbox(root, cfg.SandboxWritablePaths, cfg.SandboxNetwork, cfg.SandboxAllowedDomains)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -886,7 +912,7 @@ var usageGroups = []struct {
 	{"", [][3]string{{"h", "help", ""}}},
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "resume", "path"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
-	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "env", "name"}, {"", "command-env", "mode"}}},
+	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}}},
 }
 

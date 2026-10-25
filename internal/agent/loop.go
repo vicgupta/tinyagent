@@ -19,6 +19,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/hooks"
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/outschema"
+	"github.com/vicgupta/tinyagent/internal/sandboxnet"
 	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
 )
@@ -248,7 +249,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 	switch env := a.Tools.Env.(type) {
 	case tools.Local:
 		if sb := env.Sandbox; sb != nil {
-			t.Sandbox = &trajectory.SandboxInfo{Backend: sb.Backend, Writable: sb.Writable, Network: sb.Network}
+			t.Sandbox = &trajectory.SandboxInfo{Backend: sb.Backend, Writable: sb.Writable, Network: sb.Network, AllowedDomains: sb.AllowedDomains}
 		}
 		t.CommandEnv = CommandEnvInfo(env.CommandEnv)
 	case *tools.Container:
@@ -839,10 +840,27 @@ func (a *Agent) saveFailed(t *trajectory.Trajectory, err error) *trajectory.Traj
 }
 
 func (a *Agent) step(t *trajectory.Trajectory) error {
+	a.recordNetworkDenials(t)
 	if a.OnStep != nil {
 		return a.OnStep(t)
 	}
 	return nil
+}
+
+// recordNetworkDenials records the requests the sandbox allowlist proxy
+// refused since the last step, from commands and background processes.
+func (a *Agent) recordNetworkDenials(t *trajectory.Trajectory) {
+	src, ok := a.Tools.Env.(interface{ TakeNetworkDenials() []sandboxnet.Denial })
+	if !ok {
+		return
+	}
+	for _, d := range src.TakeNetworkDenials() {
+		t.SandboxNetworkDenials = append(t.SandboxNetworkDenials, trajectory.NetworkDenial{Host: d.Host, Port: d.Port, Reason: d.Reason})
+		a.event("sandbox.network_denied", map[string]any{"host": d.Host, "port": d.Port, "reason": d.Reason})
+		if a.Verbose {
+			fmt.Fprintf(a.Err, "sandbox: network denied: %s port %d: %s\n", d.Host, d.Port, d.Reason)
+		}
+	}
 }
 
 func (a *Agent) logAssistant(msg model.Message) {
