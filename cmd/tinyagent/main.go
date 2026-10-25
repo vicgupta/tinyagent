@@ -51,6 +51,7 @@ type options struct {
 	reasoningEffort                                  string
 	openaiAPI                                        string
 	execEnv                                          string
+	commandEnv                                       string
 	stepLimit, timeLimit, maxFormatErrors            int
 	maxOutputTokens                                  int
 	costLimit                                        float64
@@ -101,6 +102,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "provider reasoning effort: none, minimal, low, medium, high, xhigh, or max")
 	fs.StringVar(&o.openaiAPI, "openai-api", "", "openai provider transport: auto, responses, or chat")
 	fs.StringVar(&o.execEnv, "env", "", "where bash and start_process run: local or container (default: config's environment, else local)")
+	fs.StringVar(&o.commandEnv, "command-env", "", "environment bash and start_process inherit: all, core or none (default: config's command_env.inherit, else all)")
 	fs.BoolVar(&o.jsonOutput, "json", false, "write run events as JSONL to stdout")
 	fs.StringVar(&o.outputSchema, "output-schema", "", "end the run with a JSON result validated against this JSON Schema file (printed to stdout)")
 	fs.Var(&o.logDB, "log-db", "also log run events to SQLite (default .tinyagent/tinyagent.db under --cwd); --log-db=false turns config log_db off")
@@ -136,6 +138,10 @@ func run() int {
 	}
 	if !config.ValidEnvironment(o.execEnv) {
 		fmt.Fprintf(fs.Output(), "error: --env %q must be local or container\n", o.execEnv)
+		return 2
+	}
+	if flagWasSet(fs, "command-env") && (o.commandEnv == "" || !config.ValidInherit(o.commandEnv)) {
+		fmt.Fprintf(fs.Output(), "error: --command-env %q must be all, core or none\n", o.commandEnv)
 		return 2
 	}
 	if msg := validateLimits(o); msg != "" {
@@ -191,7 +197,7 @@ func run() int {
 	cfgPath := config.Find(o.configPath)
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
-		return fail(err)
+		return configFail(err)
 	}
 	hookRunner, err := hooks.New(cfg.Hooks, cfgPath)
 	if err != nil {
@@ -264,7 +270,7 @@ func run() int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	env, closeEnv, err := startEnvironment(ctx, cfg, root)
+	env, closeEnv, err := startEnvironment(ctx, cfg, root, o.verbose)
 	if err != nil {
 		return fail(err)
 	}
@@ -467,7 +473,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	cfgPath := config.Find(o.configPath)
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
-		return fail(err)
+		return configFail(err)
 	}
 	hookRunner, err := hooks.New(cfg.Hooks, cfgPath)
 	if err != nil {
@@ -558,7 +564,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	env, closeEnv, err := startEnvironment(ctx, cfg, root)
+	env, closeEnv, err := startEnvironment(ctx, cfg, root, o.verbose)
 	if err != nil {
 		return fail(err)
 	}
@@ -735,8 +741,8 @@ func canonicalRoot(path string) (string, error) {
 	return filepath.EvalSymlinks(root)
 }
 
-// applySandboxFlags lets --sandbox, --sandbox-network and --env override the
-// config.
+// applySandboxFlags lets --sandbox, --sandbox-network, --env and
+// --command-env override the config.
 func applySandboxFlags(fs *flag.FlagSet, cfg *config.AgentConfig, o options) {
 	if flagWasSet(fs, "env") {
 		cfg.Environment = o.execEnv
@@ -747,6 +753,20 @@ func applySandboxFlags(fs *flag.FlagSet, cfg *config.AgentConfig, o options) {
 	if flagWasSet(fs, "sandbox-network") {
 		cfg.SandboxNetwork = o.sandboxNetwork
 	}
+	if flagWasSet(fs, "command-env") {
+		cfg.CommandEnv.Inherit = o.commandEnv
+	}
+}
+
+// configFail reports a config error: exit status 2 for invalid settings
+// (config.InvalidError), 1 otherwise, as before.
+func configFail(err error) int {
+	var invalid *config.InvalidError
+	if errors.As(err, &invalid) {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	}
+	return fail(err)
 }
 
 // envConflict reports settings that can't be combined.
@@ -760,13 +780,16 @@ func envConflict(cfg config.AgentConfig) string {
 // startEnvironment returns the environment the config asks for and a
 // function that releases it. It fails if the environment can't be set up
 // (never falling back to an unconfined local one), and otherwise announces
-// any sandbox or container on stderr. Read-only runs have no command tools,
-// so they get a plain local environment.
-func startEnvironment(ctx context.Context, cfg config.AgentConfig, root string) (tools.Environment, func(), error) {
+// any sandbox, container or command_env policy on stderr. Read-only runs
+// have no command tools, so they get a plain local environment.
+func startEnvironment(ctx context.Context, cfg config.AgentConfig, root string, verbose bool) (tools.Environment, func(), error) {
 	if cfg.ReadOnly {
 		return tools.Local{}, func() {}, nil
 	}
 	if cfg.Environment == "container" {
+		if cfg.CommandEnv.Configured() {
+			fmt.Fprintln(os.Stderr, "command env: not applied; the container environment forwards no host variables")
+		}
 		c, err := tools.StartContainer(ctx, cfg.Container.Runtime, cfg.Container.Image, cfg.Container.RunArgs, root)
 		if err != nil {
 			return nil, nil, err
@@ -778,15 +801,44 @@ func startEnvironment(ctx context.Context, cfg config.AgentConfig, root string) 
 			}
 		}, nil
 	}
+	var ce *tools.CommandEnv
+	if cfg.CommandEnv.Configured() {
+		ce = tools.NewCommandEnv(cfg.CommandEnv, os.Environ())
+	}
 	if !cfg.Sandbox {
-		return tools.Local{}, func() {}, nil
+		describeCommandEnv(os.Stderr, ce, verbose)
+		return tools.Local{CommandEnv: ce}, func() {}, nil
 	}
 	sb, err := tools.NewSandbox(root, cfg.SandboxWritablePaths, cfg.SandboxNetwork)
 	if err != nil {
 		return nil, nil, err
 	}
 	fmt.Fprintln(os.Stderr, sb.Describe())
-	return tools.Local{Sandbox: sb}, sb.Cleanup, nil
+	describeCommandEnv(os.Stderr, ce, verbose)
+	return tools.Local{Sandbox: sb, CommandEnv: ce}, sb.Cleanup, nil
+}
+
+// describeCommandEnv prints the command_env summary and, with verbose, the
+// variable names it passed and withheld. Values are never printed.
+func describeCommandEnv(w io.Writer, ce *tools.CommandEnv, verbose bool) {
+	if ce == nil {
+		return
+	}
+	fmt.Fprintln(w, ce.Describe())
+	if !verbose {
+		return
+	}
+	list := func(names []string) string {
+		if len(names) == 0 {
+			return "(none)"
+		}
+		return strings.Join(names, " ")
+	}
+	fmt.Fprintln(w, "command env passed:", list(ce.Passed))
+	fmt.Fprintln(w, "command env withheld:", list(ce.Withheld))
+	if len(ce.Missing) > 0 {
+		fmt.Fprintln(w, "command env pass not set:", list(ce.Missing))
+	}
 }
 
 // usageGroups lays out --help: each flag's shorthand, long name and value
@@ -798,7 +850,7 @@ var usageGroups = []struct {
 	{"", [][3]string{{"h", "help", ""}}},
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "resume", "path"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
-	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "env", "name"}}},
+	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "env", "name"}, {"", "command-env", "mode"}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}}},
 }
 
@@ -1089,6 +1141,11 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	if a.FollowUp != "" {
 		started["follow_up"] = true
 	}
+	if l, ok := a.Tools.Env.(tools.Local); ok {
+		if ce := agent.CommandEnvInfo(l.CommandEnv); ce != nil {
+			started["command_env"] = ce
+		}
+	}
 	events.emit("run.started", started)
 	a.OnEvent = func(kind string, fields map[string]any) {
 		events.emit(kind, fields)
@@ -1228,6 +1285,10 @@ func configuredSecrets(cfg config.AgentConfig) []string {
 				vals = append(vals, v)
 			}
 		}
+	}
+	// command_env.set values may be secrets the user deliberately provides.
+	for _, v := range cfg.CommandEnv.Set {
+		vals = append(vals, v)
 	}
 	return vals
 }

@@ -101,6 +101,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--sandbox` | config `sandbox`, else off | Confine `bash`/`start_process` at the OS level: writes only under `--cwd`, a temp dir and `sandbox_writable_paths`, network off. See [Sandboxing commands](#sandboxing-commands) |
 | `--sandbox-network` | config `sandbox_network`, else off | With `--sandbox`, allow network access |
 | `--env` | config `environment`, else `local` | Where `bash`/`start_process` run: `local` (on the host) or `container` (Docker/Podman). See [Execution environments](#execution-environments) |
+| `--command-env` | config `command_env.inherit`, else `all` | Environment `bash`/`start_process` inherit: `all`, `core` or `none`. See [Command environment](#command-environment) |
 | `-o, --output` | — | Trajectory JSON, rewritten after every step |
 | `-v, --verbose` | off | Print tool calls and their outputs |
 | `--json` | off | Write machine-readable run events as JSONL to stdout |
@@ -119,7 +120,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 
 | Type | Fields |
 |---|---|
-| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `reasoning_effort` (only when set), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider) |
+| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `reasoning_effort` (only when set), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy) |
 | `assistant.message` | `text` (complete assistant message) |
 | `tool.call` | `id`, `name`, `arguments` (decoded JSON value, or a string if malformed) |
 | `tool.result` | `id`, `name`, `output` (same configured truncation as tool output), `is_error` |
@@ -270,6 +271,9 @@ system_prompt: |          # {{cwd}} and {{os}} are substituted
 read_only: true            # expose only read_file, list_files, and grep
 sandbox: false             # OS-confine bash/start_process; see Sandboxing commands
 environment: local         # or container; see Execution environments
+command_env:               # omitted by default (inherit everything); see Command environment
+  inherit: core            # all, core or none
+  exclude_secrets: true
 step_limit: 50
 cost_limit: 2.0
 wall_time_seconds: 1800
@@ -522,7 +526,38 @@ Toolchains that cache outside the repo (Go, npm, pip) fail under the sandbox wit
 - **Windows:** not supported.
 - **Fail closed:** if the host cannot enforce the requested policy, tinyagent exits before the first model request and says what is missing. It never runs commands unsandboxed.
 - On start, one `sandbox:` line (backend, writable roots, network) goes to stderr, and `-o` trajectories record it as `sandbox`. With `--resume`, the current invocation's settings apply. With `--read-only` there are no command tools, so nothing is sandboxed.
-- **Not covered:** the in-process file tools (`read_file`, `write_file`, ... and their symlink behavior), MCP servers, and provider requests. Commands can still read anything you can, including credentials, and inherit your environment variables (API keys included). The sandbox reduces risk; it does not make untrusted code safe.
+- **Not covered:** the in-process file tools (`read_file`, `write_file`, ... and their symlink behavior), MCP servers, and provider requests. Commands can still read anything you can, including credentials, and inherit your environment variables (API keys included) unless you set a [command environment](#command-environment) policy. The sandbox reduces risk; it does not make untrusted code safe.
+
+## Command environment
+
+By default `bash` and `start_process` commands inherit tinyagent's whole environment, including the provider API keys tinyagent itself needs, so a prompt-injected `env` or `echo $OPENAI_API_KEY` can read them. `command_env` (config only, from the user config or `-c`) controls what they get instead:
+
+```yaml
+command_env:
+  inherit: core                       # all (default) | core | none
+  exclude_secrets: true               # default false
+  exclude: ["AWS_*", "NPM_TOKEN"]     # names or * ? [ ] globs
+  pass: [GOFLAGS, GOPATH, GITHUB_TOKEN]   # names or globs copied from tinyagent's environment
+  set:                                # literal string values
+    CI: "true"
+```
+
+`--command-env all|core|none` overrides `inherit` for one run. The environment is built once per run, in this order:
+
+1. **Base** from `inherit`: `all` is every variable; `core` keeps `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_*`, `TERM`, `TZ`, `TMPDIR`, plus on Windows `SystemRoot`, `WINDIR`, `USERPROFILE`, `TEMP`, `TMP`, `PATHEXT`, `COMSPEC`; `none` is empty.
+2. **`exclude_secrets`** removes names ending in `_KEY`, `_TOKEN`, `_SECRET` or `_PASSWORD` (the same rule `--log-db` redaction uses) and always `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY`.
+3. **`exclude`** removes matching names.
+4. **`pass`** adds matching names back from tinyagent's environment, even ones removed above. Entries that match nothing are skipped (`-v` lists them).
+5. **`set`** applies literal values.
+6. With `--sandbox`, the sandbox's `TMPDIR` is applied last.
+
+Name matching is case-insensitive on Windows and case-sensitive elsewhere. tinyagent's own environment is unchanged, so providers, MCP servers and hooks behave as before; every process a command spawns inherits the filtered environment, with or without `--sandbox`. An invalid `inherit`, an empty or `=`-containing name, a malformed glob, a non-string `set` value or an unknown key exits 2 before any provider request.
+
+When a policy is set (or `--command-env` is passed), one line such as `command env: core, secrets excluded; 14 passed, 37 withheld` goes to stderr; `-v` also lists the passed and withheld names. `-o` trajectories and `--json` `run.started` record `command_env` (mode, `exclude_secrets`, passed names). Values are never printed or recorded; `--log-db` also redacts `set` values. With `--resume`, the current invocation's policy applies. `--read-only` runs have no command tools, so the policy has no effect there (it is still validated). The `container` environment forwards no host variables and ignores the policy.
+
+For CI on untrusted input (issue bodies, PR diffs), use `inherit: core` with `exclude_secrets: true`; for reproducible runs, `inherit: none` with `set`. `core` and `none` can break toolchains that need other variables (`GOPATH`, `JAVA_HOME`, proxy settings): check the `-v` lists and add them to `pass`.
+
+This is not a sandbox. It does not protect credentials stored in files (`~/.aws/credentials`, `.env`, the Codex auth file), which commands can still read, and it does not redact secrets from tool output, trajectories or `--json`. `pass` and `set` deliberately give commands the values you name.
 
 ## Execution environments
 

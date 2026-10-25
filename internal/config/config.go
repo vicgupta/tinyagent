@@ -8,7 +8,9 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -29,6 +31,9 @@ type AgentConfig struct {
 	Environment string `yaml:"environment"`
 	// Container configures the "container" environment.
 	Container Container `yaml:"container"`
+	// CommandEnv is the environment policy for local bash and start_process
+	// commands. The zero value inherits tinyagent's whole environment.
+	CommandEnv CommandEnv `yaml:"command_env"`
 	// Model is the provider/model used when neither -m nor $AGENT_MODEL sets
 	// one. "" falls back to the built-in default.
 	Model string `yaml:"model"`
@@ -161,6 +166,73 @@ type Container struct {
 	RunArgs []string `yaml:"run_args,omitempty"` // extra `run` arguments
 }
 
+// CommandEnv decides which environment variables bash and start_process
+// commands receive. It is applied in order: the Inherit base, then
+// ExcludeSecrets, Exclude, Pass (re-adding from tinyagent's environment) and
+// Set.
+type CommandEnv struct {
+	Inherit        string            `yaml:"inherit"` // all (default, also ""), core or none
+	ExcludeSecrets bool              `yaml:"exclude_secrets"`
+	Exclude        []string          `yaml:"exclude,omitempty"` // names or * / ? globs
+	Pass           []string          `yaml:"pass,omitempty"`    // names or globs
+	Set            map[string]string `yaml:"set,omitempty"`
+}
+
+// Configured reports whether c changes the inherited environment at all.
+func (c CommandEnv) Configured() bool {
+	return c.Inherit != "" || c.ExcludeSecrets || len(c.Exclude) > 0 || len(c.Pass) > 0 || len(c.Set) > 0
+}
+
+// ValidInherit reports whether mode is a known command_env.inherit value.
+func ValidInherit(mode string) bool {
+	return mode == "" || mode == "all" || mode == "core" || mode == "none"
+}
+
+// Validate checks the policy's names and globs. The error names the key.
+func (c CommandEnv) Validate() error {
+	if !ValidInherit(c.Inherit) {
+		return fmt.Errorf("command_env.inherit %q must be all, core or none", c.Inherit)
+	}
+	for key, names := range map[string][]string{"exclude": c.Exclude, "pass": c.Pass} {
+		for _, n := range names {
+			if err := checkEnvName(n, true); err != nil {
+				return fmt.Errorf("command_env.%s entry %q: %w", key, n, err)
+			}
+		}
+	}
+	for n := range c.Set {
+		if err := checkEnvName(n, false); err != nil {
+			return fmt.Errorf("command_env.set name %q: %w", n, err)
+		}
+	}
+	return nil
+}
+
+func checkEnvName(n string, glob bool) error {
+	switch {
+	case n == "":
+		return errors.New("empty name")
+	case strings.Contains(n, "="):
+		return errors.New("name must not contain =")
+	case strings.ContainsRune(n, 0):
+		return errors.New("name must not contain NUL")
+	}
+	if glob {
+		if _, err := path.Match(n, ""); err != nil {
+			return fmt.Errorf("malformed glob: %w", err)
+		}
+	} else if strings.ContainsAny(n, "*?[") {
+		return errors.New("must be a plain name, not a glob")
+	}
+	return nil
+}
+
+// InvalidError is a config error that should exit with usage status 2.
+type InvalidError struct{ Err error }
+
+func (e *InvalidError) Error() string { return e.Err.Error() }
+func (e *InvalidError) Unwrap() error { return e.Err }
+
 // ValidEnvironment reports whether name is a known environment.
 func ValidEnvironment(name string) bool {
 	return name == "" || name == "local" || name == "container"
@@ -240,6 +312,7 @@ func Load(path string) (AgentConfig, error) {
 		MaxFormatErrors yaml.Node `yaml:"max_format_errors"`
 		MaxOutputTokens yaml.Node `yaml:"max_output_tokens"`
 		MaxTruncations  yaml.Node `yaml:"max_truncations"`
+		CommandEnv      yaml.Node `yaml:"command_env"`
 	}
 	if yaml.Unmarshal(data, &probe) == nil {
 		for _, c := range []struct {
@@ -252,6 +325,11 @@ func Load(path string) (AgentConfig, error) {
 		} {
 			if n := c.n; n.Kind != 0 && (n.Kind != yaml.ScalarNode || n.ShortTag() != "!!int") {
 				return cfg, fmt.Errorf("config %s: %s must be a whole number %s, got %q", path, c.key, c.want, n.Value)
+			}
+		}
+		if probe.CommandEnv.Kind != 0 {
+			if err := checkCommandEnv(&probe.CommandEnv); err != nil {
+				return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
 			}
 		}
 	}
@@ -281,6 +359,9 @@ func Load(path string) (AgentConfig, error) {
 	if !ValidEnvironment(cfg.Environment) {
 		return cfg, fmt.Errorf("config %s: environment %q must be local or container", path, cfg.Environment)
 	}
+	if err := cfg.CommandEnv.Validate(); err != nil {
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
+	}
 	if r := cfg.Container.Runtime; r != "" && r != "docker" && r != "podman" {
 		return cfg, fmt.Errorf("config %s: container.runtime %q must be docker or podman", path, r)
 	}
@@ -293,4 +374,43 @@ func Load(path string) (AgentConfig, error) {
 		}
 	}
 	return cfg, nil
+}
+
+// checkCommandEnv rejects unknown keys and non-string set values under
+// command_env, which the lenient YAML decoding would otherwise accept.
+func checkCommandEnv(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode && n.ShortTag() == "!!null" {
+		return nil
+	}
+	if n.Kind != yaml.MappingNode {
+		return errors.New("command_env must be a mapping")
+	}
+	b, err := yaml.Marshal(n)
+	if err != nil {
+		return fmt.Errorf("command_env: %w", err)
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(b))
+	dec.KnownFields(true)
+	var c CommandEnv
+	if err := dec.Decode(&c); err != nil {
+		return fmt.Errorf("command_env: %w", err)
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value != "set" {
+			continue
+		}
+		set := n.Content[i+1]
+		if set.Kind != yaml.MappingNode {
+			if set.ShortTag() == "!!null" {
+				continue
+			}
+			return errors.New("command_env.set must be a mapping of names to strings")
+		}
+		for j := 0; j+1 < len(set.Content); j += 2 {
+			if v := set.Content[j+1]; v.Kind != yaml.ScalarNode || v.ShortTag() != "!!str" {
+				return fmt.Errorf("command_env.set %s must be a string; quote it", set.Content[j].Value)
+			}
+		}
+	}
+	return nil
 }

@@ -237,12 +237,13 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 	a.cur = t
 	// The output budget may change on resume, so the current one is recorded.
 	t.MaxOutputTokens = a.Config.MaxOutputTokens
-	t.Sandbox, t.Environment = nil, nil
+	t.Sandbox, t.Environment, t.CommandEnv = nil, nil, nil
 	switch env := a.Tools.Env.(type) {
 	case tools.Local:
 		if sb := env.Sandbox; sb != nil {
 			t.Sandbox = &trajectory.SandboxInfo{Backend: sb.Backend, Writable: sb.Writable, Network: sb.Network}
 		}
+		t.CommandEnv = CommandEnvInfo(env.CommandEnv)
 	case *tools.Container:
 		t.Environment = &trajectory.EnvironmentInfo{Name: "container", Runtime: env.Runtime, Image: env.Image}
 	}
@@ -865,4 +866,13 @@ func (a *Agent) recordProcesses(t *trajectory.Trajectory) {
 	for _, p := range ps {
 		t.Processes = append(t.Processes, trajectory.ProcessInfo{ID: p.ID, PID: p.PID, Command: p.Command})
 	}
+}
+
+// CommandEnvInfo summarizes c by name for trajectories and run.started; nil
+// when no policy is active.
+func CommandEnvInfo(c *tools.CommandEnv) *trajectory.CommandEnvInfo {
+	if c == nil {
+		return nil
+	}
+	return &trajectory.CommandEnvInfo{Inherit: c.Inherit, ExcludeSecrets: c.ExcludeSecrets, Passed: append([]string{}, c.Passed...)}
 }

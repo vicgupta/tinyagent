@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -239,6 +240,41 @@ func TestEnvironmentConfig(t *testing.T) {
 	for _, body := range []string{"environment: vm\n", "container: {runtime: lxc}\n", "container: {imgae: x}\n", "enviroment: local\n"} {
 		if _, err := Load(write(body)); err == nil {
 			t.Errorf("%q accepted", body)
+		}
+	}
+}
+
+func TestCommandEnvConfig(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	write(t, p, "command_env:\n  inherit: core\n  exclude_secrets: true\n  exclude: [\"AWS_*\"]\n  pass: [GOPATH]\n  set:\n    CI: \"true\"\n")
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := CommandEnv{Inherit: "core", ExcludeSecrets: true, Exclude: []string{"AWS_*"}, Pass: []string{"GOPATH"}, Set: map[string]string{"CI": "true"}}
+	if !reflect.DeepEqual(cfg.CommandEnv, want) || !cfg.CommandEnv.Configured() {
+		t.Fatalf("got %+v", cfg.CommandEnv)
+	}
+	if Default().CommandEnv.Configured() {
+		t.Error("default policy is configured")
+	}
+	for _, c := range []struct{ yaml, want string }{
+		{"command_env: {inherit: bogus}", "command_env.inherit"},
+		{"command_env: {unknown_key: 1}", "unknown_key"},
+		{"command_env: {exclude: [\"\"]}", "command_env.exclude"},
+		{"command_env: {pass: [\"A=B\"]}", "command_env.pass"},
+		{"command_env: {pass: [\"[A\"]}", "malformed glob"},
+		{"command_env: {set: {\"A=B\": x}}", "command_env.set"},
+		{"command_env: {set: {\"A*\": x}}", "command_env.set"},
+		{"command_env: {set: {CI: true}}", "command_env.set CI"},
+		{"command_env: {set: {N: 1}}", "command_env.set N"},
+		{"command_env: [all]", "command_env"},
+	} {
+		write(t, p, c.yaml+"\n")
+		_, err := Load(p)
+		var invalid *InvalidError
+		if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), p) || !errors.As(err, &invalid) {
+			t.Errorf("%s: err = %v, want InvalidError naming %q and the file", c.yaml, err, c.want)
 		}
 	}
 }

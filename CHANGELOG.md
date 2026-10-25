@@ -4,6 +4,7 @@
 
 ### Features
 
+- Add an opt-in command environment policy (`command_env` config, `--command-env all|core|none`) that controls which environment variables `bash` and `start_process` commands inherit: a trimmed `core` or empty base, `exclude_secrets` (secret-named variables and tinyagent's provider keys), `exclude`/`pass` globs and fixed `set` values. The default still inherits everything.
 - Add `--max-output-tokens` (config `max_output_tokens`) to set the per-request output-token budget for Anthropic, OpenAI, OpenRouter and Ollama.
 - Continue a finished (`Submitted`/`Completed`) run with a follow-up task: `--resume <trajectory> -t "<follow-up>"` sends the saved conversation plus a follow-up notice and the new instruction, keeps step/cost totals cumulative, and records `follow_up` in the resume provenance and `run.started`.
 - Discover Agent Skills (`SKILL.md`) from `.agents/skills` in the project and `~/.agents/skills`, list them in the system prompt, and load them on demand with a new `skill` tool (opt-in via `--skills` or `skills: true`).

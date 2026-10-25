@@ -287,6 +287,7 @@ Output:
       --sandbox                   confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths
       --sandbox-network           with --sandbox, allow commands to use the network
       --env name                  where bash and start_process run: local or container (default: config's environment, else local)
+      --command-env mode          environment bash and start_process inherit: all, core or none (default: config's command_env.inherit, else all)
 Other:
   -V, --version                   print the version and exit
       --update                    update to the latest release and exit

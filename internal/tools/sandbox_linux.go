@@ -89,7 +89,7 @@ func (s *Sandbox) wrap(ctx context.Context, command string) *exec.Cmd {
 		mode = "net-allow"
 	}
 	args := append([]string{SandboxHelperArg, mode}, s.Writable...)
-	args = append(args, "--", "bash", "-c", command)
+	args = append(args, "--", bashPath(), "-c", command)
 	return exec.CommandContext(ctx, self, args...)
 }
 

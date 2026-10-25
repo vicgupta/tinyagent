@@ -26,15 +26,26 @@ type EnvironmentInfo struct {
 	Image   string `json:"image,omitempty"`
 }
 
+// CommandEnvInfo records the command_env policy bash and start_process
+// commands ran with: names only, never values.
+type CommandEnvInfo struct {
+	Inherit        string   `json:"inherit"`
+	ExcludeSecrets bool     `json:"exclude_secrets"`
+	Passed         []string `json:"passed"`
+}
+
 type Trajectory struct {
 	// Environment is set when bash and start_process ran outside the host,
 	// e.g. in a container.
 	Environment *EnvironmentInfo `json:"environment,omitempty"`
 	// Sandbox is set when bash and start_process ran in an OS sandbox.
-	Sandbox  *SandboxInfo `json:"sandbox,omitempty"`
-	ReadOnly bool         `json:"read_only"`
-	Task     string       `json:"task"`
-	Model    string       `json:"model"`
+	Sandbox *SandboxInfo `json:"sandbox,omitempty"`
+	// CommandEnv is set when a command_env policy filtered the environment
+	// of bash and start_process; it records this invocation's policy.
+	CommandEnv *CommandEnvInfo `json:"command_env,omitempty"`
+	ReadOnly   bool            `json:"read_only"`
+	Task       string          `json:"task"`
+	Model      string          `json:"model"`
 	// ReasoningEffort is the reasoning_effort sent with every request, if any.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	// OpenAIAPI is the openai provider's resolved transport, "responses" or
