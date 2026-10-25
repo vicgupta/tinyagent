@@ -56,6 +56,15 @@ type AdditionalDir struct {
 	Mode string `json:"mode"`
 }
 
+// WorktreeInfo records the Git worktree a --worktree run worked in: its
+// path, branch, the commit it was branched from and the main repository.
+type WorktreeInfo struct {
+	Path       string `json:"path"`
+	Branch     string `json:"branch"`
+	BaseCommit string `json:"base_commit"`
+	RepoRoot   string `json:"repo_root"`
+}
+
 // FileAccessInfo records the file_access rules the built-in file tools
 // enforced.
 type FileAccessInfo struct {
@@ -75,6 +84,9 @@ type Trajectory struct {
 	// FileAccess is set when file_access rules restricted the file tools;
 	// it records this invocation's rules.
 	FileAccess *FileAccessInfo `json:"file_access,omitempty"`
+	// Worktree is set when the run was started with --worktree: Root is
+	// that worktree (or its subdirectory).
+	Worktree *WorktreeInfo `json:"worktree,omitempty"`
 	// AdditionalDirs lists the directories outside Root the file tools could
 	// reach in this invocation, with their effective mode.
 	AdditionalDirs []AdditionalDir `json:"additional_dirs,omitempty"`

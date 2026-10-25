@@ -269,6 +269,7 @@ Task:
       --openai-api api               openai provider transport: auto, responses, or chat
   -c, --config path                  YAML config (default: user config if present, else built-in)
       --cwd dir                      working directory (default ".")
+      --worktree [=name]             run in a new Git worktree on branch tinyagent/<name> from HEAD of the repo containing --cwd, kept afterwards (default name generated)
       --resume path                  continue an unfinished run from a trajectory JSON checkpoint, or a finished one with -t "<follow-up>"
 Limits:
       --step-limit n                 max model calls, 0 = unlimited
