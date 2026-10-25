@@ -119,6 +119,9 @@ type Trajectory struct {
 	// ApplyPatchEnabled (schema 2) records whether the opt-in apply_patch
 	// tool was enabled. A resume must use the same setting.
 	ApplyPatchEnabled bool `json:"apply_patch_enabled,omitempty"`
+	// ToolOutputFiles (schema 2) lists the over-limit tool results whose
+	// full text was saved with tool_output_files on.
+	ToolOutputFiles []ToolOutputFile `json:"tool_output_files,omitempty"`
 	// SkillsEnabled records whether Agent Skills discovery was on. A resume
 	// rediscovers skills and must rebuild the same catalog. Older
 	// checkpoints, without the field, resume with skills off.
@@ -132,6 +135,13 @@ type SkillInfo struct {
 	Name  string `json:"name"`
 	Scope string `json:"scope"`
 	Path  string `json:"path"`
+}
+
+// ToolOutputFile records where one tool result's full text was saved.
+type ToolOutputFile struct {
+	ToolCallID  string `json:"tool_call_id"`
+	OutputFile  string `json:"output_file"` // relative to the run's root, slash separated
+	OutputBytes int    `json:"output_bytes"`
 }
 
 // PendingCall identifies a tool call without a recorded result.

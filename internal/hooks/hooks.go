@@ -163,6 +163,9 @@ type Input struct {
 	Root       string `json:"root"`
 	ReadOnly   bool   `json:"read_only"`
 	Step       int    `json:"step"`
+	// OutputFile (post_tool only) is the saved full output, relative to
+	// Root, when tool_output_files saved this result.
+	OutputFile string `json:"output_file,omitempty"`
 }
 
 type payload struct {

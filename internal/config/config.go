@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -95,7 +96,28 @@ type AgentConfig struct {
 	Skills bool `yaml:"skills"`
 	// LogDB is the opt-in SQLite event log.
 	LogDB LogDB `yaml:"log_db"`
+	// ToolOutputFiles saves the full text of over-limit tool results to
+	// per-run files the model can page (off by default;
+	// --tool-output-files overrides Enabled).
+	ToolOutputFiles ToolOutputFiles `yaml:"tool_output_files"`
 }
+
+// ToolOutputFiles configures saving over-limit tool output.
+type ToolOutputFiles struct {
+	Enabled bool `yaml:"enabled"`
+	// Dir is relative to --cwd and must stay inside it; "" means
+	// DefaultToolOutputDir.
+	Dir string `yaml:"dir"`
+	// MaxRuns keeps this many earlier run directories at run start; 0
+	// keeps all.
+	MaxRuns int `yaml:"max_runs"`
+}
+
+// DefaultToolOutputDir is the default tool_output_files.dir.
+const DefaultToolOutputDir = ".tinyagent/tool-output"
+
+// DefaultToolOutputMaxRuns is the default tool_output_files.max_runs.
+const DefaultToolOutputMaxRuns = 20
 
 // Images turns on sending images to vision-capable models.
 type Images struct {
@@ -194,6 +216,7 @@ func Default() AgentConfig {
 		MaxTruncations:         DefaultMaxTruncations,
 		MaxImageBytes:          DefaultMaxImageBytes,
 		LogDB:                  LogDB{Level: "metadata", MaxDays: 30, MaxRuns: 500},
+		ToolOutputFiles:        ToolOutputFiles{Dir: DefaultToolOutputDir, MaxRuns: DefaultToolOutputMaxRuns},
 	}
 }
 
@@ -265,6 +288,14 @@ func Load(path string) (AgentConfig, error) {
 	}
 	if cfg.LogDB.MaxDays < 0 || cfg.LogDB.MaxRuns < 0 || cfg.LogDB.MaxPayloadBytes < 0 {
 		return cfg, fmt.Errorf("config %s: log_db max_days, max_runs and max_payload_bytes must be >= 0", path)
+	}
+	if cfg.ToolOutputFiles.MaxRuns < 0 {
+		return cfg, fmt.Errorf("config %s: tool_output_files.max_runs must be >= 0, got %d", path, cfg.ToolOutputFiles.MaxRuns)
+	}
+	if d := cfg.ToolOutputFiles.Dir; d != "" && !filepath.IsAbs(d) {
+		if c := filepath.Clean(d); c == "." || c == ".." || strings.HasPrefix(c, ".."+string(filepath.Separator)) {
+			return cfg, fmt.Errorf("config %s: tool_output_files.dir %q must be a subdirectory of --cwd", path, d)
+		}
 	}
 	if cfg.MaxFormatErrors < 1 {
 		return cfg, fmt.Errorf("config %s: max_format_errors must be a whole number >= 1, got %d", path, cfg.MaxFormatErrors)

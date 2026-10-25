@@ -31,6 +31,12 @@ func Grep(root, pattern, path, include string, ignoreCase, fixedStrings bool) (s
 
 // GrepWithContext returns matches with up to contextLines surrounding lines.
 func GrepWithContext(root, pattern, path, include string, ignoreCase, fixedStrings bool, contextLines int) (string, error) {
+	return grepWithContext(root, pattern, path, include, ignoreCase, fixedStrings, contextLines, "")
+}
+
+// grepWithContext is GrepWithContext that also skips the directory skip (an
+// absolute path; "" skips nothing extra) unless the search starts inside it.
+func grepWithContext(root, pattern, path, include string, ignoreCase, fixedStrings bool, contextLines int, skip string) (string, error) {
 	if fixedStrings {
 		pattern = regexp.QuoteMeta(pattern)
 	}
@@ -60,7 +66,7 @@ func GrepWithContext(root, pattern, path, include string, ignoreCase, fixedStrin
 			return nil
 		}
 		if d.IsDir() {
-			if p != start && skipDir(d.Name()) {
+			if p != start && (skipDir(d.Name()) || p == skip) {
 				return filepath.SkipDir
 			}
 			return nil
