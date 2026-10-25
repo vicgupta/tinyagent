@@ -33,9 +33,18 @@ func ImagesToolSignature(readOnly, plan, images bool) string {
 	return toolSignature(readOnly, plan, images)
 }
 
-func toolSignature(readonly, plan bool, images ...bool) string {
-	img := len(images) > 0 && images[0]
-	data, _ := json.Marshal(builtinSpecs(readonly, plan, img))
+// ApplyPatchToolSignature is ImagesToolSignature with apply_patch enabled or
+// not. Without apply_patch it equals ImagesToolSignature.
+func ApplyPatchToolSignature(readOnly, plan, images, applyPatch bool) string {
+	return toolSignature(readOnly, plan, images, applyPatch)
+}
+
+// toolSignature takes the opt-in images and apply_patch settings, in that
+// order, after readonly and plan.
+func toolSignature(readonly, plan bool, opt ...bool) string {
+	img := len(opt) > 0 && opt[0]
+	patch := len(opt) > 1 && opt[1]
+	data, _ := json.Marshal(builtinSpecs(readonly, plan, img, patch))
 	prefix := "tools-v1:"
 	if readonly {
 		prefix = "tools-read-only-v1:"
@@ -46,16 +55,22 @@ func toolSignature(readonly, plan bool, images ...bool) string {
 	if img {
 		prefix = "images-v1:" + prefix
 	}
+	if patch {
+		prefix = "apply-patch-v1:" + prefix
+	}
 	return fmt.Sprintf("%s%x", prefix, sha256.Sum256(data))
 }
 
-func builtinSpecs(readOnly, plan bool, images ...bool) []model.ToolSpec {
+func builtinSpecs(readOnly, plan bool, opt ...bool) []model.ToolSpec {
 	specs := tools.Specs(readOnly)
 	if plan {
 		specs = append(specs, tools.PlanSpec())
 	}
-	if len(images) > 0 && images[0] {
+	if len(opt) > 0 && opt[0] {
 		specs = append(specs, tools.ViewImageSpec())
+	}
+	if len(opt) > 1 && opt[1] && !readOnly {
+		specs = append(specs, tools.ApplyPatchSpec())
 	}
 	return specs
 }
@@ -70,10 +85,10 @@ func ValidateResume(t *trajectory.Trajectory, cfg config.AgentConfig, root strin
 	if root != t.Root {
 		return errors.New("--cwd does not match the checkpoint's canonical root")
 	}
-	if t.ToolSignature != toolSignature(t.ReadOnly, t.PlanEnabled, t.ImagesEnabled) {
+	if t.ToolSignature != toolSignature(t.ReadOnly, t.PlanEnabled, t.ImagesEnabled, t.ApplyPatchEnabled) {
 		return errors.New("tool compatibility has changed; start a fresh task")
 	}
-	names := toolNames(builtinSpecs(t.ReadOnly, t.PlanEnabled, t.ImagesEnabled))
+	names := toolNames(builtinSpecs(t.ReadOnly, t.PlanEnabled, t.ImagesEnabled, t.ApplyPatchEnabled))
 	var set *skills.Set
 	if t.SkillsEnabled {
 		set, _ = skills.Discover(root, skills.UserDir())

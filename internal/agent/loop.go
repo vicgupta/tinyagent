@@ -42,6 +42,9 @@ const (
 	// StatusVerificationFailed: stop hooks were still rejecting the result
 	// when the max_stop_continuations cap was reached.
 	StatusVerificationFailed = "VerificationFailed"
+	// StatusOutputTruncated: too many consecutive responses were cut off at
+	// the output-token limit.
+	StatusOutputTruncated = "OutputTruncated"
 )
 
 // stopNotice opens the user message that sends the model back to work after
@@ -173,6 +176,10 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			t.ExitStatus, t.Submission = StatusError, "resume images setting differs from checkpoint"
 			return t
 		}
+		if t.ApplyPatchEnabled != a.Tools.ApplyPatch {
+			t.ExitStatus, t.Submission = StatusError, "resume apply_patch setting differs from checkpoint"
+			return t
+		}
 		t.ExitStatus, t.Submission = "", ""
 		if t.OpenAIAPI == "" {
 			t.OpenAIAPI = a.OpenAIAPI
@@ -210,9 +217,10 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			SystemPrompt:          system,
 			SkipAgentsMD:          a.SkipAgentsMD,
 			Tools:                 toolNames(a.Tools.Catalog()),
-			ToolSignature:         toolSignature(a.Tools.ReadOnly, a.Tools.Plan, a.Tools.Images),
+			ToolSignature:         toolSignature(a.Tools.ReadOnly, a.Tools.Plan, a.Tools.Images, a.Tools.ApplyPatch),
 			PlanEnabled:           a.Tools.Plan,
 			ImagesEnabled:         a.Tools.Images,
+			ApplyPatchEnabled:     a.Tools.ApplyPatch,
 			MCPEnabled:            len(a.Tools.ExternalSpecs) > 0,
 			ExternalTools:         externalToolNames(a.Tools.ExternalSpecs),
 			ExternalToolSignature: externalToolSignature(a.Tools.ExternalSpecs),
@@ -227,6 +235,8 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		}
 	}
 	a.cur = t
+	// The output budget may change on resume, so the current one is recorded.
+	t.MaxOutputTokens = a.Config.MaxOutputTokens
 	t.Sandbox, t.Environment, t.CommandEnv = nil, nil, nil
 	switch env := a.Tools.Env.(type) {
 	case tools.Local:
@@ -291,6 +301,13 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		if msg.Content != "" {
 			a.event("assistant.message", map[string]any{"text": msg.Content})
 		}
+		if cut, reason := model.Truncated(msg); cut {
+			if done := a.truncated(t, v, msg, reason); done != nil {
+				return done
+			}
+			continue
+		}
+		t.ConsecutiveTruncations = 0
 
 		if a.OutputSchema != nil {
 			done, result := a.structuredStep(ctx, t, v, msg, &invalidOutputs)
@@ -464,6 +481,61 @@ func (a *Agent) recordToolResult(t *trajectory.Trajectory, v *view, call model.T
 	if a.Verbose {
 		fmt.Fprintf(a.Out, "  -> %s\n", indent(out))
 	}
+}
+
+// truncated handles a response cut off at the output-token limit: it never
+// ends the run successfully and none of its tool calls run. Each call gets a
+// "not run" result, the model gets a correction, and after max_truncations
+// such responses in a row the run ends OutputTruncated. It returns the final
+// trajectory, or nil to continue.
+func (a *Agent) truncated(t *trajectory.Trajectory, v *view, msg model.Message, reason string) *trajectory.Trajectory {
+	t.Truncations++
+	t.ConsecutiveTruncations++
+	limit := a.outputLimit()
+	a.event("model.truncated", map[string]any{
+		"step": t.Steps, "reason": reason, "max_output_tokens": a.Config.MaxOutputTokens,
+		"tool_calls_dropped": len(msg.ToolCalls), "consecutive": t.ConsecutiveTruncations,
+	})
+	fmt.Fprintf(a.Err, "warning: response cut off at the output-token limit (%s, %s); %d tool calls not run\n", reason, limit, len(msg.ToolCalls))
+	result := fmt.Sprintf("error: [not run: your response was cut off at the output-token limit (%s) before this call was complete]", limit)
+	for _, c := range msg.ToolCalls {
+		a.event("tool.result", map[string]any{"id": c.ID, "name": c.Function.Name, "output": result, "is_error": true, "truncated": true})
+		t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: c.ID, Content: result})
+		v.add(t, t.Messages[len(t.Messages)-1])
+	}
+	if t.ConsecutiveTruncations >= a.maxTruncations() {
+		return a.finish(t, StatusOutputTruncated, "")
+	}
+	t.Messages = append(t.Messages, model.Message{Role: "user", Content: fmt.Sprintf(truncationNotice, limit)})
+	v.add(t, t.Messages[len(t.Messages)-1])
+	if err := a.step(t); err != nil {
+		return a.saveFailed(t, err)
+	}
+	return nil
+}
+
+// truncationNotice is the correction after a cut-off response; %s is the
+// output limit.
+const truncationNotice = "Your previous response was cut off at the output-token limit (%s), so it was not accepted and none of its tool calls ran. Continue in smaller steps: write large files in parts, prefer edit_file over rewriting whole files, and keep your final answer concise."
+
+// outputLimit describes the per-request output budget for messages.
+func (a *Agent) outputLimit() string {
+	if n := a.Config.MaxOutputTokens; n > 0 {
+		return fmt.Sprintf("%d tokens", n)
+	}
+	if strings.HasPrefix(a.ModelName, "anthropic/") {
+		return fmt.Sprintf("%d tokens", model.DefaultAnthropicMaxTokens)
+	}
+	return "provider default"
+}
+
+// maxTruncations is the configured cap on consecutive truncated responses;
+// an unset (zero) config uses the default.
+func (a *Agent) maxTruncations() int {
+	if a.Config.MaxTruncations > 0 {
+		return a.Config.MaxTruncations
+	}
+	return config.DefaultMaxTruncations
 }
 
 // maxFormatErrors is the configured cap on consecutive format-error steps;

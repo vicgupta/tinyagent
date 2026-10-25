@@ -12,7 +12,7 @@ type Anthropic struct {
 	BaseURL   string
 	APIKey    string
 	Model     string
-	MaxTokens int          // defaults to 8192
+	MaxTokens int          // defaults to DefaultAnthropicMaxTokens
 	OnText    func(string) // if set, stream and report text deltas
 	// ReasoningEffort, if set, is sent as output_config.effort.
 	ReasoningEffort string
@@ -146,7 +146,7 @@ func (a *Anthropic) Query(ctx context.Context, messages []Message, tools []ToolS
 	system, msgs := toAnthropic(messages)
 	maxTokens := a.MaxTokens
 	if maxTokens == 0 {
-		maxTokens = 8192
+		maxTokens = DefaultAnthropicMaxTokens
 	}
 	// Automatic prompt caching: the API puts the cache breakpoint on the last
 	// cacheable block, so each step reads the history the previous one wrote.
@@ -190,6 +190,10 @@ func (a *Anthropic) Query(ctx context.Context, messages []Message, tools []ToolS
 	}
 
 	msg := Message{Role: "assistant", Extra: map[string]any{"stop_reason": resp.StopReason}}
+	truncated := anthropicTruncated(resp.StopReason)
+	if truncated {
+		markTruncated(&msg, "stop_reason: "+resp.StopReason)
+	}
 	var text []string
 	thinking := false
 	for _, b := range resp.Content {
@@ -211,12 +215,19 @@ func (a *Anthropic) Query(ctx context.Context, messages []Message, tools []ToolS
 	}
 	msg.Content = strings.Join(text, "\n")
 	if thinking {
-		raw := make([]json.RawMessage, len(resp.Content))
-		for i, b := range resp.Content {
-			if b.Type == "tool_use" && len(b.Input) == 0 {
+		var raw []json.RawMessage
+		for _, b := range resp.Content {
+			// A cut-off response may end in a thinking block that never got
+			// its signature; the API rejects it on replay, so drop it.
+			if truncated && b.Type == "thinking" && b.Signature == "" {
+				continue
+			}
+			// Cut-off tool input is not valid JSON and must not be replayed.
+			if b.Type == "tool_use" && !json.Valid(b.Input) {
 				b.Input = json.RawMessage("{}")
 			}
-			raw[i], _ = json.Marshal(b)
+			r, _ := json.Marshal(b)
+			raw = append(raw, r)
 		}
 		msg.Extra[ExtraAnthropicContent] = raw
 	}

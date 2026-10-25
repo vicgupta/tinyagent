@@ -96,6 +96,13 @@ type Trajectory struct {
 	ConsecutiveFormatErrors int    `json:"consecutive_format_errors,omitempty"`
 	FormatErrorMessages     []int  `json:"format_error_messages,omitempty"`
 	LastFormatError         string `json:"last_format_error,omitempty"`
+	// Truncations counts responses cut off at the output-token limit over
+	// the whole run, and ConsecutiveTruncations the current run of them; it
+	// is restored on resume. MaxOutputTokens is the effective per-request
+	// output budget (0 = provider default).
+	Truncations            int `json:"truncations,omitempty"`
+	ConsecutiveTruncations int `json:"consecutive_truncations,omitempty"`
+	MaxOutputTokens        int `json:"max_output_tokens,omitempty"`
 	// StopContinuations counts the times stop hooks sent the model back to
 	// work; it is restored on resume. StopReason is the last stop-hook
 	// feedback of a VerificationFailed run.
@@ -120,6 +127,9 @@ type Trajectory struct {
 	// (view_image and MCP image pass-through) was on. A resume must use the
 	// same setting. Image bytes are stored inline, base64, in Messages.
 	ImagesEnabled bool `json:"images_enabled,omitempty"`
+	// ApplyPatchEnabled (schema 2) records whether the opt-in apply_patch
+	// tool was enabled. A resume must use the same setting.
+	ApplyPatchEnabled bool `json:"apply_patch_enabled,omitempty"`
 	// SkillsEnabled records whether Agent Skills discovery was on. A resume
 	// rediscovers skills and must rebuild the same catalog. Older
 	// checkpoints, without the field, resume with skills off.
