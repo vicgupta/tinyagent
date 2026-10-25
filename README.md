@@ -101,6 +101,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--read-only` | config `read_only`, else off | Permit only `read_file`, `list_files`, and `grep`; blocks edits, shell, and process tools. `--read-only=false` explicitly disables it. |
 | `--sandbox` | config `sandbox`, else off | Confine `bash`/`start_process` at the OS level: writes only under `--cwd`, a temp dir and `sandbox_writable_paths`, network off. See [Sandboxing commands](#sandboxing-commands) |
 | `--sandbox-network` | config `sandbox_network`, else off | With `--sandbox`, allow network access |
+| `--sandbox-allow-domain <host>` | config `sandbox_allowed_domains`, else none | With `--sandbox`, let commands reach only the listed hosts over HTTP(S) through a filtering proxy. Repeatable; replaces the config list. See [Network allowlist](#network-allowlist) |
 | `--env` | config `environment`, else `local` | Where `bash`/`start_process` run: `local` (on the host) or `container` (Docker/Podman). See [Execution environments](#execution-environments) |
 | `--command-env` | config `command_env.inherit`, else `all` | Environment `bash`/`start_process` inherit: `all`, `core` or `none`. See [Command environment](#command-environment) |
 | `-o, --output` | — | Trajectory JSON, rewritten after every step |
@@ -132,6 +133,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 | `resume.process_lost` | `id`, `pid`, `cmd` of a background process from the previous invocation |
 | `compaction` | `step`, `reason`, `stage`, `tokens_before`, `tokens_after`, `elided_messages`, `summarized_messages` |
 | `warning` / `error` | `message` |
+| `sandbox.network_denied` | `host`, `port`, `reason`; the sandbox allowlist proxy refused a request from a command (see [Network allowlist](#network-allowlist)) |
 | `provider.retry` | `attempt` (the upcoming attempt number), `reason` (`http_<status>` or `network`), `backoff_ms`; only emitted when a model request is retried |
 | `result` | `status`, `submission`, cumulative `steps`, `structured_output` (only with `--output-schema` and status `Submitted`), `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cost_usd`, invocation `duration_ms` |
 
@@ -271,6 +273,7 @@ system_prompt: |          # {{cwd}} and {{os}} are substituted
   You are a coding agent...
 read_only: true            # expose only read_file, list_files, and grep
 sandbox: false             # OS-confine bash/start_process; see Sandboxing commands
+# sandbox_allowed_domains: [proxy.golang.org]  # with sandbox, the only hosts commands may reach
 environment: local         # or container; see Execution environments
 command_env:               # omitted by default (inherit everything); see Command environment
   inherit: core            # all, core or none
@@ -584,7 +587,33 @@ Toolchains that cache outside the repo (Go, npm, pip) fail under the sandbox wit
 - **Windows:** not supported.
 - **Fail closed:** if the host cannot enforce the requested policy, tinyagent exits before the first model request and says what is missing. It never runs commands unsandboxed.
 - On start, one `sandbox:` line (backend, writable roots, network) goes to stderr, and `-o` trajectories record it as `sandbox`. With `--resume`, the current invocation's settings apply. With `--read-only` there are no command tools, so nothing is sandboxed.
-- **Not covered:** the in-process file tools (`read_file`, `write_file`, ... and their symlink behavior), MCP servers, and provider requests. Commands can still read anything you can, including credentials, and inherit your environment variables (API keys included) unless you set a [command environment](#command-environment) policy. The sandbox reduces risk; it does not make untrusted code safe.
+- **Not covered:** the in-process file tools (`read_file`, `write_file`, ... and their symlink behavior), MCP servers, and provider requests. Commands can still read anything you can, including credentials, and inherit your environment variables (API keys included) unless you set a [command environment](#command-environment) policy. With `--sandbox-network` they can send it to any host; prefer a [network allowlist](#network-allowlist). The sandbox reduces risk; it does not make untrusted code safe.
+
+### Network allowlist
+
+`sandbox_allowed_domains` (or `--sandbox-allow-domain <host>`, repeatable, which replaces the config list) lets sandboxed commands reach only the hosts you list, over HTTP and HTTPS. tinyagent runs a small proxy outside the sandbox that checks each request's hostname, and sets `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` (and their lowercase forms) to it, with `NO_PROXY` empty. The OS sandbox lets commands connect only to that proxy. It requires `--sandbox` and can't be combined with `--sandbox-network` (exit 2 otherwise). Without the key or flag, nothing changes.
+
+```yaml
+sandbox: true
+sandbox_allowed_domains:
+  - proxy.golang.org       # Go modules
+  - sum.golang.org
+  - registry.npmjs.org     # npm
+  - pypi.org               # pip
+  - files.pythonhosted.org
+sandbox_writable_paths:    # their caches, see above
+  - /home/me/go/pkg/mod
+```
+
+- **Entries:** an exact hostname (`api.example.com`), `*.example.com` for its subdomains only (not `example.com` itself), or an IP literal (`10.0.0.5`, `[::1]`). Each may end with `:port`; otherwise ports 80 and 443 are allowed. Matching ignores case and a trailing dot. A bare `*` is a config error.
+- **Private addresses:** the proxy resolves an allowed name itself and refuses to connect to loopback, private, link-local (including the `169.254.169.254` cloud metadata address) and other non-public addresses, unless that address is listed as a literal for the port.
+- **Refusals:** the command gets HTTP `403` with an `X-Proxy-Error: blocked-by-allowlist` header and a body such as `tinyagent sandbox: host not in sandbox_allowed_domains: evil.example (port 443)` (for HTTPS, clients report the proxy's 403 on `CONNECT`). Each refusal is a `sandbox.network_denied` event with `--json`, is listed under `sandbox_network_denials` in `-o` trajectories, and is printed to stderr with `-v`. Allowed requests are not logged.
+- **Only proxy-aware clients work:** curl, Go, npm, pip, git over HTTPS and most HTTP libraries honor the proxy variables. Programs that ignore them, and anything that isn't HTTP(S) (SSH, raw TCP, UDP, DNS lookups), cannot connect. Proxy variables in your own environment are replaced, and the proxy connects directly rather than through an upstream proxy.
+- **Linux:** each command runs in its own unprivileged user and network namespace, which has only loopback. tinyagent forwards a loopback port there to the proxy's Unix socket (in a private temporary directory removed when the run ends), and Landlock additionally allows TCP connections only to that port. This needs Landlock ABI 4 and unprivileged user namespaces. Ubuntu 23.10+ restricts these with AppArmor (`kernel.apparmor_restrict_unprivileged_userns=1`), and other distributions may disable them (`kernel.unprivileged_userns_clone`, `user.max_user_namespaces`); there, tinyagent exits before the first model request with a message naming the cause. Commands appear as your own uid, but other users and groups map to `nobody`. Unix sockets on the filesystem (for example a Docker socket) are still reachable, as without the allowlist.
+- **macOS:** the proxy listens on a loopback port and the Seatbelt profile allows outbound connections only to that port on localhost.
+- **Exfiltration:** an allowlist limits where data can go, not what is sent. Commands can upload anything they can read to an allowed host, and broad entries (`github.com`, `*.amazonaws.com`, CDN wildcards) allow uploads to other users' content and domain fronting, since TLS isn't inspected. List only the hosts a task needs.
+- The startup line shows e.g. `network: allowlist (2 domains: proxy.golang.org, sum.golang.org)`, and the trajectory's `sandbox` record includes `allowed_domains`. The proxy stops when the run ends, however it ends; background processes from `start_process` use it until then.
+
 
 ## Command environment
 

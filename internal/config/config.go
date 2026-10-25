@@ -18,6 +18,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/vicgupta/tinyagent/embed"
+	"github.com/vicgupta/tinyagent/internal/sandboxnet"
 )
 
 type AgentConfig struct {
@@ -29,6 +30,10 @@ type AgentConfig struct {
 	SandboxNetwork bool `yaml:"sandbox_network"`
 	// SandboxWritablePaths are extra absolute directories commands may write.
 	SandboxWritablePaths []string `yaml:"sandbox_writable_paths,omitempty"`
+	// SandboxAllowedDomains limits sandboxed commands' network to these
+	// hosts (exact, "*.domain" or IP, optional ":port"), over HTTP and HTTPS
+	// through a filtering proxy. Empty keeps the network denied.
+	SandboxAllowedDomains []string `yaml:"sandbox_allowed_domains,omitempty"`
 	// Environment selects where bash and start_process commands run:
 	// "local" (the default, also "") or "container".
 	Environment string `yaml:"environment"`
@@ -449,6 +454,9 @@ func Load(path string) (AgentConfig, error) {
 		if fi, err := os.Stat(p); err != nil || !fi.IsDir() {
 			return cfg, fmt.Errorf("config %s: sandbox_writable_paths entry %q is not an existing directory", path, p)
 		}
+	}
+	if _, err := sandboxnet.ParseRules(cfg.SandboxAllowedDomains); err != nil {
+		return cfg, fmt.Errorf("config %s: sandbox_allowed_domains %v", path, err)
 	}
 	return cfg, nil
 }

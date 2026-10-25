@@ -24,7 +24,7 @@ func sandboxOrSkip(t *testing.T, root string, extra []string, network bool) *San
 	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
 		t.Skip("no sandbox backend on " + runtime.GOOS)
 	}
-	sb, err := NewSandbox(root, extra, network)
+	sb, err := NewSandbox(root, extra, network, nil)
 	if err != nil {
 		t.Skipf("sandbox unavailable: %v", err)
 	}
@@ -126,5 +126,33 @@ func TestSandboxDescribe(t *testing.T) {
 	s := &Sandbox{Backend: "x", Writable: []string{"/a", "/b"}}
 	if got, want := s.Describe(), "sandbox: x; writable: /a, /b; network: denied"; got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+	s.AllowedDomains = []string{"proxy.golang.org", "*.npmjs.org"}
+	if got, want := s.NetworkMode(), "allowlist (2 domains: proxy.golang.org, *.npmjs.org)"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	s.AllowedDomains = s.AllowedDomains[:1]
+	if got, want := s.NetworkMode(), "allowlist (1 domain: proxy.golang.org)"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestSandboxDefaultEnvironmentUnchanged(t *testing.T) {
+	root := t.TempDir()
+	sb := sandboxOrSkip(t, root, nil, false)
+	cmd := Local{Sandbox: sb}.Command(context.Background(), root, "true")
+	for _, kv := range cmd.Env[len(os.Environ()):] {
+		if kv != "TMPDIR="+sb.Tmp {
+			t.Errorf("unexpected variable %q without an allowlist", kv)
+		}
+	}
+}
+
+func TestNewSandboxRejectsBadAllowlist(t *testing.T) {
+	if _, err := NewSandbox(t.TempDir(), nil, false, []string{"*"}); err == nil || !strings.Contains(err.Error(), `"*"`) {
+		t.Errorf("bare wildcard: %v", err)
+	}
+	if _, err := NewSandbox(t.TempDir(), nil, true, []string{"example.com"}); err == nil || !strings.Contains(err.Error(), "sandbox_network") {
+		t.Errorf("with network: %v", err)
 	}
 }

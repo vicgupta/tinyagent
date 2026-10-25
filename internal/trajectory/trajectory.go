@@ -17,6 +17,16 @@ type SandboxInfo struct {
 	Backend  string   `json:"backend"`
 	Writable []string `json:"writable"`
 	Network  bool     `json:"network"`
+	// AllowedDomains is set in allowlist mode: commands could reach only
+	// these hosts, through tinyagent's proxy.
+	AllowedDomains []string `json:"allowed_domains,omitempty"`
+}
+
+// NetworkDenial is one request the sandbox allowlist proxy refused.
+type NetworkDenial struct {
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+	Reason string `json:"reason"`
 }
 
 // EnvironmentInfo records the non-local environment bash commands ran in.
@@ -43,9 +53,11 @@ type Trajectory struct {
 	// CommandEnv is set when a command_env policy filtered the environment
 	// of bash and start_process; it records this invocation's policy.
 	CommandEnv *CommandEnvInfo `json:"command_env,omitempty"`
-	ReadOnly   bool            `json:"read_only"`
-	Task       string          `json:"task"`
-	Model      string          `json:"model"`
+	// SandboxNetworkDenials lists the requests the allowlist proxy refused.
+	SandboxNetworkDenials []NetworkDenial `json:"sandbox_network_denials,omitempty"`
+	ReadOnly              bool            `json:"read_only"`
+	Task                  string          `json:"task"`
+	Model                 string          `json:"model"`
 	// ReasoningEffort is the reasoning_effort sent with every request, if any.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	// OpenAIAPI is the openai provider's resolved transport, "responses" or

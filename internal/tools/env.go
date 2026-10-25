@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/vicgupta/tinyagent/internal/sandboxnet"
 )
 
 // Environment decides where bash and start_process commands run.
@@ -49,11 +51,17 @@ func (l Local) Command(ctx context.Context, root, command string) *exec.Cmd {
 		if l.CommandEnv != nil {
 			env = append([]string{}, l.CommandEnv.Vars...)
 		}
-		cmd.Env = append(env, "TMPDIR="+l.Sandbox.Tmp)
+		cmd.Env = append(append(env, "TMPDIR="+l.Sandbox.Tmp), l.Sandbox.proxyEnv...)
 	}
 	cmd.Dir = root
 	setProcessGroup(cmd)
 	return cmd
+}
+
+// TakeNetworkDenials returns the requests the sandbox allowlist proxy
+// refused since the last call.
+func (l Local) TakeNetworkDenials() []sandboxnet.Denial {
+	return l.Sandbox.TakeNetworkDenials()
 }
 
 // ContainerLabel marks containers started by tinyagent.

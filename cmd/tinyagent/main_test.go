@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -259,38 +260,39 @@ const wantUsage = `Usage: tinyagent -t "<prompt>" [flags]    (or --task "<prompt
        tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]
        tinyagent --resume <finished.json> -t "<follow-up>" --cwd <dir> -o <new.json> [flags]
 
-  -h, --help                      show this help and exit
+  -h, --help                         show this help and exit
 Task:
-  -t, --task string               task/prompt (required unless --resume; with --resume of a finished run, the follow-up instruction); "-" reads it from stdin
-  -m, --model string              provider/model; if unset, $AGENT_MODEL, then the config's model (default "openai/gpt-4o")
-      --reasoning-effort level    provider reasoning effort: none, minimal, low, medium, high, xhigh, or max
-      --openai-api api            openai provider transport: auto, responses, or chat
-  -c, --config path               YAML config (default: user config if present, else built-in)
-      --cwd dir                   working directory (default ".")
-      --resume path               continue an unfinished run from a trajectory JSON checkpoint, or a finished one with -t "<follow-up>"
+  -t, --task string                  task/prompt (required unless --resume; with --resume of a finished run, the follow-up instruction); "-" reads it from stdin
+  -m, --model string                 provider/model; if unset, $AGENT_MODEL, then the config's model (default "openai/gpt-4o")
+      --reasoning-effort level       provider reasoning effort: none, minimal, low, medium, high, xhigh, or max
+      --openai-api api               openai provider transport: auto, responses, or chat
+  -c, --config path                  YAML config (default: user config if present, else built-in)
+      --cwd dir                      working directory (default ".")
+      --resume path                  continue an unfinished run from a trajectory JSON checkpoint, or a finished one with -t "<follow-up>"
 Limits:
-      --step-limit n              max model calls, 0 = unlimited
-      --cost-limit usd            max USD, 0 = unlimited
-      --time-limit sec            max wall-clock seconds, 0 = unlimited
-      --max-format-errors n       stop after this many consecutive steps of malformed tool calls (>= 1) (default 3)
-      --max-output-tokens n       per-request output-token budget sent to the provider, 0 = provider default (8192 for anthropic; config max_output_tokens)
-      --no-compact                don't compact the history when it nears the context window
+      --step-limit n                 max model calls, 0 = unlimited
+      --cost-limit usd               max USD, 0 = unlimited
+      --time-limit sec               max wall-clock seconds, 0 = unlimited
+      --max-format-errors n          stop after this many consecutive steps of malformed tool calls (>= 1) (default 3)
+      --max-output-tokens n          per-request output-token budget sent to the provider, 0 = provider default (8192 for anthropic; config max_output_tokens)
+      --no-compact                   don't compact the history when it nears the context window
 Output:
-  -o, --output path               write trajectory JSON
-  -v, --verbose                   print tool outputs
-      --no-stream                 wait for full responses instead of streaming
-      --json                      write run events as JSONL to stdout
-      --output-schema path        end the run with a JSON result validated against this JSON Schema file (printed to stdout)
-      --log-db [=path]            also log run events to SQLite (default .tinyagent/tinyagent.db under --cwd); --log-db=false turns config log_db off
-      --no-agents-md              don't add AGENTS.md (nearest, up to the repo root) to the system prompt
-      --read-only                 allow only read_file, list_files, and grep; blocks edits and commands
-      --sandbox                   confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths
-      --sandbox-network           with --sandbox, allow commands to use the network
-      --env name                  where bash and start_process run: local or container (default: config's environment, else local)
-      --command-env mode          environment bash and start_process inherit: all, core or none (default: config's command_env.inherit, else all)
+  -o, --output path                  write trajectory JSON
+  -v, --verbose                      print tool outputs
+      --no-stream                    wait for full responses instead of streaming
+      --json                         write run events as JSONL to stdout
+      --output-schema path           end the run with a JSON result validated against this JSON Schema file (printed to stdout)
+      --log-db [=path]               also log run events to SQLite (default .tinyagent/tinyagent.db under --cwd); --log-db=false turns config log_db off
+      --no-agents-md                 don't add AGENTS.md (nearest, up to the repo root) to the system prompt
+      --read-only                    allow only read_file, list_files, and grep; blocks edits and commands
+      --sandbox                      confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths
+      --sandbox-network              with --sandbox, allow commands to use the network
+      --sandbox-allow-domain host    with --sandbox, let commands reach only this host (name, *.domain or IP, optional :port) over HTTP(S) via a filtering proxy; repeatable, replaces sandbox_allowed_domains
+      --env name                     where bash and start_process run: local or container (default: config's environment, else local)
+      --command-env mode             environment bash and start_process inherit: all, core or none (default: config's command_env.inherit, else all)
 Other:
-  -V, --version                   print the version and exit
-      --update                    update to the latest release and exit
+  -V, --version                      print the version and exit
+      --update                       update to the latest release and exit
 
 Examples:
   tinyagent -t "fix the failing test" -m anthropic/claude-sonnet-4
@@ -352,7 +354,7 @@ func TestUsage(t *testing.T) {
 func TestUsageShowsModelDefaultFromEnv(t *testing.T) {
 	t.Setenv("AGENT_MODEL", "ollama/llama3.1")
 	_, got, _ := runWith(t, "--help")
-	if !strings.Contains(got, `  -m, --model string              provider/model; if unset, $AGENT_MODEL, then the config's model (default "ollama/llama3.1")`+"\n") {
+	if !strings.Contains(got, `  -m, --model string                 provider/model; if unset, $AGENT_MODEL, then the config's model (default "ollama/llama3.1")`+"\n") {
 		t.Errorf("model row doesn't show $AGENT_MODEL:\n%s", got)
 	}
 }
@@ -388,10 +390,10 @@ func TestShortAndLongFlagsParseIdentically(t *testing.T) {
 		{{"-V"}, {"--version"}, {"-version"}},
 	} {
 		a, b, d := parse(c[0]...), parse(c[1]...), parse(c[2]...)
-		if a != b || a != d {
+		if !reflect.DeepEqual(a, b) || !reflect.DeepEqual(a, d) {
 			t.Errorf("%v, %v and %v parse differently: %+v / %+v / %+v", c[0], c[1], c[2], a, b, d)
 		}
-		if a == parse() {
+		if reflect.DeepEqual(a, parse()) {
 			t.Errorf("%v had no effect", c[0])
 		}
 	}
@@ -732,6 +734,57 @@ func TestEnvFlag(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	if code, _, _ := runWith(t, "--env", "container", "-c", cfg, "-t", "x", "-m", "ollama/none"); code != 1 {
 		t.Errorf("missing runtime: exit %d, want 1", code)
+	}
+}
+
+func TestSandboxAllowDomainValidation(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var requests atomic.Int32
+	srv := fakeOpenAI(t, &requests)
+	t.Setenv("OPENAI_BASE_URL", srv.URL)
+	t.Setenv("OPENAI_API_KEY", "fake")
+	base := []string{"-t", "x", "-m", "openai/gpt-4o", "--no-stream", "--cwd", t.TempDir()}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--sandbox-allow-domain", "example.com"}, "requires --sandbox"},
+		{[]string{"--sandbox", "--sandbox-network", "--sandbox-allow-domain", "example.com"}, "can't be combined with --sandbox-network"},
+		{[]string{"--sandbox", "--sandbox-allow-domain", "*"}, "bare wildcard"},
+	} {
+		var code int
+		var flagErr string
+		stderr := captureStderr(t, func() {
+			code, _, flagErr = runWith(t, append(append([]string{}, tc.args...), base...)...)
+		})
+		stderr += flagErr
+		if code != 2 || !strings.Contains(stderr, tc.want) {
+			t.Errorf("%v: exit %d, stderr %q; want 2 and %q", tc.args, code, stderr, tc.want)
+		}
+	}
+	if requests.Load() != 0 {
+		t.Errorf("%d provider requests before validation failed", requests.Load())
+	}
+}
+
+func TestSandboxAllowDomainFlagReplacesConfig(t *testing.T) {
+	var o options
+	fs := newFlagSet(&o)
+	if err := fs.Parse([]string{"--sandbox-allow-domain", "a.test", "--sandbox-allow-domain", "*.b.test:8080"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.AgentConfig{SandboxAllowedDomains: []string{"config.test"}}
+	applySandboxFlags(fs, &cfg, o)
+	if !reflect.DeepEqual(cfg.SandboxAllowedDomains, []string{"a.test", "*.b.test:8080"}) {
+		t.Errorf("domains = %v", cfg.SandboxAllowedDomains)
+	}
+	cfg = config.AgentConfig{SandboxAllowedDomains: []string{"config.test"}}
+	var o2 options
+	fs = newFlagSet(&o2)
+	fs.Parse(nil)
+	applySandboxFlags(fs, &cfg, o2)
+	if !reflect.DeepEqual(cfg.SandboxAllowedDomains, []string{"config.test"}) {
+		t.Errorf("config domains without the flag = %v", cfg.SandboxAllowedDomains)
 	}
 }
 
