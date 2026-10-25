@@ -4,7 +4,7 @@
 curl -fsSL https://raw.githubusercontent.com/vicgupta/tinyagent/main/install.sh | sh
 ```
 
-A minimal coding agent in a single static Go binary. It gives an LLM nine tools (`read_file`, `write_file`, `edit_file`, `list_files`, `grep`, `bash`, and `start_process`, `read_process`, `stop_process` for background commands), plus the opt-in `update_plan`, `skill`, and `view_image` tools, and keeps a linear message history until the model submits.
+A minimal coding agent in a single static Go binary. It gives an LLM nine tools (`read_file`, `write_file`, `edit_file`, `list_files`, `grep`, `bash`, and `start_process`, `read_process`, `stop_process` for background commands), plus the opt-in `update_plan`, `skill`, `view_image`, and `apply_patch` tools, and keeps a linear message history until the model submits.
 
 ## Install
 
@@ -92,6 +92,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--max-output-tokens` | config `max_output_tokens`, else 0 | Per-request output-token budget sent to the provider; 0 keeps the provider default (8192 `max_tokens` on Anthropic). Not supported by `codex`. Unrelated to `max_output_chars`, which caps tool output. See [Output truncation](#output-truncation) |
 | `--no-compact` | off | Never compact the history; see [Long runs](#long-runs) |
 | `--plan` | config `plan.enabled`, else off | Give the model the `update_plan` tool; see [Plan tool](#plan-tool) |
+| `--apply-patch` | config `apply_patch`, else off | Give the model the `apply_patch` tool for multi-file, multi-hunk edits, checked before any write; `--apply-patch=false` disables it. See [apply_patch](#apply_patch) |
 | `--images` | config `images.enabled`, else off | Let vision-capable models see images: the `view_image` tool and MCP image pass-through; see [Images](#images) |
 | `--plan-file` | — | Mirror the current plan to this Markdown file after each checkpoint save (requires the plan tool) |
 | `--skills` | config `skills`, else off | Discover [Agent Skills](#agent-skills) and offer the `skill` tool |
@@ -284,6 +285,7 @@ context_window: 200000    # tokens; overrides the built-in table, used for compa
 plan:
   enabled: false          # give the model the update_plan tool (same as --plan)
 skills: false             # discover Agent Skills and offer the skill tool (same as --skills)
+apply_patch: false        # offer the apply_patch tool (same as --apply-patch)
 images:
   enabled: false          # view_image tool and MCP image pass-through (same as --images)
 max_image_bytes: 5242880  # largest image sent to the model (5 MiB); must be >= 1
@@ -378,6 +380,8 @@ Each hook gets one JSON object on stdin: `schema_version` (`1`), `event` (`pre_t
 
 A denied call is not executed; the model gets the error result `error: denied by pre_tool hook <command>: <reason>` and the run continues. Matching hooks run one at a time in config order: the first `pre_tool` deny stops the rest, and every matching `post_tool` hook runs, each appending its feedback under `[post_tool hook <command>]` (capped at 8 KiB per hook; the combined result still honors `max_output_chars`). Read-only denials and unknown tools are rejected before hooks, so hooks never run for them and cannot widen authority; with `--read-only`, hooks still run for `read_file`, `list_files`, and `grep`. MCP tools are matched by their exposed `<alias>__<tool>` name. Ctrl-C or the wall-time limit kills a running hook (its process group on Unix; only the process on Windows). `-v` prints one stderr line per hook run, `--json` emits a `hook` event, and trajectories record the model-visible results, including denial reasons and feedback. Resumed runs use the hooks in the current config. Hooks do not run for `update_plan`, which only changes the run's plan.
 
+Hooks match tool names, so a hook on `write_file|edit_file` does not see edits made with the opt-in `apply_patch` tool; use `match: "write_file|edit_file|apply_patch"` to cover all three. An `apply_patch` hook gets `arguments` as `{"input": "<patch text>"}`.
+
 Two examples: a `post_tool` hook on `write_file|edit_file` that runs `gofmt -l` on the edited path and prints `{"feedback":"..."}` when it lists files, and a `pre_tool` hook on `write_file|edit_file` that exits 2 with `edit schema.sql and run make gen instead` when `arguments.path` is under `migrations/`.
 
 #### Stop hooks
@@ -426,6 +430,38 @@ Per provider: `anthropic` sends images as image blocks inside the tool result, a
 Image data never appears in text channels: the model's tool-result text, `--json` events, verbose output, hook input, and the event log see a placeholder like `[image: image/png, 48,213 bytes, sha256:1a2b3c4d5e6f]`. Privacy: the image bytes are sent to the model provider and stored base64 in the trajectory/checkpoint file, so treat those files like the images themselves. For compaction each image counts as about 1,600 tokens, and old images are elided (`[image elided: <path>, N bytes]`) like old tool output; the summarizer never sees image data.
 
 A checkpoint records whether images were enabled, and `--resume` keeps that setting: passing `--images` to resume a run that started without it (or the reverse) is an error, and the config's `images.enabled` is ignored on resume.
+
+### apply_patch
+
+`--apply-patch` (or `apply_patch: true`) adds an `apply_patch` tool that applies one patch in the `*** Begin Patch` ("V4A") format [documented by OpenAI](https://developers.openai.com/api/docs/guides/tools-apply-patch). It is aimed at models trained on that format (the OpenAI GPT-4.1 and GPT-5 families, including `codex/*`) and works with any model that follows the tool description. It is off by default; with it off, requests, tools, and checkpoints are unchanged. `edit_file` and `write_file` stay available, and the tool is never offered with `--read-only` (a call to it gets the read-only denial).
+
+The tool takes one string argument, `input`:
+
+```
+*** Begin Patch
+*** Add File: docs/notes.txt
++first line
+*** Update File: src/app.go
+*** Move to: src/main.go
+@@ func main() {
+ 	fmt.Println("hi")
+-	return
++	os.Exit(0)
+ }
+*** Delete File: old.txt
+*** End Patch
+```
+
+- `*** Add File:` is followed by the file's lines, each prefixed with `+`. `*** Delete File:` takes no body. `*** Update File:` is optionally followed by `*** Move to:` (a rename), then hunks of context (` `), removed (`-`), and added (`+`) lines.
+- A hunk starts with `@@` or `@@ <line>`: the search for the hunk moves past the first line matching `<line>` (after the previous hunk), and several `@@` lines may be stacked to narrow it down. `*** End of File` marks a hunk at the end of the file. There are no line numbers.
+- Context is matched exactly, then ignoring trailing whitespace, then ignoring surrounding whitespace; a looser match is noted in the result. Context lines keep the file's own text.
+- Paths follow the same rules as the other file tools: relative to `--cwd`, or absolute inside it; anything outside is rejected. A shell heredoc wrapper (`apply_patch <<"EOF" ... EOF`) is stripped.
+
+The whole patch is parsed and checked before anything is written: update and delete targets must exist, be regular files, and not be binary; add targets and move destinations must not exist; a path may appear in only one operation; every hunk must match; and the patch must be at most 1 MiB. If any check fails, nothing is written and the error names the operation (by number and path), the reason, and for context failures the lines that were not found. Otherwise the operations are applied in order and the result is `ok` followed by one line per operation: `A <path>`, `M <path> (<n> hunks)`, `D <path>`, or `R <old> -> <new>`. Updated files keep their permission bits, their line endings (CRLF or LF), and a missing trailing newline (a hunk marked `*** End of File` leaves the file ending in a newline); new files are written 0644 with parent directories created.
+
+Writes are not transactional: if writing fails part-way (for example, a permission error), work stops and the error lists the operations that were applied, which are not rolled back, and those that were not. Like `edit_file`, the tool is not covered by `--sandbox`. A missing or non-string `input` is a [malformed tool call](#malformed-tool-calls); a patch that does not apply is an ordinary tool error.
+
+A checkpoint records whether `apply_patch` was enabled (`apply_patch_enabled`), and `--resume` keeps that setting: passing a conflicting `--apply-patch` exits 2, and the config's `apply_patch` is ignored on resume.
 
 ## Exit status
 

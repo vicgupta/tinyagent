@@ -144,7 +144,7 @@ func (t *Trajectory) Validate() error {
 	if t.SchemaVersion != 1 && t.SchemaVersion != SchemaVersion {
 		return fmt.Errorf("checkpoint schema version %d is unsupported (want 1 or %d)", t.SchemaVersion, SchemaVersion)
 	}
-	if t.SchemaVersion == 1 && (len(t.PendingCalls) > 0 || len(t.Processes) > 0 || t.PlanEnabled || t.Plan != nil || len(t.PlanHistory) > 0 || t.ImagesEnabled) {
+	if t.SchemaVersion == 1 && (len(t.PendingCalls) > 0 || len(t.Processes) > 0 || t.PlanEnabled || t.Plan != nil || len(t.PlanHistory) > 0 || t.ImagesEnabled || t.ApplyPatchEnabled) {
 		return errors.New("schema version 1 checkpoint has version 2 fields")
 	}
 	if !t.ImagesEnabled {

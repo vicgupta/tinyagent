@@ -58,6 +58,9 @@ type Executor struct {
 	// Skills, when it holds at least one skill, adds the read-only skill
 	// tool (also in read-only mode). nil or empty offers nothing.
 	Skills *skills.Set
+	// ApplyPatch offers the opt-in apply_patch tool (never in read-only
+	// mode).
+	ApplyPatch bool
 
 	procs registry
 }
@@ -85,6 +88,7 @@ type args struct {
 	ContextLines json.RawMessage `json:"context_lines"`
 	Name         string          `json:"name"`
 	File         string          `json:"file"`
+	Input        string          `json:"input"`
 }
 
 // Specs returns the OpenAI tool definitions for all tools.
@@ -217,6 +221,9 @@ func (e *Executor) Catalog() []model.ToolSpec {
 	if e.Images {
 		out = append(out, ViewImageSpec())
 	}
+	if e.ApplyPatch && !e.ReadOnly {
+		out = append(out, ApplyPatchSpec())
+	}
 	if e.Skills.Len() > 0 {
 		out = append(out, e.Skills.Spec())
 	}
@@ -312,6 +319,11 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 			return "ok", err
 		}
 		return fmt.Sprintf("ok (%d replacements)", n), nil
+	case ApplyPatchToolName:
+		if !e.ApplyPatch {
+			return "", fmt.Errorf("unknown tool %q", name)
+		}
+		return ApplyPatch(e.Root, a.Input)
 	case "list_files":
 		return ListFiles(e.Root, a.Path, a.Pattern)
 	case "grep":
