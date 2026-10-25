@@ -222,3 +222,23 @@ func TestSandboxConfig(t *testing.T) {
 		t.Errorf("misspelled key accepted: %v", err)
 	}
 }
+
+func TestEnvironmentConfig(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) string {
+		p := filepath.Join(dir, "c.yaml")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	cfg, err := Load(write("environment: container\ncontainer:\n  runtime: podman\n  image: golang:1.23\n  run_args: [--network, none]\n"))
+	if err != nil || cfg.Environment != "container" || cfg.Container.Runtime != "podman" || cfg.Container.Image != "golang:1.23" || len(cfg.Container.RunArgs) != 2 {
+		t.Fatalf("cfg=%+v err=%v", cfg, err)
+	}
+	for _, body := range []string{"environment: vm\n", "container: {runtime: lxc}\n", "container: {imgae: x}\n", "enviroment: local\n"} {
+		if _, err := Load(write(body)); err == nil {
+			t.Errorf("%q accepted", body)
+		}
+	}
+}

@@ -175,9 +175,14 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		}
 	}
 	a.cur = t
-	t.Sandbox = nil
-	if sb := a.Tools.Sandbox; sb != nil {
-		t.Sandbox = &trajectory.SandboxInfo{Backend: sb.Backend, Writable: sb.Writable, Network: sb.Network}
+	t.Sandbox, t.Environment = nil, nil
+	switch env := a.Tools.Env.(type) {
+	case tools.Local:
+		if sb := env.Sandbox; sb != nil {
+			t.Sandbox = &trajectory.SandboxInfo{Backend: sb.Backend, Writable: sb.Writable, Network: sb.Network}
+		}
+	case *tools.Container:
+		t.Environment = &trajectory.EnvironmentInfo{Name: "container", Runtime: env.Runtime, Image: env.Image}
 	}
 	specs := a.Tools.Catalog()
 	if a.OutputSchema != nil {

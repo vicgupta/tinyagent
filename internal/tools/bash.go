@@ -22,16 +22,15 @@ func BashStream(ctx context.Context, root, command string, timeout time.Duration
 	return bashStream(ctx, nil, root, command, timeout, live)
 }
 
-// bashStream is BashStream run under sb, if non-nil.
-func bashStream(ctx context.Context, sb *Sandbox, root, command string, timeout time.Duration, live io.Writer) (string, error) {
+// bashStream is BashStream run in env (nil means Local{}).
+func bashStream(ctx context.Context, env Environment, root, command string, timeout time.Duration, live io.Writer) (string, error) {
 	if timeout <= 0 {
 		timeout = 120 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := shellCommand(ctx, sb, command)
-	cmd.Dir = root
+	cmd := environment(env).Command(ctx, root, command)
 	var buf bytes.Buffer
 	var w io.Writer = &buf
 	if live != nil {
@@ -40,7 +39,6 @@ func bashStream(ctx context.Context, sb *Sandbox, root, command string, timeout 
 	cmd.Stdout = w
 	cmd.Stderr = w
 	cmd.WaitDelay = 2 * time.Second
-	setProcessGroup(cmd)
 
 	err := cmd.Run()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {

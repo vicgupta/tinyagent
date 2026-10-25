@@ -139,7 +139,7 @@ func (e *Executor) bufferBytes() int {
 	return DefaultProcessBufferBytes
 }
 
-// StartProcess launches command with bash -c in the background and returns
+// StartProcess launches command with bash -c (in e.Env) in the background and returns
 // its id with any output produced in the first moment.
 func (e *Executor) StartProcess(command string) (string, error) {
 	if strings.TrimSpace(command) == "" {
@@ -162,13 +162,11 @@ func (e *Executor) StartProcess(command string) (string, error) {
 	e.procs.nextID++
 	id := "p" + strconv.Itoa(e.procs.nextID)
 	ctx, cancel := context.WithCancel(context.Background())
-	cmd := shellCommand(ctx, e.Sandbox, command)
-	cmd.Dir = e.Root
+	cmd := environment(e.Env).Command(ctx, e.Root, command)
 	out := newOutBuffer(e.bufferBytes())
 	cmd.Stdout = out
 	cmd.Stderr = out
 	cmd.WaitDelay = 2 * time.Second
-	setProcessGroup(cmd)
 	if err := cmd.Start(); err != nil {
 		e.procs.mu.Unlock()
 		cancel()

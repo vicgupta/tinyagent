@@ -563,3 +563,16 @@ func TestRunKillsBackgroundProcesses(t *testing.T) {
 		})
 	}
 }
+
+func TestRunRecordsEnvironment(t *testing.T) {
+	a := newAgent(t, &scripted{replies: []model.Message{{Role: "assistant", Content: "answer"}}})
+	if tr := a.Run(context.Background(), "q"); tr.Environment != nil || tr.Sandbox != nil {
+		t.Errorf("local run recorded environment %+v, sandbox %+v", tr.Environment, tr.Sandbox)
+	}
+	a = newAgent(t, &scripted{replies: []model.Message{{Role: "assistant", Content: "answer"}}})
+	a.Tools.Env = &tools.Container{Runtime: "podman", Image: "golang:1.23", ID: "x"}
+	tr := a.Run(context.Background(), "q")
+	if want := (trajectory.EnvironmentInfo{Name: "container", Runtime: "podman", Image: "golang:1.23"}); tr.Environment == nil || *tr.Environment != want {
+		t.Errorf("environment = %+v, want %+v", tr.Environment, want)
+	}
+}

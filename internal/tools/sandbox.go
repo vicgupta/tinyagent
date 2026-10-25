@@ -1,11 +1,9 @@
 package tools
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -65,16 +63,6 @@ func (s *Sandbox) Describe() string {
 		net = "allowed"
 	}
 	return fmt.Sprintf("sandbox: %s; writable: %s; network: %s", s.Backend, strings.Join(s.Writable, ", "), net)
-}
-
-// shellCommand returns `bash -c command`, run under sb if it is non-nil.
-func shellCommand(ctx context.Context, sb *Sandbox, command string) *exec.Cmd {
-	if sb == nil {
-		return exec.CommandContext(ctx, "bash", "-c", command)
-	}
-	cmd := sb.wrap(ctx, command)
-	cmd.Env = append(os.Environ(), "TMPDIR="+sb.Tmp)
-	return cmd
 }
 
 var errSandboxUnsupported = errors.New("sandbox: not supported on this operating system (supported: Linux with Landlock, macOS); run without --sandbox")

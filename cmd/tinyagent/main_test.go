@@ -281,6 +281,7 @@ Output:
       --read-only                 allow only read_file, list_files, and grep; blocks edits and commands
       --sandbox                   confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths
       --sandbox-network           with --sandbox, allow commands to use the network
+      --env name                  where bash and start_process run: local or container (default: config's environment, else local)
 Other:
   -V, --version                   print the version and exit
       --update                    update to the latest release and exit
@@ -706,5 +707,23 @@ func TestInvalidHookConfigFailsBeforeProvider(t *testing.T) {
 	}
 	if !strings.Contains(stderr, cfgPath) || !strings.Contains(stderr, "hooks.post_tool[0]: command \"fmt-check\" must be an absolute path") {
 		t.Errorf("stderr = %q", stderr)
+	}
+}
+func TestEnvFlag(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if code, _, got := runWith(t, "--env", "bogus", "-t", "x"); code != 2 || !strings.Contains(got, `--env "bogus"`) {
+		t.Errorf("--env bogus: exit %d, stderr %q; want 2", code, got)
+	}
+	if code, _, _ := runWith(t, "--env", "container", "--sandbox", "-t", "x"); code != 2 {
+		t.Errorf("--env container --sandbox: exit %d, want 2", code)
+	}
+	// A missing runtime fails before any provider is contacted.
+	cfg := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(cfg, []byte("container: {runtime: podman, image: alpine}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir())
+	if code, _, _ := runWith(t, "--env", "container", "-c", cfg, "-t", "x", "-m", "ollama/none"); code != 1 {
+		t.Errorf("missing runtime: exit %d, want 1", code)
 	}
 }

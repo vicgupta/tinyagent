@@ -94,6 +94,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--read-only` | config `read_only`, else off | Permit only `read_file`, `list_files`, and `grep`; blocks edits, shell, and process tools. `--read-only=false` explicitly disables it. |
 | `--sandbox` | config `sandbox`, else off | Confine `bash`/`start_process` at the OS level: writes only under `--cwd`, a temp dir and `sandbox_writable_paths`, network off. See [Sandboxing commands](#sandboxing-commands) |
 | `--sandbox-network` | config `sandbox_network`, else off | With `--sandbox`, allow network access |
+| `--env` | config `environment`, else `local` | Where `bash`/`start_process` run: `local` (on the host) or `container` (Docker/Podman). See [Execution environments](#execution-environments) |
 | `-o, --output` | — | Trajectory JSON, rewritten after every step |
 | `-v, --verbose` | off | Print tool calls and their outputs |
 | `--json` | off | Write machine-readable run events as JSONL to stdout |
@@ -224,6 +225,7 @@ system_prompt: |          # {{cwd}} and {{os}} are substituted
   You are a coding agent...
 read_only: true            # expose only read_file, list_files, and grep
 sandbox: false             # OS-confine bash/start_process; see Sandboxing commands
+environment: local         # or container; see Execution environments
 step_limit: 50
 cost_limit: 2.0
 wall_time_seconds: 1800
@@ -383,6 +385,30 @@ Toolchains that cache outside the repo (Go, npm, pip) fail under the sandbox wit
 - On start, one `sandbox:` line (backend, writable roots, network) goes to stderr, and `-o` trajectories record it as `sandbox`. With `--resume`, the current invocation's settings apply. With `--read-only` there are no command tools, so nothing is sandboxed.
 - **Not covered:** the in-process file tools (`read_file`, `write_file`, ... and their symlink behavior), MCP servers, and provider requests. Commands can still read anything you can, including credentials, and inherit your environment variables (API keys included). The sandbox reduces risk; it does not make untrusted code safe.
 
+## Execution environments
+
+The environment decides where `bash` and `start_process` commands run. Choose it with `--env local|container` or `environment:` in the config; the flag wins, and the default is `local`.
+
+- **`local`** (default) runs `bash -c` on the host, exactly as before. `--sandbox` is a property of this environment (see [Sandboxing commands](#sandboxing-commands)).
+- **`container`** runs each command with `<runtime> exec ... bash -c <command>` in one container started for the run:
+
+```yaml
+environment: container
+container:
+  runtime: docker          # or podman; default docker
+  image: golang:1.23       # required; must provide bash
+  run_args: [--network, none]   # optional extra `run` arguments, added after tinyagent's defaults
+```
+
+Before the first model request tinyagent runs `<runtime> run -d --rm --init --label tinyagent=1 -v <cwd>:<cwd> -w <cwd> --user <uid>:<gid> -e HOME=/tmp <run_args> <image> sleep infinity` and prints one line to stderr, e.g. `environment: container (docker, image=golang:1.23); mount: /home/me/repo`. `-o` trajectories record it as `environment` (name, runtime, image).
+
+- **Mount model:** only `--cwd` is shared, at the same path, so the in-process file tools on the host and commands in the container see the same files. Commands run as your uid:gid so files they create are yours on the host (for rootless Podman add `run_args: [--userns=keep-id]`). `$HOME` is `/tmp` inside the container; writes outside `--cwd` stay in the container. Later `run_args` such as `--user` or `-e HOME=...` override these defaults.
+- **What runs where:** only `bash` and `start_process` commands run in the container. File tools, MCP servers, provider requests and the trajectory stay on the host. No host environment variables are forwarded (pass them with `run_args: [-e, NAME]` if needed). The network is the runtime's default unless `run_args` say otherwise.
+- **Timeouts and `stop_process`** kill the command's processes inside the container (each command is tagged with a `TINYAGENT_EXEC` variable that its children inherit), not only the host-side `exec` client. Output format, return codes, the process limit and buffers are unchanged.
+- **Cleanup:** the container is removed when the run ends: normally, on error, at a limit, or on Ctrl-C. `docker ps -a --filter label=tinyagent` lists any left behind by a killed tinyagent.
+- **Fail closed:** a missing runtime, an unreachable daemon or an image that won't start exits with an error before any provider request. tinyagent never falls back to running commands on the host.
+- `--sandbox` can't be combined with `--env container` (exit 2); use `run_args` such as `--network none` or `--read-only` to restrict the container. `--read-only` runs start no container. With `--resume`, the current invocation's environment applies. Not supported on Windows.
+
 ## Notes
 
 - `read_file` takes optional `offset` (1-based start line) and `limit` (max lines) to read part of a large file. A partial read ends with `[lines A-B of N]`; with neither set, it returns the whole file as before. Binary files are rejected; use `bash` (for example, `file` or `xxd | head`) to inspect them.
@@ -394,6 +420,6 @@ Toolchains that cache outside the repo (Go, npm, pip) fail under the sandbox wit
 - `bash` passes `stream: true` to also print a command's output to stdout as it is produced; the result returned to the model is the same. By default nothing is streamed.
 - For servers, watch modes, and other long-running commands, `start_process` runs `bash -c <command>` in the background and returns a process id (`p1`, `p2`, ...) with its first output. `read_process` returns only output produced since the last read, optionally waiting up to `timeout` milliseconds (max 60000) for some, or just the last `tail` lines. `stop_process` kills the process and its children (the whole process group on Unix) and reports the exit status and unread output. For example: start a server, `read_process` until it logs "listening", run tests against it, then stop it.
 - At most `max_background_processes` (default 4) run at once, and each keeps only its last 1 MiB of output; a read notes how many bytes were dropped. When the run ends for any reason (submission, a limit, Ctrl-C, or an error), every background process still registered is killed and its status and output tail are saved as `background_processes` in the trajectory, so nothing is left running. On Windows only the `bash` process itself is killed.
-- Path sandboxing is lexical: `..` and absolute paths outside `--cwd` are rejected, but a symlink inside the root that points outside it is followed. `bash` isn't sandboxed unless you pass `--sandbox` (see Sandboxing commands); without it, only run it on code you trust.
+- Path sandboxing is lexical: `..` and absolute paths outside `--cwd` are rejected, but a symlink inside the root that points outside it is followed. `bash` isn't sandboxed unless you pass `--sandbox` or `--env container` (see Sandboxing commands and Execution environments); without them, only run it on code you trust.
 - Cost uses a small built-in price table (`internal/model/provider.go`). Unknown models cost $0 unless you set the price in the config, so `--cost-limit` does nothing for them. With a positive cost limit, tinyagent prints a warning on stderr before the first request when the `openai`, `openrouter` or `anthropic` model has no price, naming `input_price_per_mtok` and `output_price_per_mtok`. The run continues as normal.
 - The `anthropic` provider turns on [prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) for every request, so each step reads the history the previous step already sent from the cache instead of paying full price for it again. Input tokens in the summary and trajectory include cached tokens. Cost prices cache writes at 1.25× the input price and cache reads at 0.1× (less on models where Anthropic charges less, such as 0.05× for Claude Opus 5.5 and Sonnet 5.5). `input_price_per_mtok` overrides the base price and the multipliers apply on top.
