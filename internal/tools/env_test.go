@@ -41,7 +41,7 @@ func fakeContainer(t *testing.T) (*Container, string) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	c, err := StartContainer(context.Background(), bin, "img", nil, root)
+	c, err := StartContainer(context.Background(), bin, "img", nil, root, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,17 +117,17 @@ func TestStartContainerFailsClosed(t *testing.T) {
 		t.Skip()
 	}
 	root := t.TempDir()
-	if _, err := StartContainer(context.Background(), "no-such-runtime-xyz", "img", nil, root); err == nil || !strings.Contains(err.Error(), "not found in PATH") {
+	if _, err := StartContainer(context.Background(), "no-such-runtime-xyz", "img", nil, root, nil); err == nil || !strings.Contains(err.Error(), "not found in PATH") {
 		t.Errorf("missing runtime: %v", err)
 	}
-	if _, err := StartContainer(context.Background(), "docker", "", nil, root); err == nil || !strings.Contains(err.Error(), "image") {
+	if _, err := StartContainer(context.Background(), "docker", "", nil, root, nil); err == nil || !strings.Contains(err.Error(), "image") {
 		t.Errorf("missing image: %v", err)
 	}
 	bin := filepath.Join(t.TempDir(), "down")
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho 'Cannot connect to the Docker daemon' >&2; exit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := StartContainer(context.Background(), bin, "img", nil, root); err == nil || !strings.Contains(err.Error(), "Cannot connect") {
+	if _, err := StartContainer(context.Background(), bin, "img", nil, root, nil); err == nil || !strings.Contains(err.Error(), "Cannot connect") {
 		t.Errorf("daemon down: %v", err)
 	}
 }
@@ -168,7 +168,7 @@ func TestRealContainer(t *testing.T) {
 	root := t.TempDir()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	c, err := StartContainer(ctx, rt, testImage, nil, root)
+	c, err := StartContainer(ctx, rt, testImage, nil, root, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

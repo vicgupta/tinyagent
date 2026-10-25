@@ -268,6 +268,9 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		if lost := a.lostProcesses(t); lost != "" {
 			notice += "\n\n" + lost
 		}
+		if cur := AdditionalDirsInfo(a.Tools.ExtraDirs, a.Tools.ReadOnly); !sameDirs(t.AdditionalDirs, cur) {
+			notice += "\n\n" + dirsChangedNotice(cur)
+		}
 		if finished {
 			notice += "\n\n" + a.FollowUp
 			if a.Verbose {
@@ -319,6 +322,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 	t.MaxOutputTokens = a.Config.MaxOutputTokens
 	t.Sandbox, t.Environment, t.CommandEnv = nil, nil, nil
 	t.FileAccess = FileAccessInfo(a.Tools.FileAccess)
+	t.AdditionalDirs = AdditionalDirsInfo(a.Tools.ExtraDirs, a.Tools.ReadOnly)
 	t.WebFetch = nil
 	if wf := a.Tools.WebFetch; wf != nil {
 		t.WebFetch = &trajectory.WebFetchInfo{AllowedDomains: wf.Domains}
@@ -806,6 +810,7 @@ func (a *Agent) systemPrompt() string {
 		system += section
 	}
 	system += a.Tools.Skills.Catalog()
+	system += tools.ExtraDirsNotice(effectiveDirs(a.Tools.ExtraDirs, a.Tools.ReadOnly))
 	if a.Tools.ReadOnly {
 		system += "\n\n" + readOnlyNotice
 	}
@@ -1083,6 +1088,54 @@ func FileAccessInfo(f *tools.FileAccess) *trajectory.FileAccessInfo {
 	}
 	read, write := f.Rules()
 	return &trajectory.FileAccessInfo{DenyRead: append([]string{}, read...), DenyWrite: append([]string{}, write...)}
+}
+
+// effectiveDirs returns dirs with every mode read when readOnly.
+func effectiveDirs(dirs []tools.ExtraDir, readOnly bool) []tools.ExtraDir {
+	if !readOnly || len(dirs) == 0 {
+		return dirs
+	}
+	out := make([]tools.ExtraDir, len(dirs))
+	for i, d := range dirs {
+		out[i] = tools.ExtraDir{Path: d.Path, Mode: tools.DirRead}
+	}
+	return out
+}
+
+// AdditionalDirsInfo records dirs, with their effective modes, for
+// trajectories and run.started; nil when there are none.
+func AdditionalDirsInfo(dirs []tools.ExtraDir, readOnly bool) []trajectory.AdditionalDir {
+	var out []trajectory.AdditionalDir
+	for _, d := range effectiveDirs(dirs, readOnly) {
+		out = append(out, trajectory.AdditionalDir{Path: d.Path, Mode: d.Mode})
+	}
+	return out
+}
+
+func sameDirs(a, b []trajectory.AdditionalDir) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// dirsChangedNotice tells a resumed model that the additional directories
+// differ from the ones its system prompt lists.
+func dirsChangedNotice(cur []trajectory.AdditionalDir) string {
+	if len(cur) == 0 {
+		return "The additional directories have changed for this resumed run: the file tools can now reach only the working directory."
+	}
+	var b strings.Builder
+	b.WriteString("The additional directories have changed for this resumed run; the file tools can now reach these, by absolute path, besides the working directory:")
+	for _, d := range cur {
+		fmt.Fprintf(&b, "\n- %s (%s)", d.Path, d.Mode)
+	}
+	return b.String()
 }
 
 // CommandEnvInfo summarizes c by name for trajectories and run.started; nil

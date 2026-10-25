@@ -286,6 +286,8 @@ Output:
       --log-db [=path]               also log run events to SQLite (default .tinyagent/tinyagent.db under --cwd); --log-db=false turns config log_db off
       --no-agents-md                 don't add AGENTS.md (nearest, up to the repo root) to the system prompt
       --read-only                    allow only read_file, list_files, and grep; blocks edits and commands
+      --add-dir-read path            let the file tools (and a container) read this directory outside --cwd; repeatable; with --add-dir-write, replaces config additional_dirs
+      --add-dir-write path           let the file tools, --sandbox commands and a container read and write this directory outside --cwd; repeatable; with --add-dir-read, replaces config additional_dirs
       --sandbox                      confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths
       --sandbox-network              with --sandbox, allow commands to use the network
       --sandbox-allow-domain host    with --sandbox, let commands reach only this host (name, *.domain or IP, optional :port) over HTTP(S) via a filtering proxy; repeatable, replaces sandbox_allowed_domains

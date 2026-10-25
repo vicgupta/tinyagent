@@ -14,19 +14,19 @@ func ReadFile(root, path string, offset, limit int) (string, error) {
 	return readFile(root, path, offset, limit, nil)
 }
 
-// readFile is ReadFile that refuses paths fa denies for reading.
-func readFile(root, path string, offset, limit int, fa *FileAccess) (string, error) {
+// readFile is ReadFile that refuses paths the scope denies for reading.
+func readFile(root, path string, offset, limit int, sc *scope) (string, error) {
 	if offset < 0 {
 		return "", errors.New("offset must be a line number >= 1")
 	}
 	if limit < 0 {
 		return "", errors.New("limit must be >= 0")
 	}
-	full, err := Resolve(root, path)
+	full, err := sc.resolve(root, path)
 	if err != nil {
 		return "", err
 	}
-	if err := fa.CheckRead(full, path); err != nil {
+	if err := sc.checkRead(full, path); err != nil {
 		return "", err
 	}
 	b, err := os.ReadFile(full)

@@ -63,6 +63,7 @@ type options struct {
 	verbose, noStream, noAgentsMD, noCompact         bool
 	readOnly, sandbox, sandboxNetwork                bool
 	sandboxAllowDomains                              domainList
+	addDirRead, addDirWrite                          dirList
 	jsonOutput                                       bool
 	logDB                                            optionalPath
 	snapshots, dryRun                                bool
@@ -102,6 +103,8 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.sandbox, "sandbox", false, "confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths")
 	fs.BoolVar(&o.sandboxNetwork, "sandbox-network", false, "with --sandbox, allow commands to use the network")
 	fs.Var(&o.sandboxAllowDomains, "sandbox-allow-domain", "with --sandbox, let commands reach only this host (name, *.domain or IP, optional :port) over HTTP(S) via a filtering proxy; repeatable, replaces sandbox_allowed_domains")
+	fs.Var(&o.addDirRead, "add-dir-read", "let the file tools (and a container) read this directory outside --cwd; repeatable; with --add-dir-write, replaces config additional_dirs")
+	fs.Var(&o.addDirWrite, "add-dir-write", "let the file tools, --sandbox commands and a container read and write this directory outside --cwd; repeatable; with --add-dir-read, replaces config additional_dirs")
 	fs.BoolVar(&o.plan, "plan", false, "enable the update_plan tool: a task plan saved in the checkpoint and pinned in every request (default off; config plan.enabled)")
 	fs.BoolVar(&o.toolOutputFiles, "tool-output-files", false, "save the full text of over-limit tool results under .tinyagent/tool-output so the model can page it with read_file and grep (default off; config tool_output_files.enabled)")
 	fs.BoolVar(&o.applyPatch, "apply-patch", false, "add the apply_patch tool: multi-file, multi-hunk edits in the *** Begin Patch format, checked before any write (default off; config apply_patch)")
@@ -327,16 +330,22 @@ func run() int {
 	if err != nil {
 		return configFail(err)
 	}
+	extraDirs, err := additionalDirs(fs, o, cfg, root, o.verbose)
+	if err != nil {
+		return configFail(err)
+	}
+	fileAccess.AddDirs(extraDirs)
 	if cfg.ReadOnly {
 		fmt.Fprintln(os.Stderr, "read-only mode: only read_file, list_files, and grep are available")
 	}
+	warnSnapshotDirs(cfg, extraDirs)
 	snaps, err := openSnapshots(fs, o, cfg, root, o.output)
 	if err != nil {
 		return fail(err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	env, closeEnv, err := startEnvironment(ctx, cfg, root, o.verbose)
+	env, closeEnv, err := startEnvironment(ctx, cfg, root, extraDirs, o.verbose)
 	if err != nil {
 		return fail(err)
 	}
@@ -403,6 +412,7 @@ func run() int {
 			WebFetch:           webFetch,
 			OutputFiles:        outputFiles,
 			FileAccess:         fileAccess,
+			ExtraDirs:          extraDirs,
 			MaxImageBytes:      cfg.MaxImageBytes,
 			ExternalCallImages: mcpRegistry.CallImages(cfg.MaxImageBytes),
 		},
@@ -658,6 +668,14 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if err != nil {
 		return configFail(err)
 	}
+	extraDirs, err := additionalDirs(fs, *o, cfg, root, o.verbose)
+	if err != nil {
+		return configFail(err)
+	}
+	fileAccess.AddDirs(extraDirs)
+	if cur := agent.AdditionalDirsInfo(extraDirs, cfg.ReadOnly); len(cur)+len(src.AdditionalDirs) > 0 && fmt.Sprint(cur) != fmt.Sprint(src.AdditionalDirs) {
+		fmt.Fprintln(os.Stderr, "resume: additional directories differ from the checkpoint's; this run uses the current ones")
+	}
 
 	if o.output == "" {
 		return fail(errors.New("resume: --output is required to write the continued trajectory"))
@@ -679,13 +697,14 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if src.ReadOnly {
 		fmt.Fprintln(os.Stderr, "read-only mode: only read_file, list_files, and grep are available")
 	}
+	warnSnapshotDirs(cfg, extraDirs)
 	snaps, err := openSnapshots(fs, *o, cfg, root, o.output, o.resume)
 	if err != nil {
 		return fail(err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	env, closeEnv, err := startEnvironment(ctx, cfg, root, o.verbose)
+	env, closeEnv, err := startEnvironment(ctx, cfg, root, extraDirs, o.verbose)
 	if err != nil {
 		return fail(err)
 	}
@@ -770,6 +789,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 			WebFetch:       webFetch,
 			OutputFiles:    outputFiles,
 			FileAccess:     fileAccess,
+			ExtraDirs:      extraDirs,
 			MaxImageBytes:  cfg.MaxImageBytes,
 		},
 		Config:       cfg,
@@ -957,6 +977,63 @@ func newWebFetcher(fs *flag.FlagSet, o options, cfg *config.AgentConfig) (*tools
 	return f, nil
 }
 
+// dirList is the repeatable --add-dir-read and --add-dir-write flags.
+type dirList []string
+
+func (d *dirList) String() string { return strings.Join(*d, ",") }
+func (d *dirList) Set(v string) error {
+	if strings.TrimSpace(v) == "" {
+		return errors.New("empty directory")
+	}
+	*d = append(*d, v)
+	return nil
+}
+
+// additionalDirs returns the run's validated additional directories: from
+// --add-dir-read and --add-dir-write when either is given (replacing
+// additional_dirs; relative flag paths are taken from root), else from the
+// config. In read-only mode every directory is read mode. Errors are
+// config.InvalidError (exit status 2), before any provider request.
+func additionalDirs(fs *flag.FlagSet, o options, cfg config.AgentConfig, root string, verbose bool) ([]tools.ExtraDir, error) {
+	var in []tools.ExtraDir
+	if flagWasSet(fs, "add-dir-read") || flagWasSet(fs, "add-dir-write") {
+		for _, p := range o.addDirRead {
+			in = append(in, tools.ExtraDir{Path: p, Mode: tools.DirRead})
+		}
+		for _, p := range o.addDirWrite {
+			in = append(in, tools.ExtraDir{Path: p, Mode: tools.DirWrite})
+		}
+	} else {
+		for _, d := range cfg.AdditionalDirs {
+			in = append(in, tools.ExtraDir{Path: d.Path, Mode: d.Mode})
+		}
+	}
+	dirs, err := tools.ResolveExtraDirs(root, in, cfg.ReadOnly)
+	if err != nil {
+		return nil, &config.InvalidError{Err: err}
+	}
+	if verbose {
+		for _, d := range dirs {
+			fmt.Fprintf(os.Stderr, "additional dir: %s (%s)\n", d.Path, d.Mode)
+		}
+	}
+	return dirs, nil
+}
+
+// warnSnapshotDirs notes that workspace snapshots, and so --rewind, cover
+// only --cwd, not write-mode additional directories.
+func warnSnapshotDirs(cfg config.AgentConfig, dirs []tools.ExtraDir) {
+	if !cfg.Snapshots.Enabled || cfg.ReadOnly {
+		return
+	}
+	for _, d := range dirs {
+		if d.Mode == tools.DirWrite {
+			fmt.Fprintln(os.Stderr, "warning: snapshots cover only --cwd; --rewind won't restore changes in additional directories")
+			return
+		}
+	}
+}
+
 // domainList is the repeatable --sandbox-allow-domain flag.
 type domainList []string
 
@@ -974,7 +1051,7 @@ func (d *domainList) Set(v string) error {
 // (never falling back to an unconfined local one), and otherwise announces
 // any sandbox, container or command_env policy on stderr. Read-only runs
 // have no command tools, so they get a plain local environment.
-func startEnvironment(ctx context.Context, cfg config.AgentConfig, root string, verbose bool) (tools.Environment, func(), error) {
+func startEnvironment(ctx context.Context, cfg config.AgentConfig, root string, extra []tools.ExtraDir, verbose bool) (tools.Environment, func(), error) {
 	if cfg.ReadOnly {
 		return tools.Local{}, func() {}, nil
 	}
@@ -982,7 +1059,7 @@ func startEnvironment(ctx context.Context, cfg config.AgentConfig, root string, 
 		if cfg.CommandEnv.Configured() {
 			fmt.Fprintln(os.Stderr, "command env: not applied; the container environment forwards no host variables")
 		}
-		c, err := tools.StartContainer(ctx, cfg.Container.Runtime, cfg.Container.Image, cfg.Container.RunArgs, root)
+		c, err := tools.StartContainer(ctx, cfg.Container.Runtime, cfg.Container.Image, cfg.Container.RunArgs, root, extra)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1001,7 +1078,13 @@ func startEnvironment(ctx context.Context, cfg config.AgentConfig, root string, 
 		describeCommandEnv(os.Stderr, ce, verbose)
 		return tools.Local{CommandEnv: ce}, func() {}, nil
 	}
-	sb, err := tools.NewSandbox(root, cfg.SandboxWritablePaths, cfg.SandboxNetwork, cfg.SandboxAllowedDomains)
+	writable := append([]string(nil), cfg.SandboxWritablePaths...)
+	for _, d := range extra {
+		if d.Mode == tools.DirWrite {
+			writable = append(writable, d.Path)
+		}
+	}
+	sb, err := tools.NewSandbox(root, writable, cfg.SandboxNetwork, cfg.SandboxAllowedDomains)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1042,7 +1125,7 @@ var usageGroups = []struct {
 	{"", [][3]string{{"h", "help", ""}}},
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "resume", "path"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
-	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
+	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}}},
 }
@@ -1349,6 +1432,9 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	}
 	if fa := agent.FileAccessInfo(a.Tools.FileAccess); fa != nil {
 		started["file_access"] = fa
+	}
+	if dirs := agent.AdditionalDirsInfo(a.Tools.ExtraDirs, a.Tools.ReadOnly); len(dirs) > 0 {
+		started["additional_dirs"] = dirs
 	}
 	if wf := a.Tools.WebFetch; wf != nil {
 		started["web_fetch"] = map[string]any{"allowed_domains": wf.Domains}

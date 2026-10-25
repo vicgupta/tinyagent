@@ -286,7 +286,7 @@ func (e *Executor) limit(call model.ToolCall, out string, isErr bool) Result {
 		if isErr {
 			return res
 		}
-		full, err := Resolve(e.Root, a.Path)
+		full, err := e.scope().resolve(e.Root, a.Path)
 		if err != nil {
 			return res
 		}
@@ -300,7 +300,7 @@ func (e *Executor) limit(call model.ToolCall, out string, isErr bool) Result {
 		}
 		return res
 	case "grep", "list_files":
-		if full, err := Resolve(e.Root, a.Path); err == nil && o.Contains(full) {
+		if full, err := e.scope().resolve(e.Root, a.Path); err == nil && o.Contains(full) {
 			res.Text = truncate(out, max)
 			return res
 		}

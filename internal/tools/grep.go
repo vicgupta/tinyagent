@@ -36,9 +36,9 @@ func GrepWithContext(root, pattern, path, include string, ignoreCase, fixedStrin
 
 // grepWithContext is GrepWithContext that also skips the directory skip (an
 // absolute path; "" skips nothing extra) unless the search starts inside it,
-// and never opens or reports paths fa denies for reading, ending with a count
+// and never opens or reports paths the scope denies for reading, ending with a count
 // of the ones it hid.
-func grepWithContext(root, pattern, path, include string, ignoreCase, fixedStrings bool, contextLines int, skip string, fa *FileAccess) (string, error) {
+func grepWithContext(root, pattern, path, include string, ignoreCase, fixedStrings bool, contextLines int, skip string, sc *scope) (string, error) {
 	if fixedStrings {
 		pattern = regexp.QuoteMeta(pattern)
 	}
@@ -55,11 +55,11 @@ func grepWithContext(root, pattern, path, include string, ignoreCase, fixedStrin
 		}
 	}
 	matchPath := strings.Contains(include, "/")
-	start, err := Resolve(root, path)
+	start, err := sc.resolve(root, path)
 	if err != nil {
 		return "", err
 	}
-	if err := fa.CheckRead(start, displayPath(path)); err != nil {
+	if err := sc.checkRead(start, displayPath(path)); err != nil {
 		return "", err
 	}
 	hidden := 0
@@ -75,7 +75,7 @@ func grepWithContext(root, pattern, path, include string, ignoreCase, fixedStrin
 			if p != start && (skipDir(d.Name()) || p == skip) {
 				return filepath.SkipDir
 			}
-			if p != start && fa.Hidden(p) {
+			if p != start && sc.hidden(p) {
 				hidden++
 				return filepath.SkipDir
 			}
@@ -90,7 +90,7 @@ func grepWithContext(root, pattern, path, include string, ignoreCase, fixedStrin
 				return nil
 			}
 		}
-		if p != start && fa.Hidden(p) {
+		if p != start && sc.hidden(p) {
 			hidden++
 			return nil
 		}

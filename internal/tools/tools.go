@@ -75,6 +75,11 @@ type Executor struct {
 	// (file_access config). nil denies nothing. It does not apply to bash,
 	// start_process, hooks or MCP servers.
 	FileAccess *FileAccess
+	// ExtraDirs are additional directories outside Root that the built-in
+	// file tools may reach by absolute path (additional_dirs). Read-mode
+	// directories, and all of them in read-only mode, refuse writes. nil
+	// keeps the tools inside Root.
+	ExtraDirs []ExtraDir
 
 	procs registry
 }
@@ -234,7 +239,7 @@ func (e *Executor) RunResult(ctx context.Context, call model.ToolCall) Result {
 				return Result{Text: "error: invalid arguments JSON: " + err.Error(), IsError: true}
 			}
 		}
-		out, im, err := viewImage(e.Root, a.Path, e.MaxImageBytes, e.FileAccess)
+		out, im, err := viewImage(e.Root, a.Path, e.MaxImageBytes, e.scope())
 		if err != nil {
 			return Result{Text: truncate("error: "+err.Error(), e.MaxOutputChars), IsError: true}
 		}
@@ -365,15 +370,15 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return readFile(e.Root, a.Path, offset, limit, e.FileAccess)
+		return readFile(e.Root, a.Path, offset, limit, e.scope())
 	case "write_file":
-		return "ok", writeFile(e.Root, a.Path, a.Content, e.FileAccess)
+		return "ok", writeFile(e.Root, a.Path, a.Content, e.scope())
 	case "edit_file":
 		replaceAll, err := boolArg("replace_all", a.ReplaceAll)
 		if err != nil {
 			return "", err
 		}
-		n, err := editFile(e.Root, a.Path, a.OldStr, a.NewStr, replaceAll, e.FileAccess)
+		n, err := editFile(e.Root, a.Path, a.OldStr, a.NewStr, replaceAll, e.scope())
 		if err != nil || !replaceAll {
 			return "ok", err
 		}
@@ -382,9 +387,9 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 		if !e.ApplyPatch {
 			return "", fmt.Errorf("unknown tool %q", name)
 		}
-		return applyPatch(e.Root, a.Input, e.FileAccess)
+		return applyPatch(e.Root, a.Input, e.scope())
 	case "list_files":
-		return listFiles(e.Root, a.Path, a.Pattern, e.outputSkip(), e.FileAccess)
+		return listFiles(e.Root, a.Path, a.Pattern, e.outputSkip(), e.scope())
 	case "grep":
 		contextLines, err := contextLinesArg(a.ContextLines)
 		if err != nil {
@@ -401,7 +406,7 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return grepWithContext(e.Root, a.Pattern, a.Path, a.Include, ignoreCase, fixedStrings, contextLines, e.outputSkip(), e.FileAccess)
+		return grepWithContext(e.Root, a.Pattern, a.Path, a.Include, ignoreCase, fixedStrings, contextLines, e.outputSkip(), e.scope())
 	case "bash":
 		secs, err := intArg("timeout", a.Timeout)
 		if err != nil {
@@ -513,10 +518,11 @@ func Resolve(root, path string) (string, error) {
 	return full, nil
 }
 
-// rel returns path relative to root, with forward slashes, for display.
+// rel returns path relative to root, with forward slashes, for display. A
+// path outside root (in an additional directory) is returned absolute.
 func rel(root, path string) string {
 	r, err := filepath.Rel(root, path)
-	if err != nil {
+	if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
 		return path
 	}
 	return filepath.ToSlash(r)

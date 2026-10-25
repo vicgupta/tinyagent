@@ -45,6 +45,11 @@ type AgentConfig struct {
 	// FileAccess denies the built-in file tools access to matching paths.
 	// The zero value denies nothing.
 	FileAccess FileAccess `yaml:"file_access"`
+	// AdditionalDirs are directories outside --cwd that the built-in file
+	// tools, --sandbox and the container environment may also reach. Empty
+	// (the default) keeps everything inside --cwd. --add-dir-read and
+	// --add-dir-write replace this list.
+	AdditionalDirs []AdditionalDir `yaml:"additional_dirs,omitempty"`
 	// Model is the provider/model used when neither -m nor $AGENT_MODEL sets
 	// one. "" falls back to the built-in default.
 	Model string `yaml:"model"`
@@ -371,6 +376,36 @@ func checkEnvName(n string, glob bool) error {
 	return nil
 }
 
+// AdditionalDir is one additional_dirs entry.
+type AdditionalDir struct {
+	// Path is an absolute directory outside --cwd.
+	Path string `yaml:"path"`
+	// Mode is "read" or "write"; it is required.
+	Mode string `yaml:"mode"`
+}
+
+// validateAdditionalDirs checks the config-level rules for additional_dirs:
+// absolute paths and an explicit read or write mode. Existence and overlap
+// with --cwd are checked once --cwd is known.
+func validateAdditionalDirs(dirs []AdditionalDir) error {
+	for i, d := range dirs {
+		if d.Path == "" {
+			return fmt.Errorf("additional_dirs entry %d: path is required", i+1)
+		}
+		if !filepath.IsAbs(d.Path) {
+			return fmt.Errorf("additional_dirs entry %q must be an absolute path", d.Path)
+		}
+		switch d.Mode {
+		case "read", "write":
+		case "":
+			return fmt.Errorf("additional_dirs entry %q: mode is required (read or write)", d.Path)
+		default:
+			return fmt.Errorf("additional_dirs entry %q: mode %q must be read or write", d.Path, d.Mode)
+		}
+	}
+	return nil
+}
+
 // FileAccess lists gitignore-style patterns, relative to --cwd, that the
 // built-in file tools refuse. DenyRead paths are also write-denied. It does
 // not apply to bash, start_process, hooks or MCP servers.
@@ -616,6 +651,9 @@ func Load(path string) (AgentConfig, error) {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
 	}
 	if err := cfg.WebFetch.Validate(); err != nil {
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
+	}
+	if err := validateAdditionalDirs(cfg.AdditionalDirs); err != nil {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
 	}
 	if r := cfg.Container.Runtime; r != "" && r != "docker" && r != "podman" {

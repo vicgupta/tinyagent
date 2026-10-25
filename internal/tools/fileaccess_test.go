@@ -98,47 +98,47 @@ func TestFileAccessReadTools(t *testing.T) {
 	fa := mustAccess(t, root, []string{".env", "secrets/"}, nil)
 
 	for _, p := range []string{".env", "src/.env", "secrets/a.txt", "./secrets/../.env"} {
-		_, err := readFile(root, p, 0, 0, fa)
+		_, err := readFile(root, p, 0, 0, faScope(fa))
 		var de *DeniedError
 		if !errors.As(err, &de) || de.List != "deny_read" || !strings.Contains(err.Error(), "file_access.deny_read rule") {
 			t.Errorf("read %s: %v", p, err)
 		}
 	}
-	if out, err := readFile(root, "ok.txt", 0, 0, fa); err != nil || !strings.Contains(out, "fine") {
+	if out, err := readFile(root, "ok.txt", 0, 0, faScope(fa)); err != nil || !strings.Contains(out, "fine") {
 		t.Errorf("read ok.txt: %q %v", out, err)
 	}
-	if _, _, err := viewImage(root, "secrets/a.txt", 1<<20, fa); err == nil || !strings.Contains(err.Error(), "deny_read") {
+	if _, _, err := viewImage(root, "secrets/a.txt", 1<<20, faScope(fa)); err == nil || !strings.Contains(err.Error(), "deny_read") {
 		t.Errorf("view_image: %v", err)
 	}
 
-	out, err := listFiles(root, "", "", "", fa)
+	out, err := listFiles(root, "", "", "", faScope(fa))
 	if err != nil || strings.Contains(out, ".env") || strings.Contains(out, "secrets") || !strings.Contains(out, "ok.txt") || !strings.HasSuffix(out, "(2 paths hidden by file_access rules)") {
 		t.Errorf("list: %q %v", out, err)
 	}
-	out, err = listFiles(root, "", "*", "", fa)
+	out, err = listFiles(root, "", "*", "", faScope(fa))
 	if err != nil || strings.Contains(out, ".env") || strings.Contains(out, "a.txt") || !strings.Contains(out, "ok.txt") || !strings.Contains(out, "paths hidden by file_access rules") {
 		t.Errorf("glob: %q %v", out, err)
 	}
-	out, err = listFiles(root, "", "*.go", "", fa)
+	out, err = listFiles(root, "", "*.go", "", faScope(fa))
 	if err != nil || out != "no matches\n(1 path hidden by file_access rules)" {
 		t.Errorf("glob with no matching hidden files counts only the denied dir: %q %v", out, err)
 	}
-	if _, err := listFiles(root, "secrets", "", "", fa); err == nil || !strings.Contains(err.Error(), "deny_read") {
+	if _, err := listFiles(root, "secrets", "", "", faScope(fa)); err == nil || !strings.Contains(err.Error(), "deny_read") {
 		t.Errorf("list denied dir: %v", err)
 	}
 
-	out, err = grepWithContext(root, "sentinel", "", "", false, false, 0, "", fa)
+	out, err = grepWithContext(root, "sentinel", "", "", false, false, 0, "", faScope(fa))
 	if err != nil || strings.Contains(out, ".env") || strings.Contains(out, "a.txt") || !strings.Contains(out, "ok.txt") || !strings.Contains(out, "paths hidden by file_access rules") {
 		t.Errorf("grep: %q %v", out, err)
 	}
-	out, err = grepWithContext(root, "sentinel", "", "*.txt", false, false, 0, "", fa)
+	out, err = grepWithContext(root, "sentinel", "", "*.txt", false, false, 0, "", faScope(fa))
 	if err != nil || !strings.HasSuffix(out, "(1 path hidden by file_access rules)") {
 		t.Errorf("grep include counts only filtered-in files: %q %v", out, err)
 	}
-	if _, err := grepWithContext(root, "x", ".env", "", false, false, 0, "", fa); err == nil || !strings.Contains(err.Error(), "deny_read") {
+	if _, err := grepWithContext(root, "x", ".env", "", false, false, 0, "", faScope(fa)); err == nil || !strings.Contains(err.Error(), "deny_read") {
 		t.Errorf("grep denied file: %v", err)
 	}
-	out, err = grepWithContext(root, "nope", "", "", false, false, 0, "", fa)
+	out, err = grepWithContext(root, "nope", "", "", false, false, 0, "", faScope(fa))
 	if err != nil || !strings.HasPrefix(out, "no matches\n(") {
 		t.Errorf("grep no matches: %q %v", out, err)
 	}
@@ -150,27 +150,27 @@ func TestFileAccessWriteTools(t *testing.T) {
 	fa := mustAccess(t, root, []string{".env"}, []string{"go.sum", "vendor/"})
 
 	for _, p := range []string{"go.sum", "vendor/x.go", "vendor/new.go", ".env"} {
-		if err := writeFile(root, p, "new\n", fa); err == nil {
+		if err := writeFile(root, p, "new\n", faScope(fa)); err == nil {
 			t.Errorf("write %s allowed", p)
 		}
-		if _, err := editFile(root, p, "orig", "new", false, fa); err == nil {
+		if _, err := editFile(root, p, "orig", "new", false, faScope(fa)); err == nil {
 			t.Errorf("edit %s allowed", p)
 		}
 	}
-	if err := writeFile(root, ".env", "x", fa); err == nil || !strings.Contains(err.Error(), "deny_read") {
+	if err := writeFile(root, ".env", "x", faScope(fa)); err == nil || !strings.Contains(err.Error(), "deny_read") {
 		t.Errorf("deny_read should also deny writes: %v", err)
 	}
 	// deny_write paths stay readable.
-	if out, err := readFile(root, "go.sum", 0, 0, fa); err != nil || !strings.Contains(out, "orig") {
+	if out, err := readFile(root, "go.sum", 0, 0, faScope(fa)); err != nil || !strings.Contains(out, "orig") {
 		t.Errorf("read go.sum: %q %v", out, err)
 	}
-	if err := writeFile(root, "main.go", "new\n", fa); err != nil {
+	if err := writeFile(root, "main.go", "new\n", faScope(fa)); err != nil {
 		t.Errorf("write main.go: %v", err)
 	}
 
 	// A multi-file patch touching one denied path changes nothing.
 	patch := "*** Begin Patch\n*** Update File: main.go\n@@\n-new\n+patched\n*** Add File: vendor/added.go\n+x\n*** End Patch"
-	if _, err := applyPatch(root, patch, fa); err == nil || !strings.Contains(err.Error(), "deny_write") {
+	if _, err := applyPatch(root, patch, faScope(fa)); err == nil || !strings.Contains(err.Error(), "deny_write") {
 		t.Errorf("patch: %v", err)
 	}
 	if b, _ := os.ReadFile(filepath.Join(root, "main.go")); string(b) != "new\n" {
@@ -181,10 +181,10 @@ func TestFileAccessWriteTools(t *testing.T) {
 	}
 	// A move into a denied path is refused too.
 	move := "*** Begin Patch\n*** Update File: main.go\n*** Move to: go.sum\n@@\n-new\n+moved\n*** End Patch"
-	if _, err := applyPatch(root, move, fa); err == nil || !strings.Contains(err.Error(), "go.sum") {
+	if _, err := applyPatch(root, move, faScope(fa)); err == nil || !strings.Contains(err.Error(), "go.sum") {
 		t.Errorf("move: %v", err)
 	}
-	if _, err := applyPatch(root, "*** Begin Patch\n*** Update File: main.go\n@@\n-new\n+ok\n*** End Patch", fa); err != nil {
+	if _, err := applyPatch(root, "*** Begin Patch\n*** Update File: main.go\n@@\n-new\n+ok\n*** End Patch", faScope(fa)); err != nil {
 		t.Errorf("allowed patch: %v", err)
 	}
 }
@@ -203,21 +203,21 @@ func TestFileAccessSymlinks(t *testing.T) {
 	}
 	fa := mustAccess(t, root, []string{".env", "/secrets/"}, nil)
 	for _, p := range []string{"innocent.txt", "linkdir/k", "linkdir/new"} {
-		if _, err := readFile(root, p, 0, 0, fa); err == nil {
+		if _, err := readFile(root, p, 0, 0, faScope(fa)); err == nil {
 			t.Errorf("read through symlink %s allowed", p)
 		}
-		if err := writeFile(root, p, "x", fa); err == nil {
+		if err := writeFile(root, p, "x", faScope(fa)); err == nil {
 			t.Errorf("write through symlink %s allowed", p)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(root, "secrets/new")); err == nil {
 		t.Error("write created secrets/new through a symlink")
 	}
-	out, err := listFiles(root, "", "*", "", fa)
+	out, err := listFiles(root, "", "*", "", faScope(fa))
 	if err != nil || strings.Contains(out, "innocent.txt") || strings.Contains(out, "TOKEN") {
 		t.Errorf("glob shows symlink to denied file: %q %v", out, err)
 	}
-	out, err = grepWithContext(root, "TOKEN", "", "", false, false, 0, "", fa)
+	out, err = grepWithContext(root, "TOKEN", "", "", false, false, 0, "", faScope(fa))
 	if err != nil || strings.Contains(out, "TOKEN=") {
 		t.Errorf("grep through symlink: %q %v", out, err)
 	}

@@ -290,14 +290,14 @@ func applyHunks(content string, hunks []hunk) (string, []string, error) {
 
 // checkPatch validates every operation against the files under root and
 // computes all new contents in memory. It writes nothing.
-func checkPatch(root string, ops []patchOp, fa *FileAccess) ([]fileChange, error) {
+func checkPatch(root string, ops []patchOp, sc *scope) ([]fileChange, error) {
 	seen := map[string]int{}
 	claim := func(i int, op patchOp, p string) (string, error) {
-		full, err := Resolve(root, p)
+		full, err := sc.resolve(root, p)
 		if err != nil {
 			return "", fmt.Errorf("%s: %w", op.label(i), err)
 		}
-		if err := fa.CheckWrite(full, p); err != nil {
+		if err := sc.checkWrite(full, p); err != nil {
 			return "", fmt.Errorf("%s: %w", op.label(i), err)
 		}
 		if j, ok := seen[full]; ok {
@@ -417,13 +417,13 @@ func ApplyPatch(root, input string) (string, error) {
 }
 
 // applyPatch is ApplyPatch that rejects the whole patch when any operation
-// touches a path fa denies for writing.
-func applyPatch(root, input string, fa *FileAccess) (string, error) {
+// touches a path the scope denies for writing.
+func applyPatch(root, input string, sc *scope) (string, error) {
 	ops, err := parsePatch(input)
 	if err != nil {
 		return "", fmt.Errorf("invalid patch: %w; nothing was written", err)
 	}
-	changes, err := checkPatch(root, ops, fa)
+	changes, err := checkPatch(root, ops, sc)
 	if err != nil {
 		return "", fmt.Errorf("patch does not apply: %w\nNothing was written", err)
 	}

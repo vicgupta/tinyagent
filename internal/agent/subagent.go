@@ -97,6 +97,7 @@ func (a *Agent) delegate(ctx context.Context, t *trajectory.Trajectory, call mod
 			MaxOutputChars: a.Tools.MaxOutputChars,
 			OutputFiles:    a.Tools.OutputFiles,
 			FileAccess:     a.Tools.FileAccess,
+			ExtraDirs:      a.Tools.ExtraDirs,
 		},
 		Config:       cfg,
 		Out:          out,

@@ -37,19 +37,19 @@ func ViewImage(root, path string, maxBytes int) (string, *model.Image, error) {
 	return viewImage(root, path, maxBytes, nil)
 }
 
-// viewImage is ViewImage that refuses paths fa denies for reading.
-func viewImage(root, path string, maxBytes int, fa *FileAccess) (string, *model.Image, error) {
+// viewImage is ViewImage that refuses paths the scope denies for reading.
+func viewImage(root, path string, maxBytes int, sc *scope) (string, *model.Image, error) {
 	if maxBytes <= 0 {
 		maxBytes = DefaultMaxImageBytes
 	}
 	if path == "" {
 		return "", nil, errors.New("path is required")
 	}
-	full, err := Resolve(root, path)
+	full, err := sc.resolve(root, path)
 	if err != nil {
 		return "", nil, err
 	}
-	if err := fa.CheckRead(full, path); err != nil {
+	if err := sc.checkRead(full, path); err != nil {
 		return "", nil, err
 	}
 	fi, err := os.Stat(full)
