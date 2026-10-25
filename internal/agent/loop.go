@@ -115,8 +115,18 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			Source: source, ExitStatus: t.ExitStatus, Submission: t.Submission,
 			Steps: t.Steps, Message: len(t.Messages), Previous: t.Resume,
 		}
+		if t.PlanEnabled != a.Tools.Plan {
+			t.ExitStatus, t.Submission = StatusError, "resume plan setting differs from checkpoint"
+			return t
+		}
 		t.ExitStatus, t.Submission = "", ""
-		t.Messages = append(t.Messages, model.Message{Role: "user", Content: resumeNotice})
+		a.closeInterrupted(t)
+		notice := resumeNotice
+		if lost := a.lostProcesses(t); lost != "" {
+			notice += "\n\n" + lost
+		}
+		t.SchemaVersion = trajectory.SchemaVersion
+		t.Messages = append(t.Messages, model.Message{Role: "user", Content: notice})
 		// Persist the validated starting state before the first request.
 		if err := a.step(t); err != nil {
 			return a.saveFailed(t, err)
@@ -132,7 +142,8 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			SystemPrompt:          system,
 			SkipAgentsMD:          a.SkipAgentsMD,
 			Tools:                 toolNames(a.Tools.Catalog()),
-			ToolSignature:         ToolSignature(a.Tools.ReadOnly),
+			ToolSignature:         toolSignature(a.Tools.ReadOnly, a.Tools.Plan),
+			PlanEnabled:           a.Tools.Plan,
 			MCPEnabled:            len(a.Tools.ExternalSpecs) > 0,
 			ExternalTools:         externalToolNames(a.Tools.ExternalSpecs),
 			ExternalToolSignature: externalToolSignature(a.Tools.ExternalSpecs),
@@ -152,14 +163,14 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 	if a.OutputSchema != nil {
 		specs = append(specs, SubmitToolSpec(a.OutputSchema))
 	}
-	v := newView(t.Messages)
+	v := viewFromTrajectory(t)
 	invalidOutputs := 0
 
 	for {
 		if status, ok := a.checkLimits(ctx, t); !ok {
 			return a.finish(t, status, "")
 		}
-		if a.needsCompaction(v) {
+		if a.needsCompaction(t, v) {
 			if err := a.compact(ctx, t, v, "proactive"); err != nil {
 				return a.compactFailed(ctx, t, err)
 			}
@@ -168,7 +179,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			}
 		}
 
-		msg, cost, err := a.Model.Query(ctx, v.msgs, specs)
+		msg, cost, err := a.Model.Query(ctx, a.withPlan(t, v), specs)
 		if err != nil && !a.NoCompact && model.IsContextOverflow(err) && ctx.Err() == nil {
 			if cerr := a.compact(ctx, t, v, "overflow"); cerr != nil {
 				return a.compactFailed(ctx, t, fmt.Errorf("%w: %v", cerr, err))
@@ -176,7 +187,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			if status, ok := a.checkLimits(ctx, t); !ok {
 				return a.finish(t, status, "")
 			}
-			msg, cost, err = a.Model.Query(ctx, v.msgs, specs)
+			msg, cost, err = a.Model.Query(ctx, a.withPlan(t, v), specs)
 			if err != nil && model.IsContextOverflow(err) {
 				err = fmt.Errorf("%w: %v", errStillTooLong, err)
 			}
@@ -228,23 +239,51 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			return a.finish(t, StatusCompleted, msg.Content)
 		}
 
+		// Write-ahead: persist the response and its pending calls before any
+		// tool runs, then save after every result.
+		// (merged: format-error handling from #66 kept alongside the
+		// write-ahead saves and plan tool from #69.)
+		t.PendingCalls = make([]trajectory.PendingCall, len(msg.ToolCalls))
+		for i, c := range msg.ToolCalls {
+			t.PendingCalls[i] = trajectory.PendingCall{ID: c.ID, Name: c.Function.Name}
+		}
+		if err := a.step(t); err != nil {
+			return a.saveFailed(t, err)
+		}
 		malformed := 0
 		for _, call := range msg.ToolCalls {
+			a.event("tool.call", map[string]any{"id": call.ID, "name": call.Function.Name, "arguments": eventArguments(call.Function.Arguments)})
+			var out string
+			var isError bool
+			formatError := false
 			if reason := a.Tools.FormatError(call); reason != "" {
 				malformed++
 				t.FormatErrors++
 				t.LastFormatError = reason
 				t.FormatErrorMessages = append(t.FormatErrorMessages, len(t.Messages))
-				out := a.Tools.FormatCorrection(reason)
-				a.event("tool.call", map[string]any{"id": call.ID, "name": call.Function.Name, "arguments": eventArguments(call.Function.Arguments)})
-				a.event("tool.result", map[string]any{"id": call.ID, "name": call.Function.Name, "output": out, "is_error": true, "format_error": true})
-				t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: call.ID, Content: out})
-				v.add(t, t.Messages[len(t.Messages)-1])
-				if a.Verbose {
-					fmt.Fprintf(a.Out, "  -> %s\n", indent(out))
-				}
+				out, isError, formatError = a.Tools.FormatCorrection(reason), true, true
+			} else if call.Function.Name == tools.PlanToolName && a.Tools.Plan {
+				out, isError = a.updatePlan(t, call)
 			} else {
-				a.toolStep(ctx, t, v, call)
+				out, isError = a.runTool(ctx, t, call)
+			}
+			fields := map[string]any{"id": call.ID, "name": call.Function.Name, "output": out, "is_error": isError}
+			if formatError {
+				fields["format_error"] = true
+			}
+			a.event("tool.result", fields)
+			t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: call.ID, Content: out})
+			t.PendingCalls = t.PendingCalls[1:]
+			if len(t.PendingCalls) == 0 {
+				t.PendingCalls = nil
+			}
+			a.recordProcesses(t)
+			v.add(t, t.Messages[len(t.Messages)-1])
+			if a.Verbose {
+				fmt.Fprintf(a.Out, "  -> %s\n", indent(out))
+			}
+			if err := a.step(t); err != nil {
+				return a.saveFailed(t, err)
 			}
 		}
 		if malformed == len(msg.ToolCalls) {
@@ -254,9 +293,6 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		}
 		if t.ConsecutiveFormatErrors >= a.maxFormatErrors() {
 			return a.finish(t, StatusFormatError, "")
-		}
-		if err := a.step(t); err != nil {
-			return a.saveFailed(t, err)
 		}
 	}
 }
@@ -509,6 +545,7 @@ func ctxStatus(ctx context.Context) (string, bool) {
 }
 
 func (a *Agent) closeTools(t *trajectory.Trajectory) {
+	a.recordProcesses(t)
 	if summary := a.Tools.Close(); summary != "" {
 		t.BackgroundProcesses = summary
 		if a.Verbose {
@@ -559,4 +596,48 @@ func (a *Agent) logAssistant(msg model.Message) {
 
 func indent(s string) string {
 	return strings.ReplaceAll(strings.TrimRight(s, "\n"), "\n", "\n     ")
+}
+
+// interruptedResult is the synthetic result for a call that was pending when
+// the previous invocation stopped. The call is never re-run.
+const interruptedResult = "[interrupted: tool did not complete before the agent stopped; " +
+	"it may have partially run — verify state before retrying]"
+
+// closeInterrupted gives every pending call of a resumed checkpoint an error
+// result, so the history is a complete tool turn again.
+func (a *Agent) closeInterrupted(t *trajectory.Trajectory) {
+	for _, c := range t.PendingCalls {
+		t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: c.ID, Content: "error: " + interruptedResult})
+		a.event("resume.interrupted_call", map[string]any{"id": c.ID, "name": c.Name})
+		fmt.Fprintf(a.Err, "resume: tool call %s (%s) was interrupted; it was not re-run\n", c.ID, c.Name)
+	}
+	t.PendingCalls = nil
+}
+
+// lostProcesses reports and forgets the background processes the previous
+// invocation had registered. It returns the notice text, or "".
+func (a *Agent) lostProcesses(t *trajectory.Trajectory) string {
+	if len(t.Processes) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("These background processes from the previous invocation are gone and cannot be reattached; start them again if needed:")
+	for _, p := range t.Processes {
+		fmt.Fprintf(&sb, "\n- %s (pid %d): %s", p.ID, p.PID, p.Command)
+		a.event("resume.process_lost", map[string]any{"id": p.ID, "pid": p.PID, "cmd": p.Command})
+	}
+	t.Processes = nil
+	return sb.String()
+}
+
+// recordProcesses stores the registered background processes in t.
+func (a *Agent) recordProcesses(t *trajectory.Trajectory) {
+	ps := a.Tools.Processes()
+	if len(ps) == 0 {
+		return
+	}
+	t.Processes = t.Processes[:0]
+	for _, p := range ps {
+		t.Processes = append(t.Processes, trajectory.ProcessInfo{ID: p.ID, PID: p.PID, Command: p.Command})
+	}
 }

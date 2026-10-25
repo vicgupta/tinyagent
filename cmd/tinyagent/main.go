@@ -42,6 +42,8 @@ var (
 type options struct {
 	task, modelName, configPath, cwd, output, resume string
 	outputSchema                                     string
+	planFile                                         string
+	plan                                             bool
 	stepLimit, timeLimit, maxFormatErrors            int
 	costLimit                                        float64
 	verbose, noStream, noAgentsMD, noCompact         bool
@@ -80,6 +82,8 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.readOnly, "read-only", false, "allow only read_file, list_files, and grep; blocks edits and commands")
 	fs.BoolVar(&o.sandbox, "sandbox", false, "confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths")
 	fs.BoolVar(&o.sandboxNetwork, "sandbox-network", false, "with --sandbox, allow commands to use the network")
+	fs.BoolVar(&o.plan, "plan", false, "enable the update_plan tool: a task plan saved in the checkpoint and pinned in every request (default off; config plan.enabled)")
+	fs.StringVar(&o.planFile, "plan-file", "", "with the plan enabled, also export the current plan as Markdown to this file after each save")
 	fs.BoolVar(&o.jsonOutput, "json", false, "write run events as JSONL to stdout")
 	fs.StringVar(&o.outputSchema, "output-schema", "", "end the run with a JSON result validated against this JSON Schema file (printed to stdout)")
 	fs.BoolVar(&o.showVersion, "version", false, "print the version and exit")
@@ -179,6 +183,12 @@ func run() int {
 		cfg.ReadOnly = o.readOnly
 	}
 	applySandboxFlags(fs, &cfg, o)
+	if flagWasSet(fs, "plan") {
+		cfg.Plan.Enabled = o.plan
+	}
+	if o.planFile != "" && !cfg.Plan.Enabled {
+		return fail(errors.New("--plan-file requires the plan tool; pass --plan or set plan.enabled: true"))
+	}
 	o.modelName = resolveModel(fs, o.modelName, cfg.Model)
 	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 
@@ -237,6 +247,7 @@ func run() int {
 			Stream:         streamTo(jsonStream(o.jsonOutput), progress),
 			ExternalSpecs:  mcpRegistry.Specs,
 			ExternalCall:   mcpRegistry.Call,
+			Plan:           cfg.Plan.Enabled,
 		},
 		Config:       cfg,
 		Hooks:        hookRunner,
@@ -259,7 +270,14 @@ func run() int {
 				if a.OnEvent != nil {
 					a.OnEvent("warning", map[string]any{"message": "saving trajectory: " + err.Error()})
 				}
+				return nil
 			}
+			checkpointSaved(a, t, o.output, o.planFile)
+			return nil
+		}
+	} else if o.planFile != "" {
+		a.OnStep = func(t *trajectory.Trajectory) error {
+			exportPlan(a, t, o.planFile)
 			return nil
 		}
 	}
@@ -354,6 +372,13 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return fail(errors.New("resume: --read-only conflicts with the checkpoint's recorded mode; start a fresh task"))
 	}
 	cfg.ReadOnly = src.ReadOnly
+	if flagWasSet(fs, "plan") && o.plan != src.PlanEnabled {
+		return fail(errors.New("resume: --plan conflicts with the checkpoint's recorded plan setting; start a fresh task"))
+	}
+	cfg.Plan.Enabled = src.PlanEnabled
+	if o.planFile != "" && !cfg.Plan.Enabled {
+		return fail(errors.New("--plan-file requires the plan tool, and this checkpoint was recorded without it"))
+	}
 	applySandboxFlags(fs, &cfg, *o)
 	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 
@@ -427,6 +452,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 			MaxOutputChars: cfg.MaxOutputChars,
 			MaxProcesses:   cfg.MaxBackgroundProcesses,
 			Stream:         jsonStream(o.jsonOutput),
+			Plan:           src.PlanEnabled,
 		},
 		Config:       cfg,
 		Hooks:        hookRunner,
@@ -450,9 +476,11 @@ func runResume(o *options, fs *flag.FlagSet) int {
 				return err
 			}
 			initial = false
-			return nil
+		} else if err := t.Save(o.output); err != nil {
+			return err
 		}
-		return t.Save(o.output)
+		checkpointSaved(a, t, o.output, o.planFile)
+		return nil
 	}
 
 	fmt.Fprintf(os.Stderr, "resuming %s from %s (previous status %s after %d steps)\n", modelName, o.resume, prevStatus, src.Steps)
@@ -862,4 +890,58 @@ func resultFields(t *trajectory.Trajectory, elapsed time.Duration) map[string]an
 		fields["structured_output"] = t.StructuredOutput
 	}
 	return fields
+}
+
+// checkpointSaved reports a completed save and then exports the plan mirror,
+// which is always written after the checkpoint that contains it.
+func checkpointSaved(a *agent.Agent, t *trajectory.Trajectory, path, planFile string) {
+	if a.OnEvent != nil {
+		a.OnEvent("checkpoint.saved", map[string]any{"step": t.Steps, "path": path, "pending": len(t.PendingCalls)})
+	}
+	exportPlan(a, t, planFile)
+}
+
+// exportPlan writes the read-only Markdown mirror of the plan. Failures only
+// warn: the checkpoint is the source of truth.
+func exportPlan(a *agent.Agent, t *trajectory.Trajectory, planFile string) {
+	if planFile == "" {
+		return
+	}
+	if err := writePlanFile(planFile, t.Plan); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: writing plan file:", err)
+		if a.OnEvent != nil {
+			a.OnEvent("warning", map[string]any{"message": "writing plan file: " + err.Error()})
+		}
+	}
+}
+
+func writePlanFile(path string, p *trajectory.Plan) error {
+	var sb strings.Builder
+	sb.WriteString("# Plan\n\n")
+	if p == nil {
+		sb.WriteString("_No plan yet._\n")
+	} else {
+		fmt.Fprintf(&sb, "Version %d, updated at step %d.\n\n", p.Version, p.UpdatedStep)
+		for _, it := range p.Items {
+			box := map[string]string{"pending": "[ ]", "in_progress": "[ ] (in progress)", "done": "[x]", "blocked": "[ ] (blocked)"}[it.Status]
+			fmt.Fprintf(&sb, "- %s %s: %s\n", box, it.ID, it.Text)
+		}
+		if p.Note != "" {
+			fmt.Fprintf(&sb, "\n%s\n", p.Note)
+		}
+	}
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".tinyagent-plan-*.md")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(sb.String()); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }

@@ -3,8 +3,11 @@ package trajectory
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 
 	"github.com/vicgupta/tinyagent/internal/model"
 )
@@ -69,6 +72,55 @@ type Trajectory struct {
 	LastFormatError         string `json:"last_format_error,omitempty"`
 	// Resume records the checkpoint this run continued, when it did.
 	Resume *ResumeInfo `json:"resume,omitempty"`
+
+	// PendingCalls (schema 2) is the write-ahead record of the last assistant
+	// turn's tool calls that have started or are about to start but have no
+	// result yet. It is empty at every completed step boundary.
+	PendingCalls []PendingCall `json:"pending_calls,omitempty"`
+	// Processes (schema 2) lists the background processes registered at the
+	// last save. None survive the invocation that started them.
+	Processes []ProcessInfo `json:"processes,omitempty"`
+	// PlanEnabled (schema 2) records whether the opt-in update_plan tool was
+	// offered. A resume must use the same setting.
+	PlanEnabled bool         `json:"plan_enabled,omitempty"`
+	Plan        *Plan        `json:"plan,omitempty"`
+	PlanHistory []PlanChange `json:"plan_history,omitempty"`
+}
+
+// PendingCall identifies a tool call without a recorded result.
+type PendingCall struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// ProcessInfo describes a background process registered by start_process.
+type ProcessInfo struct {
+	ID      string `json:"id"`
+	PID     int    `json:"pid,omitempty"`
+	Command string `json:"command"`
+}
+
+// Plan is the model's persistent task plan, kept outside Messages so
+// compaction never removes it.
+type Plan struct {
+	Version     int        `json:"version"`
+	Items       []PlanItem `json:"items"`
+	Note        string     `json:"note,omitempty"`
+	UpdatedStep int        `json:"updated_step"`
+}
+
+// PlanItem is one plan entry.
+type PlanItem struct {
+	ID     string `json:"id"`
+	Text   string `json:"text"`
+	Status string `json:"status"` // pending, in_progress, done, or blocked
+}
+
+// PlanChange audits one update_plan call.
+type PlanChange struct {
+	Step    int    `json:"step"`
+	Version int    `json:"version"`
+	Diff    string `json:"diff"`
 }
 
 // ResumeInfo records the checkpoint a run continued, so the previous
@@ -83,7 +135,8 @@ type ResumeInfo struct {
 }
 
 // SchemaVersion is the resume-metadata version written by this build.
-const SchemaVersion = 1
+// Version 1 checkpoints (no pending calls, processes, or plan) still load.
+const SchemaVersion = 2
 
 // Compaction describes one compaction of the model's view of the history.
 // Indexes refer to Trajectory.Messages.
@@ -102,10 +155,13 @@ type Compaction struct {
 	// View is what the model is sent next: indexes into Messages, with -1
 	// for the summary message.
 	View []int `json:"view"`
+	// PlanVersion is the plan version pinned in the view, when enabled.
+	PlanVersion int `json:"plan_version,omitempty"`
 }
 
 // Save replaces path with a complete private file using a same-directory
-// temporary file and rename. This does not guarantee power-loss durability.
+// temporary file and rename. The file and its directory are fsynced so a
+// completed save survives power loss on filesystems that honor fsync.
 func (t *Trajectory) Save(path string) error {
 	return t.save(path, false)
 }
@@ -134,11 +190,37 @@ func (t *Trajectory) save(path string, exclusive bool) error {
 		tmp.Close()
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
 	if exclusive {
-		return os.Link(tmp.Name(), path)
+		err = os.Link(tmp.Name(), path)
+	} else {
+		err = os.Rename(tmp.Name(), path)
 	}
-	return os.Rename(tmp.Name(), path)
+	if err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(path))
+}
+
+// syncDir makes a rename or link in dir durable. Windows cannot fsync a
+// directory; there the rename is left to the filesystem.
+func syncDir(dir string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	if err := d.Sync(); err != nil && !errors.Is(err, syscall.EINVAL) && !errors.Is(err, syscall.ENOTSUP) {
+		return err
+	}
+	return nil
 }

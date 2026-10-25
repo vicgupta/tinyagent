@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -41,6 +42,9 @@ type Executor struct {
 	// ExternalCall runs a tool from ExternalSpecs. ok is false when name is
 	// not an external tool; isErr marks a failed call.
 	ExternalCall func(ctx context.Context, name, args string) (out string, isErr, ok bool)
+	// Plan offers the opt-in update_plan tool (also in read-only mode). The
+	// agent handles its calls; the executor only advertises it.
+	Plan bool
 
 	procs registry
 }
@@ -166,11 +170,49 @@ func (e *Executor) RunWithError(ctx context.Context, call model.ToolCall) (strin
 // tools must never be offered (or dispatched, see Run) when only
 // read_file, list_files, and grep are available.
 func (e *Executor) Catalog() []model.ToolSpec {
-	if e.ReadOnly {
-		return Specs(true)
+	out := Specs(e.ReadOnly)
+	if e.Plan {
+		out = append(out, PlanSpec())
 	}
-	out := Specs()
+	if e.ReadOnly {
+		return out
+	}
 	return append(out, e.ExternalSpecs...)
+}
+
+// PlanToolName is the opt-in plan tool.
+const PlanToolName = "update_plan"
+
+// PlanSpec returns the update_plan definition.
+func PlanSpec() model.ToolSpec {
+	return model.ToolSpec{
+		Type: "function",
+		Function: model.FunctionSpec{
+			Name: PlanToolName,
+			Description: "Replace your whole task plan. The plan is saved with the checkpoint and shown to you every step, " +
+				"even after context compaction. Keep at most one item in_progress. Returns the rendered plan.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"items": map[string]any{
+						"type":        "array",
+						"description": "The complete plan, in order (at most 50 items)",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"id":     map[string]any{"type": "string", "description": "Stable item id"},
+								"text":   map[string]any{"type": "string", "description": "What to do (at most 500 characters)"},
+								"status": map[string]any{"type": "string", "enum": []string{"pending", "in_progress", "done", "blocked"}},
+							},
+							"required": []string{"id", "text", "status"},
+						},
+					},
+					"note": map[string]any{"type": "string", "description": "Optional short note about the plan"},
+				},
+				"required": []string{"items"},
+			},
+		},
+	}
 }
 
 // Permits reports whether a call to name would be dispatched: name is in the
@@ -185,6 +227,9 @@ func (e *Executor) Permits(name string) bool {
 }
 
 func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
+	if name == PlanToolName && e.Plan {
+		return "", errors.New("update_plan is handled by the agent loop")
+	}
 	if e.ReadOnly && (name != "read_file" && name != "list_files" && name != "grep") {
 		return "", fmt.Errorf("tool %q is unavailable in read-only mode; only read_file, list_files, and grep are allowed", name)
 	}

@@ -190,7 +190,7 @@ func TestCLIResumeRefusalsBeforeProviderSetup(t *testing.T) {
 				want = "metadata"
 			case "compacted":
 				tr.Compactions = []trajectory.Compaction{{Step: 1}}
-				want = "compacted"
+				want = "invalid compaction record"
 			}
 			if err := tr.Save(source); err != nil {
 				t.Fatal(err)

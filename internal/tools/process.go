@@ -306,3 +306,31 @@ func (e *Executor) Close() string {
 	}
 	return sb.String()
 }
+
+// RegisteredProcess describes one background process still registered.
+type RegisteredProcess struct {
+	ID      string
+	PID     int
+	Command string
+	Running bool
+}
+
+// Processes lists the registered background processes in start order.
+func (e *Executor) Processes() []RegisteredProcess {
+	e.procs.mu.Lock()
+	defer e.procs.mu.Unlock()
+	out := make([]RegisteredProcess, 0, len(e.procs.procs))
+	for _, p := range e.procs.procs {
+		rp := RegisteredProcess{ID: p.id, Command: p.command, Running: p.status() == "running"}
+		if p.cmd != nil && p.cmd.Process != nil {
+			rp.PID = p.cmd.Process.Pid
+		}
+		out = append(out, rp)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, _ := strconv.Atoi(out[i].ID[1:])
+		b, _ := strconv.Atoi(out[j].ID[1:])
+		return a < b
+	})
+	return out
+}

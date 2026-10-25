@@ -55,6 +55,14 @@ type AgentConfig struct {
 
 	// Hooks are trusted local executables run around matching tool calls.
 	Hooks Hooks `yaml:"hooks,omitempty"`
+
+	// Plan configures the opt-in update_plan tool (off by default).
+	Plan Plan `yaml:"plan,omitempty"`
+}
+
+// Plan configures the persistent plan tool.
+type Plan struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 // Hooks lists the commands run before and after matching tool calls.
