@@ -48,6 +48,7 @@ type options struct {
 	images                                           bool
 	skills, noSkills                                 bool
 	reasoningEffort                                  string
+	openaiAPI                                        string
 	execEnv                                          string
 	stepLimit, timeLimit, maxFormatErrors            int
 	costLimit                                        float64
@@ -94,6 +95,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.noSkills, "no-skills", false, "turn Agent Skills discovery off, overriding config skills; --no-skills=false turns it on")
 	fs.StringVar(&o.planFile, "plan-file", "", "with the plan enabled, also export the current plan as Markdown to this file after each save")
 	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "provider reasoning effort: none, minimal, low, medium, high, xhigh, or max")
+	fs.StringVar(&o.openaiAPI, "openai-api", "", "openai provider transport: auto, responses, or chat")
 	fs.StringVar(&o.execEnv, "env", "", "where bash and start_process run: local or container (default: config's environment, else local)")
 	fs.BoolVar(&o.jsonOutput, "json", false, "write run events as JSONL to stdout")
 	fs.StringVar(&o.outputSchema, "output-schema", "", "end the run with a JSON result validated against this JSON Schema file (printed to stdout)")
@@ -226,6 +228,14 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
 	}
+	if flagWasSet(fs, "openai-api") {
+		cfg.OpenAIAPI = o.openaiAPI
+	}
+	if err := checkOpenAIAPI(cfg.OpenAIAPI); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	}
+	openaiAPI := model.OpenAITransport(o.modelName, cfg.OpenAIAPI)
 	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 
 	root, err := canonicalRoot(o.cwd)
@@ -262,7 +272,10 @@ func run() int {
 	if !o.noStream && !o.jsonOutput {
 		onText = func(s string) { io.WriteString(progress, s) }
 	}
-	m, err := model.New(o.modelName, onText)
+	if openaiAPI != "" && o.verbose {
+		fmt.Fprintf(os.Stderr, "openai transport: %s\n", openaiAPI)
+	}
+	m, err := model.NewWith(o.modelName, onText, model.Options{OpenAIAPI: openaiAPI})
 	if err != nil {
 		code := fail(err)
 		printHint(os.Stderr, o.modelName, err.Error())
@@ -278,6 +291,7 @@ func run() int {
 		Model:           m,
 		ModelName:       o.modelName,
 		ReasoningEffort: cfg.ReasoningEffort,
+		OpenAIAPI:       openaiAPI,
 		Tools: &tools.Executor{
 			Root:               root,
 			ReadOnly:           cfg.ReadOnly,
@@ -503,7 +517,32 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if !o.noStream && !o.jsonOutput {
 		onText = func(s string) { os.Stdout.WriteString(s) }
 	}
-	m, err := model.New(modelName, onText)
+	// The recorded transport is kept: the checkpoint's reasoning items only
+	// replay on the transport that produced them. Older checkpoints, with
+	// none recorded, resolve like a new run.
+	openaiAPI := src.OpenAIAPI
+	if flagWasSet(fs, "openai-api") {
+		if err := checkOpenAIAPI(o.openaiAPI); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			return 2
+		}
+		want := model.OpenAITransport(modelName, o.openaiAPI)
+		if openaiAPI != "" && want != openaiAPI {
+			return fail(fmt.Errorf("resume: --openai-api %q conflicts with the checkpoint's openai_api %q", o.openaiAPI, openaiAPI))
+		}
+		cfg.OpenAIAPI = o.openaiAPI
+	}
+	if openaiAPI == "" {
+		if err := checkOpenAIAPI(cfg.OpenAIAPI); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			return 2
+		}
+		openaiAPI = model.OpenAITransport(modelName, cfg.OpenAIAPI)
+	}
+	if openaiAPI != "" && o.verbose {
+		fmt.Fprintf(os.Stderr, "openai transport: %s\n", openaiAPI)
+	}
+	m, err := model.NewWith(modelName, onText, model.Options{OpenAIAPI: openaiAPI})
 	if err != nil {
 		code := fail(err)
 		printHint(os.Stderr, modelName, err.Error())
@@ -525,6 +564,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		Model:           m,
 		ModelName:       modelName,
 		ReasoningEffort: src.ReasoningEffort,
+		OpenAIAPI:       openaiAPI,
 		Tools: &tools.Executor{
 			Root:           root,
 			ReadOnly:       src.ReadOnly,
@@ -692,7 +732,7 @@ var usageGroups = []struct {
 	flags [][3]string
 }{
 	{"", [][3]string{{"h", "help", ""}}},
-	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "resume", "path"}}},
+	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "resume", "path"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "env", "name"}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}}},
@@ -970,6 +1010,9 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	if a.ReasoningEffort != "" {
 		started["reasoning_effort"] = a.ReasoningEffort
 	}
+	if a.OpenAIAPI != "" {
+		started["openai_api"] = a.OpenAIAPI
+	}
 	events.emit("run.started", started)
 	a.OnEvent = func(kind string, fields map[string]any) {
 		events.emit(kind, fields)
@@ -1192,6 +1235,14 @@ func writePlanFile(path string, p *trajectory.Plan) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)
+}
+
+// checkOpenAIAPI rejects an unknown openai_api value.
+func checkOpenAIAPI(v string) error {
+	if !model.ValidOpenAIAPI(v) {
+		return fmt.Errorf("--openai-api/openai_api %q is invalid (want one of %s)", v, strings.Join(model.OpenAIAPIs, ", "))
+	}
+	return nil
 }
 
 // checkReasoningEffort rejects an unknown effort, or one the provider of spec

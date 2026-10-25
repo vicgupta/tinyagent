@@ -168,13 +168,31 @@ func splitSpec(spec string) (provider, name string) {
 // openai. If onText is non-nil, responses are streamed and each text delta is
 // passed to it as it arrives.
 func New(spec string, onText func(string)) (Model, error) {
+	return NewWith(spec, onText, Options{})
+}
+
+// Options are provider settings beyond the model spec.
+type Options struct {
+	// OpenAIAPI is the openai provider's transport: auto (or ""), responses,
+	// or chat. Other providers ignore it.
+	OpenAIAPI string
+}
+
+// NewWith is New with provider options.
+func NewWith(spec string, onText func(string), opts Options) (Model, error) {
 	provider, name := splitSpec(spec)
 	if name == "" {
 		return nil, fmt.Errorf("model %q: missing model name", spec)
 	}
 	switch provider {
 	case "openai":
-		base := envOr("OPENAI_BASE_URL", "https://api.openai.com/v1")
+		if !ValidOpenAIAPI(opts.OpenAIAPI) {
+			return nil, fmt.Errorf("invalid openai_api %q (want one of %s)", opts.OpenAIAPI, strings.Join(OpenAIAPIs, ", "))
+		}
+		base := envOr("OPENAI_BASE_URL", openAIDefaultBaseURL)
+		if ResolveOpenAIAPI(opts.OpenAIAPI, os.Getenv("OPENAI_BASE_URL")) == OpenAIAPIResponses {
+			return &OpenAIResponses{BaseURL: base, APIKey: os.Getenv("OPENAI_API_KEY"), Model: name, OnText: onText}, nil
+		}
 		return &OpenAI{BaseURL: base, APIKey: os.Getenv("OPENAI_API_KEY"), Model: name, OnText: onText}, nil
 	case "openrouter":
 		return &OpenAI{BaseURL: "https://openrouter.ai/api/v1", APIKey: os.Getenv("OPENROUTER_API_KEY"), Model: name, OnText: onText}, nil

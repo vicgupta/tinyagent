@@ -261,6 +261,7 @@ Task:
   -t, --task string               task/prompt (required unless --resume); "-" reads it from stdin
   -m, --model string              provider/model; if unset, $AGENT_MODEL, then the config's model (default "openai/gpt-4o")
       --reasoning-effort level    provider reasoning effort: none, minimal, low, medium, high, xhigh, or max
+      --openai-api api            openai provider transport: auto, responses, or chat
   -c, --config path               YAML config (default: user config if present, else built-in)
       --cwd dir                   working directory (default ".")
       --resume path               continue an unfinished run from a trajectory JSON checkpoint

@@ -17,9 +17,10 @@ var testTools = []ToolSpec{{Type: "function", Function: FunctionSpec{
 }}}
 
 func TestNewResolvesProviders(t *testing.T) {
+	t.Setenv("OPENAI_BASE_URL", "")
 	cases := map[string]string{
-		"gpt-4o":                        "*model.OpenAI",
-		"openai/gpt-4o":                 "*model.OpenAI",
+		"gpt-4o":                        "*model.OpenAIResponses",
+		"openai/gpt-4o":                 "*model.OpenAIResponses",
 		"openrouter/anthropic/claude-x": "*model.OpenAI",
 		"anthropic/claude-sonnet-4-5":   "*model.Anthropic",
 		"ollama/llama3.1":               "*model.OpenAI",
@@ -45,6 +46,8 @@ func typeName(v any) string {
 	switch v.(type) {
 	case *OpenAI:
 		return "*model.OpenAI"
+	case *OpenAIResponses:
+		return "*model.OpenAIResponses"
 	case *Anthropic:
 		return "*model.Anthropic"
 	}

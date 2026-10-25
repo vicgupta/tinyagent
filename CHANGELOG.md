@@ -11,6 +11,11 @@
 - Emit a `provider.retry` event in `--json` output when a model request is retried.
 - Add opt-in image support (`--images`, `images.enabled`, `max_image_bytes`): a `view_image` tool and MCP image pass-through for Anthropic and Codex, with a text placeholder for Chat Completions providers.
 - Preserve Anthropic thinking blocks and Codex reasoning items across tool calls, and add a `reasoning_effort` config key and `--reasoning-effort` flag.
+- Add a Responses API transport to the `openai` provider so tool calls work with reasoning on current OpenAI models, with encrypted reasoning replay and cached-token pricing. The new `openai_api` config key and `--openai-api` flag choose `auto` (default), `responses`, or `chat`.
+
+### Changed
+
+- The `openai` provider now uses the Responses API against `api.openai.com` (when `OPENAI_BASE_URL` is unset or points there). Set `openai_api: chat` to keep Chat Completions. Custom `OPENAI_BASE_URL` endpoints keep Chat Completions by default.
 
 ## v0.4.0 - 2026-10-24
 

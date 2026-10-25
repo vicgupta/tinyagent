@@ -49,11 +49,14 @@ type Agent struct {
 	ModelName string
 	// ReasoningEffort is recorded in new trajectories; the Model sends it.
 	ReasoningEffort string
-	Tools           *tools.Executor
-	Config          config.AgentConfig
-	Out             io.Writer // progress log; nil discards
-	Err             io.Writer // warnings; nil discards
-	Verbose         bool
+	// OpenAIAPI is the openai provider's resolved transport, recorded in
+	// trajectories and run.started; the Model uses it.
+	OpenAIAPI string
+	Tools     *tools.Executor
+	Config    config.AgentConfig
+	Out       io.Writer // progress log; nil discards
+	Err       io.Writer // warnings; nil discards
+	Verbose   bool
 	// Streamed means the model already wrote its text to Out as it arrived.
 	Streamed bool
 	// SkipAgentsMD stops Run from appending the nearest AGENTS.md at or above
@@ -146,6 +149,9 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			return t
 		}
 		t.ExitStatus, t.Submission = "", ""
+		if t.OpenAIAPI == "" {
+			t.OpenAIAPI = a.OpenAIAPI
+		}
 		a.closeInterrupted(t)
 		notice := resumeNotice
 		if lost := a.lostProcesses(t); lost != "" {
@@ -164,6 +170,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			ReadOnly:              a.Tools.ReadOnly,
 			Model:                 a.ModelName,
 			ReasoningEffort:       a.ReasoningEffort,
+			OpenAIAPI:             a.OpenAIAPI,
 			SchemaVersion:         trajectory.SchemaVersion,
 			Root:                  a.Tools.Root,
 			SystemPrompt:          system,
