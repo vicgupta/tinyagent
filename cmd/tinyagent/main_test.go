@@ -17,6 +17,7 @@ import (
 
 	"github.com/vicgupta/tinyagent/internal/agent"
 	"github.com/vicgupta/tinyagent/internal/config"
+	"github.com/vicgupta/tinyagent/internal/eventlog"
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
@@ -136,11 +137,11 @@ func TestSummaryLine(t *testing.T) {
 
 func TestJSONEventsWriteOneJSONLine(t *testing.T) {
 	var out strings.Builder
-	events := newJSONEvents(&out, true)
-	events.emit("run.started", map[string]any{"schema_version": 1, "model": "fake"})
-	events.emit("result", map[string]any{"status": agent.StatusSubmitted, "submission": "done"})
-	if events.err != nil {
-		t.Fatal(events.err)
+	events := eventlog.NewJSONL(&out)
+	events.Emit("run.started", map[string]any{"schema_version": 1, "model": "fake"})
+	events.Emit("result", map[string]any{"status": agent.StatusSubmitted, "submission": "done"})
+	if events.Err() != nil {
+		t.Fatal(events.Err())
 	}
 	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
 	if len(lines) != 2 {
@@ -194,7 +195,7 @@ func TestJSONRunEventStream(t *testing.T) {
 	}
 	a := newTestAgent(t, m)
 	var out strings.Builder
-	events := startEvents(&out, true, a, false, func() { t.Error("stop called on a healthy stream") })
+	events := startEvents(&out, true, a, false, func() { t.Error("stop called on a healthy stream") }, nil)
 	tr := a.Run(context.Background(), "check")
 	if err := events.finish(tr, time.Second); err != nil {
 		t.Fatal(err)
@@ -219,7 +220,7 @@ func TestJSONRunEventStream(t *testing.T) {
 func TestJSONEventsDisabledWriteNothing(t *testing.T) {
 	a := newTestAgent(t, &replies{{Role: "assistant", Content: "done"}})
 	var out strings.Builder
-	events := startEvents(&out, false, a, false, func() {})
+	events := startEvents(&out, false, a, false, func() {}, nil)
 	if err := events.finish(a.Run(context.Background(), "x"), 0); err != nil || out.Len() != 0 || a.OnEvent != nil {
 		t.Errorf("disabled stream wrote %q (err %v, OnEvent set %v)", out.String(), err, a.OnEvent != nil)
 	}
@@ -274,6 +275,7 @@ Output:
       --no-stream              wait for full responses instead of streaming
       --json                   write run events as JSONL to stdout
       --output-schema path     end the run with a JSON result validated against this JSON Schema file (printed to stdout)
+      --log-db [=path]         also log run events to SQLite (default .tinyagent/tinyagent.db under --cwd); --log-db=false turns config log_db off
       --no-agents-md           don't add AGENTS.md (nearest, up to the repo root) to the system prompt
       --read-only              allow only read_file, list_files, and grep; blocks edits and commands
       --sandbox                confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths

@@ -228,6 +228,28 @@ func postJSON(ctx context.Context, url string, headers map[string]string, body, 
 	return nil
 }
 
+// Retry describes one provider request about to be retried.
+type Retry struct {
+	Attempt int           // the attempt about to be made, starting at 2
+	Reason  string        // "http_<status>" or "network"; never a response body
+	Backoff time.Duration // wait before the attempt
+}
+
+type retryObserverKey struct{}
+
+// WithRetryObserver returns a context whose provider requests report each
+// retry to fn before waiting. fn runs on the requesting goroutine.
+func WithRetryObserver(ctx context.Context, fn func(Retry)) context.Context {
+	return context.WithValue(ctx, retryObserverKey{}, fn)
+}
+
+func retryReason(err error) string {
+	if he, ok := err.(*httpError); ok {
+		return fmt.Sprintf("http_%d", he.status)
+	}
+	return "network"
+}
+
 // post sends body to url, retrying with exponential backoff on network errors,
 // 429, and 5xx. It returns a 2xx response whose body the caller must close.
 func post(ctx context.Context, url string, headers map[string]string, body any) (*http.Response, error) {
@@ -242,6 +264,9 @@ func post(ctx context.Context, url string, headers map[string]string, body any) 
 			wait += time.Duration(rand.Int64N(int64(wait)/2 + 1))
 			if he, ok := lastErr.(*httpError); ok && he.retryAfter > 0 {
 				wait = he.retryAfter
+			}
+			if fn, ok := ctx.Value(retryObserverKey{}).(func(Retry)); ok && fn != nil {
+				fn(Retry{Attempt: attempt + 1, Reason: retryReason(lastErr), Backoff: wait})
 			}
 			select {
 			case <-ctx.Done():

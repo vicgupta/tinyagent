@@ -97,6 +97,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `-v, --verbose` | off | Print tool calls and their outputs |
 | `--json` | off | Write machine-readable run events as JSONL to stdout |
 | `--output-schema` | | End the run with a JSON result validated against this JSON Schema file (printed to stdout) |
+| `--log-db[=path]` | off | Also record run events in a local SQLite database (default `<cwd>/.tinyagent/tinyagent.db`); see [Event log database](#event-log-database) |
 | `--no-stream` | off | Wait for each full response instead of streaming it |
 | `--no-agents-md` | off | Don't append the nearest `AGENTS.md` (at or above `<cwd>`, up to the repo root; capped at 32KB) to the system prompt |
 | `-V, --version` | | Print the version and exit |
@@ -121,6 +122,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 | `resume.process_lost` | `id`, `pid`, `cmd` of a background process from the previous invocation |
 | `compaction` | `step`, `reason`, `stage`, `tokens_before`, `tokens_after`, `elided_messages`, `summarized_messages` |
 | `warning` / `error` | `message` |
+| `provider.retry` | `attempt` (the upcoming attempt number), `reason` (`http_<status>` or `network`), `backoff_ms`; only emitted when a model request is retried |
 | `result` | `status`, `submission`, cumulative `steps`, `structured_output` (only with `--output-schema` and status `Submitted`), `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cost_usd`, invocation `duration_ms` |
 
 When the run starts, the final event is `result`, including for model errors, interruptions, and limit stops. Exit codes are unchanged. `--resume` reports cumulative trajectory accounting; `duration_ms` covers only the current invocation. Event streams can contain prompts, code, and tool output, so handle them with the same care as trajectory files. Credentials and environment dumps are not included.
@@ -151,6 +153,18 @@ The schema file (at most 64 KiB) must be a JSON object with `"type": "object"` a
 On success the status is `Submitted`, stdout contains only the compact JSON object and a newline, and the summary, streamed text, and `-v` output go to stderr. With `--json`, the object is the `structured_output` field of the `result` event instead. Any other outcome exits 1 with nothing on stdout. Trajectories (`-o`) record `structured_output`, `output_schema`, and `output_schema_digest`; `submission` holds the compact JSON string. Runs started with `--output-schema` cannot be resumed, and `--resume` with `--output-schema` exits 2.
 
 Supported keywords (the same subset as MCP tool schemas): `type`, `properties`, `required`, `additionalProperties: false`, `items`, `enum`, `const`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `pattern` (Go regexp syntax), `minItems`, `maxItems`, `uniqueItems`, `minProperties`, `maxProperties`. `format` is accepted but not enforced. Providers also see the schema, but tinyagent validates locally, so results never depend on provider-side strict modes.
+### Event log database
+
+`--log-db` (or `log_db.enabled: true` in config) records every event the `--json` stream would contain in a local SQLite file, whether or not `--json` is also on. It is off by default; nothing is created unless enabled. The database lives at `<cwd>/.tinyagent/tinyagent.db` unless `--log-db=path` or `log_db.path` says otherwise (a flag path is relative to the shell's directory, a config path to `--cwd`; `~/` is expanded). Add `.tinyagent/` to your `.gitignore`. The file is created with mode 0600, uses WAL mode with a busy timeout so concurrent runs can share it, and needs no cgo (pure-Go `modernc.org/sqlite`).
+
+Tables: `runs` (one row per invocation: model, provider, cwd, status, steps, token and cost totals, duration, version), `events` (`run_id`, `seq`, `step`, `ts`, `type`, JSON `payload`), `tool_calls` (tool name, arguments, result summary, duration, `is_error`), and `schema_migrations`. Timestamps are Unix milliseconds.
+
+```sh
+sqlite3 .tinyagent/tinyagent.db \
+  "SELECT tool, count(*), avg(duration_ms) FROM tool_calls GROUP BY tool"
+```
+
+At the default `level: metadata` no prompt, message, argument, or output bodies are stored: those fields are replaced with their lengths, and the task is stored only as a SHA-256 hash and length. `level: full` stores bodies, after redacting values of environment variables named `*_KEY`, `*_TOKEN`, `*_SECRET`, or `*_PASSWORD`, secrets set in MCP or hook `env`, and common token shapes; payloads over `max_payload_bytes` are truncated. Old runs are pruned when a run starts (`max_days`, `max_runs`; `0` keeps everything). Database errors never fail a run: tinyagent prints one warning and continues without the log. The trajectory JSON (`-o`) is unchanged and remains the resume format.
 
 ### Resume an unfinished task
 
@@ -221,6 +235,13 @@ output_price_per_mtok: 15
 context_window: 200000    # tokens; overrides the built-in table, used for compaction
 plan:
   enabled: false          # give the model the update_plan tool (same as --plan)
+log_db:                   # opt-in SQLite event log; see Event log database
+  enabled: false
+  path: .tinyagent/tinyagent.db   # relative to --cwd
+  level: metadata         # metadata (no bodies) or full (redacted bodies)
+  max_days: 30            # prune runs older than this; 0 keeps all
+  max_runs: 500           # keep at most this many runs; 0 keeps all
+  max_payload_bytes: 65536
 mcp_servers:                 # omitted by default; each entry runs a trusted local executable
   - alias: docs
     command: /usr/local/bin/team-docs-mcp

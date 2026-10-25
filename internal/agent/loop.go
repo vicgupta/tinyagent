@@ -75,6 +75,17 @@ type Agent struct {
 	// OutputSchema, when non-nil, adds the submit_result tool and makes the
 	// run succeed only with a result that validates against it.
 	OutputSchema *outschema.Schema
+
+	cur *trajectory.Trajectory
+}
+
+// Step returns the current run's completed model calls, or 0 before Run
+// starts. Event sinks call it from OnEvent to tag events with a step.
+func (a *Agent) Step() int {
+	if a.cur == nil {
+		return 0
+	}
+	return a.cur.Steps
 }
 
 // resumeNotice is appended to the model's history when a run is resumed, so
@@ -94,6 +105,11 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(a.Config.WallTimeSec)*time.Second)
 		defer cancel()
+	}
+	if a.OnEvent != nil {
+		ctx = model.WithRetryObserver(ctx, func(r model.Retry) {
+			a.event("provider.retry", map[string]any{"attempt": r.Attempt, "reason": r.Reason, "backoff_ms": r.Backoff.Milliseconds()})
+		})
 	}
 
 	var t *trajectory.Trajectory
@@ -155,6 +171,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			},
 		}
 	}
+	a.cur = t
 	t.Sandbox = nil
 	if sb := a.Tools.Sandbox; sb != nil {
 		t.Sandbox = &trajectory.SandboxInfo{Backend: sb.Backend, Writable: sb.Writable, Network: sb.Network}

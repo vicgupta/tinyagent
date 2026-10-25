@@ -6,6 +6,8 @@
 
 - Run user-configured `pre_tool` and `post_tool` hook commands around tool calls to deny calls or append feedback.
 - Add `--output-schema` to end runs with a validated JSON result on stdout (or `structured_output` in `--json`), with the new `InvalidOutput` status.
+- Add an opt-in SQLite event log (`--log-db`, `log_db` config) that records runs, events, and tool calls mirroring `--json`, with metadata-only default, redaction, and retention.
+- Emit a `provider.retry` event in `--json` output when a model request is retried.
 
 ## v0.4.0 - 2026-10-24
 

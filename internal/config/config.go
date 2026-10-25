@@ -58,11 +58,30 @@ type AgentConfig struct {
 
 	// Plan configures the opt-in update_plan tool (off by default).
 	Plan Plan `yaml:"plan,omitempty"`
+	// LogDB is the opt-in SQLite event log.
+	LogDB LogDB `yaml:"log_db"`
 }
 
 // Plan configures the persistent plan tool.
 type Plan struct {
 	Enabled bool `yaml:"enabled"`
+}
+
+// LogDB configures the opt-in SQLite event log. It is off unless Enabled
+// (or --log-db) is set.
+type LogDB struct {
+	Enabled bool `yaml:"enabled"`
+	// Path is the database file; "" means .tinyagent/tinyagent.db under
+	// --cwd. A relative path is resolved against --cwd; "~/" is expanded.
+	Path string `yaml:"path"`
+	// Level is "metadata" (default; no prompt, message, argument or output
+	// bodies) or "full".
+	Level string `yaml:"level"`
+	// MaxDays and MaxRuns prune older runs at run start; 0 keeps all.
+	MaxDays int `yaml:"max_days"`
+	MaxRuns int `yaml:"max_runs"`
+	// MaxPayloadBytes caps each stored event payload; 0 means 65536.
+	MaxPayloadBytes int `yaml:"max_payload_bytes"`
 }
 
 // Hooks lists the commands run before and after matching tool calls.
@@ -104,6 +123,7 @@ func Default() AgentConfig {
 
 		MaxBackgroundProcesses: 4,
 		MaxFormatErrors:        DefaultMaxFormatErrors,
+		LogDB:                  LogDB{Level: "metadata", MaxDays: 30, MaxRuns: 500},
 	}
 }
 
@@ -158,6 +178,12 @@ func Load(path string) (AgentConfig, error) {
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) { // io.EOF: empty or comment-only file
 		return cfg, fmt.Errorf("parse config %s: %w", path, err)
+	}
+	if l := cfg.LogDB.Level; l != "metadata" && l != "full" {
+		return cfg, fmt.Errorf("config %s: log_db.level %q must be metadata or full", path, l)
+	}
+	if cfg.LogDB.MaxDays < 0 || cfg.LogDB.MaxRuns < 0 || cfg.LogDB.MaxPayloadBytes < 0 {
+		return cfg, fmt.Errorf("config %s: log_db max_days, max_runs and max_payload_bytes must be >= 0", path)
 	}
 	if cfg.MaxFormatErrors < 1 {
 		return cfg, fmt.Errorf("config %s: max_format_errors must be a whole number >= 1, got %d", path, cfg.MaxFormatErrors)
