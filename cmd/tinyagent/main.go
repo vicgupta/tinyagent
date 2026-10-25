@@ -18,6 +18,7 @@ import (
 
 	"github.com/vicgupta/tinyagent/internal/agent"
 	"github.com/vicgupta/tinyagent/internal/config"
+	"github.com/vicgupta/tinyagent/internal/hooks"
 	"github.com/vicgupta/tinyagent/internal/mcptools"
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/tools"
@@ -134,7 +135,12 @@ func run() int {
 		return fail(err)
 	}
 
-	cfg, err := config.Load(config.Find(o.configPath))
+	cfgPath := config.Find(o.configPath)
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return fail(err)
+	}
+	hookRunner, err := hooks.New(cfg.Hooks, cfgPath)
 	if err != nil {
 		return fail(err)
 	}
@@ -196,6 +202,7 @@ func run() int {
 			ExternalCall:   mcpRegistry.Call,
 		},
 		Config:       cfg,
+		Hooks:        hookRunner,
 		Out:          runOutput(o.jsonOutput),
 		Err:          os.Stderr,
 		Verbose:      o.verbose,
@@ -257,7 +264,12 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	}
 	modelName := src.Model
 
-	cfg, err := config.Load(config.Find(o.configPath))
+	cfgPath := config.Find(o.configPath)
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		return fail(err)
+	}
+	hookRunner, err := hooks.New(cfg.Hooks, cfgPath)
 	if err != nil {
 		return fail(err)
 	}
@@ -340,6 +352,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 			Stream:         jsonStream(o.jsonOutput),
 		},
 		Config:       cfg,
+		Hooks:        hookRunner,
 		Out:          runOutput(o.jsonOutput),
 		Err:          os.Stderr,
 		Verbose:      o.verbose,

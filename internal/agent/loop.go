@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vicgupta/tinyagent/internal/config"
+	"github.com/vicgupta/tinyagent/internal/hooks"
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
@@ -53,6 +54,8 @@ type Agent struct {
 	// NoCompact turns off context compaction: the full history is always
 	// sent, and a context-overflow error ends the run.
 	NoCompact bool
+	// Hooks run around tool calls the executor permits; nil runs none.
+	Hooks *hooks.Runner
 	// OnStep is called after every step, e.g. to save the trajectory. A
 	// non-nil error stops the run.
 	OnStep func(*trajectory.Trajectory) error
@@ -190,7 +193,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 
 		for _, call := range msg.ToolCalls {
 			a.event("tool.call", map[string]any{"id": call.ID, "name": call.Function.Name, "arguments": eventArguments(call.Function.Arguments)})
-			out, isError := a.Tools.RunWithError(ctx, call)
+			out, isError := a.runTool(ctx, t, call)
 			a.event("tool.result", map[string]any{"id": call.ID, "name": call.Function.Name, "output": out, "is_error": isError})
 			t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: call.ID, Content: out})
 			v.add(t, t.Messages[len(t.Messages)-1])
@@ -202,6 +205,60 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			return a.saveFailed(t, err)
 		}
 	}
+}
+
+// runTool executes call with its matching hooks. Calls the executor rejects
+// (read-only denials, unknown tools) never reach hooks, so hooks cannot widen
+// tool authority.
+func (a *Agent) runTool(ctx context.Context, t *trajectory.Trajectory, call model.ToolCall) (string, bool) {
+	if a.Hooks == nil || !a.Tools.Permits(call.Function.Name) {
+		return a.Tools.RunWithError(ctx, call)
+	}
+	in := hooks.Input{
+		ToolName: call.Function.Name, ToolCallID: call.ID, Arguments: eventArguments(call.Function.Arguments),
+		Root: a.Tools.Root, ReadOnly: a.Tools.ReadOnly, Step: t.Steps,
+	}
+	for _, r := range a.Hooks.Pre(ctx, in) {
+		a.hookRan(call, r)
+		if r.Denied {
+			return tools.Truncate(fmt.Sprintf("error: denied by pre_tool hook %s: %s", r.Command, r.Reason), a.Tools.MaxOutputChars), true
+		}
+	}
+	out, isError := a.Tools.RunWithError(ctx, call)
+	var feedback strings.Builder
+	for _, r := range a.Hooks.Post(ctx, in, out, isError) {
+		a.hookRan(call, r)
+		feedback.WriteString(r.Feedback)
+	}
+	if feedback.Len() > 0 {
+		out = tools.Truncate(out+feedback.String(), a.Tools.MaxOutputChars)
+	}
+	return out, isError
+}
+
+// hookRan reports one hook run as an event, a verbose line, and, for a
+// failed hook, a warning.
+func (a *Agent) hookRan(call model.ToolCall, r hooks.Result) {
+	a.event("hook", map[string]any{
+		"event": r.Event, "tool_call_id": call.ID, "tool_name": call.Function.Name,
+		"command": r.Command, "decision": r.Decision, "duration_ms": r.Duration.Milliseconds(),
+	})
+	if a.Verbose {
+		fmt.Fprintf(a.Err, "hook %s %s for %s: %s (%s)\n", r.Event, r.Command, call.Function.Name, r.Decision, r.Duration.Round(time.Millisecond))
+	}
+	if r.Decision != hooks.Error {
+		return
+	}
+	outcome := "result unchanged"
+	if r.Event == hooks.PreTool {
+		outcome = "call allowed"
+		if r.Denied {
+			outcome = "call denied"
+		}
+	}
+	msg := fmt.Sprintf("%s hook %s failed for %s: %s; %s", r.Event, r.Command, call.Function.Name, r.Reason, outcome)
+	fmt.Fprintln(a.Err, "warning:", msg)
+	a.event("warning", map[string]any{"message": msg})
 }
 
 func externalToolNames(specs []model.ToolSpec) []string {

@@ -162,3 +162,36 @@ func TestEmptyConfigUsesDefaults(t *testing.T) {
 		}
 	}
 }
+
+func TestHooksConfig(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "c.yaml")
+	write(t, p, `hooks:
+  pre_tool:
+    - match: "bash|start_process"
+      command: /usr/local/bin/policy
+      args: [--profile, ci]
+      env: [POLICY_TOKEN]
+      timeout_seconds: 10
+      on_error: allow
+  post_tool:
+    - command: /usr/local/bin/fmt-check
+`)
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pre, post := cfg.Hooks.PreTool, cfg.Hooks.PostTool
+	if len(pre) != 1 || pre[0].Match != "bash|start_process" || pre[0].Command != "/usr/local/bin/policy" || len(pre[0].Args) != 2 ||
+		pre[0].Env[0] != "POLICY_TOKEN" || pre[0].TimeoutSec == nil || *pre[0].TimeoutSec != 10 || pre[0].OnError != "allow" {
+		t.Errorf("pre_tool = %+v", pre)
+	}
+	if len(post) != 1 || post[0].TimeoutSec != nil || post[0].Match != "" {
+		t.Errorf("post_tool = %+v", post)
+	}
+
+	write(t, p, "hooks:\n  pre_tool:\n    - command: /bin/x\n      mach: bash\n")
+	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "mach") || !strings.Contains(err.Error(), p) {
+		t.Errorf("unknown hook key: err = %v", err)
+	}
+}

@@ -108,6 +108,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 | `assistant.message` | `text` (complete assistant message) |
 | `tool.call` | `id`, `name`, `arguments` (decoded JSON value, or a string if malformed) |
 | `tool.result` | `id`, `name`, `output` (same configured truncation as tool output), `is_error` |
+| `hook` | `event` (`pre_tool` or `post_tool`), `tool_call_id`, `tool_name`, `command`, `decision` (`allow`, `deny`, `feedback`, or `error`), `duration_ms`; emitted between the call's `tool.call` and `tool.result` |
 | `compaction` | `step`, `reason`, `stage`, `tokens_before`, `tokens_after`, `elided_messages`, `summarized_messages` |
 | `warning` / `error` | `message` |
 | `result` | `status`, `submission`, cumulative `steps`, `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cost_usd`, invocation `duration_ms` |
@@ -196,6 +197,18 @@ mcp_servers:                 # omitted by default; each entry runs a trusted loc
     env: [TEAM_DOCS_TOKEN]   # names only; tinyagent copies their current values to the child
     discovery_timeout_seconds: 15
     call_timeout_seconds: 60
+hooks:                       # omitted by default; see Tool hooks below
+  pre_tool:
+    - match: "bash|start_process"   # Go regexp matched against the whole tool name; omit to match every tool
+      command: /usr/local/bin/tinyagent-policy
+      args: [--profile, ci]
+      env: [POLICY_TOKEN]           # names only, as in mcp_servers
+      timeout_seconds: 10           # default 30, range 1..600
+      on_error: deny                # pre_tool only; deny (default) or allow
+  post_tool:
+    - match: "write_file|edit_file"
+      command: /usr/local/bin/fmt-check
+      timeout_seconds: 60
 ```
 
 ### Local MCP tools
@@ -205,6 +218,21 @@ MCP is disabled unless `mcp_servers` is explicitly configured. Each configured e
 The Go MCP SDK v1.8.0 supports protocol revisions 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26, and 2024-11-05 over stdio. Tinyagent discovers the complete paginated catalog once per run, with a 15-second default discovery timeout, 100-page, 256-selected-tool, 64-KiB-per-schema, and 1-MiB-total-schema caps, and exposes only configured names. Tool names are sent to providers as `<alias>__<original-name>` and must fit provider-compatible naming rules. The accepted input schema subset supports object, array, string, number, integer, boolean and null types (a single type or an array such as `["string", "null"]`), nested properties/items, required, enum, const, numeric bounds and `multipleOf`, length, `pattern`, `format`, item and property counts, `uniqueItems`, annotations (`title`, `description`, `default`, `examples`), and boolean `additionalProperties`. A top-level `$schema` declaration is dropped. Other keywords, including `anyOf`/`oneOf`/`allOf` and references, are rejected, and a selected tool with such a schema stops startup. Each call defaults to a 60-second timeout; a timed-out call returns an error to the model and the server stays available, while any other call failure disables that server for the rest of the run. Text content is joined with newlines, structured output is appended as JSON, unsupported content is marked as omitted, tool errors remain visible, and model-visible output is capped at 256 KiB before the normal output cap is applied. Stdio protocol data is kept separate from server stderr.
 
 MCP tool calls and results are stored in trajectories along with the external tool names. Trajectories from MCP-enabled runs cannot be resumed. Resuming a built-in-only checkpoint works with `mcp_servers` configured; the servers are not started and the run keeps the built-in tools. Trajectories and server stderr may contain sensitive data supplied by tools or the server; no blanket redaction is provided. On shutdown tinyagent closes MCP sessions and asks their processes to exit, then the SDK applies its bounded termination. Unix process descendants and Windows child-process cleanup have platform-specific behavior; tinyagent does not promise process-tree cleanup on Windows.
+
+### Tool hooks
+
+Hooks are disabled unless `hooks` is configured. A `pre_tool` hook runs before a matching tool call and can deny it with a reason the model sees; a `post_tool` hook runs after it and can append feedback, such as formatter or linter output, to the result the model sees. Like MCP servers, hooks are trusted local executables running with your privileges: they are read only from the user config or the `-c` file, never from the repository, launched directly (no shell) with an absolute `command`, `--cwd` as the working directory, and the same minimal environment (`PATH`, the Windows process variables when present, and only the named `env` variables, which must be set at startup). Provider API keys are not passed unless named. Hooks are a guardrail and automation point, not a sandbox: they see a call's parsed arguments, not what a shell command actually does.
+
+Each hook gets one JSON object on stdin: `schema_version` (`1`), `event` (`pre_tool` or `post_tool`), `tool_name`, `tool_call_id`, `arguments` (decoded JSON, or the raw string if malformed), canonical `root`, `read_only`, and `step`; `post_tool` also gets `output` (the model-visible result after normal truncation) and `is_error`. The input can contain secrets from tool arguments and output.
+
+| Event | Exit 0 | Exit 2 | Other exit, failure to start, timeout, or invalid stdout JSON |
+|---|---|---|---|
+| `pre_tool` | Allow, unless stdout is `{"decision":"deny","reason":"..."}` | Deny; the reason is stderr | Apply `on_error`: deny by default (the reason names the hook and the failure), or allow with a warning |
+| `post_tool` | Optional stdout `{"feedback":"..."}` is appended to the result | stderr is appended to the result | Warning on stderr; the result is unchanged |
+
+A denied call is not executed; the model gets the error result `error: denied by pre_tool hook <command>: <reason>` and the run continues. Matching hooks run one at a time in config order: the first `pre_tool` deny stops the rest, and every matching `post_tool` hook runs, each appending its feedback under `[post_tool hook <command>]` (capped at 8 KiB per hook; the combined result still honors `max_output_chars`). Read-only denials and unknown tools are rejected before hooks, so hooks never run for them and cannot widen authority; with `--read-only`, hooks still run for `read_file`, `list_files`, and `grep`. MCP tools are matched by their exposed `<alias>__<tool>` name. Ctrl-C or the wall-time limit kills a running hook (its process group on Unix; only the process on Windows). `-v` prints one stderr line per hook run, `--json` emits a `hook` event, and trajectories record the model-visible results, including denial reasons and feedback. Resumed runs use the hooks in the current config.
+
+Two examples: a `post_tool` hook on `write_file|edit_file` that runs `gofmt -l` on the edited path and prints `{"feedback":"..."}` when it lists files, and a `pre_tool` hook on `write_file|edit_file` that exits 2 with `edit schema.sql and run make gen instead` when `arguments.path` is under `migrations/`.
 
 ## Long runs
 

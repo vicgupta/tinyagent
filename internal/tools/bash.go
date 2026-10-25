@@ -50,3 +50,7 @@ func BashStream(ctx context.Context, root, command string, timeout time.Duration
 	}
 	return fmt.Sprintf("<returncode>%d</returncode>\n<output>\n%s</output>", code, buf.String()), nil
 }
+
+// SetProcessGroup makes cancelling cmd kill its whole process group, as for
+// bash. On Windows only the process itself is killed.
+func SetProcessGroup(cmd *exec.Cmd) { setProcessGroup(cmd) }

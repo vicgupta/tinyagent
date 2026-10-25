@@ -171,6 +171,17 @@ func (e *Executor) Catalog() []model.ToolSpec {
 	return append(out, e.ExternalSpecs...)
 }
 
+// Permits reports whether a call to name would be dispatched: name is in the
+// catalog, which in read-only mode holds only the read-only built-ins.
+func (e *Executor) Permits(name string) bool {
+	for _, s := range e.Catalog() {
+		if s.Function.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 	if e.ReadOnly && (name != "read_file" && name != "list_files" && name != "grep") {
 		return "", fmt.Errorf("tool %q is unavailable in read-only mode; only read_file, list_files, and grep are allowed", name)
@@ -351,6 +362,10 @@ func skipDir(name string) bool {
 	}
 	return false
 }
+
+// Truncate caps s at max characters, keeping its head and tail; 0 means
+// unlimited. It is the same cap applied to tool output.
+func Truncate(s string, max int) string { return truncate(s, max) }
 
 func truncate(s string, max int) string {
 	if max <= 0 || len(s) <= max {
