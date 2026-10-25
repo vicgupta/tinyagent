@@ -4,7 +4,7 @@
 curl -fsSL https://raw.githubusercontent.com/vicgupta/tinyagent/main/install.sh | sh
 ```
 
-A minimal coding agent in a single static Go binary. It gives an LLM nine tools (`read_file`, `write_file`, `edit_file`, `list_files`, `grep`, `bash`, and `start_process`, `read_process`, `stop_process` for background commands), plus the opt-in `update_plan`, `skill`, `view_image`, `apply_patch`, and `delegate` tools, and keeps a linear message history until the model submits.
+A minimal coding agent in a single static Go binary. It gives an LLM nine tools (`read_file`, `write_file`, `edit_file`, `list_files`, `grep`, `bash`, and `start_process`, `read_process`, `stop_process` for background commands), plus the opt-in `update_plan`, `skill`, `view_image`, `apply_patch`, `delegate`, and `web_fetch` tools, and keeps a linear message history until the model submits.
 
 ## Install
 
@@ -94,6 +94,8 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--plan` | config `plan.enabled`, else off | Give the model the `update_plan` tool; see [Plan tool](#plan-tool) |
 | `--apply-patch` | config `apply_patch`, else off | Give the model the `apply_patch` tool for multi-file, multi-hunk edits, checked before any write; `--apply-patch=false` disables it. See [apply_patch](#apply_patch) |
 | `--subagents` | config `subagents.enabled`, else off | Give the model the `delegate` tool, which hands a task to a read-only subagent with a fresh context and returns only its report; `--subagents=false` disables it. See [Subagents](#subagents) |
+| `--web-fetch` | config `web_fetch.enabled`, else off | Give the model the `web_fetch` tool, which reads pages from allowlisted hosts as text; needs a nonempty allowlist. `--web-fetch=false` disables it. See [Web fetch](#web-fetch) |
+| `--web-fetch-allow-domain <host>` | config `web_fetch.allowed_domains`, else none | Hosts `web_fetch` may read. Repeatable; replaces the config list; requires `--web-fetch` (or `web_fetch.enabled: true`). See [Web fetch](#web-fetch) |
 | `--tool-output-files` | config `tool_output_files.enabled`, else off | Save the full text of tool results over `max_output_chars` to a per-run file the model can page with `read_file` and `grep`; `--tool-output-files=false` disables it. See [Tool output files](#tool-output-files) |
 | `--images` | config `images.enabled`, else off | Let vision-capable models see images: the `view_image` tool and MCP image pass-through; see [Images](#images) |
 | `--plan-file` | — | Mirror the current plan to this Markdown file after each checkpoint save (requires the plan tool) |
@@ -125,7 +127,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 
 | Type | Fields |
 |---|---|
-| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `reasoning_effort` (only when set), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy), `file_access` (`deny_read`, `deny_write`; only with [file access](#restricting-file-access) rules) |
+| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `reasoning_effort` (only when set), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy), `file_access` (`deny_read`, `deny_write`; only with [file access](#restricting-file-access) rules), `web_fetch` (`allowed_domains`; only with [web fetch](#web-fetch) on) |
 | `assistant.message` | `text` (complete assistant message) |
 | `tool.call` | `id`, `name`, `arguments` (decoded JSON value, or a string if malformed) |
 | `tool.result` | `id`, `name`, `output` (same configured truncation as tool output), `is_error`; with [tool output files](#tool-output-files), a saved result also has `output_file` (path relative to `--cwd`) and `output_bytes` |
@@ -139,6 +141,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 | `rewind.plan` / `rewind.result` | `--rewind --json` only: the target snapshot, each `{op, path}` change and counts; then `restored`, `not_restored`, `pre_rewind` and `error` (on a partial restore) |
 | `warning` / `error` | `message` |
 | `sandbox.network_denied` | `host`, `port`, `reason`; the sandbox allowlist proxy refused a request from a command (see [Network allowlist](#network-allowlist)) |
+| `web_fetch` | `url`, `final_url`, `status`, `content_type`, `bytes`, `truncated`, `duration_ms`, and `denied_reason` (for a refused URL) or `error` (for a failed fetch); one per fetch attempt, emitted before its `tool.result` (see [Web fetch](#web-fetch)) |
 | `provider.retry` | `attempt` (the upcoming attempt number), `reason` (`http_<status>` or `network`), `backoff_ms`; only emitted when a model request is retried |
 | `result` | `status`, `submission`, cumulative `steps`, `structured_output` (only with `--output-schema` and status `Submitted`), `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cost_usd`, invocation `duration_ms` |
 
@@ -297,7 +300,7 @@ The lookup order is: `-c PATH` if given (a missing or unreadable file is an erro
 
 Every key is optional, but an unrecognized key (a typo like `step_limt`) is an error naming the file and the key, rather than silently ignored. Command-line flags override the file.
 
-Set `read_only: true` to make repository analysis the default. `--read-only` overrides the config value, including `--read-only=false`. In this mode, executor dispatch allows only `read_file`, `list_files`, and `grep`; writes, edits, shell commands, and background process tools are denied even if task text or repository instructions request them. Denials are returned to the model as tool errors. The restriction is model tool authority, not an OS sandbox (for that, see `--sandbox` under Sandboxing commands): an explicit `-o` trajectory destination can be written by the CLI, provider requests still send their context to the selected service, and the Codex provider may refresh its credential file. `--update` is an administrative action outside task-tool policy. Readable secrets (unless hidden with [`file_access`](#restricting-file-access) rules), symlinks that point outside `--cwd`, existing lexical path behavior, and AGENTS.md discovery retain their existing limitations; read-only mode does not make an untrusted repository safe.
+Set `read_only: true` to make repository analysis the default. `--read-only` overrides the config value, including `--read-only=false`. In this mode, executor dispatch allows only `read_file`, `list_files`, and `grep`; writes, edits, shell commands, and background process tools are denied even if task text or repository instructions request them. Denials are returned to the model as tool errors. The restriction is model tool authority, not an OS sandbox (for that, see `--sandbox` under Sandboxing commands): an explicit `-o` trajectory destination can be written by the CLI, provider requests still send their context to the selected service, and the Codex provider may refresh its credential file, and the opt-in [`web_fetch`](#web-fetch) tool, which only reads allowlisted URLs, stays available when enabled. `--update` is an administrative action outside task-tool policy. Readable secrets (unless hidden with [`file_access`](#restricting-file-access) rules), symlinks that point outside `--cwd`, existing lexical path behavior, and AGENTS.md discovery retain their existing limitations; read-only mode does not make an untrusted repository safe.
 
 `model` saves a default model, so `tinyagent -t "fix the failing test"` needs no `-m`. The model is chosen in this order: `-m`/`--model` if given (even `-m openai/gpt-4o`), then a nonempty `$AGENT_MODEL`, then a nonempty `model` in the config, then `openai/gpt-4o`.
 
@@ -335,6 +338,11 @@ subagents:
   enabled: false          # offer the delegate tool (same as --subagents)
   model: ""               # child model, e.g. openai/gpt-5-mini; empty uses the parent model
   max_steps: 30           # step cap per delegated task; 0 means the default (30)
+web_fetch:
+  enabled: false          # offer the web_fetch tool (same as --web-fetch)
+  allowed_domains: []     # hosts it may read, e.g. [pkg.go.dev, "*.python.org"]; required when enabled
+  max_bytes: 2097152      # response bytes read per fetch (2 MiB); must be >= 1
+  timeout_seconds: 20     # per fetch, including redirects; 1 to 120
 images:
   enabled: false          # view_image tool and MCP image pass-through (same as --images)
 max_image_bytes: 5242880  # largest image sent to the model (5 MiB); must be >= 1
@@ -585,6 +593,25 @@ A checkpoint records whether `apply_patch` was enabled (`apply_patch_enabled`), 
 
 Not in this version: children that can write or run commands, parallel children, nested delegation, and streaming the child's output.
 
+### Web fetch
+
+`--web-fetch` (or `web_fetch.enabled: true`) adds a `web_fetch` tool that reads one URL and returns it as text, for documentation, changelogs and API references. It is off by default; with it off, requests, tools, and checkpoints are unchanged. It is separate from command networking: it runs inside tinyagent, not through `bash`, so enabling it gives commands no network access, and `--sandbox`, `--sandbox-network` and `sandbox_allowed_domains` neither restrict nor widen it.
+
+```yaml
+web_fetch:
+  enabled: true
+  allowed_domains: [pkg.go.dev, "*.python.org"]
+  max_bytes: 2097152      # 2 MiB
+  timeout_seconds: 20     # 1 to 120
+```
+
+- **Allowlist.** `allowed_domains` (or `--web-fetch-allow-domain <host>`, repeatable, which replaces the config list) uses the same syntax as [`sandbox_allowed_domains`](#network-allowlist): `example.com`, `*.example.com` (subdomains only), and an optional `:port` (without one, ports 80 and 443). A bare `*`, an empty list while enabled, `timeout_seconds` outside 1 to 120, or `max_bytes` below 1 exits 2 before any model request, as does `--web-fetch-allow-domain` without enabling the tool. On start, one line such as `web_fetch: 2 domains (pkg.go.dev, *.python.org)` goes to stderr.
+- **What it fetches.** `http` and `https` URLs only, with no user name or password in them, by `GET` with `User-Agent: tinyagent/<version>` and no cookies or credentials. The host is checked before any connection; loopback, private, link-local (including the `169.254.169.254` metadata address) and other non-public addresses are refused unless that literal address is listed, and the connection goes to the address that was checked. Up to 5 redirects are followed, each checked the same way. `HTTP_PROXY` and similar variables are ignored.
+- **What it returns.** A header line such as `[web_fetch https://pkg.go.dev/fmt → 200 text/html, 81,234 bytes, 412 lines]` (noting truncation and a redirected final URL), then the body: HTML is converted to readable text (headings, lists, code blocks and `[text](url)` links kept; scripts, styles and navigation dropped), and plain text, Markdown, JSON and XML are returned as is. Other content types, non-2xx statuses, timeouts and refused URLs are tool errors. At most `max_bytes` of the response is read, and the result is then subject to `max_output_chars` and [tool output files](#tool-output-files) like any other tool output. Page content is untrusted input to the model.
+- **Where it is offered.** It only reads, so it is offered with `--read-only`. [Subagents](#subagents) never get it. `pre_tool`/`post_tool` [hooks](#tool-hooks) match it as `web_fetch` and see `arguments` as `{"url": "..."}`; a denied call makes no request.
+- **Observability.** `-v` prints one line per fetch (URL, status, type, bytes, time, or the refusal reason). `--json` and `--log-db` emit a `web_fetch` event per attempt and list `allowed_domains` in `run.started`; `-o` trajectories record `web_fetch_enabled` and `web_fetch.allowed_domains`.
+- **Resume.** A checkpoint records whether `web_fetch` was enabled, and `--resume` keeps that setting: passing a conflicting `--web-fetch` exits 2, and the config's `web_fetch.enabled` is ignored on resume. The allowlist and limits come from the current invocation.
+
 ## Exit status
 
 The run ends when the model writes `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` (`Submitted`), stops calling tools (`Completed`), or hits a limit (`StepLimitExceeded`, `CostLimitExceeded`, `TimeLimitExceeded`), Ctrl-C (`Interrupted`), a non-retryable API error (`Error`), too many consecutive malformed tool-call steps (`RepeatedFormatError`, see below), or, with `--output-schema`, 3 consecutive invalid results (`InvalidOutput`), or stop hooks still rejecting the result after `max_stop_continuations` (`VerificationFailed`, see [Stop hooks](#stop-hooks)), or too many consecutive responses cut off at the output-token limit (`OutputTruncated`, see [Output truncation](#output-truncation)). The process exits 0 only for `Submitted` and `Completed`, 3 for `OutputTruncated`, and 1 otherwise (2 is reserved for usage errors).
@@ -644,7 +671,7 @@ Toolchains that cache outside the repo (Go, npm, pip) fail under the sandbox wit
 - **Windows:** not supported.
 - **Fail closed:** if the host cannot enforce the requested policy, tinyagent exits before the first model request and says what is missing. It never runs commands unsandboxed.
 - On start, one `sandbox:` line (backend, writable roots, network) goes to stderr, and `-o` trajectories record it as `sandbox`. With `--resume`, the current invocation's settings apply. With `--read-only` there are no command tools, so nothing is sandboxed.
-- **Not covered:** the in-process file tools (`read_file`, `write_file`, ... and their symlink behavior; see [Restricting file access](#restricting-file-access) for rules on them), MCP servers, and provider requests. Commands can still read anything you can, including credentials, and inherit your environment variables (API keys included) unless you set a [command environment](#command-environment) policy. With `--sandbox-network` they can send it to any host; prefer a [network allowlist](#network-allowlist). The sandbox reduces risk; it does not make untrusted code safe.
+- **Not covered:** [`web_fetch`](#web-fetch), which has its own allowlist and is unaffected by `--sandbox`, the in-process file tools (`read_file`, `write_file`, ... and their symlink behavior; see [Restricting file access](#restricting-file-access) for rules on them), MCP servers, and provider requests. Commands can still read anything you can, including credentials, and inherit your environment variables (API keys included) unless you set a [command environment](#command-environment) policy. With `--sandbox-network` they can send it to any host; prefer a [network allowlist](#network-allowlist). The sandbox reduces risk; it does not make untrusted code safe.
 
 ### Network allowlist
 

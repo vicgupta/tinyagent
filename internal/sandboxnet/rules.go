@@ -144,3 +144,12 @@ func isNonPublic(a netip.Addr) bool {
 	}
 	return false
 }
+
+// IsNonPublic reports whether a is a loopback, private, link-local (cloud
+// metadata), shared, multicast or unspecified address: one that is refused
+// after resolution unless listed literally. The web_fetch tool shares it.
+func IsNonPublic(a netip.Addr) bool { return isNonPublic(a) }
+
+// NormalizeHost lowercases h and strips a trailing dot and IPv6 brackets,
+// the form Rule.Allows expects.
+func NormalizeHost(h string) string { return normalizeHost(h) }

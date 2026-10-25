@@ -114,6 +114,9 @@ type AgentConfig struct {
 	// read-only child agent (off by default; --subagents overrides
 	// Enabled).
 	Subagents Subagents `yaml:"subagents"`
+	// WebFetch configures the opt-in web_fetch tool (off by default;
+	// --web-fetch overrides Enabled).
+	WebFetch WebFetch `yaml:"web_fetch"`
 	// Skills turns on Agent Skills discovery from .agents/skills (off by
 	// default; --skills / --no-skills override it).
 	Skills bool `yaml:"skills"`
@@ -199,6 +202,42 @@ type Images struct {
 
 // DefaultMaxImageBytes is the default max_image_bytes (5 MiB).
 const DefaultMaxImageBytes = 5 << 20
+
+// WebFetch configures the opt-in web_fetch tool, which reads allowlisted
+// URLs in tinyagent's own process, separately from command network access.
+type WebFetch struct {
+	Enabled bool `yaml:"enabled"`
+	// AllowedDomains lists the hosts web_fetch may read, in the
+	// sandbox_allowed_domains syntax. Required when Enabled.
+	AllowedDomains []string `yaml:"allowed_domains,omitempty"`
+	// MaxBytes caps the body read per fetch. Must be >= 1; default 2 MiB.
+	MaxBytes int `yaml:"max_bytes"`
+	// TimeoutSeconds caps each fetch, redirects included (1..120;
+	// default 20).
+	TimeoutSeconds int `yaml:"timeout_seconds"`
+}
+
+// Web fetch defaults and limits.
+const (
+	DefaultWebFetchMaxBytes       = 2 << 20
+	DefaultWebFetchTimeoutSeconds = 20
+	MaxWebFetchTimeoutSeconds     = 120
+)
+
+// Validate checks the limits and allowlist syntax. An empty allowlist with
+// Enabled is checked after flags apply (see the CLI).
+func (w WebFetch) Validate() error {
+	if w.MaxBytes < 1 {
+		return fmt.Errorf("web_fetch.max_bytes must be >= 1, got %d", w.MaxBytes)
+	}
+	if w.TimeoutSeconds < 1 || w.TimeoutSeconds > MaxWebFetchTimeoutSeconds {
+		return fmt.Errorf("web_fetch.timeout_seconds must be between 1 and %d, got %d", MaxWebFetchTimeoutSeconds, w.TimeoutSeconds)
+	}
+	if _, err := sandboxnet.ParseRules(w.AllowedDomains); err != nil {
+		return fmt.Errorf("web_fetch.allowed_domains %v", err)
+	}
+	return nil
+}
 
 // Subagents configures the opt-in delegate tool.
 type Subagents struct {
@@ -459,6 +498,7 @@ func Default() AgentConfig {
 		MaxFormatErrors:        DefaultMaxFormatErrors,
 		MaxTruncations:         DefaultMaxTruncations,
 		MaxImageBytes:          DefaultMaxImageBytes,
+		WebFetch:               WebFetch{MaxBytes: DefaultWebFetchMaxBytes, TimeoutSeconds: DefaultWebFetchTimeoutSeconds},
 		LogDB:                  LogDB{Level: "metadata", MaxDays: 30, MaxRuns: 500},
 		ToolOutputFiles:        ToolOutputFiles{Dir: DefaultToolOutputDir, MaxRuns: DefaultToolOutputMaxRuns},
 		Snapshots:              Snapshots{MaxFileBytes: DefaultSnapshotMaxFileBytes},
@@ -573,6 +613,9 @@ func Load(path string) (AgentConfig, error) {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
 	}
 	if err := cfg.FileAccess.Validate(); err != nil {
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
+	}
+	if err := cfg.WebFetch.Validate(); err != nil {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
 	}
 	if r := cfg.Container.Runtime; r != "" && r != "docker" && r != "podman" {
