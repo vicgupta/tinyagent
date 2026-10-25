@@ -80,7 +80,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `-h, --help` | | Print usage to stdout and exit |
 | `-t, --task` | — | Task prompt (required unless `--resume`; with `--resume` of a finished run, the follow-up task); `-` reads it from stdin |
 | `--resume` | — | Continue a validated unfinished trajectory; requires explicit matching `--cwd` and a new `-o` path |
-| `-m, --model` | `$AGENT_MODEL`, else config `model`, else `openai/gpt-4o` | `<provider>/<model>`; no `/` means openai. Providers: openai, openrouter, anthropic, ollama, codex |
+| `-m, --model` | `$AGENT_MODEL`, else config `model`, else `openai/gpt-4o` | `<provider>/<model>`; no `/` means openai. Providers: openai, openrouter, anthropic, ollama, codex, plus any defined under [`providers`](#named-providers) |
 | `--reasoning-effort` | config `reasoning_effort`, else unset | Reasoning effort sent to the provider: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; see [Reasoning](#reasoning) |
 | `--openai-api` | config `openai_api`, else `auto` | Transport for the `openai` provider: `auto`, `responses`, or `chat`; see [OpenAI transport](#openai-transport) |
 | `-c, --config` | user config, else built-in | YAML config file; see [Config](#config) |
@@ -307,6 +307,13 @@ log_db:                   # opt-in SQLite event log; see Event log database
   max_payload_bytes: 65536
 reasoning_effort: medium  # optional; see Reasoning; --reasoning-effort wins
 openai_api: auto          # openai provider transport: auto, responses, or chat; --openai-api wins
+providers:                # omitted by default; see Named providers
+  - id: gateway           # use as -m gateway/<model>
+    api: chat             # chat, responses, or anthropic
+    base_url: https://llm.internal.example.com/v1
+    api_key_env: GATEWAY_API_KEY   # optional; names only, never the key itself
+    models:
+      vendor/model-x: {input_price_per_mtok: 2, output_price_per_mtok: 8, context_window: 128000}
 mcp_servers:                 # omitted by default; each entry runs a trusted local executable
   - alias: docs
     command: /usr/local/bin/team-docs-mcp
@@ -332,6 +339,33 @@ hooks:                       # omitted by default; see Tool hooks below
       timeout_seconds: 300
   max_stop_continuations: 5     # default 5, range 1..50
 ```
+
+### Named providers
+
+`providers` defines extra endpoints you can select with `-m <id>/<model>`, such as an internal gateway, a self-hosted server or another OpenAI-compatible service, without setting `OPENAI_BASE_URL`. Everything after the first `/` is sent to the endpoint as the model name, so `-m gateway/vendor/model-x` sends `vendor/model-x`.
+
+```yaml
+providers:
+  - id: gateway
+    api: chat                  # chat (POST <base_url>/chat/completions), responses (POST <base_url>/responses), or anthropic (POST <base_url>/v1/messages)
+    base_url: https://llm.internal.example.com/v1
+    api_key_env: GATEWAY_API_KEY   # optional; sent as Authorization: Bearer (x-api-key for anthropic)
+    headers: {X-Team: core}        # optional static, non-secret headers
+    env_headers: {X-Tenant: GATEWAY_TENANT}   # optional headers whose values come from environment variables
+    models:                        # optional per-model metadata
+      vendor/model-x:
+        input_price_per_mtok: 2
+        output_price_per_mtok: 8
+        cache_read_multiplier: 0.1 # optional; price of cached input relative to input
+        context_window: 128000     # used for compaction
+```
+
+- `id` must be unique, contain no `/`, and not be a built-in provider (`openai`, `openrouter`, `anthropic`, `ollama`, `codex`); built-in names always mean the built-in provider. `api` must be `chat`, `responses` or `anthropic`, and `base_url` an absolute `http` or `https` URL without credentials. Prices must be non-negative and `context_window` positive. A config that breaks these rules is rejected before any request, naming the file and the `providers[i]` entry, with exit status 2. A misspelled key is rejected like any other unknown config key.
+- Secrets stay in the environment. `api_key_env` and `env_headers` name variables; tinyagent reads their values at startup and exits 2, before any request, if one is unset or empty. Static `headers` may not carry credentials (`Authorization`, `x-api-key`, `api-key`). Key and header values never appear in stderr, `-v`, `--json`, the trajectory or the event log database, which also redacts them if they show up in tool output. Without `api_key_env`, no key is sent.
+- Metadata matches the model name exactly. Top-level `input_price_per_mtok`, `output_price_per_mtok` and `context_window` still win over provider metadata. A model with no price behaves like an unknown built-in model: it costs $0 and, with a positive `--cost-limit`, prints the "no pricing available" warning. A `cache_read_multiplier` without prices refines the built-in price for that model name, if there is one.
+- `-v` prints `provider: <id> (api <api>, base_url <url>)`. A plain `http` base URL to a host other than localhost or a loopback address prints a warning, because requests and any key travel unencrypted. `run.started` in `--json` and the trajectory record `provider_api` and `provider_base_url` (never headers or keys); built-in providers leave them out.
+- `--resume` of a trajectory that used a named provider needs the same provider defined with the same `api` and `base_url`; otherwise it stops before any request and tells you what changed.
+- `openai_api`, `--openai-api` and `OPENAI_BASE_URL` apply only to the built-in `openai` provider. Configs with `providers` fail to load on tinyagent versions without this feature, since older versions reject the unknown key.
 
 ### OpenAI transport
 
@@ -417,7 +451,7 @@ tinyagent resends the whole history on every step, so a long run can outgrow the
 
 If a provider rejects a request as too long (`prompt is too long`, `context_length_exceeded`, `maximum context length`), tinyagent compacts and retries that step once; a second rejection ends the run as `Error`. This works even for models whose window isn't known.
 
-The window comes from a small built-in table (`internal/model/context.go`) or `context_window` in the config, which wins. Without either, only the retry-on-error path runs. Each compaction prints one line to stderr, such as `compacted context: ~182,000 → ~31,000 tokens (summarized 41 messages)`. The summary request's tokens and cost count toward the run's totals and `--cost-limit`, but not `--step-limit`. With `-o`, the trajectory keeps every original message, and `compactions` records each one: the step, the estimates before and after, the stage, the summary, and which messages the model was sent next.
+The window comes from a small built-in table (`internal/model/context.go`), a named provider's per-model `context_window` (see [Named providers](#named-providers)), or top-level `context_window` in the config, which wins. Without either, only the retry-on-error path runs. Each compaction prints one line to stderr, such as `compacted context: ~182,000 → ~31,000 tokens (summarized 41 messages)`. The summary request's tokens and cost count toward the run's totals and `--cost-limit`, but not `--step-limit`. With `-o`, the trajectory keeps every original message, and `compactions` records each one: the step, the estimates before and after, the stage, the summary, and which messages the model was sent next.
 
 Summaries lose detail. Put instructions that must hold for the whole run in `AGENTS.md`, which is part of the system prompt and never compacted. `--no-compact` turns all of this off.
 
@@ -619,5 +653,5 @@ Before the first model request tinyagent runs `<runtime> run -d --rm --init --la
 - For servers, watch modes, and other long-running commands, `start_process` runs `bash -c <command>` in the background and returns a process id (`p1`, `p2`, ...) with its first output. `read_process` returns only output produced since the last read, optionally waiting up to `timeout` milliseconds (max 60000) for some, or just the last `tail` lines. `stop_process` kills the process and its children (the whole process group on Unix) and reports the exit status and unread output. For example: start a server, `read_process` until it logs "listening", run tests against it, then stop it.
 - At most `max_background_processes` (default 4) run at once, and each keeps only its last 1 MiB of output; a read notes how many bytes were dropped. When the run ends for any reason (submission, a limit, Ctrl-C, or an error), every background process still registered is killed and its status and output tail are saved as `background_processes` in the trajectory, so nothing is left running. On Windows only the `bash` process itself is killed.
 - Path sandboxing is lexical: `..` and absolute paths outside `--cwd` are rejected, but a symlink inside the root that points outside it is followed. `bash` isn't sandboxed unless you pass `--sandbox` or `--env container` (see Sandboxing commands and Execution environments); without them, only run it on code you trust.
-- Cost uses a small built-in price table (`internal/model/provider.go`). Unknown models cost $0 unless you set the price in the config, so `--cost-limit` does nothing for them. With a positive cost limit, tinyagent prints a warning on stderr before the first request when the `openai`, `openrouter` or `anthropic` model has no price, naming `input_price_per_mtok` and `output_price_per_mtok`. The run continues as normal.
+- Cost uses a small built-in price table (`internal/model/provider.go`). Unknown models cost $0 unless you set the price in the config (top level, or per model under a [named provider](#named-providers)), so `--cost-limit` does nothing for them. With a positive cost limit, tinyagent prints a warning on stderr before the first request when the `openai`, `openrouter`, `anthropic` or named-provider model has no price, naming `input_price_per_mtok` and `output_price_per_mtok`. The run continues as normal.
 - The `anthropic` provider turns on [prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) for every request, so each step reads the history the previous step already sent from the cache instead of paying full price for it again. Input tokens in the summary and trajectory include cached tokens. Cost prices cache writes at 1.25× the input price and cache reads at 0.1× (less on models where Anthropic charges less, such as 0.05× for Claude Opus 5.5 and Sonnet 5.5). `input_price_per_mtok` overrides the base price and the multipliers apply on top.

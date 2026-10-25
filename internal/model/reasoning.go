@@ -51,6 +51,10 @@ func SetReasoningEffort(m Model, spec, effort string) error {
 	case *OpenAIResponses:
 		p.ReasoningEffort = effort
 	case *OpenAI:
+		if _, ok := ConfiguredProvider(spec); ok {
+			p.ReasoningEffort = effort
+			return nil
+		}
 		switch provider {
 		case "openai":
 			p.ReasoningEffort = effort

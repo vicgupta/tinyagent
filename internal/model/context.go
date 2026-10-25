@@ -17,7 +17,12 @@ var ContextWindows = map[string]int{
 // ContextWindow returns the context window for spec, a "<provider>/<model>"
 // name as given to New, or 0 when it isn't in ContextWindows. For a nested
 // name such as openrouter/anthropic/claude-x, the last segment is tried too.
+// A configured provider's model metadata, matched by exact name, comes
+// before the table.
 func ContextWindow(spec string) int {
+	if m, ok := configuredMeta(spec); ok && m.ContextWindow > 0 {
+		return m.ContextWindow
+	}
 	names := []string{spec}
 	if _, name, ok := strings.Cut(spec, "/"); ok {
 		names = append(names, name)

@@ -66,11 +66,15 @@ type Agent struct {
 	// OpenAIAPI is the openai provider's resolved transport, recorded in
 	// trajectories and run.started; the Model uses it.
 	OpenAIAPI string
-	Tools     *tools.Executor
-	Config    config.AgentConfig
-	Out       io.Writer // progress log; nil discards
-	Err       io.Writer // warnings; nil discards
-	Verbose   bool
+	// ProviderAPI and ProviderBaseURL describe a config-defined provider,
+	// recorded in trajectories and run.started; empty for built-ins.
+	ProviderAPI     string
+	ProviderBaseURL string
+	Tools           *tools.Executor
+	Config          config.AgentConfig
+	Out             io.Writer // progress log; nil discards
+	Err             io.Writer // warnings; nil discards
+	Verbose         bool
 	// Streamed means the model already wrote its text to Out as it arrived.
 	Streamed bool
 	// SkipAgentsMD stops Run from appending the nearest AGENTS.md at or above
@@ -184,6 +188,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		if t.OpenAIAPI == "" {
 			t.OpenAIAPI = a.OpenAIAPI
 		}
+		t.ProviderAPI, t.ProviderBaseURL = a.ProviderAPI, a.ProviderBaseURL
 		a.closeInterrupted(t)
 		notice := resumeNotice
 		if finished {
@@ -212,6 +217,8 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			Model:                 a.ModelName,
 			ReasoningEffort:       a.ReasoningEffort,
 			OpenAIAPI:             a.OpenAIAPI,
+			ProviderAPI:           a.ProviderAPI,
+			ProviderBaseURL:       a.ProviderBaseURL,
 			SchemaVersion:         trajectory.SchemaVersion,
 			Root:                  a.Tools.Root,
 			SystemPrompt:          system,

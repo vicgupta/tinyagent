@@ -55,6 +55,9 @@ func responsesTruncated(state string) bool {
 // MaxOutputTokensSupported reports whether the provider of spec accepts a
 // per-request output-token budget, and returns an error naming it if not.
 func MaxOutputTokensSupported(spec string) error {
+	if _, ok := ConfiguredProvider(spec); ok {
+		return nil
+	}
 	provider, _ := splitSpec(spec)
 	switch provider {
 	case "anthropic", "openai", "openrouter", "ollama":

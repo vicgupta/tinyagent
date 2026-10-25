@@ -199,8 +199,9 @@ func run() int {
 	cfgPath := config.Find(o.configPath)
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
-		return configFail(err)
+		return loadConfigError(err)
 	}
+	registerProviders(cfg)
 	hookRunner, err := hooks.New(cfg.Hooks, cfgPath)
 	if err != nil {
 		return fail(err)
@@ -258,6 +259,10 @@ func run() int {
 		return 2
 	}
 	openaiAPI := model.OpenAITransport(o.modelName, cfg.OpenAIAPI)
+	if err := model.CheckProviderEnv(o.modelName); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	}
 	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 
 	root, err := canonicalRoot(o.cwd)
@@ -301,6 +306,7 @@ func run() int {
 	if openaiAPI != "" && o.verbose {
 		fmt.Fprintf(os.Stderr, "openai transport: %s\n", openaiAPI)
 	}
+	announceProvider(os.Stderr, o.modelName, o.verbose)
 	m, err := model.NewWith(o.modelName, onText, model.Options{OpenAIAPI: openaiAPI})
 	if err != nil {
 		code := fail(err)
@@ -316,12 +322,15 @@ func run() int {
 		return 2
 	}
 	warnUnpriced(os.Stderr, o.modelName, cfg.CostLimit)
+	providerAPI, providerBaseURL := providerInfo(o.modelName)
 
 	a := &agent.Agent{
 		Model:           m,
 		ModelName:       o.modelName,
 		ReasoningEffort: cfg.ReasoningEffort,
 		OpenAIAPI:       openaiAPI,
+		ProviderAPI:     providerAPI,
+		ProviderBaseURL: providerBaseURL,
 		Tools: &tools.Executor{
 			Root:               root,
 			ReadOnly:           cfg.ReadOnly,
@@ -474,14 +483,23 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if flagWasSet(fs, "reasoning-effort") && o.reasoningEffort != src.ReasoningEffort {
 		return fail(fmt.Errorf("resume: --reasoning-effort %q conflicts with the checkpoint's reasoning_effort %q", o.reasoningEffort, src.ReasoningEffort))
 	}
-	if err := checkReasoningEffort(modelName, src.ReasoningEffort); err != nil {
-		return fail(fmt.Errorf("resume: %w", err))
-	}
 
 	cfgPath := config.Find(o.configPath)
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
-		return configFail(err)
+		return loadConfigError(err)
+	}
+	registerProviders(cfg)
+	// Checked after the config load so configured providers resolve.
+	if err := checkReasoningEffort(modelName, src.ReasoningEffort); err != nil {
+		return fail(fmt.Errorf("resume: %w", err))
+	}
+	if err := checkResumeProvider(src, modelName); err != nil {
+		return fail(err)
+	}
+	if err := model.CheckProviderEnv(modelName); err != nil {
+		fmt.Fprintln(os.Stderr, "error: resume:", err)
+		return 2
 	}
 	hookRunner, err := hooks.New(cfg.Hooks, cfgPath)
 	if err != nil {
@@ -611,6 +629,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if openaiAPI != "" && o.verbose {
 		fmt.Fprintf(os.Stderr, "openai transport: %s\n", openaiAPI)
 	}
+	announceProvider(os.Stderr, modelName, o.verbose)
 	m, err := model.NewWith(modelName, onText, model.Options{OpenAIAPI: openaiAPI})
 	if err != nil {
 		code := fail(err)
@@ -624,6 +643,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return fail(fmt.Errorf("resume: %w", err))
 	}
 	warnUnpriced(os.Stderr, modelName, cfg.CostLimit)
+	providerAPI, providerBaseURL := providerInfo(modelName)
 
 	// The agent records this boundary and clears the active termination before
 	// persisting the new starting state.
@@ -637,6 +657,8 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		ModelName:       modelName,
 		ReasoningEffort: src.ReasoningEffort,
 		OpenAIAPI:       openaiAPI,
+		ProviderAPI:     providerAPI,
+		ProviderBaseURL: providerBaseURL,
 		Tools: &tools.Executor{
 			Root:           root,
 			ReadOnly:       src.ReadOnly,
@@ -1152,6 +1174,10 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	if a.OpenAIAPI != "" {
 		started["openai_api"] = a.OpenAIAPI
 	}
+	if a.ProviderAPI != "" {
+		started["provider_api"] = a.ProviderAPI
+		started["provider_base_url"] = a.ProviderBaseURL
+	}
 	if a.FollowUp != "" {
 		started["follow_up"] = true
 	}
@@ -1315,6 +1341,9 @@ func configuredSecrets(cfg config.AgentConfig) []string {
 			vals = append(vals, v)
 		}
 	}
+	// Configured providers read their key and secret headers from the
+	// environment; redact those values too.
+	vals = append(vals, model.ProviderSecrets()...)
 	// Hook env entries name variables forwarded from tinyagent's own
 	// environment; redact the values they had at startup.
 	var hookDefs []config.Hook
@@ -1478,6 +1507,9 @@ func checkReasoningEffort(spec, effort string) error {
 	}
 	switch provider {
 	case "openai", "openrouter", "anthropic", "codex":
+		return nil
+	}
+	if _, ok := model.ConfiguredProvider(spec); ok {
 		return nil
 	}
 	return fmt.Errorf("--reasoning-effort/reasoning_effort is not supported by the %s provider", provider)

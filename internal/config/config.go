@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -81,6 +84,10 @@ type AgentConfig struct {
 	OpenAIAPI string `yaml:"openai_api"`
 
 	MCPServers []MCPServer `yaml:"mcp_servers,omitempty"`
+
+	// Providers are named model providers selectable as "<id>/<model>".
+	// They come only from the user config or -c.
+	Providers []Provider `yaml:"providers,omitempty"`
 
 	// Hooks are trusted local executables run around matching tool calls.
 	Hooks Hooks `yaml:"hooks,omitempty"`
@@ -270,6 +277,43 @@ type MCPServer struct {
 	CallTimeoutSec      int      `yaml:"call_timeout_seconds"`
 }
 
+// Provider is one config-defined model provider. Secrets come only from the
+// environment variables it names, never from the file itself.
+type Provider struct {
+	ID      string `yaml:"id"`
+	API     string `yaml:"api"` // chat, responses or anthropic
+	BaseURL string `yaml:"base_url"`
+	// APIKeyEnv names the variable holding the API key; "" sends no key.
+	APIKeyEnv string `yaml:"api_key_env,omitempty"`
+	// Headers are static, non-secret request headers.
+	Headers map[string]string `yaml:"headers,omitempty"`
+	// EnvHeaders maps a header name to the variable holding its value.
+	EnvHeaders map[string]string `yaml:"env_headers,omitempty"`
+	// Models holds per-model metadata, matched by exact model name.
+	Models map[string]ProviderModel `yaml:"models,omitempty"`
+}
+
+// ProviderModel is price and context-window metadata for one model of a
+// configured provider. Zero values mean unknown.
+type ProviderModel struct {
+	InputPricePerMTok  float64 `yaml:"input_price_per_mtok"`
+	OutputPricePerMTok float64 `yaml:"output_price_per_mtok"`
+	// CacheReadMultiplier is the cache-read price as a multiple of the
+	// input price, in (0, 1]; 0 means the default 0.1.
+	CacheReadMultiplier float64 `yaml:"cache_read_multiplier"`
+	ContextWindow       int     `yaml:"context_window"`
+}
+
+// ProviderAPIs are the accepted providers[].api values.
+var ProviderAPIs = []string{"chat", "responses", "anthropic"}
+
+// BuiltinProviders are reserved and can't be used as a providers[].id.
+var BuiltinProviders = []string{"openai", "openrouter", "anthropic", "ollama", "codex"}
+
+// ErrInvalidProvider wraps every providers validation error, so callers can
+// exit 2 for them.
+var ErrInvalidProvider = errors.New("invalid provider")
+
 // DefaultMaxFormatErrors is the default MaxFormatErrors.
 const DefaultMaxFormatErrors = 3
 
@@ -395,6 +439,9 @@ func Load(path string) (AgentConfig, error) {
 	if r := cfg.Container.Runtime; r != "" && r != "docker" && r != "podman" {
 		return cfg, fmt.Errorf("config %s: container.runtime %q must be docker or podman", path, r)
 	}
+	if err := validateProviders(cfg.Providers); err != nil {
+		return cfg, fmt.Errorf("config %s: %w", path, err)
+	}
 	for _, p := range cfg.SandboxWritablePaths {
 		if !filepath.IsAbs(p) {
 			return cfg, fmt.Errorf("config %s: sandbox_writable_paths entry %q must be an absolute path", path, p)
@@ -443,4 +490,120 @@ func checkCommandEnv(n *yaml.Node) error {
 		}
 	}
 	return nil
+}
+
+// validateProviders checks every providers entry. Errors wrap
+// ErrInvalidProvider and name the offending entry.
+func validateProviders(ps []Provider) error {
+	seen := map[string]bool{}
+	for i, p := range ps {
+		where := fmt.Sprintf("providers[%d]", i)
+		if p.ID != "" {
+			where = fmt.Sprintf("providers[%d] (id %q)", i, p.ID)
+		}
+		bad := func(format string, args ...any) error {
+			return fmt.Errorf("%w: %s: %s", ErrInvalidProvider, where, fmt.Sprintf(format, args...))
+		}
+		switch {
+		case strings.TrimSpace(p.ID) == "":
+			return bad("id is required")
+		case strings.Contains(p.ID, "/"):
+			return bad("id must not contain \"/\"")
+		case p.ID != strings.TrimSpace(p.ID) || strings.ContainsAny(p.ID, " \t\r\n"):
+			return bad("id must not contain whitespace")
+		case slices.Contains(BuiltinProviders, p.ID):
+			return bad("id %q is a built-in provider name (reserved: %s)", p.ID, strings.Join(BuiltinProviders, ", "))
+		case seen[p.ID]:
+			return bad("duplicate id %q", p.ID)
+		}
+		seen[p.ID] = true
+		if !slices.Contains(ProviderAPIs, p.API) {
+			return bad("api %q must be one of %s", p.API, strings.Join(ProviderAPIs, ", "))
+		}
+		u, err := url.Parse(p.BaseURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return bad("base_url %q must be an absolute http or https URL", p.BaseURL)
+		}
+		if u.User != nil {
+			return bad("base_url must not contain credentials; use api_key_env or env_headers")
+		}
+		if u.RawQuery != "" || u.Fragment != "" {
+			return bad("base_url must not have a query or fragment")
+		}
+		if p.APIKeyEnv != "" && !validEnvName(p.APIKeyEnv) {
+			return bad("api_key_env %q is not a valid environment variable name", p.APIKeyEnv)
+		}
+		headers := map[string]bool{}
+		for name, v := range p.Headers {
+			if !validHeaderName(name) {
+				return bad("header name %q is not a valid HTTP token", name)
+			}
+			if l := strings.ToLower(name); l == "authorization" || l == "x-api-key" || l == "api-key" {
+				return bad("header %q carries a credential; set it with api_key_env or env_headers instead", name)
+			}
+			if strings.ContainsAny(v, "\r\n\x00") {
+				return bad("header %q value contains a control character", name)
+			}
+			headers[strings.ToLower(name)] = true
+		}
+		for name, env := range p.EnvHeaders {
+			if !validHeaderName(name) {
+				return bad("env_headers name %q is not a valid HTTP token", name)
+			}
+			if headers[strings.ToLower(name)] {
+				return bad("header %q is set in both headers and env_headers", name)
+			}
+			if !validEnvName(env) {
+				return bad("env_headers %q: %q is not a valid environment variable name", name, env)
+			}
+		}
+		for name, m := range p.Models {
+			if strings.TrimSpace(name) == "" {
+				return bad("models has an empty model name")
+			}
+			for _, f := range []struct {
+				key string
+				v   float64
+			}{{"input_price_per_mtok", m.InputPricePerMTok}, {"output_price_per_mtok", m.OutputPricePerMTok}} {
+				if f.v < 0 || math.IsNaN(f.v) || math.IsInf(f.v, 0) {
+					return bad("models[%q].%s must be a finite number >= 0, got %v", name, f.key, f.v)
+				}
+			}
+			if c := m.CacheReadMultiplier; c < 0 || c > 1 || math.IsNaN(c) {
+				return bad("models[%q].cache_read_multiplier must be between 0 and 1, got %v", name, c)
+			}
+			if m.ContextWindow < 0 {
+				return bad("models[%q].context_window must be >= 0, got %d", name, m.ContextWindow)
+			}
+		}
+	}
+	return nil
+}
+
+// validHeaderName reports whether s is an RFC 9110 token.
+func validHeaderName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case strings.ContainsRune("!#$%&'*+-.^_`|~", c):
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func validEnvName(s string) bool {
+	if s == "" || (s[0] >= '0' && s[0] <= '9') {
+		return false
+	}
+	for _, c := range s {
+		if !(c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+			return false
+		}
+	}
+	return true
 }
