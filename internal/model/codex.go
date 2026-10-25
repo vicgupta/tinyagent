@@ -287,7 +287,7 @@ func toResponses(messages []Message) (string, []map[string]any) {
 			for _, tc := range m.ToolCalls {
 				input = append(input, map[string]any{
 					"type": "function_call", "call_id": tc.ID,
-					"name": tc.Function.Name, "arguments": tc.Function.Arguments,
+					"name": tc.Function.Name, "arguments": replayArguments(m, tc),
 				})
 			}
 		case "tool":

@@ -18,6 +18,10 @@ type OpenAI struct {
 	// reasoning.effort when NestedReasoning is set (OpenRouter).
 	ReasoningEffort string
 	NestedReasoning bool
+	// MaxOutputTokens, if > 0, is sent under MaxOutputKey
+	// (max_completion_tokens, or max_tokens for Ollama).
+	MaxOutputTokens int
+	MaxOutputKey    string
 }
 
 // openAIMessage is the wire form of Message; it omits Extra and always sends content.
@@ -70,7 +74,14 @@ func (o *OpenAI) Query(ctx context.Context, messages []Message, tools []ToolSpec
 		if len(m.Images) > 0 {
 			content += "\n" + chatImageNote
 		}
-		wire[i] = openAIMessage{Role: m.Role, Content: content, ToolCalls: m.ToolCalls, ToolCallID: m.ToolCallID}
+		calls := m.ToolCalls
+		if cut, _ := Truncated(m); cut && len(calls) > 0 {
+			calls = append([]ToolCall(nil), calls...)
+			for j := range calls {
+				calls[j].Function.Arguments = replayArguments(m, calls[j])
+			}
+		}
+		wire[i] = openAIMessage{Role: m.Role, Content: content, ToolCalls: calls, ToolCallID: m.ToolCallID}
 	}
 	body := map[string]any{"model": o.Model, "messages": wire}
 	if o.ReasoningEffort != "" {
@@ -79,6 +90,13 @@ func (o *OpenAI) Query(ctx context.Context, messages []Message, tools []ToolSpec
 		} else {
 			body["reasoning_effort"] = o.ReasoningEffort
 		}
+	}
+	if o.MaxOutputTokens > 0 {
+		key := o.MaxOutputKey
+		if key == "" {
+			key = "max_completion_tokens"
+		}
+		body[key] = o.MaxOutputTokens
 	}
 	if len(tools) > 0 {
 		body["tools"] = tools
@@ -118,6 +136,9 @@ func (o *OpenAI) Query(ctx context.Context, messages []Message, tools []ToolSpec
 	}
 	if finish != "" {
 		msg.Extra = map[string]any{"finish_reason": finish}
+	}
+	if finish == "length" {
+		markTruncated(&msg, "finish_reason: length")
 	}
 	return msg, price(o.Model, usage.PromptTokens, usage.CompletionTokens), nil
 }
