@@ -30,6 +30,8 @@ type Codex struct {
 	AuthFile string
 	Model    string
 	OnText   func(string)
+	// ReasoningEffort, if set, is sent as reasoning.effort.
+	ReasoningEffort string
 
 	session string // prompt cache key, one per run
 }
@@ -188,11 +190,12 @@ type codexEvent struct {
 	Type  string `json:"type"`
 	Delta string `json:"delta"`
 	Item  struct {
-		Type      string `json:"type"`
-		CallID    string `json:"call_id"`
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
-		Content   []struct {
+		Type             string `json:"type"`
+		EncryptedContent string `json:"encrypted_content"`
+		CallID           string `json:"call_id"`
+		Name             string `json:"name"`
+		Arguments        string `json:"arguments"`
+		Content          []struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"content"`
@@ -251,6 +254,9 @@ func (c *Codex) Query(ctx context.Context, messages []Message, tools []ToolSpec)
 		"stream":           true, // the Codex backend only streams
 		"prompt_cache_key": c.session,
 	}
+	if c.ReasoningEffort != "" {
+		body["reasoning"] = map[string]string{"effort": c.ReasoningEffort}
+	}
 	url := strings.TrimRight(c.BaseURL, "/") + "/responses"
 
 	resp, err := post(ctx, url, c.headers(a), body)
@@ -272,6 +278,9 @@ func (c *Codex) Query(ctx context.Context, messages []Message, tools []ToolSpec)
 		cost  Cost
 		done  bool
 		state string
+		// reasoning items, kept only when they carry encrypted_content:
+		// with store=false an item without it cannot be sent back.
+		reasoning []json.RawMessage
 	)
 	err = readSSE(resp.Body, func(_, data string) error {
 		var ev codexEvent
@@ -289,6 +298,15 @@ func (c *Codex) Query(ctx context.Context, messages []Message, tools []ToolSpec)
 				for _, p := range ev.Item.Content {
 					if p.Type == "output_text" {
 						text.WriteString(p.Text)
+					}
+				}
+			case "reasoning":
+				if ev.Item.EncryptedContent != "" {
+					var raw struct {
+						Item json.RawMessage `json:"item"`
+					}
+					if json.Unmarshal([]byte(data), &raw) == nil {
+						reasoning = append(reasoning, raw.Item)
 					}
 				}
 			case "function_call":
@@ -332,6 +350,12 @@ func (c *Codex) Query(ctx context.Context, messages []Message, tools []ToolSpec)
 	if state != "" {
 		msg.Extra = map[string]any{"status": state}
 	}
+	if len(reasoning) > 0 {
+		if msg.Extra == nil {
+			msg.Extra = map[string]any{}
+		}
+		msg.Extra[ExtraCodexReasoning] = reasoning
+	}
 	return msg, cost, nil
 }
 
@@ -364,6 +388,16 @@ func toResponses(messages []Message) (string, []map[string]any) {
 				"content": []map[string]any{{"type": "input_text", "text": m.Content}},
 			})
 		case "assistant":
+			// Reasoning items go back right before the items of the same
+			// response, as the Responses API expects during function calling.
+			if raw, ok := rawItems(m.Extra[ExtraCodexReasoning]); ok {
+				for _, r := range raw {
+					var item map[string]any
+					if json.Unmarshal(r, &item) == nil && item["type"] == "reasoning" {
+						input = append(input, item)
+					}
+				}
+			}
 			if m.Content != "" {
 				input = append(input, map[string]any{
 					"type": "message", "role": "assistant",

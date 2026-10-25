@@ -81,6 +81,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `-t, --task` | — | Task prompt (required unless `--resume`); `-` reads it from stdin |
 | `--resume` | — | Continue a validated unfinished trajectory; requires explicit matching `--cwd` and a new `-o` path |
 | `-m, --model` | `$AGENT_MODEL`, else config `model`, else `openai/gpt-4o` | `<provider>/<model>`; no `/` means openai. Providers: openai, openrouter, anthropic, ollama, codex |
+| `--reasoning-effort` | config `reasoning_effort`, else unset | Reasoning effort sent to the provider: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; see [Reasoning](#reasoning) |
 | `-c, --config` | user config, else built-in | YAML config file; see [Config](#config) |
 | `--cwd` | `.` | Root directory; tools can't reach outside it |
 | `--step-limit` | 0 (unlimited) | Max model calls |
@@ -111,7 +112,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 
 | Type | Fields |
 |---|---|
-| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed` |
+| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `reasoning_effort` (only when set) |
 | `assistant.message` | `text` (complete assistant message) |
 | `tool.call` | `id`, `name`, `arguments` (decoded JSON value, or a string if malformed) |
 | `tool.result` | `id`, `name`, `output` (same configured truncation as tool output), `is_error` |
@@ -242,6 +243,7 @@ log_db:                   # opt-in SQLite event log; see Event log database
   max_days: 30            # prune runs older than this; 0 keeps all
   max_runs: 500           # keep at most this many runs; 0 keeps all
   max_payload_bytes: 65536
+reasoning_effort: medium  # optional; see Reasoning; --reasoning-effort wins
 mcp_servers:                 # omitted by default; each entry runs a trusted local executable
   - alias: docs
     command: /usr/local/bin/team-docs-mcp
@@ -263,6 +265,27 @@ hooks:                       # omitted by default; see Tool hooks below
       command: /usr/local/bin/fmt-check
       timeout_seconds: 60
 ```
+
+### Reasoning
+
+Reasoning models return state that must be sent back during tool use. tinyagent keeps it for the run and replays it unchanged:
+
+- `anthropic`: when a response contains `thinking` or `redacted_thinking` blocks (thinking is on by default on current Claude models), all of its content blocks, including signatures, are sent back complete and in their original order in the same assistant message. Streaming and `--no-stream` behave the same.
+- `codex`: Responses API `reasoning` items that carry `encrypted_content` are sent back in `input` right before the function calls and text of the same response. Items without `encrypted_content` are dropped, because with `store: false` they cannot be referenced.
+
+`reasoning_effort` (config) or `--reasoning-effort` (flag, which wins) chooses how much the model reasons. When it is unset, nothing is added to requests and the model's default applies. When set, it maps to:
+
+| Provider | Request field |
+|---|---|
+| `codex` | `reasoning.effort` |
+| `openai` | `reasoning_effort` |
+| `openrouter` | `reasoning.effort` |
+| `anthropic` | `output_config.effort` (thinking is not turned on explicitly) |
+| `ollama` | not supported; exits 2 |
+
+An unknown value exits 2 before any request. Which values a model accepts varies; a provider rejection is reported like any other model error and is not retried. The effort is recorded as `reasoning_effort` in trajectories and is kept on `--resume` (a different `--reasoning-effort` is refused, like `--model`). Higher effort means more output tokens, which providers bill and which count toward `--cost-limit`; on Anthropic, thinking also counts toward the request's 8192 `max_tokens`. Changing the effort invalidates provider prompt caches.
+
+Reasoning state is stored in each assistant message's `extra` (`anthropic_content`, `codex_reasoning`) in trajectories and checkpoints, so `--resume` replays it. It may include thinking text and encrypted reasoning blobs; treat trajectory files as private. Reasoning state is not shown in the terminal or in `--json` events.
 
 ### Local MCP tools
 

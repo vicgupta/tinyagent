@@ -51,6 +51,11 @@ type AgentConfig struct {
 	// 0 uses the table.
 	ContextWindow int `yaml:"context_window"`
 
+	// ReasoningEffort is sent to the provider's reasoning control: none,
+	// minimal, low, medium, high, xhigh, or max. "" sends nothing, so the
+	// model's default applies.
+	ReasoningEffort string `yaml:"reasoning_effort"`
+
 	MCPServers []MCPServer `yaml:"mcp_servers,omitempty"`
 
 	// Hooks are trusted local executables run around matching tool calls.

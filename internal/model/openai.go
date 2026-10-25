@@ -14,6 +14,10 @@ type OpenAI struct {
 	APIKey  string
 	Model   string
 	OnText  func(string) // if set, stream and report text deltas
+	// ReasoningEffort, if set, is sent as reasoning_effort, or as
+	// reasoning.effort when NestedReasoning is set (OpenRouter).
+	ReasoningEffort string
+	NestedReasoning bool
 }
 
 // openAIMessage is the wire form of Message; it omits Extra and always sends content.
@@ -65,6 +69,13 @@ func (o *OpenAI) Query(ctx context.Context, messages []Message, tools []ToolSpec
 		wire[i] = openAIMessage{Role: m.Role, Content: m.Content, ToolCalls: m.ToolCalls, ToolCallID: m.ToolCallID}
 	}
 	body := map[string]any{"model": o.Model, "messages": wire}
+	if o.ReasoningEffort != "" {
+		if o.NestedReasoning {
+			body["reasoning"] = map[string]string{"effort": o.ReasoningEffort}
+		} else {
+			body["reasoning_effort"] = o.ReasoningEffort
+		}
+	}
 	if len(tools) > 0 {
 		body["tools"] = tools
 	}

@@ -85,7 +85,7 @@ func (v *view) estimate() int {
 }
 
 func msgChars(m model.Message) int {
-	n := len(m.Content)
+	n := len(m.Content) + model.ReasoningChars(m)
 	for _, c := range m.ToolCalls {
 		n += len(c.Function.Name) + len(c.Function.Arguments)
 	}

@@ -21,15 +21,17 @@ type SandboxInfo struct {
 
 type Trajectory struct {
 	// Sandbox is set when bash and start_process ran in an OS sandbox.
-	Sandbox      *SandboxInfo    `json:"sandbox,omitempty"`
-	ReadOnly     bool            `json:"read_only"`
-	Task         string          `json:"task"`
-	Model        string          `json:"model"`
-	Messages     []model.Message `json:"messages"`
-	Steps        int             `json:"steps"`
-	Cost         float64         `json:"cost"`
-	InputTokens  int             `json:"input_tokens"`
-	OutputTokens int             `json:"output_tokens"`
+	Sandbox  *SandboxInfo `json:"sandbox,omitempty"`
+	ReadOnly bool         `json:"read_only"`
+	Task     string       `json:"task"`
+	Model    string       `json:"model"`
+	// ReasoningEffort is the reasoning_effort sent with every request, if any.
+	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
+	Messages        []model.Message `json:"messages"`
+	Steps           int             `json:"steps"`
+	Cost            float64         `json:"cost"`
+	InputTokens     int             `json:"input_tokens"`
+	OutputTokens    int             `json:"output_tokens"`
 	// Prompt-cache totals, included in InputTokens.
 	CacheReadTokens  int    `json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens int    `json:"cache_write_tokens,omitempty"`
