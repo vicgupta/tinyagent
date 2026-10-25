@@ -19,7 +19,7 @@ func probeSandbox(network bool) (string, error) {
 }
 
 func (s *Sandbox) wrap(ctx context.Context, command string) *exec.Cmd {
-	return exec.CommandContext(ctx, sandboxExec, "-p", s.profile(), "bash", "-c", command)
+	return exec.CommandContext(ctx, sandboxExec, "-p", s.profile(), bashPath(), "-c", command)
 }
 
 func (s *Sandbox) profile() string {

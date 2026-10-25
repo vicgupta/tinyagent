@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -63,6 +64,15 @@ func (s *Sandbox) Describe() string {
 		net = "allowed"
 	}
 	return fmt.Sprintf("sandbox: %s; writable: %s; network: %s", s.Backend, strings.Join(s.Writable, ", "), net)
+}
+
+// bashPath resolves bash with tinyagent's own PATH, so the sandbox wrapper
+// finds it even when command_env withholds PATH from the command.
+func bashPath() string {
+	if p, err := exec.LookPath("bash"); err == nil {
+		return p
+	}
+	return "bash"
 }
 
 var errSandboxUnsupported = errors.New("sandbox: not supported on this operating system (supported: Linux with Landlock, macOS); run without --sandbox")

@@ -31,15 +31,25 @@ func environment(env Environment) Environment {
 // Local runs commands on the host, confined by Sandbox if it is non-nil.
 type Local struct {
 	Sandbox *Sandbox
+	// CommandEnv, when non-nil, is the whole environment commands get;
+	// nil inherits tinyagent's.
+	CommandEnv *CommandEnv
 }
 
 func (l Local) Command(ctx context.Context, root, command string) *exec.Cmd {
 	var cmd *exec.Cmd
 	if l.Sandbox == nil {
 		cmd = exec.CommandContext(ctx, "bash", "-c", command)
+		if l.CommandEnv != nil {
+			cmd.Env = append([]string{}, l.CommandEnv.Vars...)
+		}
 	} else {
 		cmd = l.Sandbox.wrap(ctx, command)
-		cmd.Env = append(os.Environ(), "TMPDIR="+l.Sandbox.Tmp)
+		env := os.Environ()
+		if l.CommandEnv != nil {
+			env = append([]string{}, l.CommandEnv.Vars...)
+		}
+		cmd.Env = append(env, "TMPDIR="+l.Sandbox.Tmp)
 	}
 	cmd.Dir = root
 	setProcessGroup(cmd)
