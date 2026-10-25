@@ -19,13 +19,18 @@ func Bash(ctx context.Context, root, command string, timeout time.Duration) (str
 // BashStream is Bash that also copies output to live, if non-nil, as it is
 // produced. The returned result is the same as Bash's.
 func BashStream(ctx context.Context, root, command string, timeout time.Duration, live io.Writer) (string, error) {
+	return bashStream(ctx, nil, root, command, timeout, live)
+}
+
+// bashStream is BashStream run under sb, if non-nil.
+func bashStream(ctx context.Context, sb *Sandbox, root, command string, timeout time.Duration, live io.Writer) (string, error) {
 	if timeout <= 0 {
 		timeout = 120 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
+	cmd := shellCommand(ctx, sb, command)
 	cmd.Dir = root
 	var buf bytes.Buffer
 	var w io.Writer = &buf

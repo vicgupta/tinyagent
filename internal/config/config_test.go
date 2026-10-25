@@ -195,3 +195,30 @@ func TestHooksConfig(t *testing.T) {
 		t.Errorf("unknown hook key: err = %v", err)
 	}
 }
+
+func TestSandboxConfig(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) string {
+		p := filepath.Join(dir, "c.yaml")
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	cfg, err := Load(write("sandbox: true\nsandbox_network: true\nsandbox_writable_paths: [" + dir + "]\n"))
+	if err != nil || !cfg.Sandbox || !cfg.SandboxNetwork || len(cfg.SandboxWritablePaths) != 1 {
+		t.Fatalf("cfg=%+v err=%v", cfg, err)
+	}
+	for _, body := range []string{
+		"sandbox_writable_paths: [rel/dir]\n",
+		"sandbox_writable_paths: [" + filepath.Join(dir, "missing") + "]\n",
+	} {
+		p := write(body)
+		if _, err := Load(p); err == nil || !strings.Contains(err.Error(), p) || !strings.Contains(err.Error(), "sandbox_writable_paths") {
+			t.Errorf("%q: err=%v", body, err)
+		}
+	}
+	if _, err := Load(write("sandox: true\n")); err == nil || !strings.Contains(err.Error(), "sandox") {
+		t.Errorf("misspelled key accepted: %v", err)
+	}
+}
