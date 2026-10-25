@@ -86,6 +86,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--step-limit` | 0 (unlimited) | Max model calls |
 | `--cost-limit` | 0 (unlimited) | Max USD |
 | `--time-limit` | 0 (unlimited) | Max wall-clock seconds; overrides `wall_time_seconds` |
+| `--max-format-errors` | config `max_format_errors`, else 3 | Stop with `RepeatedFormatError` after this many consecutive steps whose tool calls are all malformed; must be >= 1. See [Malformed tool calls](#malformed-tool-calls) |
 | `--no-compact` | off | Never compact the history; see [Long runs](#long-runs) |
 | `--read-only` | config `read_only`, else off | Permit only `read_file`, `list_files`, and `grep`; blocks edits, shell, and process tools. `--read-only=false` explicitly disables it. |
 | `--sandbox` | config `sandbox`, else off | Confine `bash`/`start_process` at the OS level: writes only under `--cwd`, a temp dir and `sandbox_writable_paths`, network off. See [Sandboxing commands](#sandboxing-commands) |
@@ -201,6 +202,7 @@ sandbox: false             # OS-confine bash/start_process; see Sandboxing comma
 step_limit: 50
 cost_limit: 2.0
 wall_time_seconds: 1800
+max_format_errors: 3      # consecutive malformed-call steps before RepeatedFormatError (>= 1)
 bash_timeout_seconds: 120
 max_output_chars: 30000   # tool output is truncated, keeping head and tail
 max_background_processes: 4   # start_process processes running at once (0 uses 4)
@@ -268,7 +270,7 @@ Summaries lose detail. Put instructions that must hold for the whole run in `AGE
 
 ## Exit status
 
-The run ends when the model writes `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` (`Submitted`), stops calling tools (`Completed`), or hits a limit (`StepLimitExceeded`, `CostLimitExceeded`, `TimeLimitExceeded`), Ctrl-C (`Interrupted`), a non-retryable API error (`Error`), or, with `--output-schema`, 3 consecutive invalid results (`InvalidOutput`). The process exits 0 only for `Submitted` and `Completed`.
+The run ends when the model writes `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` (`Submitted`), stops calling tools (`Completed`), or hits a limit (`StepLimitExceeded`, `CostLimitExceeded`, `TimeLimitExceeded`), Ctrl-C (`Interrupted`), a non-retryable API error (`Error`), too many consecutive malformed tool-call steps (`RepeatedFormatError`, see below), or, with `--output-schema`, 3 consecutive invalid results (`InvalidOutput`). The process exits 0 only for `Submitted` and `Completed`.
 
 Every run ends with one summary line on stderr, so stdout keeps only the model's text:
 
@@ -277,6 +279,14 @@ Submitted after 12 steps in 1m42s (48,213 input / 3,104 output tokens, $0.23)
 ```
 
 Cost is shown only when it's above zero, and the token/cost part is left out if the run ended before any model response. When some input was read from the prompt cache, the line also shows how much, e.g. `(48,213 input / 3,104 output tokens, 41,900 cached, $0.09)`. With `-o`, the trajectory JSON also records `input_tokens` and `output_tokens` totals, plus `cache_read_tokens` and `cache_write_tokens` when they're non-zero.
+
+### Malformed tool calls
+
+A tool call is a *format error* when its arguments aren't valid JSON or not a JSON object, its tool name isn't offered, or its arguments miss a field the tool's schema marks `required` or give a field the wrong JSON type (integers may still be sent as numeric strings). The tool isn't run; the model gets a short correction instead, such as `format error: read_file is missing required field "path". Call one of: read_file, ... with arguments matching its schema.`, and the run continues. Errors from a well-formed call that runs (a command exiting 1, a missing file) are not format errors, and in `--read-only` mode a non-read-only built-in keeps its read-only denial.
+
+A step whose tool calls are all format errors counts toward a consecutive limit; any step with at least one well-formed call resets it. After `--max-format-errors` (config `max_format_errors`, default 3) such steps in a row, the run ends with `RepeatedFormatError`, an empty submission, and a non-zero exit. Format-error steps are ordinary model calls, so they count toward `--step-limit` and `--cost-limit`, which are checked first. A response with no tool calls still ends the run as `Completed`.
+
+The summary line shows the count (`..., 3 format errors: <last reason>`). With `--json`, a malformed call's `tool.result` event has `"format_error": true` and the `result` event has `format_errors`. With `-o`, the trajectory records `format_errors`, `consecutive_format_errors`, `format_error_messages` (indexes of the correction messages) and `last_format_error`, and keeps the original arguments. The consecutive count is restored on `--resume`, and a `RepeatedFormatError` checkpoint can be resumed.
 
 ## Troubleshooting
 

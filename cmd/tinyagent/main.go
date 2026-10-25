@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,7 +42,7 @@ var (
 type options struct {
 	task, modelName, configPath, cwd, output, resume string
 	outputSchema                                     string
-	stepLimit, timeLimit                             int
+	stepLimit, timeLimit, maxFormatErrors            int
 	costLimit                                        float64
 	verbose, noStream, noAgentsMD, noCompact         bool
 	readOnly, sandbox, sandboxNetwork                bool
@@ -67,6 +68,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.IntVar(&o.stepLimit, "step-limit", 0, "max model calls, 0 = unlimited")
 	fs.Float64Var(&o.costLimit, "cost-limit", 0, "max USD, 0 = unlimited")
 	fs.IntVar(&o.timeLimit, "time-limit", 0, "max wall-clock seconds, 0 = unlimited")
+	fs.IntVar(&o.maxFormatErrors, "max-format-errors", config.DefaultMaxFormatErrors, "stop after this many consecutive steps of malformed tool calls (>= 1)")
 	fs.StringVar(&o.output, "output", "", "write trajectory JSON")
 	fs.StringVar(&o.output, "o", "", "shorthand for --output")
 	fs.StringVar(&o.resume, "resume", "", "continue an unfinished run from a trajectory JSON checkpoint")
@@ -170,6 +172,9 @@ func run() int {
 		return fail(err)
 	}
 	applyFlagOverrides(fs, &cfg, o.stepLimit, o.costLimit, o.timeLimit)
+	if flagWasSet(fs, "max-format-errors") {
+		cfg.MaxFormatErrors = o.maxFormatErrors
+	}
 	if flagWasSet(fs, "read-only") {
 		cfg.ReadOnly = o.readOnly
 	}
@@ -342,6 +347,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		fmt.Fprintln(os.Stderr, "resume: configured MCP servers are not started; resumed runs use only the built-in tools")
 	}
 	applyFlagOverrides(fs, &cfg, o.stepLimit, o.costLimit, o.timeLimit)
+	if flagWasSet(fs, "max-format-errors") {
+		cfg.MaxFormatErrors = o.maxFormatErrors
+	}
 	if flagWasSet(fs, "read-only") && o.readOnly != src.ReadOnly {
 		return fail(errors.New("resume: --read-only conflicts with the checkpoint's recorded mode; start a fresh task"))
 	}
@@ -534,7 +542,7 @@ var usageGroups = []struct {
 }{
 	{"", [][3]string{{"h", "help", ""}}},
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "resume", "path"}}},
-	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "no-compact", ""}}},
+	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "sandbox", ""}, {"", "sandbox-network", ""}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}}},
 }
@@ -565,7 +573,11 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 			fl := fs.Lookup(f[1])
 			help := fl.Usage
 			if d := fl.DefValue; d != "" && d != "0" && d != "false" {
-				help += fmt.Sprintf(" (default %q)", d)
+				if _, err := strconv.Atoi(d); err == nil {
+					help += fmt.Sprintf(" (default %s)", d)
+				} else {
+					help += fmt.Sprintf(" (default %q)", d)
+				}
 			}
 			fmt.Fprintf(w, "%-*s%s\n", width+4, left(f), help)
 		}
@@ -598,8 +610,14 @@ func summaryLine(t *trajectory.Trajectory, elapsed time.Duration) string {
 		}
 		s += ")"
 	}
+	if t.FormatErrors > 0 {
+		s += fmt.Sprintf(", %d format errors", t.FormatErrors)
+	}
 	if t.ExitStatus == agent.StatusError {
 		s += ": " + t.Submission
+	}
+	if t.ExitStatus == agent.StatusFormatError && t.LastFormatError != "" {
+		s += ": " + t.LastFormatError
 	}
 	return s
 }
@@ -661,6 +679,8 @@ func validateLimits(o options) string {
 		return "--cost-limit must be finite and >= 0 (0 = unlimited)"
 	case o.timeLimit < 0:
 		return "--time-limit must be >= 0"
+	case o.maxFormatErrors < 1:
+		return "--max-format-errors must be a whole number >= 1"
 	}
 	return ""
 }
@@ -836,6 +856,7 @@ func resultFields(t *trajectory.Trajectory, elapsed time.Duration) map[string]an
 		"input_tokens": t.InputTokens, "output_tokens": t.OutputTokens,
 		"cache_read_tokens": t.CacheReadTokens, "cache_write_tokens": t.CacheWriteTokens,
 		"cost_usd": t.Cost, "duration_ms": elapsed.Milliseconds(),
+		"format_errors": t.FormatErrors,
 	}
 	if t.ExitStatus == agent.StatusSubmitted && t.StructuredOutput != nil {
 		fields["structured_output"] = t.StructuredOutput

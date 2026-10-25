@@ -158,7 +158,7 @@ func TestHooksSkipRejectedCalls(t *testing.T) {
 		PostTool: []config.Hook{hookstest.Hook(t, ".*", "log", log, "post")},
 	})
 	res := toolResults(a.Run(context.Background(), "task").Messages)
-	if len(res) != 3 || !strings.Contains(res[0], "unavailable in read-only mode") || !strings.Contains(res[1], "read-only") || res[2] != "hi" {
+	if len(res) != 3 || !strings.Contains(res[0], "unavailable in read-only mode") || !strings.HasPrefix(res[1], "format error: unknown tool") || res[2] != "hi" {
 		t.Errorf("results = %q", res)
 	}
 	if b, _ := os.ReadFile(log); string(b) != "pre\npost\n" {

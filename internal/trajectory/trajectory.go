@@ -59,6 +59,14 @@ type Trajectory struct {
 	MCPEnabled            bool     `json:"mcp_enabled,omitempty"`
 	ExternalTools         []string `json:"external_tools,omitempty"`
 	ExternalToolSignature string   `json:"external_tool_signature,omitempty"`
+	// FormatErrors counts malformed tool calls over the whole run, and
+	// ConsecutiveFormatErrors the current run of steps whose calls were all
+	// malformed; it is restored on resume. FormatErrorMessages lists the
+	// indexes in Messages of tool results that were format-error corrections.
+	FormatErrors            int    `json:"format_errors,omitempty"`
+	ConsecutiveFormatErrors int    `json:"consecutive_format_errors,omitempty"`
+	FormatErrorMessages     []int  `json:"format_error_messages,omitempty"`
+	LastFormatError         string `json:"last_format_error,omitempty"`
 	// Resume records the checkpoint this run continued, when it did.
 	Resume *ResumeInfo `json:"resume,omitempty"`
 }

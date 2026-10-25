@@ -87,7 +87,7 @@ func Load(path string) (*Trajectory, error) {
 
 func unfinished(status string) bool {
 	switch status {
-	case "", "StepLimitExceeded", "CostLimitExceeded", "TimeLimitExceeded", "Interrupted", "Error":
+	case "", "StepLimitExceeded", "CostLimitExceeded", "TimeLimitExceeded", "Interrupted", "Error", "RepeatedFormatError":
 		return true
 	}
 	return false
@@ -148,6 +148,16 @@ func (t *Trajectory) Validate() error {
 		}
 		known[name] = true
 	}
+	if t.FormatErrors < 0 || t.ConsecutiveFormatErrors < 0 || t.ConsecutiveFormatErrors > t.Steps || len(t.FormatErrorMessages) != t.FormatErrors {
+		return errors.New("checkpoint has invalid format-error counters")
+	}
+	markers := map[int]bool{}
+	for _, idx := range t.FormatErrorMessages {
+		if idx < 2 || idx >= len(t.Messages) || markers[idx] || t.Messages[idx].Role != "tool" {
+			return errors.New("checkpoint has invalid format-error markers")
+		}
+		markers[idx] = true
+	}
 	steps = 0
 	for i := 2; i < len(t.Messages); {
 		m := t.Messages[i]
@@ -163,9 +173,16 @@ func (t *Trajectory) Validate() error {
 			return errors.New("checkpoint history is not an unfinished assistant/tool boundary")
 		}
 		ids := map[string]bool{}
-		for _, c := range m.ToolCalls {
+		for k, c := range m.ToolCalls {
 			var args map[string]json.RawMessage
-			if c.ID == "" || ids[c.ID] || c.Type != "function" || !known[c.Function.Name] || json.Unmarshal([]byte(c.Function.Arguments), &args) != nil || args == nil {
+			// A malformed call is valid history when its result was a
+			// format-error correction (the tool never ran).
+			malformed := !known[c.Function.Name] || json.Unmarshal([]byte(c.Function.Arguments), &args) != nil || args == nil
+			if malformed {
+				r := i + 1 + k
+				malformed = !markers[r] || r >= len(t.Messages) || !strings.HasPrefix(t.Messages[r].Content, "format error:")
+			}
+			if c.ID == "" || ids[c.ID] || c.Type != "function" || malformed {
 				return errors.New("checkpoint has an invalid or duplicate tool call")
 			}
 			ids[c.ID] = true
