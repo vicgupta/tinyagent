@@ -64,6 +64,9 @@ type Executor struct {
 	// Delegate offers the opt-in delegate tool (also in read-only mode).
 	// The agent loop runs its calls; the executor never does.
 	Delegate bool
+	// WebFetch, when set, offers the opt-in web_fetch tool (also in
+	// read-only mode). nil leaves it off.
+	WebFetch *WebFetcher
 	// OutputFiles, when set, saves the full text of over-limit results to a
 	// per-run file and keeps that directory out of grep and list_files
 	// walks. nil keeps plain truncation.
@@ -109,6 +112,7 @@ type args struct {
 	Name         string          `json:"name"`
 	File         string          `json:"file"`
 	Input        string          `json:"input"`
+	URL          string          `json:"url"`
 }
 
 // Specs returns the OpenAI tool definitions for all tools.
@@ -269,6 +273,9 @@ func (e *Executor) Catalog() []model.ToolSpec {
 	if e.Delegate {
 		out = append(out, DelegateSpec())
 	}
+	if e.WebFetch != nil {
+		out = append(out, WebFetchSpec())
+	}
 	if e.Skills.Len() > 0 {
 		out = append(out, e.Skills.Spec())
 	}
@@ -332,7 +339,8 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 		return "", errors.New("delegate is handled by the agent loop")
 	}
 	skillTool := name == skills.ToolName && e.Skills.Len() > 0
-	if e.ReadOnly && !skillTool && (name != "read_file" && name != "list_files" && name != "grep") {
+	webFetch := name == WebFetchToolName && e.WebFetch != nil
+	if e.ReadOnly && !skillTool && !webFetch && (name != "read_file" && name != "list_files" && name != "grep") {
 		return "", fmt.Errorf("tool %q is unavailable in read-only mode; only read_file, list_files, and grep are allowed", name)
 	}
 	var a args
@@ -340,6 +348,9 @@ func (e *Executor) run(ctx context.Context, name, raw string) (string, error) {
 		if err := json.Unmarshal([]byte(raw), &a); err != nil {
 			return "", fmt.Errorf("invalid arguments JSON: %w", err)
 		}
+	}
+	if webFetch {
+		return e.WebFetch.Fetch(ctx, a.URL)
 	}
 	if skillTool {
 		return e.Skills.Load(a.Name, a.File)

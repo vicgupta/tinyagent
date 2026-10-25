@@ -49,6 +49,8 @@ type options struct {
 	images                                           bool
 	applyPatch                                       bool
 	subagents                                        bool
+	webFetch                                         bool
+	webFetchAllowDomains                             domainList
 	toolOutputFiles                                  bool
 	skills, noSkills                                 bool
 	reasoningEffort                                  string
@@ -103,6 +105,8 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.plan, "plan", false, "enable the update_plan tool: a task plan saved in the checkpoint and pinned in every request (default off; config plan.enabled)")
 	fs.BoolVar(&o.toolOutputFiles, "tool-output-files", false, "save the full text of over-limit tool results under .tinyagent/tool-output so the model can page it with read_file and grep (default off; config tool_output_files.enabled)")
 	fs.BoolVar(&o.applyPatch, "apply-patch", false, "add the apply_patch tool: multi-file, multi-hunk edits in the *** Begin Patch format, checked before any write (default off; config apply_patch)")
+	fs.BoolVar(&o.webFetch, "web-fetch", false, "add the web_fetch tool: read an allowlisted http(s) URL as text, in tinyagent's own process, separate from command network access (default off; config web_fetch.enabled)")
+	fs.Var(&o.webFetchAllowDomains, "web-fetch-allow-domain", "with --web-fetch, let web_fetch read this host (name, *.domain or IP, optional :port); repeatable, replaces web_fetch.allowed_domains")
 	fs.BoolVar(&o.subagents, "subagents", false, "add the delegate tool: hand a task to a read-only subagent with a fresh context and get back only its report (default off; config subagents.enabled)")
 	fs.BoolVar(&o.images, "images", false, "let vision-capable models see images: the view_image tool and MCP image pass-through (default off; config images.enabled)")
 	fs.BoolVar(&o.skills, "skills", false, "discover Agent Skills in .agents/skills (project, up to the repo root, and ~/.agents/skills) and add the skill tool (default off; config skills)")
@@ -254,6 +258,13 @@ func run() int {
 	if flagWasSet(fs, "subagents") {
 		cfg.Subagents.Enabled = o.subagents
 	}
+	if flagWasSet(fs, "web-fetch") {
+		cfg.WebFetch.Enabled = o.webFetch
+	}
+	webFetch, err := newWebFetcher(fs, o, &cfg)
+	if err != nil {
+		return configFail(err)
+	}
 	if on, set, err := skillsFlag(fs, o); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
@@ -389,6 +400,7 @@ func run() int {
 			Images:             cfg.Images.Enabled,
 			ApplyPatch:         cfg.ApplyPatch,
 			Delegate:           subagents != nil,
+			WebFetch:           webFetch,
 			OutputFiles:        outputFiles,
 			FileAccess:         fileAccess,
 			MaxImageBytes:      cfg.MaxImageBytes,
@@ -593,6 +605,15 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return 2
 	}
 	cfg.Subagents.Enabled = src.SubagentsEnabled
+	if flagWasSet(fs, "web-fetch") && o.webFetch != src.WebFetchEnabled {
+		fmt.Fprintln(os.Stderr, "error: resume: --web-fetch conflicts with the checkpoint's recorded web_fetch setting; start a fresh task")
+		return 2
+	}
+	cfg.WebFetch.Enabled = src.WebFetchEnabled
+	webFetch, err := newWebFetcher(fs, *o, &cfg)
+	if err != nil {
+		return configFail(err)
+	}
 	if on, set, err := skillsFlag(fs, *o); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
@@ -746,6 +767,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 			Images:         src.ImagesEnabled,
 			ApplyPatch:     src.ApplyPatchEnabled,
 			Delegate:       src.SubagentsEnabled,
+			WebFetch:       webFetch,
 			OutputFiles:    outputFiles,
 			FileAccess:     fileAccess,
 			MaxImageBytes:  cfg.MaxImageBytes,
@@ -901,6 +923,38 @@ func envConflict(cfg config.AgentConfig) string {
 		}
 	}
 	return ""
+}
+
+// newWebFetcher applies --web-fetch-allow-domain to cfg and returns the
+// web_fetch tool, or nil when it is off. Its settings come only from the
+// user's config, -c and flags; an empty allowlist is a usage error.
+func newWebFetcher(fs *flag.FlagSet, o options, cfg *config.AgentConfig) (*tools.WebFetcher, error) {
+	if flagWasSet(fs, "web-fetch-allow-domain") {
+		if !cfg.WebFetch.Enabled {
+			return nil, &config.InvalidError{Err: errors.New("--web-fetch-allow-domain requires --web-fetch (web_fetch.enabled: true)")}
+		}
+		cfg.WebFetch.AllowedDomains = o.webFetchAllowDomains
+	}
+	w := cfg.WebFetch
+	if !w.Enabled {
+		return nil, nil
+	}
+	if len(w.AllowedDomains) == 0 {
+		return nil, &config.InvalidError{Err: errors.New("web_fetch is enabled but web_fetch.allowed_domains is empty; list the hosts it may read in web_fetch.allowed_domains or with --web-fetch-allow-domain")}
+	}
+	if err := w.Validate(); err != nil {
+		return nil, &config.InvalidError{Err: err}
+	}
+	f, err := tools.NewWebFetcher(w.AllowedDomains, w.MaxBytes, time.Duration(w.TimeoutSeconds)*time.Second, "tinyagent/"+currentVersion())
+	if err != nil {
+		return nil, &config.InvalidError{Err: err}
+	}
+	unit := "domains"
+	if len(w.AllowedDomains) == 1 {
+		unit = "domain"
+	}
+	fmt.Fprintf(os.Stderr, "web_fetch: %d %s (%s)\n", len(w.AllowedDomains), unit, strings.Join(w.AllowedDomains, ", "))
+	return f, nil
 }
 
 // domainList is the repeatable --sandbox-allow-domain flag.
@@ -1295,6 +1349,9 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	}
 	if fa := agent.FileAccessInfo(a.Tools.FileAccess); fa != nil {
 		started["file_access"] = fa
+	}
+	if wf := a.Tools.WebFetch; wf != nil {
+		started["web_fetch"] = map[string]any{"allowed_domains": wf.Domains}
 	}
 	events.emit("run.started", started)
 	a.OnEvent = func(kind string, fields map[string]any) {

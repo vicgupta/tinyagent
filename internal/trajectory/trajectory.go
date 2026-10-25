@@ -22,6 +22,11 @@ type SandboxInfo struct {
 	AllowedDomains []string `json:"allowed_domains,omitempty"`
 }
 
+// WebFetchInfo records the web_fetch allowlist of one invocation.
+type WebFetchInfo struct {
+	AllowedDomains []string `json:"allowed_domains"`
+}
+
 // NetworkDenial is one request the sandbox allowlist proxy refused.
 type NetworkDenial struct {
 	Host   string `json:"host"`
@@ -160,6 +165,12 @@ type Trajectory struct {
 	// SubagentsEnabled (schema 2) records whether the opt-in delegate tool
 	// was offered. A resume must use the same setting.
 	SubagentsEnabled bool `json:"subagents_enabled,omitempty"`
+	// WebFetchEnabled (schema 2) records whether the opt-in web_fetch tool
+	// was offered. A resume must use the same setting.
+	WebFetchEnabled bool `json:"web_fetch_enabled,omitempty"`
+	// WebFetch is set when web_fetch was offered; it records this
+	// invocation's allowlist.
+	WebFetch *WebFetchInfo `json:"web_fetch,omitempty"`
 	// Subagents records each delegate call's child run, in call order,
 	// with its full history. Their tokens and cost are included in the
 	// run totals; their model calls are counted in SubagentSteps, not

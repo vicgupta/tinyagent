@@ -251,6 +251,10 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			t.ExitStatus, t.Submission = StatusError, "resume subagents setting differs from checkpoint"
 			return t
 		}
+		if t.WebFetchEnabled != (a.Tools.WebFetch != nil) {
+			t.ExitStatus, t.Submission = StatusError, "resume web_fetch setting differs from checkpoint"
+			return t
+		}
 		t.ExitStatus, t.Submission = "", ""
 		if t.OpenAIAPI == "" {
 			t.OpenAIAPI = a.OpenAIAPI
@@ -291,11 +295,12 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			SystemPrompt:          system,
 			SkipAgentsMD:          a.SkipAgentsMD,
 			Tools:                 toolNames(a.Tools.Catalog()),
-			ToolSignature:         toolSignature(a.Tools.ReadOnly, a.Tools.Plan, a.Tools.Images, a.Tools.ApplyPatch, a.Tools.Delegate),
+			ToolSignature:         toolSignature(a.Tools.ReadOnly, a.Tools.Plan, a.Tools.Images, a.Tools.ApplyPatch, a.Tools.Delegate, a.Tools.WebFetch != nil),
 			PlanEnabled:           a.Tools.Plan,
 			ImagesEnabled:         a.Tools.Images,
 			ApplyPatchEnabled:     a.Tools.ApplyPatch,
 			SubagentsEnabled:      a.Tools.Delegate,
+			WebFetchEnabled:       a.Tools.WebFetch != nil,
 			MCPEnabled:            len(a.Tools.ExternalSpecs) > 0,
 			ExternalTools:         externalToolNames(a.Tools.ExternalSpecs),
 			ExternalToolSignature: externalToolSignature(a.Tools.ExternalSpecs),
@@ -314,6 +319,10 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 	t.MaxOutputTokens = a.Config.MaxOutputTokens
 	t.Sandbox, t.Environment, t.CommandEnv = nil, nil, nil
 	t.FileAccess = FileAccessInfo(a.Tools.FileAccess)
+	t.WebFetch = nil
+	if wf := a.Tools.WebFetch; wf != nil {
+		t.WebFetch = &trajectory.WebFetchInfo{AllowedDomains: wf.Domains}
+	}
 	switch env := a.Tools.Env.(type) {
 	case tools.Local:
 		if sb := env.Sandbox; sb != nil {
@@ -470,6 +479,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 				out, isError = a.updatePlan(t, call)
 			} else {
 				res = a.runTool(ctx, t, call)
+				a.recordWebFetches()
 				out, images, isError = res.Text, res.Images, res.IsError
 				switch stop := a.takeDelegateStop(); stop {
 				case StatusInterrupted, StatusTimeLimit:
@@ -971,6 +981,32 @@ func (a *Agent) recordNetworkDenials(t *trajectory.Trajectory) {
 		a.event("sandbox.network_denied", map[string]any{"host": d.Host, "port": d.Port, "reason": d.Reason})
 		if a.Verbose {
 			fmt.Fprintf(a.Err, "sandbox: network denied: %s port %d: %s\n", d.Host, d.Port, d.Reason)
+		}
+	}
+}
+
+// recordWebFetches emits a web_fetch event, and with -v a stderr line, for
+// each fetch the last tool call made.
+func (a *Agent) recordWebFetches() {
+	if a.Tools.WebFetch == nil {
+		return
+	}
+	for _, r := range a.Tools.WebFetch.TakeRecords() {
+		a.event("web_fetch", r.Fields())
+		if !a.Verbose {
+			continue
+		}
+		switch {
+		case r.DeniedReason != "":
+			fmt.Fprintf(a.Err, "web_fetch: %s denied: %s\n", r.URL, r.DeniedReason)
+		case r.Error != "" && r.Status == 0:
+			fmt.Fprintf(a.Err, "web_fetch: %s failed: %s (%dms)\n", r.URL, r.Error, r.Duration.Milliseconds())
+		default:
+			trunc := ""
+			if r.Truncated {
+				trunc = ", truncated"
+			}
+			fmt.Fprintf(a.Err, "web_fetch: %s -> %d %s, %d bytes%s (%dms)\n", r.URL, r.Status, r.ContentType, r.Bytes, trunc, r.Duration.Milliseconds())
 		}
 	}
 }
