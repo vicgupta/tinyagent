@@ -163,12 +163,16 @@ type PlanChange struct {
 // ResumeInfo records the checkpoint a run continued, so the previous
 // termination stays distinguishable from the active result.
 type ResumeInfo struct {
-	Source     string      `json:"source"`      // path of the input checkpoint
-	ExitStatus string      `json:"exit_status"` // previous termination status
-	Steps      int         `json:"steps"`       // steps at the previous termination
-	Submission string      `json:"submission,omitempty"`
-	Message    int         `json:"message"` // continuation notice index in Messages
-	Previous   *ResumeInfo `json:"previous,omitempty"`
+	Source     string `json:"source"`      // path of the input checkpoint
+	ExitStatus string `json:"exit_status"` // previous termination status
+	Steps      int    `json:"steps"`       // steps at the previous termination
+	Submission string `json:"submission,omitempty"`
+	Message    int    `json:"message"` // continuation notice index in Messages
+	// FollowUp marks a boundary where a finished (Submitted or Completed)
+	// run was continued with a new user instruction. Its message starts with
+	// FollowUpNotice instead of ContinuationNotice.
+	FollowUp bool        `json:"follow_up,omitempty"`
+	Previous *ResumeInfo `json:"previous,omitempty"`
 }
 
 // SchemaVersion is the resume-metadata version written by this build.

@@ -92,6 +92,10 @@ type Agent struct {
 	// state, and a continuation notice is appended before the first request.
 	Resume       *trajectory.Trajectory
 	ResumeSource string // audit-only input path for resume provenance
+	// FollowUp, with Resume, continues a finished (Submitted or Completed)
+	// checkpoint with this new user instruction. It must be empty for an
+	// unfinished checkpoint and set for a finished one.
+	FollowUp string
 	// OutputSchema, when non-nil, adds the submit_result tool and makes the
 	// run succeed only with a result that validates against it.
 	OutputSchema *outschema.Schema
@@ -144,13 +148,22 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			t.ExitStatus, t.Submission = StatusError, err.Error()
 			return t
 		}
+		finished := trajectory.Finished(t.ExitStatus)
+		if finished && a.FollowUp == "" {
+			t.ExitStatus, t.Submission = StatusError, "checkpoint already finished; continue it with a follow-up task"
+			return t
+		}
+		if !finished && a.FollowUp != "" {
+			t.ExitStatus, t.Submission = StatusError, "a follow-up task can only continue a finished checkpoint"
+			return t
+		}
 		source := a.ResumeSource
 		if source == "" {
 			source = "memory"
 		}
 		t.Resume = &trajectory.ResumeInfo{
 			Source: source, ExitStatus: t.ExitStatus, Submission: t.Submission,
-			Steps: t.Steps, Message: len(t.Messages), Previous: t.Resume,
+			Steps: t.Steps, Message: len(t.Messages), FollowUp: finished, Previous: t.Resume,
 		}
 		if t.PlanEnabled != a.Tools.Plan {
 			t.ExitStatus, t.Submission = StatusError, "resume plan setting differs from checkpoint"
@@ -166,8 +179,17 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		}
 		a.closeInterrupted(t)
 		notice := resumeNotice
+		if finished {
+			notice = trajectory.FollowUpNotice
+		}
 		if lost := a.lostProcesses(t); lost != "" {
 			notice += "\n\n" + lost
+		}
+		if finished {
+			notice += "\n\n" + a.FollowUp
+			if a.Verbose {
+				fmt.Fprintf(a.Out, "follow-up task: %s\n", a.FollowUp)
+			}
 		}
 		t.SchemaVersion = trajectory.SchemaVersion
 		t.Messages = append(t.Messages, model.Message{Role: "user", Content: notice})

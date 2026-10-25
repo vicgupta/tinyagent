@@ -4,6 +4,7 @@
 
 ### Features
 
+- Continue a finished (`Submitted`/`Completed`) run with a follow-up task: `--resume <trajectory> -t "<follow-up>"` sends the saved conversation plus a follow-up notice and the new instruction, keeps step/cost totals cumulative, and records `follow_up` in the resume provenance and `run.started`.
 - Discover Agent Skills (`SKILL.md`) from `.agents/skills` in the project and `~/.agents/skills`, list them in the system prompt, and load them on demand with a new `skill` tool (opt-in via `--skills` or `skills: true`).
 - Run user-configured `pre_tool` and `post_tool` hook commands around tool calls to deny calls or append feedback.
 - Add `stop` hooks that check a run before it finishes successfully and can send the model back to work, capped by `hooks.max_stop_continuations`, with the new `VerificationFailed` status.

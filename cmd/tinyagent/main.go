@@ -67,7 +67,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.Usage = func() { printUsage(fs.Output(), fs) }
 	fs.BoolVar(&o.showHelp, "help", false, "show this help and exit")
 	fs.BoolVar(&o.showHelp, "h", false, "shorthand for --help")
-	fs.StringVar(&o.task, "task", "", `task/prompt (required unless --resume); "-" reads it from stdin`)
+	fs.StringVar(&o.task, "task", "", `task/prompt (required unless --resume; with --resume of a finished run, the follow-up instruction); "-" reads it from stdin`)
 	fs.StringVar(&o.task, "t", "", "shorthand for --task")
 	fs.StringVar(&o.modelName, "model", defaultModel(), "provider/model; if unset, $AGENT_MODEL, then the config's model")
 	fs.StringVar(&o.modelName, "m", defaultModel(), "shorthand for --model")
@@ -80,7 +80,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.IntVar(&o.maxFormatErrors, "max-format-errors", config.DefaultMaxFormatErrors, "stop after this many consecutive steps of malformed tool calls (>= 1)")
 	fs.StringVar(&o.output, "output", "", "write trajectory JSON")
 	fs.StringVar(&o.output, "o", "", "shorthand for --output")
-	fs.StringVar(&o.resume, "resume", "", "continue an unfinished run from a trajectory JSON checkpoint")
+	fs.StringVar(&o.resume, "resume", "", "continue an unfinished run from a trajectory JSON checkpoint, or a finished one with -t \"<follow-up>\"")
 	fs.BoolVar(&o.verbose, "verbose", false, "print tool outputs")
 	fs.BoolVar(&o.verbose, "v", false, "shorthand for --verbose")
 	fs.BoolVar(&o.noStream, "no-stream", false, "wait for full responses instead of streaming")
@@ -398,11 +398,7 @@ func outputTo(w, progress io.Writer) io.Writer {
 // distinct output destination, and refuses to continue if the effective
 // instructions or tool set have changed.
 func runResume(o *options, fs *flag.FlagSet) int {
-	if flagWasSet(fs, "task", "t") {
-		fmt.Fprintln(os.Stderr, "error: --resume and --task are mutually exclusive")
-		return 2
-	}
-
+	taskSet := flagWasSet(fs, "task", "t")
 	if !flagWasSet(fs, "cwd") {
 		return fail(errors.New("resume: an explicit --cwd matching the checkpoint root is required"))
 	}
@@ -410,6 +406,23 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	src, err := trajectory.Load(o.resume)
 	if err != nil {
 		return fail(fmt.Errorf("resume: %w", err))
+	}
+	// A finished checkpoint continues only with a follow-up task; an
+	// unfinished one only without.
+	finished := trajectory.Finished(src.ExitStatus)
+	followUp := ""
+	switch {
+	case taskSet && !finished:
+		fmt.Fprintln(os.Stderr, "error: --resume and --task are mutually exclusive for an unfinished checkpoint; --task adds a follow-up only to a finished (Submitted or Completed) run")
+		return 2
+	case finished && o.task == "":
+		fmt.Fprintf(os.Stderr, "error: checkpoint already finished (%s); a follow-up task is required to continue it: --resume %s -t \"<follow-up>\"\n", src.ExitStatus, o.resume)
+		return 2
+	case finished:
+		if followUp, err = readTask(o.task, os.Stdin); err != nil {
+			fmt.Fprintln(os.Stderr, "error: follow-up task:", err)
+			return 2
+		}
 	}
 
 	// The saved model wins unless an explicit, different model is given.
@@ -587,6 +600,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		NoCompact:    o.noCompact,
 		Resume:       src,
 		ResumeSource: o.resume,
+		FollowUp:     followUp,
 	}
 	var events *runEvents
 	warn := func(msg string) { events.warn(msg) }
@@ -617,8 +631,13 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "resuming %s from %s (previous status %s after %d steps)\n", modelName, o.resume, prevStatus, src.Steps)
-	fmt.Fprintln(os.Stderr, "note: inspect and revalidate the workspace; it may have changed and commands may have produced unrecorded side effects after the last save. Live processes are not restored")
+	if finished {
+		fmt.Fprintf(os.Stderr, "following up %s from %s (previous status %s after %d steps)\n", modelName, o.resume, prevStatus, src.Steps)
+		fmt.Fprintln(os.Stderr, "note: the full previous conversation is sent to the provider again; the workspace may have changed since the run finished. Live processes are not restored")
+	} else {
+		fmt.Fprintf(os.Stderr, "resuming %s from %s (previous status %s after %d steps)\n", modelName, o.resume, prevStatus, src.Steps)
+		fmt.Fprintln(os.Stderr, "note: inspect and revalidate the workspace; it may have changed and commands may have produced unrecorded side effects after the last save. Live processes are not restored")
+	}
 
 	start := time.Now()
 	t := a.Run(ctx, src.Task)
@@ -755,7 +774,7 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 			width = max(width, len(left(f)))
 		}
 	}
-	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n       tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]\n\n")
+	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n       tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <finished.json> -t \"<follow-up>\" --cwd <dir> -o <new.json> [flags]\n\n")
 	for _, g := range usageGroups {
 		if g.name != "" {
 			fmt.Fprintf(w, "%s:\n", g.name)
@@ -776,7 +795,8 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 	fmt.Fprint(w, "\nExamples:\n"+
 		"  tinyagent -t \"fix the failing test\" -m anthropic/claude-sonnet-4\n"+
 		"  cat task.md | tinyagent -t - --step-limit 30 -o run.json\n"+
-		"  tinyagent --resume run.json --cwd . --step-limit 60 -o continued.json\n")
+		"  tinyagent --resume run.json --cwd . --step-limit 60 -o continued.json\n"+
+		"  tinyagent --resume review.json -t \"fix the races you found\" --cwd . -o fix.json\n")
 }
 
 // reportSummary prints one line on how the run ended: status, steps, elapsed
@@ -1015,6 +1035,9 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	}
 	if a.OpenAIAPI != "" {
 		started["openai_api"] = a.OpenAIAPI
+	}
+	if a.FollowUp != "" {
+		started["follow_up"] = true
 	}
 	events.emit("run.started", started)
 	a.OnEvent = func(kind string, fields map[string]any) {
