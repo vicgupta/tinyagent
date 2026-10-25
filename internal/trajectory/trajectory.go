@@ -50,12 +50,17 @@ type Trajectory struct {
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	// OpenAIAPI is the openai provider's resolved transport, "responses" or
 	// "chat"; empty for other providers and older trajectories.
-	OpenAIAPI    string          `json:"openai_api,omitempty"`
-	Messages     []model.Message `json:"messages"`
-	Steps        int             `json:"steps"`
-	Cost         float64         `json:"cost"`
-	InputTokens  int             `json:"input_tokens"`
-	OutputTokens int             `json:"output_tokens"`
+	OpenAIAPI string `json:"openai_api,omitempty"`
+	// ProviderAPI and ProviderBaseURL describe a config-defined provider
+	// (its id is the model spec's prefix); empty for built-in providers.
+	// Keys and header values are never recorded.
+	ProviderAPI     string          `json:"provider_api,omitempty"`
+	ProviderBaseURL string          `json:"provider_base_url,omitempty"`
+	Messages        []model.Message `json:"messages"`
+	Steps           int             `json:"steps"`
+	Cost            float64         `json:"cost"`
+	InputTokens     int             `json:"input_tokens"`
+	OutputTokens    int             `json:"output_tokens"`
 	// Prompt-cache totals, included in InputTokens.
 	CacheReadTokens  int    `json:"cache_read_tokens,omitempty"`
 	CacheWriteTokens int    `json:"cache_write_tokens,omitempty"`

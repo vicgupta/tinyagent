@@ -22,6 +22,12 @@ type OpenAI struct {
 	// (max_completion_tokens, or max_tokens for Ollama).
 	MaxOutputTokens int
 	MaxOutputKey    string
+	// Headers, if set, are added to every request after the defaults
+	// (configured providers).
+	Headers map[string]string
+	// Price, if set, replaces the Prices table entry for this model
+	// (configured providers); PriceOverride still wins.
+	Price *[3]float64
 }
 
 // openAIMessage is the wire form of Message; it omits Extra and always sends content.
@@ -105,6 +111,9 @@ func (o *OpenAI) Query(ctx context.Context, messages []Message, tools []ToolSpec
 	if o.APIKey != "" {
 		headers["Authorization"] = "Bearer " + o.APIKey
 	}
+	for k, v := range o.Headers {
+		headers[k] = v
+	}
 	url := strings.TrimRight(o.BaseURL, "/") + "/chat/completions"
 
 	var (
@@ -140,7 +149,7 @@ func (o *OpenAI) Query(ctx context.Context, messages []Message, tools []ToolSpec
 	if finish == "length" {
 		markTruncated(&msg, "finish_reason: length")
 	}
-	return msg, price(o.Model, usage.PromptTokens, usage.CompletionTokens), nil
+	return msg, cachedPriceWith(o.Model, o.Price, usage.PromptTokens, 0, 0, usage.CompletionTokens), nil
 }
 
 func (o *OpenAI) complete(ctx context.Context, url string, headers map[string]string, body any) (Message, openAIUsage, string, error) {

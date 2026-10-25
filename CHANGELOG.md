@@ -5,7 +5,7 @@
 ### Features
 
 - Add an opt-in command environment policy (`command_env` config, `--command-env all|core|none`) that controls which environment variables `bash` and `start_process` commands inherit: a trimmed `core` or empty base, `exclude_secrets` (secret-named variables and tinyagent's provider keys), `exclude`/`pass` globs and fixed `set` values. The default still inherits everything.
-- Add `--max-output-tokens` (config `max_output_tokens`) to set the per-request output-token budget for Anthropic, OpenAI, OpenRouter and Ollama.
+- Define named model providers in config (`providers`) with an `api` (`chat`, `responses` or `anthropic`), `base_url`, an API key read from an environment variable, extra headers, and per-model price and context-window metadata, selected with `-m <id>/<model>`. Provider config errors and missing key variables exit 2 before any request; keys and header values are never recorded; `run.started` and trajectories record `provider_api` and `provider_base_url`, and `--resume` refuses a changed provider.- Add `--max-output-tokens` (config `max_output_tokens`) to set the per-request output-token budget for Anthropic, OpenAI, OpenRouter and Ollama.
 - Continue a finished (`Submitted`/`Completed`) run with a follow-up task: `--resume <trajectory> -t "<follow-up>"` sends the saved conversation plus a follow-up notice and the new instruction, keeps step/cost totals cumulative, and records `follow_up` in the resume provenance and `run.started`.
 - Discover Agent Skills (`SKILL.md`) from `.agents/skills` in the project and `~/.agents/skills`, list them in the system prompt, and load them on demand with a new `skill` tool (opt-in via `--skills` or `skills: true`).
 - Run user-configured `pre_tool` and `post_tool` hook commands around tool calls to deny calls or append feedback.
@@ -26,6 +26,7 @@
 
 ### Changed
 
+- Configs that use the new `providers` key fail to load on older tinyagent versions, which reject unknown keys.
 - The `openai` provider now uses the Responses API against `api.openai.com` (when `OPENAI_BASE_URL` is unset or points there). Set `openai_api: chat` to keep Chat Completions. Custom `OPENAI_BASE_URL` endpoints keep Chat Completions by default.
 
 ## v0.4.0 - 2026-10-24

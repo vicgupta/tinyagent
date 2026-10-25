@@ -16,6 +16,15 @@ type Anthropic struct {
 	OnText    func(string) // if set, stream and report text deltas
 	// ReasoningEffort, if set, is sent as output_config.effort.
 	ReasoningEffort string
+	// Headers, if set, are added to every request after the defaults
+	// (configured providers).
+	Headers map[string]string
+	// Price, if set, replaces the Prices table entry for this model
+	// (configured providers); PriceOverride still wins.
+	Price *[3]float64
+	// OmitEmptyKey sends no x-api-key header when APIKey is empty
+	// (configured providers without api_key_env).
+	OmitEmptyKey bool
 }
 
 type anthropicBlock struct {
@@ -173,6 +182,12 @@ func (a *Anthropic) Query(ctx context.Context, messages []Message, tools []ToolS
 		"x-api-key":         a.APIKey,
 		"anthropic-version": "2023-06-01",
 	}
+	if a.OmitEmptyKey && a.APIKey == "" {
+		delete(headers, "x-api-key")
+	}
+	for k, v := range a.Headers {
+		headers[k] = v
+	}
 	url := strings.TrimRight(a.BaseURL, "/") + "/v1/messages"
 
 	var (
@@ -232,7 +247,7 @@ func (a *Anthropic) Query(ctx context.Context, messages []Message, tools []ToolS
 		msg.Extra[ExtraAnthropicContent] = raw
 	}
 	u := resp.Usage
-	return msg, cachedPrice(a.Model, u.InputTokens, u.CacheCreationInputTokens, u.CacheReadInputTokens, u.OutputTokens), nil
+	return msg, cachedPriceWith(a.Model, a.Price, u.InputTokens, u.CacheCreationInputTokens, u.CacheReadInputTokens, u.OutputTokens), nil
 }
 
 // stream reads an SSE response into the same shape as a non-streamed

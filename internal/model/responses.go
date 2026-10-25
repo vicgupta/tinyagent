@@ -76,6 +76,12 @@ type OpenAIResponses struct {
 	MaxOutputTokens int
 
 	session string // prompt cache key, one per run
+	// Headers, if set, are added to every request after the defaults
+	// (configured providers).
+	Headers map[string]string
+	// Price, if set, replaces the Prices table entry for this model
+	// (configured providers); PriceOverride still wins.
+	Price *[3]float64
 }
 
 func (o *OpenAIResponses) Query(ctx context.Context, messages []Message, tools []ToolSpec) (Message, Cost, error) {
@@ -108,6 +114,9 @@ func (o *OpenAIResponses) Query(ctx context.Context, messages []Message, tools [
 	headers := map[string]string{}
 	if o.APIKey != "" {
 		headers["Authorization"] = "Bearer " + o.APIKey
+	}
+	for k, v := range o.Headers {
+		headers[k] = v
 	}
 	url := strings.TrimRight(o.BaseURL, "/") + "/responses"
 
@@ -142,7 +151,7 @@ func (o *OpenAIResponses) Query(ctx context.Context, messages []Message, tools [
 	if cached > usage.InputTokens {
 		cached = usage.InputTokens
 	}
-	return msg, cachedPrice(o.Model, usage.InputTokens-cached, 0, cached, usage.OutputTokens), nil
+	return msg, cachedPriceWith(o.Model, o.Price, usage.InputTokens-cached, 0, cached, usage.OutputTokens), nil
 }
 
 // responsesTools converts tool specs to the Responses API's flat function

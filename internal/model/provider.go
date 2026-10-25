@@ -108,7 +108,16 @@ func price(model string, in, out int) Cost {
 // cachedPrice prices a response whose input was in uncached tokens plus
 // cacheWrite tokens written to and cacheRead tokens read from the cache.
 func cachedPrice(model string, in, cacheWrite, cacheRead, out int) Cost {
+	return cachedPriceWith(model, nil, in, cacheWrite, cacheRead, out)
+}
+
+// cachedPriceWith is cachedPrice with custom, when non-nil, used in place
+// of the Prices table entry (a configured provider's model price).
+func cachedPriceWith(model string, custom *[3]float64, in, cacheWrite, cacheRead, out int) Cost {
 	p, _ := lookupPrice(model)
+	if custom != nil {
+		p = *custom
+	}
 	if PriceOverride != [2]float64{} {
 		p[0], p[1] = PriceOverride[0], PriceOverride[1]
 	}
@@ -143,6 +152,13 @@ func lookupPrice(model string) (p [3]float64, ok bool) {
 // design and never unpriced.
 func Unpriced(spec string) bool {
 	provider, name := splitSpec(spec)
+	if _, ok := ConfiguredProvider(spec); ok {
+		if PriceOverride != [2]float64{} || providerPrice(spec) != nil {
+			return false
+		}
+		_, ok := lookupPrice(name)
+		return !ok
+	}
 	switch provider {
 	case "openai", "openrouter", "anthropic":
 	default:
@@ -206,7 +222,10 @@ func NewWith(spec string, onText func(string), opts Options) (Model, error) {
 	case "codex":
 		return NewCodex(name, onText)
 	default:
-		return nil, fmt.Errorf("unknown provider %q (want openai, openrouter, anthropic, ollama, or codex)", provider)
+		if d, ok := ConfiguredProvider(spec); ok {
+			return newConfigured(d, spec, name, onText)
+		}
+		return nil, fmt.Errorf("unknown provider %q (want %s)", provider, providerIDs())
 	}
 }
 

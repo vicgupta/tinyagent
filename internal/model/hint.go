@@ -29,6 +29,9 @@ func Hint(spec, errMsg string) string {
 	if m := httpStatusRe.FindStringSubmatch(errMsg); m != nil {
 		status, _ = strconv.Atoi(m[1])
 	}
+	if d, ok := ConfiguredProvider(spec); ok {
+		return configuredHint(d, name, status, errMsg)
+	}
 	switch provider {
 	case "openai", "openrouter", "anthropic":
 		env := keyEnv[provider]
@@ -56,6 +59,22 @@ func Hint(spec, errMsg string) string {
 		case strings.Contains(errMsg, "codex login"):
 			return "sign in once with the Codex CLI: run `codex login`, choose ChatGPT, then rerun tinyagent"
 		}
+	}
+	return ""
+}
+
+// configuredHint is Hint for a configured provider: it names the entry's
+// api_key_env, never a value.
+func configuredHint(d ProviderDef, name string, status int, errMsg string) string {
+	switch {
+	case (status == 401 || status == 403) && d.APIKeyEnv == "":
+		return fmt.Sprintf("provider %q rejected the request and has no api_key_env; set api_key_env (or env_headers) for it in your config", d.ID)
+	case status == 401 || status == 403:
+		return fmt.Sprintf("%s was rejected by provider %q; check that it's current and has access to %s", d.APIKeyEnv, d.ID, name)
+	case status == 404:
+		return fmt.Sprintf("provider %q (%s) returned 404 for model %q; check the model name after %s/ and that base_url %s is right for api %s", d.ID, d.API, name, d.ID, d.BaseURL, d.API)
+	case strings.Contains(errMsg, "connection refused") || strings.Contains(errMsg, "no such host"):
+		return fmt.Sprintf("can't reach provider %q at %s; check base_url in your config and that the server is running", d.ID, d.BaseURL)
 	}
 	return ""
 }
