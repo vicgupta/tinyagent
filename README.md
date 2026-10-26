@@ -87,6 +87,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--openai-api` | config `openai_api`, else `auto` | Transport for the `openai` provider: `auto`, `responses`, or `chat`; see [OpenAI transport](#openai-transport) |
 | `--init-config` | | Write a commented starter config to the user config path (or `-c PATH`), refuse overwrites, and exit |
 | `-c, --config` | user config, else built-in | YAML config file; see [Config](#config) |
+| `--profile` | none | Apply one named profile from the config file's `profiles:` section over its base settings; see [Profiles](#profiles) |
 | `--cwd` | `.` | Root directory; tools can't reach outside it |
 | `--worktree[=name]` | off | Run in a new Git worktree at `<repo>/.tinyagent/worktrees/<name>` on branch `tinyagent/<name>`, created from `HEAD` of the repository containing `--cwd` and kept afterwards; the name is generated when omitted. Can't be combined with `--resume` or `--rewind`. See [Worktrees](#worktrees) |
 | `--step-limit` | 0 (unlimited) | Max model calls |
@@ -136,7 +137,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 
 | Type | Fields |
 |---|---|
-| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `reasoning_effort` (only when set), `fallback_models` (only when a [fallback chain](#model-fallback) is configured), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy), `file_access` (`deny_read`, `deny_write`; only with [file access](#restricting-file-access) rules), `web_fetch` (`allowed_domains`; only with [web fetch](#web-fetch) on), `lsp` (`servers`, the configured names; only with [language servers](#language-servers-lsp) on), `scoped_agents_md_enabled` and `scoped_agents_md` (scoped files already in context, `[]` for a fresh run; only with [`--scoped-agents-md`](#project-instructions-agentsmd) on), `additional_dirs` (`path`, `mode`; only with [additional directories](#additional-directories)), `worktree` (`path`, `branch`, `base_commit`, `repo_root`; only with [`--worktree`](#worktrees)) |
+| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `reasoning_effort` (only when set), `fallback_models` (only when a [fallback chain](#model-fallback) is configured), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `profile` (the name only; only with [`--profile`](#profiles)), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy), `file_access` (`deny_read`, `deny_write`; only with [file access](#restricting-file-access) rules), `web_fetch` (`allowed_domains`; only with [web fetch](#web-fetch) on), `lsp` (`servers`, the configured names; only with [language servers](#language-servers-lsp) on), `scoped_agents_md_enabled` and `scoped_agents_md` (scoped files already in context, `[]` for a fresh run; only with [`--scoped-agents-md`](#project-instructions-agentsmd) on), `additional_dirs` (`path`, `mode`; only with [additional directories](#additional-directories)), `worktree` (`path`, `branch`, `base_commit`, `repo_root`; only with [`--worktree`](#worktrees)) |
 | `assistant.message` | `text` (complete assistant message) |
 | `tool.call` | `id`, `name`, `arguments` (decoded JSON value, or a string if malformed) |
 | `tool.result` | `id`, `name`, `output` (same configured truncation as tool output), `is_error`; with [tool output files](#tool-output-files), a saved result also has `output_file` (path relative to `--cwd`) and `output_bytes` |
@@ -464,7 +465,49 @@ hooks:                       # omitted by default; see Tool hooks below
     - command: /usr/local/bin/verify-tests
       timeout_seconds: 300
   max_stop_continuations: 5     # default 5, range 1..50
+profiles:                    # omitted by default; named overlays selected with --profile, see Profiles below
+  review:
+    model: openai/gpt-5-mini
+    read_only: true
 ```
+
+### Profiles
+
+`profiles` holds named overlays in the same config file tinyagent already loads (the user config, or the `-c` file). `--profile <name>` applies one of them over the file's base settings for that run, so you can switch between setups such as a cheap read-only review, CI with a sandbox and stop hooks, or a local model with one flag. A profile only lists the settings that differ from the base, and it can set anything the file can, including config-only settings like `command_env`, `file_access`, `hooks`, `mcp_servers`, `lsp` and `providers`.
+
+```yaml
+model: anthropic/claude-sonnet-4-5
+cost_limit: 5
+# providers, mcp_servers, ... defined here are shared by every profile
+profiles:
+  review:
+    model: openai/gpt-5-mini
+    read_only: true
+    cost_limit: 0.5
+  ci:
+    sandbox: true
+    command_env: {inherit: core}
+    step_limit: 80
+    hooks:
+      stop:
+        - command: /usr/local/bin/verify-tests
+          timeout_seconds: 300
+```
+
+```sh
+tinyagent --profile review -t "review this change"
+tinyagent --profile ci -t - -o run.json --json < task.md
+```
+
+- **Precedence**, lowest to highest: built-in defaults, the base config file, the selected profile, explicit flags. A profile's `model` takes the place of the config `model` in the usual model order, so `-m` and a nonempty `$AGENT_MODEL` still win over it.
+- **Merging**: mappings merge key by key, recursively, so a profile with `web_fetch: {enabled: true}` keeps the base `web_fetch.allowed_domains`. Scalars and lists replace the base value wholesale (a profile's `fallback_models` or `mcp_servers` replaces the base list; `hooks: {stop: []}` drops the base stop hooks). A value of a different kind replaces the base value, so a profile can use the `snapshots` mapping over a base `snapshots: true`. An explicit `null` in a profile is an error; it can't delete a base key.
+- **Validation**: the merged result goes through every existing check, and errors name the file and the profile. Every profile is checked on every run, selected or not: profile names may use only letters, digits, `_` and `-`; each profile must be a mapping; profiles can't be nested; and an unknown key inside any profile is an error naming the file, the profile and the key. These are usage errors (exit 2) before any model request, as are `--profile` naming an undefined profile (the error lists the defined ones) and `--profile` with no config file in use.
+- **Without `--profile`**, `profiles:` is validated and otherwise ignored; runs behave exactly as if it weren't there. There is no default profile.
+- **With `-c`**, profiles come only from that file; the user config isn't read, as usual for `-c`.
+- **Recording**: the profile *name* (never its settings) is recorded as `profile` in the trajectory (`-o`) and in `run.started`, and `-v` prints one `config profile:` line. Without `--profile` neither has the field. `--check --profile <name>` checks and reports the merged configuration.
+- **Resume**: `--resume` accepts `--profile` for the settings it re-reads from the current setup (credentials, providers, limits, fallbacks). The saved model still wins, and the original run's profile is not re-applied automatically; the resumed trajectory records the profile given to the resuming run. `--rewind` reads no config and rejects `--profile` (exit 2); `--update` and `--version` ignore it.
+
+Configs with `profiles` fail to load on tinyagent versions without this feature, since older versions reject the unknown key.
 
 ### Named providers
 
