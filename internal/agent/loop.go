@@ -83,10 +83,13 @@ type Agent struct {
 	ProviderAPI     string
 	ProviderBaseURL string
 	Tools           *tools.Executor
-	Config          config.AgentConfig
-	Out             io.Writer // progress log; nil discards
-	Err             io.Writer // warnings; nil discards
-	Verbose         bool
+	// RedactSecrets describes Tools.Redactor by name for the trajectory
+	// and run.started; nil when redact_secrets is off.
+	RedactSecrets *trajectory.RedactSecretsInfo
+	Config        config.AgentConfig
+	Out           io.Writer // progress log; nil discards
+	Err           io.Writer // warnings; nil discards
+	Verbose       bool
 	// Streamed means the model already wrote its text to Out as it arrived.
 	Streamed bool
 	// SkipAgentsMD stops Run from appending the nearest AGENTS.md at or above
@@ -417,6 +420,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 	// The output budget may change on resume, so the current one is recorded.
 	t.MaxOutputTokens = a.Config.MaxOutputTokens
 	t.Sandbox, t.Environment, t.CommandEnv = nil, nil, nil
+	t.RedactSecrets = a.RedactSecrets
 	t.FileAccess = FileAccessInfo(a.Tools.FileAccess)
 	t.AdditionalDirs = AdditionalDirsInfo(a.Tools.ExtraDirs, a.Tools.ReadOnly)
 	t.WebFetch = nil
@@ -677,7 +681,7 @@ func (a *Agent) finishSuccess(ctx context.Context, t *trajectory.Trajectory, v *
 		t.StructuredOutput = structured
 		return a.finish(t, status, submission)
 	}
-	reasons := strings.Join(feedback, "\n\n")
+	reasons, _ := a.Tools.Redactor.RedactCount(strings.Join(feedback, "\n\n"))
 	if t.StopContinuations >= a.Hooks.MaxStopContinuations() {
 		t.StopReason = reasons
 		return a.finish(t, StatusVerificationFailed, submission)
@@ -725,8 +729,12 @@ func (a *Agent) toolStep(ctx context.Context, t *trajectory.Trajectory, v *view,
 }
 
 // noteOutputFile adds a saved result's file to its tool.result event
-// fields and to the trajectory.
+// fields and to the trajectory, and the result's redaction count to the
+// fields.
 func (a *Agent) noteOutputFile(t *trajectory.Trajectory, call model.ToolCall, res tools.Result, fields map[string]any) {
+	if res.Redactions > 0 {
+		fields["redactions"] = res.Redactions
+	}
 	if res.OutputFile == "" {
 		return
 	}
@@ -842,7 +850,9 @@ func (a *Agent) runTool(ctx context.Context, t *trajectory.Trajectory, call mode
 		feedback.WriteString(r.Feedback)
 	}
 	if feedback.Len() > 0 {
-		res.Text = withFeedback(res, feedback.String(), a.Tools.MaxOutputChars)
+		fb, n := a.Tools.Redactor.RedactCount(feedback.String())
+		res.Redactions += n
+		res.Text = withFeedback(res, fb, a.Tools.MaxOutputChars)
 	}
 	return res
 }

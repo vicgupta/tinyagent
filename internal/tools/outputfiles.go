@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/vicgupta/tinyagent/internal/model"
+	"github.com/vicgupta/tinyagent/internal/skills"
 )
 
 // DefaultToolOutputDir is where saved tool output goes, relative to --cwd.
@@ -264,12 +265,29 @@ func TruncateWithNotice(body, notice string, max int) (string, bool) {
 	return b + "\n" + notice, true
 }
 
+// unredactedTools are the built-in file tools redact_secrets leaves alone:
+// their output feeds edits, and a placeholder written back would corrupt
+// files (file_access is the control for secret files).
+var unredactedTools = map[string]bool{
+	"read_file": true, "write_file": true, "edit_file": true, "list_files": true, "grep": true,
+	ApplyPatchToolName: true, ViewImageToolName: true, LSPToolName: true, skills.ToolName: true,
+}
+
+// Redacts reports whether redact_secrets masks name's results: every tool
+// (bash, the process tools, web_fetch, MCP tools) except the built-in file
+// tools.
+func Redacts(name string) bool { return !unredactedTools[name] }
+
 // limit bounds out for the model. Without OutputFiles (or within the limit)
 // it is exactly truncate. Over the limit it saves the full text and returns
 // a preview plus a notice; read_file results and searches of the output
 // directory itself are never saved.
 func (e *Executor) limit(call model.ToolCall, out string, isErr bool) Result {
-	res := Result{Text: out, IsError: isErr}
+	var redactions int
+	if e.Redactor != nil && Redacts(call.Function.Name) {
+		out, redactions = e.Redactor.RedactCount(out)
+	}
+	res := Result{Text: out, IsError: isErr, Redactions: redactions}
 	max := e.MaxOutputChars
 	o := e.OutputFiles
 	if o == nil || max <= 0 || len(out) <= max {

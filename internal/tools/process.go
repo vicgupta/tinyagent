@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/vicgupta/tinyagent/internal/eventlog"
 )
 
 const (
@@ -80,6 +82,7 @@ type process struct {
 	cancel  context.CancelFunc
 	out     *outBuffer
 	read    int // offset of the next unread byte
+	held    int // bytes after read held back as a partial secret
 	done    chan struct{}
 	code    int   // exit code, valid after done
 	waitErr error // non-exit error from Wait, valid after done
@@ -98,13 +101,24 @@ func (p *process) status() string {
 }
 
 // unread returns output since the last read, optionally only its last tail
-// lines, and marks it read.
-func (p *process) unread(tail int) string {
+// lines, and marks it read. With a redactor (redact_secrets) and the
+// process still running, a trailing partial secret stays unread until the
+// rest arrives or the process ends, so a secret split across reads is
+// masked whole; tail lines are cut only after masking.
+func (p *process) unread(tail int, red *eventlog.Redactor) string {
 	s, end, lost := p.out.since(p.read)
+	p.held = 0
+	if red != nil && p.status() == "running" {
+		p.held = red.PartialSuffix(s)
+		s, end = s[:len(s)-p.held], end-p.held
+	}
 	p.read = end
 	var note string
 	if lost > 0 {
 		note = fmt.Sprintf("[%d bytes of earlier output dropped: buffer cap]\n", lost)
+	}
+	if tail > 0 && red != nil {
+		s = red.Redact(s)
 	}
 	if tail > 0 {
 		lines := strings.SplitAfter(s, "\n")
@@ -189,13 +203,13 @@ func (e *Executor) StartProcess(command string) (string, error) {
 	}()
 
 	waitForOutput(p, startWait)
-	return fmt.Sprintf("<process_id>%s</process_id>\n<status>%s</status>\n<output>\n%s</output>", id, p.status(), p.unread(0)), nil
+	return fmt.Sprintf("<process_id>%s</process_id>\n<status>%s</status>\n<output>\n%s</output>", id, p.status(), p.unread(0, e.Redactor)), nil
 }
 
 // waitForOutput blocks until p has unread output, exits, or d passes.
 func waitForOutput(p *process, d time.Duration) {
 	end, notify := p.out.end()
-	if end > p.read || d <= 0 {
+	if end > p.read+p.held || d <= 0 {
 		return
 	}
 	t := time.NewTimer(d)
@@ -233,7 +247,7 @@ func (e *Executor) ReadProcess(ctx context.Context, id string, waitMs, tail int)
 	}
 	if waitMs > 0 {
 		end, notify := p.out.end()
-		if end <= p.read {
+		if end <= p.read+p.held {
 			t := time.NewTimer(time.Duration(waitMs) * time.Millisecond)
 			select {
 			case <-notify:
@@ -244,7 +258,7 @@ func (e *Executor) ReadProcess(ctx context.Context, id string, waitMs, tail int)
 			t.Stop()
 		}
 	}
-	return fmt.Sprintf("<status>%s</status>\n<output>\n%s</output>", p.status(), p.unread(tail)), nil
+	return fmt.Sprintf("<status>%s</status>\n<output>\n%s</output>", p.status(), p.unread(tail, e.Redactor)), nil
 }
 
 // StopProcess kills id's whole process group and reports its exit status and
@@ -258,7 +272,7 @@ func (e *Executor) StopProcess(id string, tail int) (string, error) {
 	e.procs.mu.Lock()
 	delete(e.procs.procs, id)
 	e.procs.mu.Unlock()
-	return fmt.Sprintf("<status>%s</status>\n<output>\n%s</output>", p.status(), p.unread(tail)), nil
+	return fmt.Sprintf("<status>%s</status>\n<output>\n%s</output>", p.status(), p.unread(tail, e.Redactor)), nil
 }
 
 // kill cancels p, which kills its process group, and waits for it to exit.
@@ -297,10 +311,13 @@ func (e *Executor) Close() string {
 		if wasRunning {
 			action = "killed at run end, " + p.status()
 		}
-		fmt.Fprintf(&sb, "%s (%s): %s\n%s", p.id, p.command, action, p.unread(cleanupTail))
+		fmt.Fprintf(&sb, "%s (%s): %s\n%s", p.id, p.command, action, p.unread(cleanupTail, e.Redactor))
 		if !strings.HasSuffix(sb.String(), "\n") {
 			sb.WriteString("\n")
 		}
+	}
+	if e.Redactor != nil {
+		return e.Redactor.Redact(sb.String())
 	}
 	return sb.String()
 }

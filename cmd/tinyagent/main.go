@@ -64,6 +64,7 @@ type options struct {
 	openaiAPI                                        string
 	execEnv                                          string
 	commandEnv                                       string
+	redactSecrets                                    bool
 	stepLimit, timeLimit, maxFormatErrors            int
 	maxOutputTokens                                  int
 	costLimit                                        float64
@@ -144,6 +145,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.openaiAPI, "openai-api", "", "openai provider transport: auto, responses, or chat")
 	fs.StringVar(&o.execEnv, "env", "", "where bash and start_process run: local or container (default: config's environment, else local)")
 	fs.StringVar(&o.commandEnv, "command-env", "", "environment bash and start_process inherit: all, core or none (default: config's command_env.inherit, else all)")
+	fs.BoolVar(&o.redactSecrets, "redact-secrets", false, "mask known secret values (secret-named and configured variables) as [REDACTED] in bash, process, MCP, web_fetch and hook output before the model sees it; --redact-secrets=false turns config redact_secrets off (default off)")
 	fs.BoolVar(&o.jsonOutput, "json", false, "write run events as JSONL to stdout")
 	fs.StringVar(&o.outputSchema, "output-schema", "", "end the run with a JSON result validated against this JSON Schema file (printed to stdout)")
 	fs.BoolVar(&o.snapshots, "snapshots", false, "snapshot the workspace before every tool batch that can change files, for --rewind; requires -o (default off; config snapshots)")
@@ -520,6 +522,10 @@ func run() int {
 		return 2
 	}
 	providerAPI, providerBaseURL := providerInfo(o.modelName)
+	if flagWasSet(fs, "redact-secrets") {
+		cfg.RedactSecrets.Enabled = o.redactSecrets
+	}
+	redactor, redactInfo := newSecretRedactor(cfg, os.Environ(), os.Stderr, o.verbose)
 
 	a := &agent.Agent{
 		Model:           m,
@@ -552,7 +558,9 @@ func run() int {
 			ExtraDirs:          extraDirs,
 			MaxImageBytes:      cfg.MaxImageBytes,
 			ExternalCallImages: mcpRegistry.CallImages(cfg.MaxImageBytes),
+			Redactor:           redactor,
 		},
+		RedactSecrets:  redactInfo,
 		Config:         cfg,
 		Hooks:          hookRunner,
 		Out:            outputTo(runOutput(o.jsonOutput), progress),
@@ -998,6 +1006,12 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return 2
 	}
 	providerAPI, providerBaseURL := providerInfo(modelName)
+	// The current invocation's setting applies; earlier results in the
+	// checkpoint are not rewritten.
+	if flagWasSet(fs, "redact-secrets") {
+		cfg.RedactSecrets.Enabled = o.redactSecrets
+	}
+	redactor, redactInfo := newSecretRedactor(cfg, os.Environ(), os.Stderr, o.verbose)
 
 	// The agent records this boundary and clears the active termination before
 	// persisting the new starting state.
@@ -1034,7 +1048,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 			FileAccess:     fileAccess,
 			ExtraDirs:      extraDirs,
 			MaxImageBytes:  cfg.MaxImageBytes,
+			Redactor:       redactor,
 		},
+		RedactSecrets:  redactInfo,
 		Config:         cfg,
 		Hooks:          hookRunner,
 		Out:            runOutput(o.jsonOutput),
@@ -1866,6 +1882,9 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 			started["command_env"] = ce
 		}
 	}
+	if a.RedactSecrets != nil {
+		started["redact_secrets"] = a.RedactSecrets
+	}
 	if fa := agent.FileAccessInfo(a.Tools.FileAccess); fa != nil {
 		started["file_access"] = fa
 	}
@@ -2060,40 +2079,13 @@ func openLogDB(fs *flag.FlagSet, o options, cfg config.AgentConfig, root, task, 
 	return db, nil
 }
 
-// configuredSecrets returns the env values set for MCP servers and hooks in
-// the config, which the event log redacts.
+// configuredSecrets returns the env values set for MCP servers, hooks,
+// configured providers and command_env.set in the config, which the event
+// log redacts.
 func configuredSecrets(cfg config.AgentConfig) []string {
-	var envs []string
-	for _, s := range cfg.MCPServers {
-		envs = append(envs, s.Env...)
-	}
 	var vals []string
-	for _, kv := range envs {
-		if _, v, ok := strings.Cut(kv, "="); ok {
-			vals = append(vals, v)
-		}
-	}
-	// Configured providers read their key and secret headers from the
-	// environment; redact those values too.
-	vals = append(vals, model.ProviderSecrets()...)
-	// Hook env entries name variables forwarded from tinyagent's own
-	// environment; redact the values they had at startup.
-	var hookDefs []config.Hook
-	hookDefs = append(hookDefs, cfg.Hooks.PreTool...)
-	hookDefs = append(hookDefs, cfg.Hooks.PostTool...)
-	hookDefs = append(hookDefs, cfg.Hooks.Stop...)
-	for _, h := range hookDefs {
-		for _, name := range h.Env {
-			if _, v, ok := strings.Cut(name, "="); ok {
-				vals = append(vals, v)
-			} else if v := os.Getenv(name); v != "" {
-				vals = append(vals, v)
-			}
-		}
-	}
-	// command_env.set values may be secrets the user deliberately provides.
-	for _, v := range cfg.CommandEnv.Set {
-		vals = append(vals, v)
+	for _, s := range configSecrets(cfg) {
+		vals = append(vals, s.value)
 	}
 	return vals
 }
