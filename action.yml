@@ -1,0 +1,130 @@
+name: tinyagent
+description: Install a checksum-verified tinyagent release and run one task or review, with the result as step outputs.
+author: vicgupta
+branding:
+  icon: terminal
+  color: gray-dark
+
+# Every input reaches the scripts through env:, never through ${{ }} inside a
+# run: body, so untrusted text (issue bodies, PR titles) is data, not shell.
+inputs:
+  task:
+    description: The task. Fed to `tinyagent -t -` on stdin. Required unless task-file, review-base or review-commit is set; with a review it adds focus instructions.
+    required: false
+    default: ""
+  task-file:
+    description: Path of a file holding the task, instead of task.
+    required: false
+    default: ""
+  model:
+    description: Model, as for `-m` (for example anthropic/claude-sonnet-4-5).
+    required: false
+    default: ""
+  profile:
+    description: Config profile, as for `--profile`.
+    required: false
+    default: ""
+  config:
+    description: Config file, as for `-c`. Use it for command_env (inherit core, exclude_secrets) on untrusted input.
+    required: false
+    default: ""
+  working-directory:
+    description: Directory the agent works in (`--cwd`).
+    required: false
+    default: ${{ github.workspace }}
+  review-base:
+    description: Review the changes since the merge base with this ref (`--review-base`, read-only).
+    required: false
+    default: ""
+  review-commit:
+    description: Review one commit (`--review-commit`, read-only).
+    required: false
+    default: ""
+  read-only:
+    description: Pass `--read-only` (no write or command tools). true or false.
+    required: false
+    default: "false"
+  sandbox:
+    description: Pass `--sandbox` (OS-level confinement of commands). true or false.
+    required: false
+    default: "false"
+  output-schema:
+    description: JSON Schema file for a structured result (`--output-schema`).
+    required: false
+    default: ""
+  args:
+    description: Extra tinyagent flags, one argv element per line. Lines are not shell-evaluated or split; blank lines are skipped.
+    required: false
+    default: ""
+  version:
+    description: tinyagent release to install (vX.Y.Z, or latest). Defaults to the action's ref when it is a vX.Y.Z tag; required under any other ref unless tinyagent-path is set.
+    required: false
+    default: ""
+  tinyagent-path:
+    description: Use this tinyagent binary instead of downloading a release.
+    required: false
+    default: ""
+  job-summary:
+    description: Append the `tinyagent --transcript` Markdown to the job summary (model-authored content, fenced and redacted). true or false.
+    required: false
+    default: "false"
+  fail-on-error:
+    description: Fail the step when tinyagent exits non-zero. If false, only usage errors (exit 2) and install failures fail it; read exit-code instead.
+    required: false
+    default: "true"
+
+outputs:
+  status:
+    description: Final run status (Submitted, Completed, Error, ...), from the result event. Empty if the run never started.
+    value: ${{ steps.run.outputs.status }}
+  submission:
+    description: The final submission (model-authored; treat as untrusted).
+    value: ${{ steps.run.outputs.submission }}
+  structured-output:
+    description: Compact JSON result; set only for Submitted runs with output-schema.
+    value: ${{ steps.run.outputs.structured-output }}
+  steps:
+    description: Cumulative model steps.
+    value: ${{ steps.run.outputs.steps }}
+  cost-usd:
+    description: Estimated cost in USD.
+    value: ${{ steps.run.outputs.cost-usd }}
+  exit-code:
+    description: tinyagent's exit status (0 Submitted/Completed, 1 other failures, 2 usage error, 3 OutputTruncated, 4 NeedsInput).
+    value: ${{ steps.run.outputs.exit-code }}
+  trajectory:
+    description: Path of the trajectory (`-o`) under RUNNER_TEMP.
+    value: ${{ steps.run.outputs.trajectory }}
+  events:
+    description: Path of the saved `--json` event stream under RUNNER_TEMP.
+    value: ${{ steps.run.outputs.events }}
+
+runs:
+  using: composite
+  steps:
+    - id: install
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_TINYAGENT_PATH: ${{ inputs.tinyagent-path }}
+        ACTION_REF: ${{ github.action_ref }}
+      run: '"$GITHUB_ACTION_PATH/action/install.sh"'
+    - id: run
+      shell: bash
+      env:
+        TINYAGENT_BIN: ${{ steps.install.outputs.path }}
+        INPUT_TASK: ${{ inputs.task }}
+        INPUT_TASK_FILE: ${{ inputs.task-file }}
+        INPUT_MODEL: ${{ inputs.model }}
+        INPUT_PROFILE: ${{ inputs.profile }}
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        INPUT_REVIEW_BASE: ${{ inputs.review-base }}
+        INPUT_REVIEW_COMMIT: ${{ inputs.review-commit }}
+        INPUT_READ_ONLY: ${{ inputs.read-only }}
+        INPUT_SANDBOX: ${{ inputs.sandbox }}
+        INPUT_OUTPUT_SCHEMA: ${{ inputs.output-schema }}
+        INPUT_ARGS: ${{ inputs.args }}
+        INPUT_JOB_SUMMARY: ${{ inputs.job-summary }}
+        INPUT_FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+      run: '"$GITHUB_ACTION_PATH/action/run.sh"'

@@ -344,7 +344,7 @@ tinyagent --transcript run.json > run.md
 
 **Size.** Each tool result, tool call's arguments, user message (the task included), plan diff and compaction summary is cut to its first 2,000 characters, with a `[... N characters omitted ...]` notice. Assistant text and the submission are shown whole.
 
-**In CI.** Append it to the GitHub Actions job summary. A job summary is limited to 1 MiB per step and fails to upload above that, so very long runs may not fit:
+**In CI.** Append it to the GitHub Actions job summary (the [GitHub Action](#github-actions) does this with `job-summary: true`). A job summary is limited to 1 MiB per step and fails to upload above that, so very long runs may not fit:
 
 ```yaml
 - run: tinyagent --profile ci -t "fix the failing test" -o run.json
@@ -436,6 +436,84 @@ With `--skills` (or `skills: true`), tinyagent discovers [Agent Skills](https://
 - With no skills found, the prompt and tool list are exactly as without `--skills`. `-v` prints each loaded skill and its path; warnings go to stderr and, with `--json`, as `warning` events.
 
 **Trust:** skill instructions are prompt input. A project skill from a repository you don't trust can steer the agent like a malicious AGENTS.md, and bundled scripts run with your permissions if the agent invokes them. Skill text sent to the model goes to your model provider like any other prompt, and the trajectory records loaded skill content.
+
+## GitHub Actions
+
+`action.yml` at the root of this repo is a composite action. It installs a tinyagent release on a Linux or macOS runner (amd64 or arm64), checks it against the release's `SHA256SUMS`, runs one task or review, and sets the result as step outputs. It adds no agent behavior: every input maps to an existing flag.
+
+```yaml
+permissions:
+  contents: read
+steps:
+  - uses: actions/checkout@v4
+  - id: agent
+    uses: vicgupta/tinyagent@v0.5.0
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    with:
+      model: anthropic/claude-sonnet-4-5
+      task: Fix the failing test in ./internal/parser.
+      job-summary: true
+```
+
+**Pinning.** Under a `vX.Y.Z` tag the action installs the tinyagent release with the same tag, so `@v0.5.0` runs tinyagent v0.5.0. Under any other ref (a branch or a commit SHA) set `version` (`vX.Y.Z`, or `latest` to opt into the newest release) or `tinyagent-path`, or the step fails. A tag can be moved; for a fixed action pin to the tag's full commit SHA and set `version`: `uses: vicgupta/tinyagent@<sha> # v0.5.0` with `version: v0.5.0`.
+
+**Read-only PR review with a findings schema.** Review flags imply `--read-only`, so the agent can't edit files or run commands:
+
+```yaml
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - id: review
+        uses: vicgupta/tinyagent@v0.5.0
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          model: anthropic/claude-sonnet-4-5
+          review-base: origin/${{ github.base_ref }}
+          output-schema: .github/tinyagent/findings.schema.json
+          config: .github/tinyagent/ci.yaml
+          job-summary: true
+      - run: jq . <<<"$FINDINGS"
+        env:
+          FINDINGS: ${{ steps.review.outputs.structured-output }}
+```
+
+**Inputs.** `task` or `task-file` (one is required unless `review-base` or `review-commit` is set; with a review it adds focus), `model` (`-m`), `profile`, `config` (`-c`), `working-directory` (`--cwd`, default the workspace), `review-base`, `review-commit`, `read-only` and `sandbox` (`true`/`false`, default `false`), `output-schema`, `args` (extra flags, one argv element per line, never shell-evaluated or split), `version`, `tinyagent-path` (use an existing binary instead of downloading), `job-summary` (default `false`) and `fail-on-error` (default `true`). The task reaches tinyagent on stdin (`-t -`) and every input through `env:`, so text like `$(...)` or backticks is never run by a shell.
+
+**Outputs.** `status`, `submission`, `structured-output` (compact JSON, set only for a `Submitted` run with `output-schema`), `steps` and `cost-usd`, all from the final [`result` event](#machine-readable-output); `exit-code` (always set once tinyagent ran); and `trajectory` and `events`, the paths of the `-o` file and the saved `--json` stream under `$RUNNER_TEMP`. They are not uploaded; add an artifact step if you want them. Each value is written to `$GITHUB_OUTPUT` behind a random delimiter, and the step fails instead of setting a value that contains it, so a submission can't forge other outputs. While tinyagent runs, workflow commands (`::add-mask::`, `::error::` ...) in its log output are disabled.
+
+**Failing the step.** A non-zero [exit status](#exit-status) (1, 3 `OutputTruncated`, 4 `NeedsInput`) fails the step unless `fail-on-error: false`, in which case later steps can read `exit-code` and `status`. A usage error (exit 2), a bad input, or an install failure (unsupported runner, missing asset, checksum mismatch) always fails the step, before any model request.
+
+**Job summary.** `job-summary: true` appends the [`--transcript`](#view-a-run-as-a-transcript) rendering to the job summary, also when the run failed. It is fenced and redacted but still model-authored. Over GitHub's 1 MiB step-summary limit, a one-line notice is appended instead.
+
+**Requirements.** `jq` (preinstalled on GitHub-hosted Linux and macOS runners) and `bash`. Windows runners are not supported.
+
+### Untrusted input
+
+Issue bodies, PR titles, diffs and commit messages can carry prompt injection. The action keeps them out of the shell, but it can't stop the model from following instructions in them, so limit what a hijacked run can reach:
+
+- tinyagent and its commands can read anything in their environment, including the provider API key, unless a [command environment](#command-environment) policy excludes it. Use a config such as:
+
+  ```yaml
+  # .github/tinyagent/ci.yaml
+  command_env:
+    inherit: core
+    exclude_secrets: true
+  ```
+
+- Prefer `review-base`/`review-commit` or `read-only: true`, which have no command or write tools. Add `sandbox: true` for runs that do execute commands. On Linux it needs Landlock (kernel 6.2+, 6.7+ to deny TCP), and a network allowlist also needs unprivileged user namespaces, which Ubuntu 23.10+ can restrict with AppArmor. This hasn't been checked on GitHub-hosted runners; tinyagent fails closed and says what is missing if the runner can't enforce it.
+- Set minimal `permissions:` and don't put `GITHUB_TOKEN` in the action's `env:`; the action never passes it on itself.
+- Don't run on `pull_request_target` (or `workflow_run`) with a checkout of the PR's code.
+- Treat every output and the job summary as untrusted: pass them to later steps through `env:`, never `${{ }}` inside `run:`.
+
+See GitHub's [Secure use reference](https://docs.github.com/en/actions/reference/security/secure-use).
 
 ## Config
 
