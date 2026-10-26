@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [v0.5.0] - 2026-10-26
+
 ### Features
 
 - Suggest the closest flags when a flag is mistyped: an unknown flag now exits 2 with one line such as `error: unknown flag --sandbxo; did you mean --sandbox? (see tinyagent --help)` (up to three names within a small edit distance or extending what was typed, echoed with the dashes you used) instead of Go's `flag provided but not defined: -sandbxo` followed by the full usage. Other parse errors and `--help` are unchanged.
