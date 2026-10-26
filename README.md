@@ -46,9 +46,9 @@ tinyagent --update
 
 This replaces the binary in place with the latest release, after checking its checksum. If it's installed in a directory you can't write to, run it with `sudo`.
 
-### Shell completion (Bash and Zsh)
+### Shell completion (Bash, Zsh and Fish)
 
-`tinyagent --completion bash` and `tinyagent --completion zsh` print a script that completes flag names (`--sandbox-<Tab>`, `--tool-out<Tab>`, short aliases such as `-t`). Only flag names are completed, not models, profiles or other flag values.
+`tinyagent --completion bash`, `tinyagent --completion zsh` and `tinyagent --completion fish` print a script that completes flag names (`--sandbox-<Tab>`, `--tool-out<Tab>`, short aliases such as `-t`). Only flag names are completed, not models, profiles or other flag values.
 
 **Bash.** Load it for the current session:
 
@@ -68,7 +68,20 @@ source <(tinyagent --completion zsh)
 
 If your framework (Oh My Zsh, Prezto and the like) already runs `compinit`, add only the last line, after the framework is loaded. Sourcing it before `compinit` prints an error and changes nothing.
 
-Other shell names exit 2. In both shells, words that don't start with `-` (and flag prefixes that match no flag) keep the shell's normal filename completion, and pressing Tab never runs tinyagent: the flag list is fixed when the script is generated, so re-source it (or open a new shell) after updating. The command needs no task, credentials or config.
+**Fish.** Load it for the current session:
+
+```fish
+tinyagent --completion fish | source
+```
+
+For automatic loading in new sessions, save the script:
+
+```fish
+mkdir -p ~/.config/fish/completions
+tinyagent --completion fish > ~/.config/fish/completions/tinyagent.fish
+```
+
+Other shell names exit 2. In all three shells, words that don't start with `-` (and flag prefixes that match no flag) keep the shell's normal filename completion, and pressing Tab never runs tinyagent: the flag list is fixed when the script is generated, so re-source it after `--update` (or open a new shell); for Fish automatic loading, regenerate the saved file after updating. The command needs no task, credentials or config.
 
 ### Build from source
 
@@ -161,7 +174,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `-V, --version` | | Print the version and exit |
 | `--update` | | Replace this binary with the latest GitHub release (checksum-verified) and exit |
 | `--check` | | Print the resolved config file, model, provider key status, fallbacks, cwd and limits (and `ask_user` when it is on or set by flag), then exit without a model request (exit 2 on a setup error) |
-| `--completion bash\|zsh` | | Print a Bash or Zsh flag-name completion script and exit (`source <(tinyagent --completion bash)`; for Zsh, after `compinit`); see [Shell completion](#shell-completion-bash-and-zsh) |
+| `--completion bash\|zsh\|fish` | | Print a Bash, Zsh or Fish flag-name completion script and exit (`source <(tinyagent --completion bash)`; for Zsh, after `compinit`; for Fish, `tinyagent --completion fish \| source`); see [Shell completion](#shell-completion-bash-zsh-and-fish) |
 
 ### Machine-readable output
 

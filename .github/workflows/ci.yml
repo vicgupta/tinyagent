@@ -28,5 +28,9 @@ jobs:
         run: go build ./...
       - name: Vet
         run: go vet ./...
+      - name: Install Fish
+        run: sudo apt-get update && sudo apt-get install -y fish
       - name: Test
+        env:
+          TINYAGENT_REQUIRE_FISH: "1"
         run: go test -count=1 ./...
