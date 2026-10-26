@@ -132,6 +132,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `-o, --output` | — | Trajectory JSON, rewritten after every step |
 | `--snapshots` | config `snapshots`, else off | Snapshot the workspace before every tool batch that can change files, so `--rewind` can restore it. Requires `-o`. See [Rewind workspace changes](#rewind-workspace-changes) |
 | `--rewind <trajectory>` | | Restore `--cwd` to a snapshot recorded in that trajectory, with `--to start\|<step>\|<snapshot-id>` (default `start`) and `--dry-run` to preview. Makes no model request |
+| `--transcript <trajectory>` | | Print that trajectory as a redacted Markdown transcript on stdout and exit. Makes no model request and needs no API key; see [View a run as a transcript](#view-a-run-as-a-transcript) |
 | `-v, --verbose` | off | Print tool calls and their outputs |
 | `--json` | off | Write machine-readable run events as JSONL to stdout |
 | `--output-schema` | | End the run with a JSON result validated against this JSON Schema file (printed to stdout) |
@@ -326,6 +327,31 @@ A rewind doesn't touch Git state (HEAD, the index, branches, stashes), so uncomm
 **Resume.** `--resume` keeps the source trajectory's snapshots in the new trajectory, so either file can be rewound, including to a step of the original run. Whether the resumed run takes new snapshots depends on this invocation's `--snapshots`/config.
 
 **Storage.** Snapshots live in `<cwd>/.tinyagent/snapshots/`: file contents are stored once each by SHA-256, plus one small manifest per snapshot. Directories are created `0700` and files `0600`, and the store has its own `.gitignore` so it is never committed. It holds full copies of in-scope files, secrets included, so treat it like trajectory files. Nothing is pruned automatically; deleting `.tinyagent/snapshots` is safe and only makes old trajectories un-rewindable. Each snapshot walks the tree, which can take a moment on large trees; `duration_ms` in the event shows how long.
+
+### View a run as a transcript
+
+`--transcript <trajectory>` renders a saved `-o` file as Markdown on stdout, so you can see what an unattended run read, ran and changed, and why, without reading the raw JSON. It reads no config, needs no API key, makes no model or network request and writes no file.
+
+```sh
+tinyagent --transcript run.json | less
+tinyagent --transcript run.json > run.md
+```
+
+**What it shows.** A header with the exit status, model (and the model serving at the end, after a fallback), profile, steps, token totals (cache included), cost, and the read-only, sandbox, environment, worktree and review settings. Then the task, and a `### Step N` section per step, numbered as in `steps`: the assistant's text, each tool call with its arguments pretty-printed, and each result in a collapsed `<details>` block (marked when it was a format-error correction). Tool calls without a result, as in an interrupted checkpoint, are listed as such. Plan updates (with the final plan as a checklist), compactions, model switches, subagent delegations and `--resume`/follow-up boundaries appear where they happened. Every message is shown, including ones compaction removed from the model's view. The footer has the submission (or the `--output-schema` result as JSON) and the snapshot ids for `--rewind`. The system prompt is left out.
+
+**Safety.** All text that came from the task, the model, tools, MCP servers or hooks is written inside fenced code blocks (or inline code) longer than any backtick run it contains, so it can't render as an image, link or HTML wherever the Markdown is shown. Images are never inlined: each is a line like `[image: image/png, shot.png, 48,213 bytes]`. Secrets are masked as `[REDACTED]` with the same redactor as the event log: values of environment variables named `*_KEY`, `*_TOKEN`, `*_SECRET` or `*_PASSWORD` in the environment you run `--transcript` in, and `sk-…`, `ghp_…`, `Bearer …` and `xox…-` shaped tokens. Redaction is best-effort: review a transcript before posting it publicly.
+
+**Size.** Each tool result, tool call's arguments, user message (the task included), plan diff and compaction summary is cut to its first 2,000 characters, with a `[... N characters omitted ...]` notice. Assistant text and the submission are shown whole.
+
+**In CI.** Append it to the GitHub Actions job summary. A job summary is limited to 1 MiB per step and fails to upload above that, so very long runs may not fit:
+
+```yaml
+- run: tinyagent --profile ci -t "fix the failing test" -o run.json
+- if: always()
+  run: tinyagent --transcript run.json >> "$GITHUB_STEP_SUMMARY"
+```
+
+Any trajectory tinyagent writes renders, finished or not, including old files and ones `--resume` would refuse; fields it doesn't know are ignored. A missing, non-regular, empty or over-64-MiB file, invalid JSON or an unsupported `schema_version` exits 2 with one error line and nothing on stdout. `--transcript` can't be combined with `-t`, `--resume`, `--rewind`, `--check`, `--json`, `-o` or the other mode flags (exit 2).
 
 ### Continue a finished run with a follow-up task
 

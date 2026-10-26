@@ -75,6 +75,7 @@ type options struct {
 	worktree                                         worktreeFlag
 	snapshots, dryRun                                bool
 	rewind, rewindTo                                 string
+	transcript                                       string
 	profile                                          string
 	completion                                       string
 	showHelp, showVersion, doUpdate, check           bool
@@ -147,6 +148,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.rewind, "rewind", "", "restore --cwd to a workspace snapshot recorded in this trajectory JSON (see --to and --dry-run)")
 	fs.StringVar(&o.rewindTo, "to", "", "with --rewind: start (the baseline, the default), a step number (the state before that step's tool batch), or a snapshot id")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "with --rewind: print what would change and write nothing")
+	fs.StringVar(&o.transcript, "transcript", "", "print this trajectory JSON as a Markdown transcript (secrets redacted, long results truncated) and exit; makes no model request")
 	fs.Var(&o.logDB, "log-db", "also log run events to SQLite (default .tinyagent/tinyagent.db under --cwd); --log-db=false turns config log_db off")
 	fs.BoolVar(&o.showVersion, "version", false, "print the version and exit")
 	fs.BoolVar(&o.showVersion, "V", false, "shorthand for --version")
@@ -173,6 +175,9 @@ func run() int {
 	if o.showHelp {
 		printUsage(helpOutput, fs)
 		return 0
+	}
+	if flagWasSet(fs, "transcript") {
+		return runTranscript(&o, fs, os.Stdout)
 	}
 	if flagWasSet(fs, "completion") {
 		return runCompletion(o.completion, fs, os.Stdout)
@@ -1405,7 +1410,7 @@ var usageGroups = []struct {
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
-	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "init-config", ""}, {"", "completion", "shell"}}},
+	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "transcript", "path"}, {"", "init-config", ""}, {"", "completion", "shell"}}},
 }
 
 func printUsage(w io.Writer, fs *flag.FlagSet) {
@@ -1425,7 +1430,7 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 			width = max(width, len(left(f)))
 		}
 	}
-	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n       tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <finished.json> -t \"<follow-up>\" --cwd <dir> -o <new.json> [flags]\n       tinyagent --review | --review-base <ref> | --review-commit <rev> [-t \"<focus>\"] [flags]\n       tinyagent --rewind <trajectory.json> --cwd <dir> [--to start|<step>|<id>] [--dry-run]\n       tinyagent --check [-m <model>] [-c <config>] [--profile <name>] [--cwd <dir>]\n       tinyagent --completion bash\n\n")
+	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n       tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <finished.json> -t \"<follow-up>\" --cwd <dir> -o <new.json> [flags]\n       tinyagent --review | --review-base <ref> | --review-commit <rev> [-t \"<focus>\"] [flags]\n       tinyagent --rewind <trajectory.json> --cwd <dir> [--to start|<step>|<id>] [--dry-run]\n       tinyagent --check [-m <model>] [-c <config>] [--profile <name>] [--cwd <dir>]\n       tinyagent --transcript <trajectory.json>\n       tinyagent --completion bash\n\n")
 	for _, g := range usageGroups {
 		if g.name != "" {
 			fmt.Fprintf(w, "%s:\n", g.name)
@@ -1452,6 +1457,7 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 		"  tinyagent --review-base main -t \"focus on error handling\"\n"+
 		"  tinyagent --rewind run.json --cwd . --to 3 --dry-run\n"+
 		"  tinyagent --check -m anthropic/claude-sonnet-4\n"+
+		"  tinyagent --transcript run.json >> \"$GITHUB_STEP_SUMMARY\"\n"+
 		"  source <(tinyagent --completion bash)\n")
 }
 
