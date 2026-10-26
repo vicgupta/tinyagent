@@ -528,7 +528,11 @@ func run() int {
 	start := time.Now()
 	t := a.Run(ctx, task)
 	elapsed := time.Since(start)
-	reportSummary(os.Stderr, o.modelName, t, elapsed)
+	resume := ""
+	if !o.jsonOutput {
+		resume = resumeCommand(t, o.output, root, cfg)
+	}
+	reportSummary(os.Stderr, o.modelName, t, elapsed, resume)
 	if worktree != nil {
 		fmt.Fprintf(os.Stderr, "worktree kept: %s (branch %s)\n", worktree.Path, worktree.Branch)
 	}
@@ -947,7 +951,11 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	start := time.Now()
 	t := a.Run(ctx, src.Task)
 	elapsed := time.Since(start)
-	reportSummary(os.Stderr, modelName, t, elapsed)
+	resume := ""
+	if !o.jsonOutput {
+		resume = resumeCommand(t, o.output, root, cfg)
+	}
+	reportSummary(os.Stderr, modelName, t, elapsed, resume)
 	if events.finish(t, elapsed) != nil {
 		return 1
 	}
@@ -1326,12 +1334,75 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 
 // reportSummary prints one line on how the run ended: status, steps, elapsed
 // time, and token and cost totals when known. For an error that looks like a
-// setup problem, a hint line follows.
-func reportSummary(w io.Writer, modelName string, t *trajectory.Trajectory, elapsed time.Duration) {
+// setup problem, a hint line follows; for a resumable stop, resume is the
+// ready-to-paste command (empty prints nothing).
+func reportSummary(w io.Writer, modelName string, t *trajectory.Trajectory, elapsed time.Duration, resume string) {
 	fmt.Fprintln(w, summaryLine(t, elapsed))
 	if t.ExitStatus == agent.StatusError {
 		printHint(w, modelName, t.Submission)
 	}
+	if resume != "" {
+		fmt.Fprintln(w, "resume: "+resume)
+	}
+}
+
+// resumeCommand returns the --resume command that continues a run stopped at
+// a limit, interrupted or truncated, or "" when there is nothing to resume
+// (no -o, an --output-schema run, another status). Limit stops get the hit limit doubled, since
+// limits are cumulative ceilings. root is the resolved --cwd.
+func resumeCommand(t *trajectory.Trajectory, output, root string, cfg config.AgentConfig) string {
+	if output == "" || t.OutputSchema != nil || t.OutputSchemaDigest != "" {
+		return ""
+	}
+	limit := ""
+	switch t.ExitStatus {
+	case agent.StatusStepLimit:
+		if cfg.StepLimit > 0 {
+			limit = " --step-limit " + strconv.Itoa(2*cfg.StepLimit)
+		}
+	case agent.StatusCostLimit:
+		if cfg.CostLimit > 0 {
+			limit = " --cost-limit " + strconv.FormatFloat(2*cfg.CostLimit, 'f', -1, 64)
+		}
+	case agent.StatusTimeLimit:
+		if cfg.WallTimeSec > 0 {
+			limit = " --time-limit " + strconv.Itoa(2*cfg.WallTimeSec)
+		}
+	case agent.StatusInterrupted, agent.StatusOutputTruncated:
+	default:
+		return ""
+	}
+	return "tinyagent --resume " + shellQuote(output) + " --cwd " + shellQuote(root) + limit + " -o " + shellQuote(nextOutputPath(output))
+}
+
+// nextOutputPath returns path with -2 before the extension, or the next
+// number when it already ends in -N, skipping names that already exist
+// (--resume refuses an existing -o).
+func nextOutputPath(path string) string {
+	ext := filepath.Ext(path)
+	base := strings.TrimSuffix(path, ext)
+	n := 2
+	if i := strings.LastIndex(base, "-"); i >= 0 && i > len(filepath.Dir(base)) {
+		if m, err := strconv.Atoi(base[i+1:]); err == nil && m >= 1 && strings.Trim(base[i+1:], "0123456789") == "" {
+			base, n = base[:i], m+1
+		}
+	}
+	for {
+		p := base + "-" + strconv.Itoa(n) + ext
+		if _, err := os.Lstat(p); err != nil {
+			return p
+		}
+		n++
+	}
+}
+
+// shellQuote single-quotes s for a POSIX shell unless it only contains
+// characters that need no quoting.
+func shellQuote(s string) string {
+	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./:@%+=,") == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 func summaryLine(t *trajectory.Trajectory, elapsed time.Duration) string {

@@ -92,16 +92,83 @@ func TestApplyFlagOverridesTimeLimit(t *testing.T) {
 func TestReportSummary(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	var b strings.Builder
-	reportSummary(&b, "openai/gpt-4o", &trajectory.Trajectory{ExitStatus: agent.StatusError, Submission: "HTTP 401: Incorrect API key"}, 0)
+	reportSummary(&b, "openai/gpt-4o", &trajectory.Trajectory{ExitStatus: agent.StatusError, Submission: "HTTP 401: Incorrect API key"}, 0, "")
 	lines := strings.Split(strings.TrimSpace(b.String()), "\n")
 	if len(lines) != 2 || lines[0] != "Error after 0 steps in 0s: HTTP 401: Incorrect API key" || !strings.HasPrefix(lines[1], "hint: OPENAI_API_KEY isn't set") {
 		t.Errorf("got %q, want the summary line then a hint", b.String())
 	}
 
 	b.Reset()
-	reportSummary(&b, "openai/gpt-4o", &trajectory.Trajectory{ExitStatus: agent.StatusSubmitted, Steps: 2, InputTokens: 10, OutputTokens: 5, Cost: 0.5}, 3*time.Second)
+	reportSummary(&b, "openai/gpt-4o", &trajectory.Trajectory{ExitStatus: agent.StatusSubmitted, Steps: 2, InputTokens: 10, OutputTokens: 5, Cost: 0.5}, 3*time.Second, "")
 	if got := b.String(); got != "Submitted after 2 steps in 3s (10 input / 5 output tokens, $0.50)\n" {
 		t.Errorf("success: got %q", got)
+	}
+}
+
+func TestReportSummaryResume(t *testing.T) {
+	var b strings.Builder
+	reportSummary(&b, "openai/gpt-4o", &trajectory.Trajectory{ExitStatus: agent.StatusStepLimit, Steps: 30}, 252*time.Second, "tinyagent --resume run.json --cwd /src --step-limit 60 -o run-2.json")
+	if got, want := b.String(), "StepLimitExceeded after 30 steps in 4m12s\nresume: tinyagent --resume run.json --cwd /src --step-limit 60 -o run-2.json\n"; got != want {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+}
+
+func TestResumeCommand(t *testing.T) {
+	dir := t.TempDir()
+	run := filepath.Join(dir, "run.json")
+	cfg := config.AgentConfig{StepLimit: 30, CostLimit: 0.75, WallTimeSec: 600}
+	tests := []struct {
+		name   string
+		tr     trajectory.Trajectory
+		output string
+		root   string
+		want   string
+	}{
+		{"step limit", trajectory.Trajectory{ExitStatus: agent.StatusStepLimit}, run, "/home/me/src",
+			"tinyagent --resume " + run + " --cwd /home/me/src --step-limit 60 -o " + filepath.Join(dir, "run-2.json")},
+		{"cost limit", trajectory.Trajectory{ExitStatus: agent.StatusCostLimit}, run, "/src",
+			"tinyagent --resume " + run + " --cwd /src --cost-limit 1.5 -o " + filepath.Join(dir, "run-2.json")},
+		{"time limit", trajectory.Trajectory{ExitStatus: agent.StatusTimeLimit}, run, "/src",
+			"tinyagent --resume " + run + " --cwd /src --time-limit 1200 -o " + filepath.Join(dir, "run-2.json")},
+		{"interrupted", trajectory.Trajectory{ExitStatus: agent.StatusInterrupted}, run, "/src",
+			"tinyagent --resume " + run + " --cwd /src -o " + filepath.Join(dir, "run-2.json")},
+		{"output truncated", trajectory.Trajectory{ExitStatus: agent.StatusOutputTruncated}, run, "/src",
+			"tinyagent --resume " + run + " --cwd /src -o " + filepath.Join(dir, "run-2.json")},
+		{"second resume", trajectory.Trajectory{ExitStatus: agent.StatusInterrupted}, "run-2.json", "/src",
+			"tinyagent --resume run-2.json --cwd /src -o run-3.json"},
+		{"no extension", trajectory.Trajectory{ExitStatus: agent.StatusInterrupted}, "out/trace", "/src",
+			"tinyagent --resume out/trace --cwd /src -o out/trace-2"},
+		{"spaces", trajectory.Trajectory{ExitStatus: agent.StatusInterrupted}, "my runs/run.json", "/home/me/My Project",
+			"tinyagent --resume 'my runs/run.json' --cwd '/home/me/My Project' -o 'my runs/run-2.json'"},
+		{"quote", trajectory.Trajectory{ExitStatus: agent.StatusInterrupted}, "it's.json", "/src",
+			`tinyagent --resume 'it'\''s.json' --cwd /src -o 'it'\''s-2.json'`},
+		{"no output", trajectory.Trajectory{ExitStatus: agent.StatusStepLimit}, "", "/src", ""},
+		{"output schema", trajectory.Trajectory{ExitStatus: agent.StatusStepLimit, OutputSchemaDigest: "sha256:x"}, run, "/src", ""},
+		{"submitted", trajectory.Trajectory{ExitStatus: agent.StatusSubmitted}, run, "/src", ""},
+		{"completed", trajectory.Trajectory{ExitStatus: agent.StatusCompleted}, run, "/src", ""},
+		{"error", trajectory.Trajectory{ExitStatus: agent.StatusError}, run, "/src", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resumeCommand(&tt.tr, tt.output, tt.root, cfg); got != tt.want {
+				t.Errorf("got  %q\nwant %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNextOutputPathSkipsExisting(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"run-2.json", "run-3.json"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, want := nextOutputPath(filepath.Join(dir, "run.json")), filepath.Join(dir, "run-4.json"); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	if got, want := nextOutputPath(filepath.Join(dir, "run-2.json")), filepath.Join(dir, "run-4.json"); got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
