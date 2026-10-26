@@ -40,7 +40,12 @@ type Executor struct {
 	Env Environment
 	// Stream receives bash output as it is produced when a call sets
 	// stream: true. nil discards it (the result is unchanged either way).
-	Stream        io.Writer
+	Stream io.Writer
+	// CommandTools are the configured command_tools (never offered or run
+	// in read-only mode). CommandLog, when set, gets one line per call
+	// with the final argv.
+	CommandTools  []*CommandTool
+	CommandLog    io.Writer
 	ExternalSpecs []model.ToolSpec
 	// ExternalCall runs a tool from ExternalSpecs. ok is false when name is
 	// not an external tool; isErr marks a failed call.
@@ -273,6 +278,14 @@ func (e *Executor) RunResult(ctx context.Context, call model.ToolCall) Result {
 		}
 		return Result{Text: out, Images: []model.Image{*im}, Paths: e.touched(ViewImageToolName, a)}
 	}
+	// Command tools, like external tools, are never run in read-only mode.
+	if c := e.commandTool(call.Function.Name); c != nil && !e.ReadOnly {
+		out, err := e.runCommandTool(ctx, c, call.Function.Arguments)
+		if err != nil {
+			return e.limit(call, "error: "+err.Error(), true)
+		}
+		return e.limit(call, out, false)
+	}
 	// External tools are never dispatched in read-only mode: the check in
 	// run() below then rejects them with the read-only error, matching
 	// Catalog(), which also excludes them there.
@@ -349,9 +362,9 @@ func (e *Executor) touched(name string, a args) []string {
 	return out
 }
 
-// Catalog returns the fixed built-in and explicitly configured external tools.
-// In read-only mode it returns only the read-only built-ins: external MCP
-// tools must never be offered (or dispatched, see Run) when only
+// Catalog returns the fixed built-in, command and explicitly configured
+// external tools. In read-only mode it returns only the read-only
+// built-ins: command and external MCP tools must never be offered (or dispatched, see Run) when only
 // read_file, list_files, and grep are available.
 func (e *Executor) Catalog() []model.ToolSpec {
 	out := Specs(e.ReadOnly)
@@ -381,6 +394,9 @@ func (e *Executor) Catalog() []model.ToolSpec {
 	}
 	if e.ReadOnly {
 		return out
+	}
+	for _, c := range e.CommandTools {
+		out = append(out, c.Spec())
 	}
 	return append(out, e.ExternalSpecs...)
 }

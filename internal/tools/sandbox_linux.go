@@ -149,7 +149,7 @@ func (s *Sandbox) listenProxy() (net.Listener, string, error) {
 // execs bash, so only the command (not tinyagent) is confined. In allowlist
 // mode the helper starts in its own network namespace, which has only
 // loopback, and forwards proxyPort there to the proxy's Unix socket.
-func (s *Sandbox) wrap(ctx context.Context, command string) *exec.Cmd {
+func (s *Sandbox) wrap(ctx context.Context, argv []string) *exec.Cmd {
 	mode := "net-deny"
 	if s.Network {
 		mode = "net-allow"
@@ -157,7 +157,7 @@ func (s *Sandbox) wrap(ctx context.Context, command string) *exec.Cmd {
 		mode = fmt.Sprintf("net-proxy=%d:%s", proxyPort, s.proxy.Addr().String())
 	}
 	args := append([]string{SandboxHelperArg, mode}, s.Writable...)
-	args = append(args, "--", bashPath(), "-c", command)
+	args = append(append(args, "--"), argv...)
 	cmd := exec.CommandContext(ctx, helperPath(), args...)
 	if s.proxy != nil {
 		cmd.SysProcAttr = namespaceAttr()

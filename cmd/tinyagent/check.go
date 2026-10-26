@@ -11,6 +11,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/hooks"
 	"github.com/vicgupta/tinyagent/internal/model"
+	"github.com/vicgupta/tinyagent/internal/tools"
 )
 
 // runCheck implements --check: it loads the config and resolves the model,
@@ -111,6 +112,10 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
 		return nil, fmt.Errorf("--cwd %s is not a directory", o.cwd)
 	}
+	cmdTools, err := tools.NewCommandTools(cfg.CommandTools, root, cfg.BashTimeoutSec)
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
 
 	var lines [][2]string
 	add := func(k, v string) { lines = append(lines, [2]string{k, v}) }
@@ -157,6 +162,13 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 		add("ask_user", fmt.Sprintf("on, at most %d questions per run (from config)", cfg.AskUser.MaxQuestions))
 	case flagWasSet(fs, "ask-user"):
 		add("ask_user", "off (from --ask-user)")
+	}
+	if n := len(cmdTools); n > 0 {
+		names := make([]string, n)
+		for i, c := range cmdTools {
+			names[i] = c.Name
+		}
+		add("tools", fmt.Sprintf("%d command tools (%s)", n, strings.Join(names, ", ")))
 	}
 	return lines, nil
 }

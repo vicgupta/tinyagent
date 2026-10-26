@@ -19,8 +19,8 @@ func probeSandbox(network, proxied bool) (string, error) {
 	return "seatbelt", nil
 }
 
-func (s *Sandbox) wrap(ctx context.Context, command string) *exec.Cmd {
-	return exec.CommandContext(ctx, sandboxExec, "-p", s.profile(), bashPath(), "-c", command)
+func (s *Sandbox) wrap(ctx context.Context, argv []string) *exec.Cmd {
+	return exec.CommandContext(ctx, sandboxExec, append([]string{"-p", s.profile()}, argv...)...)
 }
 
 func (s *Sandbox) listenProxy() (net.Listener, string, error) {

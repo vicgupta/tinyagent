@@ -12,7 +12,7 @@ func probeSandbox(network, proxied bool) (string, error) { return "", errSandbox
 
 func (s *Sandbox) listenProxy() (net.Listener, string, error) { return nil, "", errSandboxUnsupported }
 
-func (s *Sandbox) wrap(ctx context.Context, command string) *exec.Cmd {
+func (s *Sandbox) wrap(ctx context.Context, argv []string) *exec.Cmd {
 	panic("sandbox: unsupported platform")
 }
 

@@ -628,6 +628,18 @@ mcp_servers:                 # omitted by default; each entry runs a trusted loc
     env: [TEAM_DOCS_TOKEN]   # names only; tinyagent copies their current values to the child
     discovery_timeout_seconds: 15
     call_timeout_seconds: 60
+command_tools:               # omitted by default; see Command tools below
+  - name: run_tests
+    description: Run Go tests for the given package patterns. Use instead of bash for tests.
+    parameters:              # JSON Schema, same subset as --output-schema
+      type: object
+      properties:
+        packages: {type: array, items: {type: string, pattern: "^\\./[A-Za-z0-9_./-]*(\\.\\.\\.)?$"}, minItems: 1}
+      required: [packages]
+      additionalProperties: false
+    argv: [go, test, -count=1, "{{packages}}"]   # no shell; each placeholder is a whole element
+    timeout_seconds: 300     # default bash_timeout_seconds, range 1..600
+    dir: .                   # optional, relative to --cwd and inside it
 hooks:                       # omitted by default; see Tool hooks below
   pre_tool:
     - match: "bash|start_process"   # Go regexp matched against the whole tool name; omit to match every tool
@@ -777,6 +789,18 @@ The Go MCP SDK v1.8.0 supports protocol revisions 2026-07-28, 2025-11-25, 2025-0
 
 MCP tool calls and results are stored in trajectories along with the external tool names. Trajectories from MCP-enabled runs cannot be resumed. Resuming a built-in-only checkpoint works with `mcp_servers` configured; the servers are not started and the run keeps the built-in tools. Trajectories and server stderr may contain sensitive data supplied by tools or the server; [`redact_secrets`](#redacting-secrets-from-tool-output) masks known secret values in tool results, but not other sensitive data or server stderr. On shutdown tinyagent closes MCP sessions and asks their processes to exit, then the SDK applies its bounded termination. Unix process descendants and Windows child-process cleanup have platform-specific behavior; tinyagent does not promise process-tree cleanup on Windows.
 
+### Command tools
+
+`command_tools` gives the model your project's own actions (run the tests, regenerate code, check a migration) as named, typed tools, without writing an MCP server. Each entry has a `name` (`^[A-Za-z][A-Za-z0-9_-]{0,63}$`, not a built-in tool, MCP `<alias>__<tool>` or other command tool name), a `description`, optional `parameters` (a JSON Schema with `type: object` at the root, in the same subset as `--output-schema`; omitted means no arguments), an `argv` template, and optional `timeout_seconds` and `dir` (see the [Config](#config) example). Like `mcp_servers` and `hooks`, definitions are read only from the user config or `-c`, never from the repository. Every definition is checked at startup, and a bad one (name collision, empty `argv`, a placeholder in `argv[0]`, a placeholder for an undeclared or object-typed property, an unsupported schema keyword, a `dir` outside `--cwd`) exits 2 before the first model request, naming the tool and key. `--check` validates them too and prints how many are configured.
+
+When the model calls a command tool, its arguments are checked against `parameters` first; if they fail, the model gets an error listing each problem and nothing runs. Then the `argv` template is filled in: a literal element passes through unchanged, and an element that is exactly `{{name}}` is replaced by that argument. A string becomes one element verbatim, a number or boolean its JSON form, an array of scalars one element per item, and a missing (or null) optional argument drops the element. Placeholders inside a larger string (`--pkg={{p}}`) are rejected. The command runs **without a shell**, so `;`, `$(...)`, backticks, quotes and newlines in an argument arrive as plain characters in one argv element.
+
+Command tools run where `bash` runs and under the same controls: the [execution environment](#execution-environments) (`argv[0]` is looked up on the container's `PATH` there), [`--sandbox`](#sandboxing-commands), the [command environment](#command-environment) policy (`argv[0]` is looked up on the `PATH` it passes, so with `inherit: none` and no `PATH` use an absolute path), the working directory (`--cwd`, or `dir`), the timeout (which kills the process group on Unix), and `max_output_chars` and [tool output files](#tool-output-files). The result has the `bash` format (`<returncode>` and `<output>`, or the timeout message); a non-zero exit is a normal result, and an executable that isn't found is an error result. The run continues either way.
+
+They are not offered with `--read-only` (a forged call is rejected like any other read-only denial), and subagents never get them. [Hooks](#tool-hooks) match them by name, with `arguments` as the decoded JSON the model sent. `-v` prints one stderr line per call with the final argv, `--json` and `--log-db` record the usual `tool.call` and `tool.result` events, `run.started` lists their names as `command_tools`, and trajectories record each definition (`name`, `argv` template, `schema_digest`). With `--resume`, the current config's command tools apply; if they differ from the checkpoint's, stderr and the model are told, and a call to one that no longer exists gets an error result.
+
+**Security:** command tools are trusted definitions that run with your privileges, like hooks and MCP servers. Schema checks limit what the model can pass; they don't make an unsafe `argv` safe: `[bash, -c, "{{script}}"]` gives back arbitrary execution. An argument starting with `-` is passed through as is and can be read as an option (for example `--output=/etc/passwd`), so constrain every placeholder with a `pattern`, `enum` or similar, as in the `^\./` pattern above. Older tinyagent versions reject a config file containing the `command_tools` key.
+
 ### Tool hooks
 
 Hooks are disabled unless `hooks` is configured. A `pre_tool` hook runs before a matching tool call and can deny it with a reason the model sees; a `post_tool` hook runs after it and can append feedback, such as formatter or linter output, to the result the model sees. Like MCP servers, hooks are trusted local executables running with your privileges: they are read only from the user config or the `-c` file, never from the repository, launched directly (no shell) with an absolute `command`, `--cwd` as the working directory, and the same minimal environment (`PATH`, the Windows process variables when present, and only the named `env` variables, which must be set at startup). Provider API keys are not passed unless named. Hooks are a guardrail and automation point, not a sandbox: they see a call's parsed arguments, not what a shell command actually does.
@@ -788,7 +812,7 @@ Each hook gets one JSON object on stdin: `schema_version` (`1`), `event` (`pre_t
 | `pre_tool` | Allow, unless stdout is `{"decision":"deny","reason":"..."}` | Deny; the reason is stderr | Apply `on_error`: deny by default (the reason names the hook and the failure), or allow with a warning |
 | `post_tool` | Optional stdout `{"feedback":"..."}` is appended to the result | stderr is appended to the result | Warning on stderr; the result is unchanged |
 
-A denied call is not executed; the model gets the error result `error: denied by pre_tool hook <command>: <reason>` and the run continues. Matching hooks run one at a time in config order: the first `pre_tool` deny stops the rest, and every matching `post_tool` hook runs, each appending its feedback under `[post_tool hook <command>]` (capped at 8 KiB per hook; the combined result still honors `max_output_chars`). Read-only denials and unknown tools are rejected before hooks, so hooks never run for them and cannot widen authority; with `--read-only`, hooks still run for `read_file`, `list_files`, and `grep`. MCP tools are matched by their exposed `<alias>__<tool>` name. Ctrl-C or the wall-time limit kills a running hook (its process group on Unix; only the process on Windows). `-v` prints one stderr line per hook run, `--json` emits a `hook` event, and trajectories record the model-visible results, including denial reasons and feedback. Resumed runs use the hooks in the current config. Hooks do not run for `update_plan`, which only changes the run's plan.
+A denied call is not executed; the model gets the error result `error: denied by pre_tool hook <command>: <reason>` and the run continues. Matching hooks run one at a time in config order: the first `pre_tool` deny stops the rest, and every matching `post_tool` hook runs, each appending its feedback under `[post_tool hook <command>]` (capped at 8 KiB per hook; the combined result still honors `max_output_chars`). Read-only denials and unknown tools are rejected before hooks, so hooks never run for them and cannot widen authority; with `--read-only`, hooks still run for `read_file`, `list_files`, and `grep`. MCP tools are matched by their exposed `<alias>__<tool>` name, and [command tools](#command-tools) by their configured name. Ctrl-C or the wall-time limit kills a running hook (its process group on Unix; only the process on Windows). `-v` prints one stderr line per hook run, `--json` emits a `hook` event, and trajectories record the model-visible results, including denial reasons and feedback. Resumed runs use the hooks in the current config. Hooks do not run for `update_plan`, which only changes the run's plan.
 
 Hooks match tool names, so a hook on `write_file|edit_file` does not see edits made with the opt-in `apply_patch` tool; use `match: "write_file|edit_file|apply_patch"` to cover all three. An `apply_patch` hook gets `arguments` as `{"input": "<patch text>"}`.
 
@@ -1040,7 +1064,7 @@ ok
 
 ## Sandboxing commands
 
-`--sandbox` (or `sandbox: true`) confines every `bash` and `start_process` command, and all processes they spawn, at the OS level. Commands can write only inside `--cwd`, a per-run temporary directory (exported as `TMPDIR`, removed when the run ends), the directories in `sandbox_writable_paths` and any `write` [additional directories](#additional-directories). Reads stay unrestricted so toolchains work. Outbound network is denied unless you pass `--sandbox-network` (`sandbox_network: true`). Flags override the config, including `--sandbox=false`. It is off by default.
+`--sandbox` (or `sandbox: true`) confines every `bash`, `start_process` and [command tool](#command-tools) command, and all processes they spawn, at the OS level. Commands can write only inside `--cwd`, a per-run temporary directory (exported as `TMPDIR`, removed when the run ends), the directories in `sandbox_writable_paths` and any `write` [additional directories](#additional-directories). Reads stay unrestricted so toolchains work. Outbound network is denied unless you pass `--sandbox-network` (`sandbox_network: true`). Flags override the config, including `--sandbox=false`. It is off by default.
 
 ```yaml
 sandbox: true
@@ -1086,7 +1110,7 @@ sandbox_writable_paths:    # their caches, see above
 
 ## Command environment
 
-By default `bash` and `start_process` commands inherit tinyagent's whole environment, including the provider API keys tinyagent itself needs, so a prompt-injected `env` or `echo $OPENAI_API_KEY` can read them. `command_env` (config only, from the user config or `-c`) controls what they get instead:
+By default `bash`, `start_process` and [command tool](#command-tools) commands inherit tinyagent's whole environment, including the provider API keys tinyagent itself needs, so a prompt-injected `env` or `echo $OPENAI_API_KEY` can read them. `command_env` (config only, from the user config or `-c`) controls what they get instead:
 
 ```yaml
 command_env:

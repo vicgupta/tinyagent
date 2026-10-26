@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -332,6 +333,11 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		if cur := AdditionalDirsInfo(a.Tools.ExtraDirs, a.Tools.ReadOnly); !sameDirs(t.AdditionalDirs, cur) {
 			notes = append(notes, dirsChangedNotice(cur))
 		}
+		if cur := CommandToolsInfo(a.Tools); !sameCommandTools(t.CommandTools, cur) {
+			names := commandToolNames(cur)
+			fmt.Fprintf(a.Err, "resume: command tools differ from the checkpoint's (%s); this run uses the current ones\n", strings.Join(names, ", "))
+			notes = append(notes, commandToolsChangedNotice(names))
+		}
 		t.SchemaVersion = trajectory.SchemaVersion
 		if asked {
 			// The answer becomes the pending ask_user call's result; no
@@ -377,7 +383,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			Root:                  a.Tools.Root,
 			SystemPrompt:          system,
 			SkipAgentsMD:          a.SkipAgentsMD,
-			Tools:                 toolNames(a.Tools.Catalog()),
+			Tools:                 toolNames(withoutCommandTools(a.Tools.Catalog(), a.Tools.CommandTools)),
 			ToolSignature:         toolSignature(a.Tools.ReadOnly, a.Tools.Plan, a.Tools.Images, a.Tools.ApplyPatch, a.Tools.Delegate, a.Tools.WebFetch != nil, a.Tools.LSP != nil, a.Tools.AskUser),
 			PlanEnabled:           a.Tools.Plan,
 			ImagesEnabled:         a.Tools.Images,
@@ -422,6 +428,12 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 	t.Sandbox, t.Environment, t.CommandEnv = nil, nil, nil
 	t.RedactSecrets = a.RedactSecrets
 	t.FileAccess = FileAccessInfo(a.Tools.FileAccess)
+	t.CommandTools = CommandToolsInfo(a.Tools)
+	for _, c := range t.CommandTools {
+		if !slices.Contains(t.CommandToolNames, c.Name) {
+			t.CommandToolNames = append(t.CommandToolNames, c.Name)
+		}
+	}
 	t.AdditionalDirs = AdditionalDirsInfo(a.Tools.ExtraDirs, a.Tools.ReadOnly)
 	t.WebFetch = nil
 	if wf := a.Tools.WebFetch; wf != nil {
@@ -1253,6 +1265,65 @@ func (a *Agent) recordProcesses(t *trajectory.Trajectory) {
 	for _, p := range ps {
 		t.Processes = append(t.Processes, trajectory.ProcessInfo{ID: p.ID, PID: p.PID, Command: p.Command})
 	}
+}
+
+// CommandToolsInfo records the command tools e offers for trajectories;
+// nil when it offers none.
+func CommandToolsInfo(e *tools.Executor) []trajectory.CommandToolInfo {
+	if e.ReadOnly {
+		return nil
+	}
+	var out []trajectory.CommandToolInfo
+	for _, c := range e.CommandTools {
+		out = append(out, trajectory.CommandToolInfo{Name: c.Name, Argv: c.Argv, SchemaDigest: c.Schema.Digest})
+	}
+	return out
+}
+
+func commandToolNames(info []trajectory.CommandToolInfo) []string {
+	names := []string{}
+	for _, c := range info {
+		names = append(names, c.Name)
+	}
+	return names
+}
+
+// sameCommandTools reports whether two invocations offered the same command
+// tool definitions.
+func sameCommandTools(a, b []trajectory.CommandToolInfo) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Name != b[i].Name || a[i].SchemaDigest != b[i].SchemaDigest || !slices.Equal(a[i].Argv, b[i].Argv) {
+			return false
+		}
+	}
+	return true
+}
+
+// commandToolsChangedNotice tells a resumed model which command tools it
+// now has.
+func commandToolsChangedNotice(names []string) string {
+	if len(names) == 0 {
+		return "The command tools have changed for this resumed run: none are available now; calls to earlier ones will fail."
+	}
+	return "The command tools have changed for this resumed run; only these are available now (calls to others will fail): " + strings.Join(names, ", ") + "."
+}
+
+// withoutCommandTools drops the command tools from specs: they are per
+// invocation, like hooks, so they are not part of the recorded tool set.
+func withoutCommandTools(specs []model.ToolSpec, cmds []*tools.CommandTool) []model.ToolSpec {
+	if len(cmds) == 0 {
+		return specs
+	}
+	var out []model.ToolSpec
+	for _, s := range specs {
+		if !slices.ContainsFunc(cmds, func(c *tools.CommandTool) bool { return c.Name == s.Function.Name }) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // FileAccessInfo records f's rules for trajectories and run.started; nil

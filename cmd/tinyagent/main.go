@@ -461,6 +461,11 @@ func run() int {
 			return 2
 		}
 	}
+	cmdTools, err := commandTools(os.Stderr, cfg, root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	}
 	if cfg.ReadOnly {
 		fmt.Fprintln(os.Stderr, "read-only mode: only read_file, list_files, and grep are available")
 	}
@@ -492,6 +497,10 @@ func run() int {
 		return fail(err)
 	}
 	defer mcpRegistry.Close()
+	if err := checkCommandToolNames(cmdTools, mcpRegistry.Specs); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	}
 
 	var onText func(string)
 	if !o.noStream && !o.jsonOutput {
@@ -544,6 +553,8 @@ func run() int {
 			MaxOutputChars:     cfg.MaxOutputChars,
 			MaxProcesses:       cfg.MaxBackgroundProcesses,
 			Stream:             streamTo(jsonStream(o.jsonOutput), progress),
+			CommandTools:       cmdTools,
+			CommandLog:         commandLog(o.verbose),
 			ExternalSpecs:      mcpRegistry.Specs,
 			ExternalCall:       mcpRegistry.Call,
 			Plan:               cfg.Plan.Enabled,
@@ -911,6 +922,11 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return configFail(err)
 	}
 	fileAccess.AddDirs(extraDirs)
+	cmdTools, err := commandTools(os.Stderr, cfg, root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: resume:", err)
+		return 2
+	}
 	if cur := agent.AdditionalDirsInfo(extraDirs, cfg.ReadOnly); len(cur)+len(src.AdditionalDirs) > 0 && fmt.Sprint(cur) != fmt.Sprint(src.AdditionalDirs) {
 		fmt.Fprintln(os.Stderr, "resume: additional directories differ from the checkpoint's; this run uses the current ones")
 	}
@@ -1049,6 +1065,8 @@ func runResume(o *options, fs *flag.FlagSet) int {
 			ExtraDirs:      extraDirs,
 			MaxImageBytes:  cfg.MaxImageBytes,
 			Redactor:       redactor,
+			CommandTools:   cmdTools,
+			CommandLog:     commandLog(o.verbose),
 		},
 		RedactSecrets:  redactInfo,
 		Config:         cfg,
@@ -1885,6 +1903,13 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	if a.RedactSecrets != nil {
 		started["redact_secrets"] = a.RedactSecrets
 	}
+	if ct := agent.CommandToolsInfo(a.Tools); len(ct) > 0 {
+		names := make([]string, len(ct))
+		for i, c := range ct {
+			names[i] = c.Name
+		}
+		started["command_tools"] = names
+	}
 	if fa := agent.FileAccessInfo(a.Tools.FileAccess); fa != nil {
 		started["file_access"] = fa
 	}
@@ -2088,6 +2113,41 @@ func configuredSecrets(cfg config.AgentConfig) []string {
 		vals = append(vals, s.value)
 	}
 	return vals
+}
+
+// commandTools checks cfg's command_tools for a run rooted at root. Read-only
+// runs are offered none, but bad definitions still fail.
+func commandTools(w io.Writer, cfg config.AgentConfig, root string) ([]*tools.CommandTool, error) {
+	cts, err := tools.NewCommandTools(cfg.CommandTools, root, cfg.BashTimeoutSec)
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+	if cfg.ReadOnly && len(cts) > 0 {
+		fmt.Fprintln(w, "read-only mode: configured command tools are not offered")
+		return nil, nil
+	}
+	return cts, nil
+}
+
+// checkCommandToolNames rejects a command tool named like an exposed MCP
+// tool.
+func checkCommandToolNames(cts []*tools.CommandTool, mcp []model.ToolSpec) error {
+	for _, c := range cts {
+		for _, s := range mcp {
+			if s.Function.Name == c.Name {
+				return fmt.Errorf("config: command_tools (%s): name %q is used by an MCP tool", c.Name, c.Name)
+			}
+		}
+	}
+	return nil
+}
+
+// commandLog is where command tool calls print their argv: stderr with -v.
+func commandLog(verbose bool) io.Writer {
+	if verbose {
+		return os.Stderr
+	}
+	return nil
 }
 
 // mcpServers returns the MCP servers to start. Read-only runs start none:

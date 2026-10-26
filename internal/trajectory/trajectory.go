@@ -57,6 +57,13 @@ type RedactSecretsInfo struct {
 	Names    []string `json:"names"`
 }
 
+// CommandToolInfo records one command_tools definition: what its name ran.
+type CommandToolInfo struct {
+	Name         string   `json:"name"`
+	Argv         []string `json:"argv"`
+	SchemaDigest string   `json:"schema_digest"`
+}
+
 // AdditionalDir is one additional directory: an absolute path and its
 // effective mode, "read" or "write".
 type AdditionalDir struct {
@@ -109,6 +116,11 @@ type Trajectory struct {
 	// in tool output; it records this invocation's setting. Earlier
 	// results in a resumed history are not rewritten.
 	RedactSecrets *RedactSecretsInfo `json:"redact_secrets,omitempty"`
+	// CommandTools lists this invocation's command_tools definitions.
+	CommandTools []CommandToolInfo `json:"command_tools,omitempty"`
+	// CommandToolNames lists every command tool name offered in any
+	// invocation of the run, so earlier calls stay valid history on resume.
+	CommandToolNames []string `json:"command_tool_names,omitempty"`
 	// FileAccess is set when file_access rules restricted the file tools;
 	// it records this invocation's rules.
 	FileAccess *FileAccessInfo `json:"file_access,omitempty"`
