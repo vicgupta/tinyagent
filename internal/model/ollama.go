@@ -37,3 +37,8 @@ func ollamaBaseURL(host string) string {
 	u.Host = net.JoinHostPort(hostname, port)
 	return strings.TrimRight(u.String(), "/")
 }
+
+// OllamaBaseURL returns the Ollama server URL that OLLAMA_HOST resolves to.
+func OllamaBaseURL() string {
+	return ollamaBaseURL(os.Getenv("OLLAMA_HOST"))
+}

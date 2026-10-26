@@ -125,6 +125,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--scoped-agents-md` | off | Also deliver `AGENTS.md` files in directories below `<cwd>`, appended to the first file tool result that touches a path there; see [Project instructions](#project-instructions-agentsmd). Can't be combined with `--no-agents-md` |
 | `-V, --version` | | Print the version and exit |
 | `--update` | | Replace this binary with the latest GitHub release (checksum-verified) and exit |
+| `--check` | | Print the resolved config file, model, provider key status, fallbacks, cwd and limits, then exit without a model request (exit 2 on a setup error) |
 
 ### Machine-readable output
 
@@ -761,6 +762,19 @@ A warning goes to stderr, the summary line shows `..., N truncated responses`, `
 ## Troubleshooting
 
 When a run fails on a common setup problem, tinyagent prints a `hint:` line under the error. The error itself is kept, and hints name environment variables without printing their values.
+
+To check your setup before a run, use `tinyagent --check` with the same `-m`, `-c`, `--cwd`, fallback and limit flags you'd pass to a run. It sends no model request and writes nothing. It prints which config file, model, provider, fallbacks, working directory and limits a run would use, and where each came from, then `ok` (exit 0). A problem a run would hit, such as an unknown provider, a bad config key or a missing API key, is printed the same way a run prints it, with its `hint:`, and exits 2. Key values are never printed, only whether the variable is set.
+
+```
+$ tinyagent --check -m anthropic/claude-sonnet-4
+config:    none (built-in defaults)
+model:     anthropic/claude-sonnet-4 (from -m)
+provider:  anthropic, ANTHROPIC_API_KEY is set
+fallback:  none
+cwd:       /home/me/project (default)
+limits:    steps unlimited, cost unlimited, time unlimited
+ok
+```
 
 | Symptom | Fix |
 |---|---|
