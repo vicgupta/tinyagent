@@ -330,6 +330,7 @@ const wantUsage = `Usage: tinyagent -t "<prompt>" [flags]    (or --task "<prompt
        echo "<prompt>" | tinyagent -t -
        tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]
        tinyagent --resume <finished.json> -t "<follow-up>" --cwd <dir> -o <new.json> [flags]
+       tinyagent --resume <needs-input.json> -t "<answer>" --cwd <dir> -o <new.json> [flags]
        tinyagent --review | --review-base <ref> | --review-commit <rev> [-t "<focus>"] [flags]
        tinyagent --rewind <trajectory.json> --cwd <dir> [--to start|<step>|<id>] [--dry-run]
        tinyagent --check [-m <model>] [-c <config>] [--profile <name>] [--cwd <dir>]
@@ -338,7 +339,7 @@ const wantUsage = `Usage: tinyagent -t "<prompt>" [flags]    (or --task "<prompt
 
   -h, --help                         show this help and exit
 Task:
-  -t, --task string                  task/prompt (required unless --resume or a review flag, where it adds focus instructions; with --resume of a finished run, the follow-up instruction); "-" reads it from stdin
+  -t, --task string                  task/prompt (required unless --resume or a review flag, where it adds focus instructions; with --resume of a finished run, the follow-up instruction; of a NeedsInput run, the answer); "-" reads it from stdin
   -m, --model string                 provider/model; if unset, $AGENT_MODEL, then the config's model (default "openai/gpt-4o")
       --reasoning-effort level       provider reasoning effort: none, minimal, low, medium, high, xhigh, or max
       --fallback-model spec          provider/model to switch to when requests still fail with 429/5xx/network errors after retries (repeatable, tried in order; replaces fallback_models)
@@ -348,7 +349,8 @@ Task:
       --profile name                 apply this named profile from the config file's profiles: section over its base settings
       --cwd dir                      working directory (default ".")
       --worktree [=name]             run in a new Git worktree on branch tinyagent/<name> from HEAD of the repo containing --cwd, kept afterwards (default name generated)
-      --resume path                  continue an unfinished run from a trajectory JSON checkpoint, or a finished one with -t "<follow-up>"
+      --resume path                  continue an unfinished run from a trajectory JSON checkpoint, a finished one with -t "<follow-up>", or answer a NeedsInput one with -t "<answer>"
+      --ask-user                     add the ask_user tool: the model may end the run with one question (status NeedsInput, exit 4), answered with --resume <trajectory> -t "<answer>"; requires -o (default off; config ask_user.enabled)
 Review:
       --review                       review the uncommitted changes (staged, unstaged and untracked) against HEAD: tinyagent collects the diff and runs a read-only review; -t adds focus instructions
       --review-base ref              review what the current branch adds on top of this ref (merge-base..HEAD), read-only; -t adds focus instructions

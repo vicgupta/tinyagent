@@ -39,7 +39,7 @@ const resultSummaryBytes = 1024
 
 // bodyKeys are the payload fields that carry bodies; at LevelMetadata they
 // are replaced by <key>_len.
-var bodyKeys = []string{"text", "arguments", "output", "submission", "task", "content", "prompt"}
+var bodyKeys = []string{"text", "arguments", "output", "submission", "task", "content", "prompt", "question"}
 
 //go:embed migrations/*.sql
 var migrationFS embed.FS

@@ -38,6 +38,20 @@ const FollowUpNotice = "The previous invocation finished. The conversation above
 	"workspace before relying on earlier observations. Live processes and shell state are not " +
 	"restored. The user's follow-up task is below."
 
+// AnswerNotice is part of the versioned checkpoint contract. It starts the
+// tool result that answers a NeedsInput run's pending ask_user call; the
+// user's answer follows it.
+const AnswerNotice = "The user answered your question. The workspace may have changed while the run was waiting; " +
+	"revalidate earlier observations before relying on them. Live processes and shell state are not restored. The answer is below."
+
+// StatusNeedsInput is the exit status of a run that ended with an
+// ask_user question. It is neither finished nor unfinished: only an answer
+// continues it.
+const StatusNeedsInput = "NeedsInput"
+
+// askUserTool is the name of the ask_user tool.
+const askUserTool = "ask_user"
+
 // Finished reports whether status is a successful termination that can only
 // be continued with a follow-up task.
 func Finished(status string) bool {
@@ -177,7 +191,7 @@ func (t *Trajectory) Validate() error {
 	if t.SchemaVersion != 1 && t.SchemaVersion != SchemaVersion {
 		return fmt.Errorf("checkpoint schema version %d is unsupported (want 1 or %d)", t.SchemaVersion, SchemaVersion)
 	}
-	if t.SchemaVersion == 1 && (len(t.PendingCalls) > 0 || len(t.Processes) > 0 || t.PlanEnabled || t.Plan != nil || len(t.PlanHistory) > 0 || t.ImagesEnabled || t.ApplyPatchEnabled || len(t.ToolOutputFiles) > 0 || t.SubagentsEnabled || len(t.Subagents) > 0 || t.SubagentSteps > 0 || t.WebFetchEnabled || t.LSPEnabled || t.ScopedAgentsMDEnabled || len(t.ScopedAgentsMDLoads) > 0) {
+	if t.SchemaVersion == 1 && (len(t.PendingCalls) > 0 || len(t.Processes) > 0 || t.PlanEnabled || t.Plan != nil || len(t.PlanHistory) > 0 || t.ImagesEnabled || t.ApplyPatchEnabled || len(t.ToolOutputFiles) > 0 || t.SubagentsEnabled || len(t.Subagents) > 0 || t.SubagentSteps > 0 || t.WebFetchEnabled || t.LSPEnabled || t.ScopedAgentsMDEnabled || len(t.ScopedAgentsMDLoads) > 0 || t.AskUserEnabled || t.QuestionsAsked != 0 || t.PendingQuestion != nil) {
 		return errors.New("schema version 1 checkpoint has version 2 fields")
 	}
 	// Tool-result images need the images setting; user messages may carry
@@ -203,8 +217,12 @@ func (t *Trajectory) Validate() error {
 		return errors.New("checkpoint is missing its task or model")
 	}
 	finished := Finished(t.ExitStatus)
-	if !finished && !unfinished(t.ExitStatus) {
+	needsInput := t.ExitStatus == StatusNeedsInput
+	if !finished && !needsInput && !unfinished(t.ExitStatus) {
 		return errors.New("checkpoint has an unsupported exit status")
+	}
+	if err := t.validateQuestion(needsInput); err != nil {
+		return err
 	}
 	if t.StopContinuations != 0 || t.StopReason != "" {
 		return errors.New("checkpoint was sent back to work by a stop hook; runs continued by stop hooks cannot be resumed yet; start a fresh task")
@@ -222,10 +240,15 @@ func (t *Trajectory) Validate() error {
 	end, steps := len(t.Messages), t.Steps
 	for b := t.Resume; b != nil; b = b.Previous {
 		okStatus := unfinished(b.ExitStatus)
-		if b.FollowUp {
+		switch {
+		case b.FollowUp && b.Answer:
+			okStatus = false
+		case b.FollowUp:
 			okStatus = Finished(b.ExitStatus)
+		case b.Answer:
+			okStatus = b.ExitStatus == StatusNeedsInput && t.AskUserEnabled
 		}
-		if (b.FollowUp && b.Message < 3) || b.Message < 2 || b.Message >= end || b.Steps < 0 || b.Steps > steps || !okStatus || b.Source == "" {
+		if ((b.FollowUp || b.Answer) && b.Message < 3) || b.Message < 2 || b.Message >= end || b.Steps < 0 || b.Steps > steps || !okStatus || b.Source == "" {
 			return errors.New("checkpoint has invalid resume provenance")
 		}
 		boundaries[b.Message] = b
@@ -322,6 +345,13 @@ func (t *Trajectory) Validate() error {
 			if r.Role != "tool" || r.ToolCallID != c.ID || len(r.ToolCalls) != 0 {
 				return errors.New("checkpoint has a missing, duplicate, orphaned, or out-of-order tool result")
 			}
+			// An answer boundary is the result of a lone ask_user call.
+			if b, ok := boundaries[i]; ok && b.Answer {
+				if b.Steps != steps+1 || len(m.ToolCalls) != 1 || c.Function.Name != askUserTool || !strings.HasPrefix(r.Content, AnswerNotice) || len(r.Images) > 0 || markers[i] {
+					return errors.New("checkpoint has an invalid answer boundary")
+				}
+				delete(boundaries, i)
+			}
 			i++
 		}
 		steps++
@@ -340,6 +370,30 @@ func (t *Trajectory) Validate() error {
 	}
 	if finished && (len(t.Messages) < 3 || !finalShape(t.Messages[len(t.Messages)-1], t.ExitStatus)) {
 		return errors.New("finished checkpoint does not end with a final assistant message")
+	}
+	if needsInput && (!pendingOK || len(t.Messages[len(t.Messages)-1].ToolCalls) != 1) {
+		return errors.New("NeedsInput checkpoint does not end with a lone ask_user call")
+	}
+	return nil
+}
+
+// validateQuestion checks the ask_user metadata: a NeedsInput checkpoint
+// has exactly one pending call, ask_user, with its question recorded; any
+// other checkpoint has no pending question.
+func (t *Trajectory) validateQuestion(needsInput bool) error {
+	if t.QuestionsAsked < 0 || (!t.AskUserEnabled && (t.QuestionsAsked != 0 || t.PendingQuestion != nil)) {
+		return errors.New("checkpoint has ask_user records but the ask_user setting was not enabled")
+	}
+	if !needsInput {
+		if t.PendingQuestion != nil {
+			return errors.New("checkpoint has a pending question but did not end NeedsInput")
+		}
+		return nil
+	}
+	q := t.PendingQuestion
+	if q == nil || strings.TrimSpace(q.Question) == "" || t.QuestionsAsked < 1 || len(t.PendingCalls) != 1 ||
+		t.PendingCalls[0].Name != askUserTool || t.PendingCalls[0].ID != q.ToolCallID {
+		return errors.New("NeedsInput checkpoint has no valid pending ask_user question")
 	}
 	return nil
 }

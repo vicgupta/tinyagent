@@ -230,6 +230,16 @@ type Trajectory struct {
 	LSPEnabled bool `json:"lsp_enabled,omitempty"`
 	// LSPServers names this invocation's configured language servers.
 	LSPServers []string `json:"lsp_servers,omitempty"`
+	// AskUserEnabled (schema 2) records whether the opt-in ask_user tool
+	// was offered. A resume must use the same setting.
+	AskUserEnabled bool `json:"ask_user_enabled,omitempty"`
+	// QuestionsAsked counts the ask_user questions that ended a run, over
+	// the whole resume chain.
+	QuestionsAsked int `json:"questions_asked,omitempty"`
+	// PendingQuestion is the unanswered question of a NeedsInput run; its
+	// call is the only pending call. A resume delivers the answer as that
+	// call's result.
+	PendingQuestion *Question `json:"pending_question,omitempty"`
 	// ScopedAgentsMDEnabled (schema 2) records whether AGENTS.md files
 	// below Root were delivered with file tool results (--scoped-agents-md).
 	ScopedAgentsMDEnabled bool `json:"scoped_agents_md_enabled,omitempty"`
@@ -309,6 +319,13 @@ type PendingCall struct {
 	Name string `json:"name"`
 }
 
+// Question is one ask_user question waiting for an answer.
+type Question struct {
+	ToolCallID string   `json:"tool_call_id"`
+	Question   string   `json:"question"`
+	Options    []string `json:"options,omitempty"`
+}
+
 // ProcessInfo describes a background process registered by start_process.
 type ProcessInfo struct {
 	ID      string `json:"id"`
@@ -350,7 +367,11 @@ type ResumeInfo struct {
 	// FollowUp marks a boundary where a finished (Submitted or Completed)
 	// run was continued with a new user instruction. Its message starts with
 	// FollowUpNotice instead of ContinuationNotice.
-	FollowUp bool        `json:"follow_up,omitempty"`
+	FollowUp bool `json:"follow_up,omitempty"`
+	// Answer marks a boundary where a NeedsInput run was continued with the
+	// user's answer. Its message is the pending ask_user call's tool result,
+	// starting with AnswerNotice.
+	Answer   bool        `json:"answer,omitempty"`
 	Previous *ResumeInfo `json:"previous,omitempty"`
 }
 
