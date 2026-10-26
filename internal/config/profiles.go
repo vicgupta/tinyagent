@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -36,50 +37,15 @@ func applyProfiles(path string, data []byte, profile string) ([]byte, error) {
 		}
 		return data, nil
 	}
-	var base *yaml.Node
-	if doc.Kind == yaml.DocumentNode && len(doc.Content) == 1 && doc.Content[0].Kind == yaml.MappingNode {
-		base = doc.Content[0]
-	}
-	idx := -1
-	if base != nil {
-		for i := 0; i+1 < len(base.Content); i += 2 {
-			if base.Content[i].Value == "profiles" {
-				idx = i
-				break
-			}
-		}
+	base, idx, profiles, names, err := collectProfiles(path, &doc)
+	if err != nil {
+		return nil, err
 	}
 	if idx < 0 {
 		if profile != "" {
 			return nil, invalid("--profile %s: this file defines no profiles", profile)
 		}
 		return data, nil
-	}
-	section := base.Content[idx+1]
-	if section.Kind == yaml.AliasNode {
-		section = section.Alias
-	}
-	if section.Kind != yaml.MappingNode {
-		return nil, invalid("profiles must be a mapping of profile names to settings")
-	}
-	profiles := map[string]*yaml.Node{}
-	var names []string
-	for i := 0; i+1 < len(section.Content); i += 2 {
-		name, body := section.Content[i].Value, section.Content[i+1]
-		if !profileName.MatchString(name) {
-			return nil, invalid("profile name %q is invalid; use only letters, digits, _ and -", name)
-		}
-		if _, dup := profiles[name]; dup {
-			return nil, invalid("profile %s is defined more than once", name)
-		}
-		if err := checkProfile(name, body); err != nil {
-			return nil, invalid("%v", err)
-		}
-		if body.Kind == yaml.AliasNode {
-			body = body.Alias
-		}
-		profiles[name] = body
-		names = append(names, name)
 	}
 	// Remove the section, so the regular decode sees only base settings.
 	base.Content = append(base.Content[:idx:idx], base.Content[idx+2:]...)
@@ -100,6 +66,83 @@ func applyProfiles(path string, data []byte, profile string) ([]byte, error) {
 		return nil, invalid("profiles: %v", err)
 	}
 	return out, nil
+}
+
+// collectProfiles finds the document's profiles: section and validates every
+// profile, returning the base mapping, the section's index in it (-1 when
+// there is no profiles: key), the profile bodies keyed by name and the names
+// in file order. Every error is an *InvalidError naming path.
+func collectProfiles(path string, doc *yaml.Node) (base *yaml.Node, idx int, profiles map[string]*yaml.Node, names []string, err error) {
+	invalid := func(format string, args ...any) error {
+		return &InvalidError{fmt.Errorf("config %s: "+format, append([]any{path}, args...)...)}
+	}
+	if doc.Kind == yaml.DocumentNode && len(doc.Content) == 1 && doc.Content[0].Kind == yaml.MappingNode {
+		base = doc.Content[0]
+	}
+	idx = -1
+	if base != nil {
+		for i := 0; i+1 < len(base.Content); i += 2 {
+			if base.Content[i].Value == "profiles" {
+				idx = i
+				break
+			}
+		}
+	}
+	if idx < 0 {
+		return base, idx, nil, nil, nil
+	}
+	section := base.Content[idx+1]
+	if section.Kind == yaml.AliasNode {
+		section = section.Alias
+	}
+	if section.Kind != yaml.MappingNode {
+		return nil, -1, nil, nil, invalid("profiles must be a mapping of profile names to settings")
+	}
+	profiles = map[string]*yaml.Node{}
+	for i := 0; i+1 < len(section.Content); i += 2 {
+		name, body := section.Content[i].Value, section.Content[i+1]
+		if !profileName.MatchString(name) {
+			return nil, -1, nil, nil, invalid("profile name %q is invalid; use only letters, digits, _ and -", name)
+		}
+		if _, dup := profiles[name]; dup {
+			return nil, -1, nil, nil, invalid("profile %s is defined more than once", name)
+		}
+		if err := checkProfile(name, body); err != nil {
+			return nil, -1, nil, nil, invalid("%v", err)
+		}
+		if body.Kind == yaml.AliasNode {
+			body = body.Alias
+		}
+		profiles[name] = body
+		names = append(names, name)
+	}
+	return base, idx, profiles, names, nil
+}
+
+// ProfileNames returns the names in the config file's profiles: section,
+// sorted lexicographically. It runs the same structural checks applyProfiles
+// does (name charset, duplicates, mapping shape, null and unknown keys), so
+// an invalid section is an error rather than a partial list. An empty path
+// means no config file is in use and yields no names; a missing or unreadable
+// file is an error naming the path.
+func ProfileNames(path string) ([]string, error) {
+	if path == "" {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return nil, &InvalidError{fmt.Errorf("config %s: %v", path, err)}
+	}
+	_, _, _, names, err := collectProfiles(path, &doc)
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(names)
+	return names, nil
 }
 
 // checkProfile validates one profile body: a mapping with no nested
