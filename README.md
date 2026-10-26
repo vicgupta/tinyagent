@@ -155,6 +155,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--json` | off | Write machine-readable run events as JSONL to stdout |
 | `--output-schema` | | End the run with a JSON result validated against this JSON Schema file (printed to stdout) |
 | `--log-db[=path]` | off | Also record run events in a local SQLite database (default `<cwd>/.tinyagent/tinyagent.db`); see [Event log database](#event-log-database) |
+| `--otel` | config `otel.enabled`, else off | Export the run as an OpenTelemetry trace over OTLP/HTTP; `--otel=false` turns the config setting off. `OTEL_*` variables alone never enable it. See [OpenTelemetry export](#opentelemetry-export) |
 | `--no-stream` | off | Wait for each full response instead of streaming it |
 | `--no-agents-md` | off | Don't append the nearest `AGENTS.md` (at or above `<cwd>`, up to the repo root; capped at 32KB) to the system prompt |
 | `--scoped-agents-md` | off | Also deliver `AGENTS.md` files in directories below `<cwd>`, appended to the first file tool result that touches a path there; see [Project instructions](#project-instructions-agentsmd). Can't be combined with `--no-agents-md` |
@@ -171,7 +172,8 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 
 | Type | Fields |
 |---|---|
-| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `attachments` (`index`, `name`, `mime_type`, `bytes`, `sha256` per [`--image`](#attaching-images-to-the-task) file, never the data; only with `--image`), `reasoning_effort` (only when set), `fallback_models` (only when a [fallback chain](#model-fallback) is configured), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `profile` (the name only; only with [`--profile`](#profiles)), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy), `redact_secrets` (`enabled`, `patterns`, sorted variable `names`; only with [secret redaction](#redacting-secrets-from-tool-output) on), `file_access` (`deny_read`, `deny_write`; only with [file access](#restricting-file-access) rules), `web_fetch` (`allowed_domains`; only with [web fetch](#web-fetch) on), `lsp` (`servers`, the configured names; only with [language servers](#language-servers-lsp) on), `scoped_agents_md_enabled` and `scoped_agents_md` (scoped files already in context, `[]` for a fresh run; only with [`--scoped-agents-md`](#project-instructions-agentsmd) on), `additional_dirs` (`path`, `mode`; only with [additional directories](#additional-directories)), `worktree` (`path`, `branch`, `base_commit`, `repo_root`; only with [`--worktree`](#worktrees)), `review` (`target`, `ref`, `base_commit`, `head_commit`, `commit`, `files_changed`, `diff_bytes`, `diff_bytes_sent`, `truncated`, `hidden_paths`; only with a [review flag](#reviewing-changes)) |
+| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `attachments` (`index`, `name`, `mime_type`, `bytes`, `sha256` per [`--image`](#attaching-images-to-the-task) file, never the data; only with `--image`), `reasoning_effort` (only when set), `fallback_models` (only when a [fallback chain](#model-fallback) is configured), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `profile` (the name only; only with [`--profile`](#profiles)), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy), `redact_secrets` (`enabled`, `patterns`, sorted variable `names`; only with [secret redaction](#redacting-secrets-from-tool-output) on), `file_access` (`deny_read`, `deny_write`; only with [file access](#restricting-file-access) rules), `web_fetch` (`allowed_domains`; only with [web fetch](#web-fetch) on), `lsp` (`servers`, the configured names; only with [language servers](#language-servers-lsp) on), `scoped_agents_md_enabled` and `scoped_agents_md` (scoped files already in context, `[]` for a fresh run; only with [`--scoped-agents-md`](#project-instructions-agentsmd) on), `additional_dirs` (`path`, `mode`; only with [additional directories](#additional-directories)), `worktree` (`path`, `branch`, `base_commit`, `repo_root`; only with [`--worktree`](#worktrees)), `review` (`target`, `ref`, `base_commit`, `head_commit`, `commit`, `files_changed`, `diff_bytes`, `diff_bytes_sent`, `truncated`, `hidden_paths`; only with a [review flag](#reviewing-changes)), `otel` (`enabled`, `endpoint_host`, `protocol`, `trace_id`; only with [`--otel`](#opentelemetry-export), never headers) |
+| `model.request` | `step` (the step the request belongs to), `model` (the provider/model that served it, after any fallback), `duration_ms`, and either `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens` or `error`; one per model request of the agent loop (compaction summaries excluded), emitted before that response's `assistant.message` |
 | `assistant.message` | `text` (complete assistant message) |
 | `tool.call` | `id`, `name`, `arguments` (decoded JSON value, or a string if malformed) |
 | `tool.result` | `id`, `name`, `output` (same configured truncation as tool output), `is_error`; with [tool output files](#tool-output-files), a saved result also has `output_file` (path relative to `--cwd`) and `output_bytes`; with [secret redaction](#redacting-secrets-from-tool-output), `redactions` (count, only when > 0) |
@@ -233,6 +235,47 @@ sqlite3 .tinyagent/tinyagent.db \
 ```
 
 At the default `level: metadata` no prompt, message, argument, or output bodies are stored: those fields are replaced with their lengths, and the task is stored only as a SHA-256 hash and length. `level: full` stores bodies, after redacting values of environment variables named `*_KEY`, `*_TOKEN`, `*_SECRET`, or `*_PASSWORD`, secrets set in MCP or hook `env`, and common token shapes; payloads over `max_payload_bytes` are truncated. Old runs are pruned when a run starts (`max_days`, `max_runs`; `0` keeps everything). Database errors never fail a run: tinyagent prints one warning and continues without the log. The trajectory JSON (`-o`) is unchanged and remains the resume format.
+
+### OpenTelemetry export
+
+`--otel` (or `otel.enabled: true` in config) sends each invocation to an OpenTelemetry backend (an OpenTelemetry Collector, Jaeger, Grafana Tempo, Honeycomb, Datadog, ...) as one trace over OTLP/HTTP. It is off by default, and the standard `OTEL_*` variables alone never turn it on, so a CI job that sets them for other tools exports nothing until you opt in. Spans are built from the same events as `--json` and `--log-db`, so the three always agree.
+
+| Span | Kind | Attributes |
+|---|---|---|
+| `invoke_agent tinyagent` (root) | INTERNAL | `gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name`, `gen_ai.request.model`, `gen_ai.provider.name`, `tinyagent.model`, `tinyagent.status`, `tinyagent.steps`, `gen_ai.usage.input_tokens`/`output_tokens`/`cache_read.input_tokens`/`cache_creation.input_tokens`, `tinyagent.cost_usd`, `tinyagent.duration_ms` (the `result` event's values), `tinyagent.resumed`, `tinyagent.read_only`, `tinyagent.version` |
+| `chat {model}` | CLIENT | `gen_ai.operation.name=chat`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.provider.name`, per-request token usage, `tinyagent.step`; `provider.retry` and `model.fallback` span events; `error.type=model_error` for a failed request |
+| `execute_tool {name}` | INTERNAL | `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`, `gen_ai.tool.call.id` (the `tool.call` `id`), `tinyagent.output_bytes`, `tinyagent.redactions`, `error.type=tool_error` when the result is an error |
+| `hook {event}` | INTERNAL | `tinyagent.hook.event`, `tinyagent.hook.decision`, `gen_ai.tool.call.id`; a child of its tool's span (`stop` hooks: of the root) |
+| `invoke_agent delegate` | INTERNAL | a [subagent](#subagents), child of its `execute_tool delegate` span; the subagent's model and tool spans nest under it |
+
+Other events (`compaction`, `checkpoint.saved`, `plan.updated`, `sandbox.network_denied`, `web_fetch`, `warning`, `error`, ...) become span events on the open tool span or the agent span, with the fields `--log-db` stores at its default level. The root span's status is ERROR for every final status except `Submitted`, `Completed` and `NeedsInput`. Each invocation (including `--resume` and follow-ups, and each [ACP](#editor-integration-acp) prompt) is its own trace. When `TRACEPARENT` (and `TRACESTATE`) holds a valid W3C trace context, the root span becomes its child, so the run shows up inside your CI pipeline's trace; a malformed value is ignored with one warning.
+
+**Content is off by default**: no task, assistant text, tool arguments or tool output is exported, only the metadata above (span-event body fields become `<field>_len`). `otel.content: true` adds `tinyagent.task`, `tinyagent.assistant.text`, `gen_ai.tool.call.arguments` and `gen_ai.tool.call.result`, each first redacted like the event log (secret-named environment variables, configured secrets, the export headers and token shapes become `[REDACTED]`) and cut to `max_attribute_bytes`.
+
+```yaml
+otel:
+  enabled: false            # or --otel
+  endpoint: ""              # OTLP/HTTP base URL; /v1/traces is appended
+  protocol: http/protobuf   # or http/json; grpc is not supported (exit 2)
+  headers_env: []           # names of env vars holding k=v,k2=v2 header lists
+  timeout: 10s              # bound on each export, retries included, and on the final flush
+  service_name: tinyagent   # resource service.name
+  content: false            # add redacted prompt, assistant, argument and output text
+  max_attribute_bytes: 4096 # cap per content attribute
+```
+
+Empty settings fall back to the standard variables: the endpoint to `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (used as is), then `OTEL_EXPORTER_OTLP_ENDPOINT` (with `/v1/traces` appended), then `http://localhost:4318/v1/traces`; the protocol to `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL`, then `OTEL_EXPORTER_OTLP_PROTOCOL`; the timeout to `OTEL_EXPORTER_OTLP_TRACES_TIMEOUT`, then `OTEL_EXPORTER_OTLP_TIMEOUT` (milliseconds); the service name to `OTEL_SERVICE_NAME`, then `service.name` in `OTEL_RESOURCE_ATTRIBUTES` (whose other entries become resource attributes). Headers come from `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_EXPORTER_OTLP_TRACES_HEADERS` and the `headers_env` variables, never from the config file, and their values are never printed or recorded. Bad settings (unknown keys, an invalid `timeout`, `grpc`, a malformed header list, an unset `headers_env` variable) exit 2 before any model request. `-v` prints the endpoint host and protocol.
+
+Spans are buffered in memory and sent in batches, at the latest when the run ends, including after Ctrl-C. `429`, `502`, `503`, `504` and network errors are retried with jittered exponential back-off (honoring `Retry-After`) within `timeout`. Export problems never change the exit code, stdout, the `result` event or the trajectory: they produce exactly one `warning` (stderr, and a `warning` event with `--json`) giving the number of spans not delivered, and the run waits at most `timeout` at exit. The exporter runs in tinyagent's own process, so `--sandbox` network rules don't apply to it. Use `https` for any endpoint that is not on localhost.
+
+To try it locally, run an OpenTelemetry Collector (or Jaeger, which accepts OTLP) on port 4318 and point tinyagent at it:
+
+```sh
+docker run --rm -p 16686:16686 -p 4318:4318 jaegertracing/all-in-one
+tinyagent --otel -t "fix the failing test"     # then open http://localhost:16686
+```
+
+Span and attribute names follow the OpenTelemetry GenAI semantic conventions, which are still in Development status; names may change in a later release to follow them.
 
 ### Reviewing changes
 
@@ -679,6 +722,15 @@ log_db:                   # opt-in SQLite event log; see Event log database
   max_days: 30            # prune runs older than this; 0 keeps all
   max_runs: 500           # keep at most this many runs; 0 keeps all
   max_payload_bytes: 65536
+otel:                     # opt-in OpenTelemetry trace export (same as --otel); see OpenTelemetry export
+  enabled: false
+  endpoint: ""            # base URL; empty uses OTEL_EXPORTER_OTLP_(TRACES_)ENDPOINT, else localhost:4318
+  protocol: http/protobuf # or http/json
+  headers_env: []         # env vars holding k=v header lists; values never come from this file
+  timeout: 10s
+  service_name: tinyagent
+  content: false          # include redacted prompt/tool/assistant text
+  max_attribute_bytes: 4096
 reasoning_effort: medium  # optional; see Reasoning; --reasoning-effort wins
 fallback_models: []       # optional, at most 3; see Model fallback; --fallback-model replaces it
 openai_api: auto          # openai provider transport: auto, responses, or chat; --openai-api wins

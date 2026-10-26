@@ -427,7 +427,7 @@ func TestDelegateEvents(t *testing.T) {
 		}
 		seq = append(seq, k)
 	}
-	want := "tool.call,subagent.started,child:tool.call,child:tool.result,child:assistant.message,subagent.finished,tool.result,assistant.message"
+	want := "model.request,tool.call,subagent.started,child:model.request,child:tool.call,child:tool.result,child:model.request,child:assistant.message,subagent.finished,tool.result,model.request,assistant.message"
 	if strings.Join(seq, ",") != want {
 		t.Errorf("events = %s", strings.Join(seq, ","))
 	}

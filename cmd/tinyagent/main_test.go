@@ -272,7 +272,7 @@ func TestJSONRunEventStream(t *testing.T) {
 	}
 	a := newTestAgent(t, m)
 	var out strings.Builder
-	events := startEvents(&out, true, a, false, func() { t.Error("stop called on a healthy stream") }, nil)
+	events := startEvents(&out, true, a, false, func() { t.Error("stop called on a healthy stream") }, nil, nil)
 	tr := a.Run(context.Background(), "check")
 	if err := events.finish(tr, time.Second); err != nil {
 		t.Fatal(err)
@@ -285,7 +285,7 @@ func TestJSONRunEventStream(t *testing.T) {
 		}
 		kinds = append(kinds, last["type"].(string))
 	}
-	want := []string{"run.started", "assistant.message", "tool.call", "tool.result", "assistant.message", "result"}
+	want := []string{"run.started", "model.request", "assistant.message", "tool.call", "tool.result", "model.request", "assistant.message", "result"}
 	if strings.Join(kinds, " ") != strings.Join(want, " ") {
 		t.Fatalf("events = %v, want %v", kinds, want)
 	}
@@ -297,7 +297,7 @@ func TestJSONRunEventStream(t *testing.T) {
 func TestJSONEventsDisabledWriteNothing(t *testing.T) {
 	a := newTestAgent(t, &replies{{Role: "assistant", Content: "done"}})
 	var out strings.Builder
-	events := startEvents(&out, false, a, false, func() {}, nil)
+	events := startEvents(&out, false, a, false, func() {}, nil, nil)
 	if err := events.finish(a.Run(context.Background(), "x"), 0); err != nil || out.Len() != 0 || a.OnEvent != nil {
 		t.Errorf("disabled stream wrote %q (err %v, OnEvent set %v)", out.String(), err, a.OnEvent != nil)
 	}
@@ -321,7 +321,7 @@ func TestRunStartedListsMCPResourcePatterns(t *testing.T) {
 	a.Config.MCPServers = []config.MCPServer{{Alias: "docs", Resources: []string{"docs://guides/*"}}, {Alias: "gh", Tools: []string{"search"}}}
 	started := func() string {
 		var out bytes.Buffer
-		startEvents(&out, true, a, false, func() {}, nil)
+		startEvents(&out, true, a, false, func() {}, nil, nil)
 		return out.String()
 	}
 	if got := started(); strings.Contains(got, "mcp_resources") {
@@ -393,6 +393,7 @@ Output:
       --json                         write run events as JSONL to stdout
       --output-schema path           end the run with a JSON result validated against this JSON Schema file (printed to stdout)
       --log-db [=path]               also log run events to SQLite (default .tinyagent/tinyagent.db under --cwd); --log-db=false turns config log_db off
+      --otel                         export the run as an OpenTelemetry trace over OTLP/HTTP (otel.endpoint, else OTEL_EXPORTER_OTLP_ENDPOINT, else localhost:4318); OTEL_* variables alone never turn it on (default off; config otel.enabled)
       --no-agents-md                 don't add AGENTS.md (nearest, up to the repo root) to the system prompt
       --scoped-agents-md             also deliver AGENTS.md files in directories below --cwd, appended to the first file tool result that touches a path there (default off; config scoped_agents_md)
       --read-only                    allow only read_file, list_files, and grep; blocks edits and commands

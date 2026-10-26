@@ -33,7 +33,7 @@ func TestLogDBMirrorsJSONEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out strings.Builder
-	events := startEvents(&out, true, a, false, func() { t.Error("stop called") }, db)
+	events := startEvents(&out, true, a, false, func() { t.Error("stop called") }, db, nil)
 	if err := events.finish(a.Run(context.Background(), "check"), time.Second); err != nil {
 		t.Fatal(err)
 	}

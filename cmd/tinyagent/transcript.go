@@ -14,7 +14,7 @@ import (
 
 // transcriptConflicts are the run and mode flags --transcript refuses.
 var transcriptConflicts = []string{"task", "t", "resume", "rewind", "to", "dry-run", "check", "init-config", "update",
-	"completion", "json", "output", "o", "review", "review-base", "review-commit", "worktree", "snapshots", "log-db"}
+	"completion", "json", "output", "o", "review", "review-base", "review-commit", "worktree", "snapshots", "log-db", "otel"}
 
 // runTranscript implements --transcript: it renders a saved trajectory as
 // Markdown on stdout. It reads no config, needs no API key, makes no model
