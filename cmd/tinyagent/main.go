@@ -75,6 +75,7 @@ type options struct {
 	snapshots, dryRun                                bool
 	rewind, rewindTo                                 string
 	profile                                          string
+	completion                                       string
 	showHelp, showVersion, doUpdate, check           bool
 	initConfig                                       bool
 }
@@ -145,6 +146,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.doUpdate, "update", false, "update to the latest release and exit")
 	fs.BoolVar(&o.initConfig, "init-config", false, "write a commented starter config to the user config path (or -c), refusing to overwrite, and exit")
 	fs.BoolVar(&o.check, "check", false, "print the resolved config, model, provider key status, fallbacks, cwd and limits, then exit; makes no model request")
+	fs.StringVar(&o.completion, "completion", "", "print a completion script for this shell (only bash is supported) and exit; load it with: source <(tinyagent --completion bash)")
 	return fs
 }
 
@@ -164,6 +166,9 @@ func run() int {
 	if o.showHelp {
 		printUsage(helpOutput, fs)
 		return 0
+	}
+	if flagWasSet(fs, "completion") {
+		return runCompletion(o.completion, fs, os.Stdout)
 	}
 	// Parsing stops at the first non-flag, so any flags after it would be
 	// silently ignored.
@@ -1304,7 +1309,7 @@ var usageGroups = []struct {
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
-	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "init-config", ""}}},
+	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "init-config", ""}, {"", "completion", "shell"}}},
 }
 
 func printUsage(w io.Writer, fs *flag.FlagSet) {
@@ -1324,7 +1329,7 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 			width = max(width, len(left(f)))
 		}
 	}
-	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n       tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <finished.json> -t \"<follow-up>\" --cwd <dir> -o <new.json> [flags]\n       tinyagent --rewind <trajectory.json> --cwd <dir> [--to start|<step>|<id>] [--dry-run]\n       tinyagent --check [-m <model>] [-c <config>] [--profile <name>] [--cwd <dir>]\n\n")
+	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n       tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <finished.json> -t \"<follow-up>\" --cwd <dir> -o <new.json> [flags]\n       tinyagent --rewind <trajectory.json> --cwd <dir> [--to start|<step>|<id>] [--dry-run]\n       tinyagent --check [-m <model>] [-c <config>] [--profile <name>] [--cwd <dir>]\n       tinyagent --completion bash\n\n")
 	for _, g := range usageGroups {
 		if g.name != "" {
 			fmt.Fprintf(w, "%s:\n", g.name)
@@ -1349,7 +1354,8 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 		"  tinyagent --resume review.json -t \"fix the races you found\" --cwd . -o fix.json\n"+
 		"  tinyagent --profile review -t \"review this change\"\n"+
 		"  tinyagent --rewind run.json --cwd . --to 3 --dry-run\n"+
-		"  tinyagent --check -m anthropic/claude-sonnet-4\n")
+		"  tinyagent --check -m anthropic/claude-sonnet-4\n"+
+		"  source <(tinyagent --completion bash)\n")
 }
 
 // reportSummary prints one line on how the run ended: status, steps, elapsed

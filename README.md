@@ -46,6 +46,16 @@ tinyagent --update
 
 This replaces the binary in place with the latest release, after checking its checksum. If it's installed in a directory you can't write to, run it with `sudo`.
 
+### Shell completion (Bash)
+
+`tinyagent --completion bash` prints a Bash script that completes flag names (`--sandbox-<Tab>`, `--tool-out<Tab>`, short aliases such as `-t`). Load it for the current session:
+
+```bash
+source <(tinyagent --completion bash)
+```
+
+To keep it, add that line to `~/.bashrc`. Only Bash is supported; other shell names exit 2. Words that don't start with `-` keep Bash's normal filename completion, and pressing Tab never runs tinyagent: the flag list is fixed when the script is generated, so re-source it after updating. The command needs no task, credentials or config.
+
 ### Build from source
 
 ```bash
@@ -128,6 +138,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `-V, --version` | | Print the version and exit |
 | `--update` | | Replace this binary with the latest GitHub release (checksum-verified) and exit |
 | `--check` | | Print the resolved config file, model, provider key status, fallbacks, cwd and limits, then exit without a model request (exit 2 on a setup error) |
+| `--completion bash` | | Print a Bash flag-name completion script and exit (`source <(tinyagent --completion bash)`); see [Shell completion](#shell-completion-bash) |
 
 ### Machine-readable output
 
