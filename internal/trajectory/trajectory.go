@@ -65,6 +65,22 @@ type WorktreeInfo struct {
 	RepoRoot   string `json:"repo_root"`
 }
 
+// ReviewInfo records the Git change set a review run (--review,
+// --review-base, --review-commit) gave the model: the target, the ref as
+// typed, the resolved commits, and how much of the diff was sent.
+type ReviewInfo struct {
+	Target        string `json:"target"` // uncommitted, base or commit
+	Ref           string `json:"ref,omitempty"`
+	BaseCommit    string `json:"base_commit,omitempty"`
+	HeadCommit    string `json:"head_commit,omitempty"`
+	Commit        string `json:"commit,omitempty"`
+	FilesChanged  int    `json:"files_changed"`
+	DiffBytes     int    `json:"diff_bytes"`
+	DiffBytesSent int    `json:"diff_bytes_sent"`
+	Truncated     bool   `json:"truncated"`
+	HiddenPaths   int    `json:"hidden_paths"`
+}
+
 // FileAccessInfo records the file_access rules the built-in file tools
 // enforced.
 type FileAccessInfo struct {
@@ -87,6 +103,9 @@ type Trajectory struct {
 	// Worktree is set when the run was started with --worktree: Root is
 	// that worktree (or its subdirectory).
 	Worktree *WorktreeInfo `json:"worktree,omitempty"`
+	// Review is set when the run reviewed a Git change set collected by
+	// tinyagent; the diff itself is in the first user message.
+	Review *ReviewInfo `json:"review,omitempty"`
 	// AdditionalDirs lists the directories outside Root the file tools could
 	// reach in this invocation, with their effective mode.
 	AdditionalDirs []AdditionalDir `json:"additional_dirs,omitempty"`

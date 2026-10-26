@@ -130,6 +130,9 @@ type Agent struct {
 	// Worktree, when non-nil, records the --worktree checkout a fresh run
 	// works in; it is copied into the new trajectory.
 	Worktree *trajectory.WorktreeInfo
+	// Review, when non-nil, records the change set a fresh review run was
+	// given; it is copied into the new trajectory.
+	Review *trajectory.ReviewInfo
 
 	cur  *trajectory.Trajectory
 	view *view
@@ -359,6 +362,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			SkillsEnabled:         a.SkillsEnabled,
 			Skills:                skillInfos(a.Tools.Skills),
 			Worktree:              a.Worktree,
+			Review:                a.Review,
 			Messages: []model.Message{
 				{Role: "system", Content: system},
 				{Role: "user", Content: task + model.AttachmentLabels(a.TaskImages), Images: a.TaskImages},
