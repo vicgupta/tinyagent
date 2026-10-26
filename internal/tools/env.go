@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -21,6 +22,10 @@ type Environment interface {
 	// Command returns an unstarted `bash -c command` that runs in root.
 	// Cancelling ctx must kill the command and everything it spawned.
 	Command(ctx context.Context, root, command string) *exec.Cmd
+	// Exec returns an unstarted command that runs argv directly, without a
+	// shell, in root. argv[0] is looked up on the environment's PATH.
+	// Cancelling ctx must kill the command and everything it spawned.
+	Exec(ctx context.Context, root string, argv []string) *exec.Cmd
 }
 
 func environment(env Environment) Environment {
@@ -39,14 +44,40 @@ type Local struct {
 }
 
 func (l Local) Command(ctx context.Context, root, command string) *exec.Cmd {
-	var cmd *exec.Cmd
 	if l.Sandbox == nil {
-		cmd = exec.CommandContext(ctx, "bash", "-c", command)
+		return l.command(ctx, root, exec.CommandContext(ctx, "bash", "-c", command))
+	}
+	return l.command(ctx, root, nil, bashPath(), "-c", command)
+}
+
+// Exec runs argv without a shell. Unsandboxed, argv[0] is looked up on the
+// command_env PATH (tinyagent's own without a policy); sandboxed, the
+// sandbox wrapper looks it up on the PATH the command gets.
+func (l Local) Exec(ctx context.Context, root string, argv []string) *exec.Cmd {
+	if l.Sandbox != nil {
+		return l.command(ctx, root, nil, argv...)
+	}
+	if l.CommandEnv == nil || strings.ContainsAny(argv[0], `/\`) {
+		return l.command(ctx, root, exec.CommandContext(ctx, argv[0], argv[1:]...))
+	}
+	path, err := lookPathIn(argv[0], l.CommandEnv.Vars)
+	cmd := exec.CommandContext(ctx, path, argv[1:]...)
+	cmd.Args[0] = argv[0]
+	if err != nil {
+		cmd.Err = err
+	}
+	return l.command(ctx, root, cmd)
+}
+
+// command finishes cmd for root: environment, directory and process group.
+// A nil cmd is argv wrapped in the sandbox.
+func (l Local) command(ctx context.Context, root string, cmd *exec.Cmd, argv ...string) *exec.Cmd {
+	if cmd != nil {
 		if l.CommandEnv != nil {
 			cmd.Env = append([]string{}, l.CommandEnv.Vars...)
 		}
 	} else {
-		cmd = l.Sandbox.wrap(ctx, command)
+		cmd = l.Sandbox.wrap(ctx, argv)
 		env := os.Environ()
 		if l.CommandEnv != nil {
 			env = append([]string{}, l.CommandEnv.Vars...)
@@ -147,8 +178,15 @@ func containerRunArgs(image string, runArgs []string, root string, extra []Extra
 }
 
 func (c *Container) Command(ctx context.Context, root, command string) *exec.Cmd {
+	return c.Exec(ctx, root, []string{"bash", "-c", command})
+}
+
+// Exec runs argv in the container without a shell; the container's PATH
+// finds argv[0].
+func (c *Container) Exec(ctx context.Context, root string, argv []string) *exec.Cmd {
 	token := newToken()
-	cmd := exec.CommandContext(ctx, c.Runtime, "exec", "-w", root, "-e", containerMarker+"="+token, c.ID, "bash", "-c", command)
+	args := append([]string{"exec", "-w", root, "-e", containerMarker + "=" + token, c.ID}, argv...)
+	cmd := exec.CommandContext(ctx, c.Runtime, args...)
 	cmd.Dir = root
 	setProcessGroup(cmd)
 	hostCancel := cmd.Cancel
@@ -194,6 +232,26 @@ func (c *Container) Describe() string {
 		s += fmt.Sprintf(", %s (%s)", d.Path, d.Mode)
 	}
 	return s
+}
+
+// lookPathIn finds file in the absolute directories of the PATH in env
+// (KEY=VALUE entries); relative entries are skipped, as exec skips ".".
+func lookPathIn(file string, env []string) (string, error) {
+	path := ""
+	for _, e := range env {
+		if k, v, _ := strings.Cut(e, "="); k == "PATH" || (runtime.GOOS == "windows" && strings.EqualFold(k, "PATH")) {
+			path = v
+		}
+	}
+	for _, dir := range filepath.SplitList(path) {
+		if !filepath.IsAbs(dir) {
+			continue
+		}
+		if p, err := exec.LookPath(filepath.Join(dir, file)); err == nil {
+			return p, nil
+		}
+	}
+	return file, fmt.Errorf("executable %q not found in the command environment's PATH", file)
 }
 
 func newToken() string {

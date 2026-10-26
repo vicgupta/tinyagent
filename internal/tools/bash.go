@@ -27,10 +27,18 @@ func bashStream(ctx context.Context, env Environment, root, command string, time
 	if timeout <= 0 {
 		timeout = 120 * time.Second
 	}
+	return runStream(ctx, timeout, live, func(ctx context.Context) *exec.Cmd {
+		return environment(env).Command(ctx, root, command)
+	})
+}
+
+// runStream runs the command newCmd returns for a context that times out
+// after timeout, and formats the result as bash does.
+func runStream(ctx context.Context, timeout time.Duration, live io.Writer, newCmd func(context.Context) *exec.Cmd) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := environment(env).Command(ctx, root, command)
+	cmd := newCmd(ctx)
 	var buf bytes.Buffer
 	var w io.Writer = &buf
 	if live != nil {

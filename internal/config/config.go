@@ -115,6 +115,11 @@ type AgentConfig struct {
 	// Hooks are trusted local executables run around matching tool calls.
 	Hooks Hooks `yaml:"hooks,omitempty"`
 
+	// CommandTools are user-defined tools that run a fixed argv filled in
+	// with schema-checked arguments, without a shell. They come only from
+	// the user config or -c.
+	CommandTools []CommandTool `yaml:"command_tools,omitempty"`
+
 	// Plan configures the opt-in update_plan tool (off by default).
 	Plan Plan `yaml:"plan,omitempty"`
 	// Images configures the opt-in view_image tool and MCP image
@@ -543,6 +548,23 @@ func (e *InvalidError) Unwrap() error { return e.Err }
 // ValidEnvironment reports whether name is a known environment.
 func ValidEnvironment(name string) bool {
 	return name == "" || name == "local" || name == "container"
+}
+
+// CommandTool is one command_tools entry. tools.NewCommandTools checks it.
+type CommandTool struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+	// Parameters is the JSON Schema of the arguments, in the
+	// --output-schema subset; nil means no arguments.
+	Parameters map[string]any `yaml:"parameters,omitempty"`
+	// Argv is the command; an element that is exactly {{name}} is replaced
+	// by the argument name.
+	Argv []string `yaml:"argv"`
+	// TimeoutSec is the per-call timeout; 0 means bash_timeout_seconds.
+	TimeoutSec int `yaml:"timeout_seconds,omitempty"`
+	// Dir is the working directory, relative to --cwd and inside it; ""
+	// means --cwd.
+	Dir string `yaml:"dir,omitempty"`
 }
 
 // MCPServer grants access to selected tools from one local stdio server.

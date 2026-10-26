@@ -261,6 +261,9 @@ func (t *Trajectory) Validate() error {
 		}
 		known[name] = true
 	}
+	for _, name := range t.CommandToolNames {
+		known[name] = true
+	}
 	if t.FormatErrors < 0 || t.ConsecutiveFormatErrors < 0 || t.ConsecutiveFormatErrors > t.Steps || len(t.FormatErrorMessages) != t.FormatErrors {
 		return errors.New("checkpoint has invalid format-error counters")
 	}
