@@ -263,9 +263,14 @@ func toResponses(messages []Message) (string, []map[string]any) {
 		case "system":
 			system = append(system, m.Content)
 		case "user":
+			// Task attachments go before the text, as for Anthropic.
+			var content []map[string]any
+			for _, im := range m.Images {
+				content = append(content, map[string]any{"type": "input_image", "image_url": im.DataURL()})
+			}
+			content = append(content, map[string]any{"type": "input_text", "text": m.Content})
 			input = append(input, map[string]any{
-				"type": "message", "role": "user",
-				"content": []map[string]any{{"type": "input_text", "text": m.Content}},
+				"type": "message", "role": "user", "content": content,
 			})
 		case "assistant":
 			// Reasoning items go back right before the items of the same

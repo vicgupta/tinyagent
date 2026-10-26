@@ -5,9 +5,11 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
-// Image is one image attached to a tool result (opt-in --images). Data is
+// Image is one image attached to a tool result (opt-in --images) or to a
+// user task message (--image). Data is
 // the base64 encoding of the raw bytes. Images travel only in provider
 // requests and trajectories; every text channel (progress log, --json, the
 // SQLite log, hooks) sees Placeholder instead.
@@ -72,3 +74,33 @@ func FormatBytes(n int) string {
 // Completions transport (openai, openrouter, ollama) can't carry its images.
 // Images are deliberately not re-sent as a synthetic user message.
 const chatImageNote = "[image not shown: this provider's Chat Completions API cannot carry images in tool results, so the image above was not sent to the model; use the anthropic or codex provider to view images]"
+
+// MaxTaskImages caps how many --image attachments one task message carries.
+const MaxTaskImages = 10
+
+// AttachmentLabels is the text added to a user message for its task
+// attachments: a blank line, then one "[attached image N: name, mime, bytes]"
+// line per image. It is "" without images, so image-free messages are
+// unchanged.
+func AttachmentLabels(images []Image) string {
+	if len(images) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n")
+	for i, im := range images {
+		fmt.Fprintf(&b, "\n[attached image %d: %s, %s, %d bytes]", i+1, im.Label, im.MIMEType, im.Size())
+	}
+	return b.String()
+}
+
+// AttachmentInfo is an attachment's metadata for events and logs: index,
+// base name, MIME type, size, and sha256. It never contains image data.
+func AttachmentInfo(images []Image) []map[string]any {
+	out := make([]map[string]any, len(images))
+	for i, im := range images {
+		raw, _ := base64.StdEncoding.DecodeString(im.Data)
+		out[i] = map[string]any{"index": i + 1, "name": im.Label, "mime_type": im.MIMEType, "bytes": len(raw), "sha256": fmt.Sprintf("%x", sha256.Sum256(raw))}
+	}
+	return out
+}

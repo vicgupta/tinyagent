@@ -147,16 +147,17 @@ func (t *Trajectory) Validate() error {
 	if t.SchemaVersion == 1 && (len(t.PendingCalls) > 0 || len(t.Processes) > 0 || t.PlanEnabled || t.Plan != nil || len(t.PlanHistory) > 0 || t.ImagesEnabled || t.ApplyPatchEnabled || len(t.ToolOutputFiles) > 0 || t.SubagentsEnabled || len(t.Subagents) > 0 || t.SubagentSteps > 0 || t.WebFetchEnabled || t.LSPEnabled || t.ScopedAgentsMDEnabled || len(t.ScopedAgentsMDLoads) > 0) {
 		return errors.New("schema version 1 checkpoint has version 2 fields")
 	}
-	if !t.ImagesEnabled {
-		for _, m := range t.Messages {
-			if len(m.Images) > 0 {
-				return errors.New("checkpoint has images but the images setting was not enabled")
-			}
-		}
-	}
+	// Tool-result images need the images setting; user messages may carry
+	// --image task attachments, each with its label line.
 	for _, m := range t.Messages {
-		if len(m.Images) > 0 && m.Role != "tool" {
-			return errors.New("checkpoint has images outside tool results")
+		switch {
+		case len(m.Images) == 0:
+		case m.Role == "tool" && !t.ImagesEnabled:
+			return errors.New("checkpoint has images but the images setting was not enabled")
+		case m.Role == "user" && !strings.HasSuffix(m.Content, model.AttachmentLabels(m.Images)):
+			return errors.New("checkpoint has image attachments without their labels")
+		case m.Role != "tool" && m.Role != "user":
+			return errors.New("checkpoint has images outside tool results and user messages")
 		}
 	}
 	if err := t.validatePlan(); err != nil {
@@ -181,7 +182,7 @@ func (t *Trajectory) Validate() error {
 	if len(t.Messages) < 2 || t.Messages[0].Role != "system" || t.Messages[0].Content != t.SystemPrompt || len(t.Messages[0].ToolCalls) != 0 || t.Messages[0].ToolCallID != "" {
 		return errors.New("checkpoint has an invalid system prompt")
 	}
-	if t.Messages[1].Role != "user" || t.Messages[1].Content != t.Task || len(t.Messages[1].ToolCalls) != 0 || t.Messages[1].ToolCallID != "" {
+	if t.Messages[1].Role != "user" || t.Messages[1].Content != t.Task+model.AttachmentLabels(t.Messages[1].Images) || len(t.Messages[1].ToolCalls) != 0 || t.Messages[1].ToolCallID != "" {
 		return errors.New("checkpoint has an invalid task message")
 	}
 	boundaries := map[int]*ResumeInfo{}
@@ -227,7 +228,7 @@ func (t *Trajectory) Validate() error {
 			if b.FollowUp {
 				notice = FollowUpNotice
 			}
-			if b.Steps != steps || m.Role != "user" || !strings.HasPrefix(m.Content, notice) || len(m.ToolCalls) != 0 || m.ToolCallID != "" {
+			if b.Steps != steps || m.Role != "user" || !strings.HasPrefix(m.Content, notice) || len(m.ToolCalls) != 0 || m.ToolCallID != "" || (!b.FollowUp && len(m.Images) > 0) {
 				return errors.New("checkpoint has an invalid continuation notice")
 			}
 			if b.FollowUp && finalAt != i-1 {

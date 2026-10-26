@@ -30,10 +30,12 @@ type OpenAI struct {
 	Price *[3]float64
 }
 
-// openAIMessage is the wire form of Message; it omits Extra and always sends content.
+// openAIMessage is the wire form of Message; it omits Extra and always sends
+// content. Content is a string, or a parts array for a user message with
+// task attachments.
 type openAIMessage struct {
 	Role       string     `json:"role"`
-	Content    string     `json:"content"`
+	Content    any        `json:"content"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
@@ -45,8 +47,11 @@ type openAIUsage struct {
 
 type openAIResponse struct {
 	Choices []struct {
-		Message      openAIMessage `json:"message"`
-		FinishReason string        `json:"finish_reason"`
+		Message struct {
+			Content   string     `json:"content"`
+			ToolCalls []ToolCall `json:"tool_calls"`
+		} `json:"message"`
+		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage openAIUsage `json:"usage"`
 }
@@ -73,12 +78,24 @@ type openAIChunk struct {
 	} `json:"error"`
 }
 
+// chatUserParts is a user message's content with task attachments: one
+// image_url part (a data: URL) per image, then the text.
+func chatUserParts(m Message) []map[string]any {
+	var parts []map[string]any
+	for _, im := range m.Images {
+		parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]string{"url": im.DataURL()}})
+	}
+	return append(parts, map[string]any{"type": "text", "text": m.Content})
+}
+
 func (o *OpenAI) Query(ctx context.Context, messages []Message, tools []ToolSpec) (Message, Cost, error) {
 	wire := make([]openAIMessage, len(messages))
 	for i, m := range messages {
-		content := m.Content
-		if len(m.Images) > 0 {
-			content += "\n" + chatImageNote
+		var content any = m.Content
+		if len(m.Images) > 0 && m.Role == "user" {
+			content = chatUserParts(m)
+		} else if len(m.Images) > 0 {
+			content = m.Content + "\n" + chatImageNote
 		}
 		calls := m.ToolCalls
 		if cut, _ := Truncated(m); cut && len(calls) > 0 {

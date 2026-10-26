@@ -116,6 +116,10 @@ type Agent struct {
 	// checkpoint with this new user instruction. It must be empty for an
 	// unfinished checkpoint and set for a finished one.
 	FollowUp string
+	// TaskImages (--image) are attached to the task message of a fresh run,
+	// or to the follow-up message with FollowUp. The message text gets one
+	// label line per image.
+	TaskImages []model.Image
 	// OutputSchema, when non-nil, adds the submit_result tool and makes the
 	// run succeed only with a result that validates against it.
 	OutputSchema *outschema.Schema
@@ -247,6 +251,10 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			t.ExitStatus, t.Submission = StatusError, "a follow-up task can only continue a finished checkpoint"
 			return t
 		}
+		if !finished && len(a.TaskImages) > 0 {
+			t.ExitStatus, t.Submission = StatusError, "image attachments need a follow-up task"
+			return t
+		}
 		source := a.ResumeSource
 		if source == "" {
 			source = "memory"
@@ -309,7 +317,12 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			}
 		}
 		t.SchemaVersion = trajectory.SchemaVersion
-		t.Messages = append(t.Messages, model.Message{Role: "user", Content: notice})
+		var images []model.Image
+		if finished {
+			images = a.TaskImages
+			notice += model.AttachmentLabels(images)
+		}
+		t.Messages = append(t.Messages, model.Message{Role: "user", Content: notice, Images: images})
 		// Persist the validated starting state before the first request.
 		if err := a.step(t); err != nil {
 			return a.saveFailed(t, err)
@@ -348,7 +361,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			Worktree:              a.Worktree,
 			Messages: []model.Message{
 				{Role: "system", Content: system},
-				{Role: "user", Content: task},
+				{Role: "user", Content: task + model.AttachmentLabels(a.TaskImages), Images: a.TaskImages},
 			},
 		}
 		if a.scopedOn() {

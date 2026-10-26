@@ -48,6 +48,7 @@ type options struct {
 	planFile                                         string
 	plan                                             bool
 	images                                           bool
+	imagePaths                                       imageList
 	applyPatch                                       bool
 	subagents                                        bool
 	webFetch                                         bool
@@ -125,6 +126,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.lsp, "lsp", false, "start the configured language servers (lsp.servers in the user config or -c): append compiler diagnostics to edit results and add the read-only lsp tool (default off; config lsp.enabled)")
 	fs.BoolVar(&o.subagents, "subagents", false, "add the delegate tool: hand a task to a read-only subagent with a fresh context and get back only its report (default off; config subagents.enabled)")
 	fs.BoolVar(&o.images, "images", false, "let vision-capable models see images: the view_image tool and MCP image pass-through (default off; config images.enabled)")
+	fs.Var(&o.imagePaths, "image", fmt.Sprintf("attach this PNG, JPEG, GIF or WebP file to the task message (or a --resume follow-up); repeatable, at most %d; independent of --images", model.MaxTaskImages))
 	fs.BoolVar(&o.skills, "skills", false, "discover Agent Skills in .agents/skills (project, up to the repo root, and ~/.agents/skills) and add the skill tool (default off; config skills)")
 	fs.BoolVar(&o.noSkills, "no-skills", false, "turn Agent Skills discovery off, overriding config skills; --no-skills=false turns it on")
 	fs.StringVar(&o.planFile, "plan-file", "", "with the plan enabled, also export the current plan as Markdown to this file after each save")
@@ -245,6 +247,10 @@ func run() int {
 		}
 		return runResume(&o, fs)
 	}
+	if o.task == "" && len(o.imagePaths) > 0 {
+		fmt.Fprintln(os.Stderr, "error: --image requires a task (-t); images are attached to the task message")
+		return 2
+	}
 	if o.task == "" {
 		fmt.Fprintln(os.Stderr, "error: --task is required")
 		fs.Usage()
@@ -274,6 +280,12 @@ func run() int {
 		return loadConfigError(err)
 	}
 	registerProviders(cfg)
+	taskImages, err := loadTaskImages(o.imagePaths, cfg.MaxImageBytes)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	}
+	announceTaskImages(os.Stderr, taskImages, o.verbose)
 	hookRunner, err := hooks.New(cfg.Hooks, cfgPath)
 	if err != nil {
 		return fail(err)
@@ -511,6 +523,7 @@ func run() int {
 		Snapshots:      snaps,
 		Subagents:      subagents,
 		Worktree:       worktree,
+		TaskImages:     taskImages,
 	}
 	var events *runEvents
 	warn := func(msg string) { events.warn(msg) }
@@ -624,6 +637,12 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	case taskSet && !finished:
 		fmt.Fprintln(os.Stderr, "error: --resume and --task are mutually exclusive for an unfinished checkpoint; --task adds a follow-up only to a finished (Submitted or Completed) run")
 		return 2
+	case len(o.imagePaths) > 0 && !finished:
+		fmt.Fprintln(os.Stderr, "error: --image needs a follow-up task: it attaches images only to a finished checkpoint's --resume -t \"<follow-up>\" message")
+		return 2
+	case finished && o.task == "" && len(o.imagePaths) > 0:
+		fmt.Fprintln(os.Stderr, "error: --image requires a follow-up task (-t); images are attached to the follow-up message")
+		return 2
 	case finished && o.task == "":
 		fmt.Fprintf(os.Stderr, "error: checkpoint already finished (%s); a follow-up task is required to continue it: --resume %s -t \"<follow-up>\"\n", src.ExitStatus, o.resume)
 		return 2
@@ -651,6 +670,12 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return loadConfigError(err)
 	}
 	registerProviders(cfg)
+	taskImages, err := loadTaskImages(o.imagePaths, cfg.MaxImageBytes)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: resume:", err)
+		return 2
+	}
+	announceTaskImages(os.Stderr, taskImages, o.verbose)
 	// Checked after the config load so configured providers resolve.
 	if err := checkReasoningEffort(modelName, src.ReasoningEffort); err != nil {
 		return fail(fmt.Errorf("resume: %w", err))
@@ -932,6 +957,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		Worktree:       src.Worktree,
 		Snapshots:      snaps,
 		FollowUp:       followUp,
+		TaskImages:     taskImages,
 		Subagents:      subagents,
 	}
 	var events *runEvents
@@ -1157,6 +1183,46 @@ func newWebFetcher(fs *flag.FlagSet, o options, cfg *config.AgentConfig) (*tools
 	}
 	fmt.Fprintf(os.Stderr, "web_fetch: %d %s (%s)\n", len(w.AllowedDomains), unit, strings.Join(w.AllowedDomains, ", "))
 	return f, nil
+}
+
+// loadTaskImages reads and validates the --image attachments, in flag order.
+// Paths resolve against the process's working directory and are not subject
+// to the workspace or file_access rules: they are the user's own input.
+func loadTaskImages(paths []string, maxBytes int) ([]model.Image, error) {
+	if len(paths) > model.MaxTaskImages {
+		return nil, fmt.Errorf("--image: %d images given; at most %d may be attached", len(paths), model.MaxTaskImages)
+	}
+	var images []model.Image
+	for _, p := range paths {
+		im, err := tools.LoadImageFile(p, maxBytes)
+		if err != nil {
+			return nil, fmt.Errorf("--image: %w", err)
+		}
+		images = append(images, im)
+	}
+	return images, nil
+}
+
+// announceTaskImages prints one -v line per --image attachment.
+func announceTaskImages(w io.Writer, images []model.Image, verbose bool) {
+	if !verbose {
+		return
+	}
+	for i, im := range images {
+		fmt.Fprintf(w, "attached image %d: %s (%s, %s bytes)\n", i+1, im.Label, im.MIMEType, model.FormatBytes(im.Size()))
+	}
+}
+
+// imageList is the repeatable --image flag.
+type imageList []string
+
+func (l *imageList) String() string { return strings.Join(*l, ",") }
+func (l *imageList) Set(v string) error {
+	if v == "" {
+		return errors.New("empty image path")
+	}
+	*l = append(*l, v)
+	return nil
 }
 
 // dirList is the repeatable --add-dir-read and --add-dir-write flags.
@@ -1685,6 +1751,9 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	}
 	if a.FollowUp != "" {
 		started["follow_up"] = true
+	}
+	if len(a.TaskImages) > 0 {
+		started["attachments"] = model.AttachmentInfo(a.TaskImages)
 	}
 	if l, ok := a.Tools.Env.(tools.Local); ok {
 		if ce := agent.CommandEnvInfo(l.CommandEnv); ce != nil {
