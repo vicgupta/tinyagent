@@ -75,6 +75,7 @@ type options struct {
 	snapshots, dryRun                                bool
 	rewind, rewindTo                                 string
 	showHelp, showVersion, doUpdate, check           bool
+	initConfig                                       bool
 }
 
 // newFlagSet defines the command-line flags, storing their values in o. Each
@@ -140,6 +141,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.showVersion, "version", false, "print the version and exit")
 	fs.BoolVar(&o.showVersion, "V", false, "shorthand for --version")
 	fs.BoolVar(&o.doUpdate, "update", false, "update to the latest release and exit")
+	fs.BoolVar(&o.initConfig, "init-config", false, "write a commented starter config to the user config path (or -c), refusing to overwrite, and exit")
 	fs.BoolVar(&o.check, "check", false, "print the resolved config, model, provider key status, fallbacks, cwd and limits, then exit; makes no model request")
 	return fs
 }
@@ -183,6 +185,13 @@ func run() int {
 	if o.showVersion {
 		fmt.Println("tinyagent", currentVersion())
 		return 0
+	}
+	if o.initConfig {
+		if flagWasSet(fs, "task", "t", "resume", "rewind", "update") {
+			fmt.Fprintln(os.Stderr, "error: --init-config can't be combined with --task, --resume, --rewind or --update")
+			return 2
+		}
+		return runInitConfig(o.configPath)
 	}
 	if o.doUpdate {
 		u, err := update.New(currentVersion())
@@ -1285,7 +1294,7 @@ var usageGroups = []struct {
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
-	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}}},
+	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "init-config", ""}}},
 }
 
 func printUsage(w io.Writer, fs *flag.FlagSet) {
