@@ -319,3 +319,16 @@ func TestReadIsLenient(t *testing.T) {
 		}
 	}
 }
+
+func TestPendingQuestion(t *testing.T) {
+	tr := finished()
+	tr.Messages[4] = model.Message{Role: "assistant", ToolCalls: []model.ToolCall{call("q", "ask_user", `{"question":"Per key or per IP?"}`)}}
+	tr.ExitStatus, tr.Submission = "NeedsInput", "Per key or per IP?"
+	tr.PendingQuestion = &trajectory.Question{ToolCallID: "q", Question: "Per key or per IP?", Options: []string{"per key", "per `IP`"}}
+	out := render(t, tr, Options{})
+	mustContain(t, out, "`NeedsInput`", "_No result recorded for `ask_user` (call `q`)._",
+		"## Question for the user\n\n```text\nPer key or per IP?\n```", "- `per key`\n", "--resume <trajectory.json>")
+	if strings.Contains(out, "## Final message") {
+		t.Errorf("question rendered as a final message:\n%s", out)
+	}
+}

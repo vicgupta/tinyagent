@@ -88,8 +88,9 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | Flag | Default | |
 |---|---|---|
 | `-h, --help` | | Print usage to stdout and exit |
-| `-t, --task` | — | Task prompt (required unless `--resume`; with `--resume` of a finished run, the follow-up task); `-` reads it from stdin |
+| `-t, --task` | — | Task prompt (required unless `--resume`; with `--resume` of a finished run, the follow-up task; of a `NeedsInput` run, the answer); `-` reads it from stdin |
 | `--resume` | — | Continue a validated unfinished trajectory; requires explicit matching `--cwd` and a new `-o` path |
+| `--ask-user` | config `ask_user.enabled`, else off | Give the model the `ask_user` tool: it may end the run with one question (status `NeedsInput`, exit 4), answered with `--resume <trajectory> -t "<answer>"`. Requires `-o`; can't be combined with `--output-schema`; `--ask-user=false` disables it. See [Asking for input](#asking-for-input) |
 | `-m, --model` | `$AGENT_MODEL`, else config `model`, else `openai/gpt-4o` | `<provider>/<model>`; no `/` means openai. Providers: openai, openrouter, anthropic, ollama, codex, plus any defined under [`providers`](#named-providers) |
 | `--reasoning-effort` | config `reasoning_effort`, else unset | Reasoning effort sent to the provider: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; see [Reasoning](#reasoning) |
 | `--fallback-model <spec>` | config `fallback_models`, else none | Model to switch to when the current one keeps failing with `429`, `5xx` or network errors after retries; repeatable, tried in order, at most 3, and replaces `fallback_models`; see [Model fallback](#model-fallback) |
@@ -142,7 +143,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--scoped-agents-md` | off | Also deliver `AGENTS.md` files in directories below `<cwd>`, appended to the first file tool result that touches a path there; see [Project instructions](#project-instructions-agentsmd). Can't be combined with `--no-agents-md` |
 | `-V, --version` | | Print the version and exit |
 | `--update` | | Replace this binary with the latest GitHub release (checksum-verified) and exit |
-| `--check` | | Print the resolved config file, model, provider key status, fallbacks, cwd and limits, then exit without a model request (exit 2 on a setup error) |
+| `--check` | | Print the resolved config file, model, provider key status, fallbacks, cwd and limits (and `ask_user` when it is on or set by flag), then exit without a model request (exit 2 on a setup error) |
 | `--completion bash` | | Print a Bash flag-name completion script and exit (`source <(tinyagent --completion bash)`); see [Shell completion](#shell-completion-bash) |
 
 ### Machine-readable output
@@ -173,7 +174,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 | `instructions.skipped` | `path`, `scope_dir`, `reason` (`file_access`, `outside_root`, `modified`, `read_error` or `cap`), `tool`, `tool_call_id`, `step`, and `error` for `read_error`; a scoped `AGENTS.md` that applied was not delivered |
 | `provider.retry` | `attempt` (the upcoming attempt number), `reason` (`http_<status>` or `network`), `backoff_ms`; only emitted when a model request is retried |
 | `model.fallback` | `step`, `from`, `to`, `reason` (`http_<status>` or `network`), `attempts`; the run switched to the next [fallback model](#model-fallback) after `from` used up its retries |
-| `result` | `status`, `submission`, cumulative `steps`, `structured_output` (only with `--output-schema` and status `Submitted`), `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cost_usd`, invocation `duration_ms` |
+| `result` | `status`, `submission` (the question for `NeedsInput`), cumulative `steps`, `structured_output` (only with `--output-schema` and status `Submitted`), `question` (`tool_call_id`, `question`, `options` when given; only for status `NeedsInput`, see [Asking for input](#asking-for-input)), `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cost_usd`, invocation `duration_ms` |
 
 When the run starts, the final event is `result`, including for model errors, interruptions, and limit stops. Exit codes are unchanged. `--resume` reports cumulative trajectory accounting; `duration_ms` covers only the current invocation. Event streams can contain prompts, code, and tool output, so handle them with the same care as trajectory files. Credentials and environment dumps are not included.
 
@@ -374,6 +375,29 @@ cat next.md | tinyagent --resume fix.json -t - --cwd . -o next.json
 - Steps, cost, and tokens stay cumulative, so `--step-limit` and `--cost-limit` count the earlier runs too. If the ceiling is already used up, no request is made and the run ends `StepLimitExceeded` or `CostLimitExceeded`; raise the ceiling for the follow-up.
 - Follow-ups chain: a follow-up's finished result can take another follow-up, and a follow-up stopped by a limit continues with plain `--resume`. Each boundary is recorded in `resume` with `follow_up: true`, and in `--json` `run.started` carries `resumed: true` and `follow_up: true`.
 - Checkpoints with a follow-up boundary use the existing schema version; older tinyagent binaries refuse them with an unknown-field error rather than misreading them.
+- A `NeedsInput` run is answered the same way, but the answer is delivered differently; see [Asking for input](#asking-for-input).
+
+### Asking for input
+
+`--ask-user` (or `ask_user.enabled: true`) gives the model an `ask_user` tool for headless runs. When information that blocks the task is missing (which of two APIs to change, whether a breaking change is OK), the model can call it with one question instead of guessing. The run then ends cleanly with status `NeedsInput` and exit code 4; nothing waits on a terminal, so nothing can hang in CI. Whoever started the run answers later with `--resume`:
+
+```sh
+tinyagent --ask-user -t "add rate limiting to the API" -o run.json
+# stderr:
+# NeedsInput after 6 steps in 41s (...): Should the limit be per API key or per client IP?
+#   options: per API key | per client IP
+# answer with: tinyagent --resume run.json --cwd /repo -t "<answer>" -o run-2.json
+
+tinyagent --resume run.json --cwd . -t "per API key" -o run-2.json
+```
+
+- **The tool.** `ask_user` takes a `question` (required, non-empty, at most 2,000 characters) and optional `options`: 2 to 6 distinct suggested answers of at most 200 characters each. The person may answer with any text. A short notice in the system prompt tells the model to ask only when it is blocked and the answer isn't in the workspace, and otherwise to proceed and state its assumptions.
+- **Ending the run.** A valid `ask_user` call that is the only tool call in its message ends the run. The call is saved in the trajectory as pending (`pending_calls`), with the question in `pending_question` (`tool_call_id`, `question`, `options`). The question goes to stdout (so `q=$(tinyagent ...)` captures it) and, with the options and a ready-to-paste `--resume` command, to stderr. With `--json`, the final `result` event has `status: "NeedsInput"`, `submission` set to the question, and a `question` object; `--log-db` stores the same, and at level `metadata` it keeps only the question's length. No hooks run for `ask_user`, and stop hooks don't run for a `NeedsInput` end.
+- **Answering.** `--resume <trajectory> -t "<answer>"` (or `-t -` for stdin) sends the saved history and delivers the answer as the result of the pending `ask_user` call, after a short notice that the workspace may have changed; no user message is added, so the model sees the answer attached to its own question. Without `-t`, or with an empty answer, `--resume` exits 2 and prints the pending question; `--image` can't be attached to an answer. Every other resume rule applies: the same model, root, system prompt and tools (a conflicting `--ask-user` exits 2), a new `-o`, and cumulative steps, cost and tokens. The boundary is recorded in `resume` with `answer: true`.
+- **Misuse.** `ask_user` together with other tool calls in one message runs none of them; each gets an error asking the model to call `ask_user` alone. Malformed arguments (missing or empty `question`, wrong types, too few, too many or duplicate `options`) are [format errors](#malformed-tool-calls). After `ask_user.max_questions` questions (default 3, counted across the whole resume chain and recorded as `questions_asked`), further calls get an error telling the model to proceed on stated assumptions, and the run continues.
+- **Where it applies.** It is offered with `--read-only` and in review mode, never to [subagents](#subagents). `--ask-user` without `-o`, or with `--output-schema`, exits 2 before any request, since the question could never be answered. With it off, tools, prompts, trajectories, events and exit codes are unchanged; older tinyagent binaries refuse `NeedsInput` checkpoints rather than misreading them.
+
+The question is model-written text that can quote workspace files or fetched pages; treat it as untrusted if you forward it to other systems.
 
 ### Project instructions (AGENTS.md)
 
@@ -470,6 +494,9 @@ subagents:
   enabled: false          # offer the delegate tool (same as --subagents)
   model: ""               # child model, e.g. openai/gpt-5-mini; empty uses the parent model
   max_steps: 30           # step cap per delegated task; 0 means the default (30)
+ask_user:
+  enabled: false          # offer the ask_user tool (same as --ask-user); see Asking for input
+  max_questions: 3        # questions per run, counted across resumes; 1 to 20
 web_fetch:
   enabled: false          # offer the web_fetch tool (same as --web-fetch)
   allowed_domains: []     # hosts it may read, e.g. [pkg.go.dev, "*.python.org"]; required when enabled
@@ -874,7 +901,7 @@ lsp:
 
 ## Exit status
 
-The run ends when the model writes `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` (`Submitted`), stops calling tools (`Completed`), or hits a limit (`StepLimitExceeded`, `CostLimitExceeded`, `TimeLimitExceeded`), Ctrl-C (`Interrupted`), a non-retryable API error (`Error`), too many consecutive malformed tool-call steps (`RepeatedFormatError`, see below), or, with `--output-schema`, 3 consecutive invalid results (`InvalidOutput`), or stop hooks still rejecting the result after `max_stop_continuations` (`VerificationFailed`, see [Stop hooks](#stop-hooks)), or too many consecutive responses cut off at the output-token limit (`OutputTruncated`, see [Output truncation](#output-truncation)). The process exits 0 only for `Submitted` and `Completed`, 3 for `OutputTruncated`, and 1 otherwise (2 is reserved for usage errors).
+The run ends when the model writes `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` (`Submitted`), stops calling tools (`Completed`), or hits a limit (`StepLimitExceeded`, `CostLimitExceeded`, `TimeLimitExceeded`), Ctrl-C (`Interrupted`), a non-retryable API error (`Error`), too many consecutive malformed tool-call steps (`RepeatedFormatError`, see below), or, with `--output-schema`, 3 consecutive invalid results (`InvalidOutput`), or stop hooks still rejecting the result after `max_stop_continuations` (`VerificationFailed`, see [Stop hooks](#stop-hooks)), or too many consecutive responses cut off at the output-token limit (`OutputTruncated`, see [Output truncation](#output-truncation)), or, with `--ask-user`, a question for the user (`NeedsInput`, see [Asking for input](#asking-for-input)). The process exits 0 only for `Submitted` and `Completed`, 3 for `OutputTruncated`, 4 for `NeedsInput`, and 1 otherwise (2 is reserved for usage errors).
 
 Every run ends with one summary line on stderr, so stdout keeps only the model's text:
 

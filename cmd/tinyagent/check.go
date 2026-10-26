@@ -147,6 +147,17 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 		"cost " + limitText(fs, "cost-limit", cfg.CostLimit > 0, formatCost(cfg.CostLimit)),
 		"time " + limitText(fs, "time-limit", cfg.WallTimeSec > 0, fmt.Sprintf("%ds", cfg.WallTimeSec)),
 	}, ", "))
+	if flagWasSet(fs, "ask-user") {
+		cfg.AskUser.Enabled = o.askUser
+	}
+	switch {
+	case cfg.AskUser.Enabled && flagWasSet(fs, "ask-user"):
+		add("ask_user", fmt.Sprintf("on, at most %d questions per run (from --ask-user)", cfg.AskUser.MaxQuestions))
+	case cfg.AskUser.Enabled:
+		add("ask_user", fmt.Sprintf("on, at most %d questions per run (from config)", cfg.AskUser.MaxQuestions))
+	case flagWasSet(fs, "ask-user"):
+		add("ask_user", "off (from --ask-user)")
+	}
 	return lines, nil
 }
 

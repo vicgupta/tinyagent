@@ -425,6 +425,16 @@ func (r *renderer) footer() {
 	case len(t.StructuredOutput) > 0:
 		r.printf("## Structured output\n\n")
 		r.fence("json", r.clean(prettyJSON(string(t.StructuredOutput))))
+	case t.ExitStatus == trajectory.StatusNeedsInput && t.PendingQuestion != nil:
+		r.printf("## Question for the user\n\n")
+		r.text(t.PendingQuestion.Question)
+		for _, o := range t.PendingQuestion.Options {
+			r.printf("- %s\n", r.code(o))
+		}
+		if len(t.PendingQuestion.Options) > 0 {
+			r.printf("\n")
+		}
+		r.printf("Answer it with `tinyagent --resume <trajectory.json> --cwd <root> -t \"<answer>\" -o <new.json>`.\n\n")
 	case t.Submission != "":
 		if trajectory.Finished(t.ExitStatus) {
 			r.printf("## Submission\n\n")

@@ -51,6 +51,7 @@ type options struct {
 	imagePaths                                       imageList
 	applyPatch                                       bool
 	subagents                                        bool
+	askUser                                          bool
 	webFetch                                         bool
 	webFetchAllowDomains                             domainList
 	lsp                                              bool
@@ -92,7 +93,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.Usage = func() { printUsage(fs.Output(), fs) }
 	fs.BoolVar(&o.showHelp, "help", false, "show this help and exit")
 	fs.BoolVar(&o.showHelp, "h", false, "shorthand for --help")
-	fs.StringVar(&o.task, "task", "", `task/prompt (required unless --resume or a review flag, where it adds focus instructions; with --resume of a finished run, the follow-up instruction); "-" reads it from stdin`)
+	fs.StringVar(&o.task, "task", "", `task/prompt (required unless --resume or a review flag, where it adds focus instructions; with --resume of a finished run, the follow-up instruction; of a NeedsInput run, the answer); "-" reads it from stdin`)
 	fs.StringVar(&o.task, "t", "", "shorthand for --task")
 	fs.StringVar(&o.modelName, "model", defaultModel(), "provider/model; if unset, $AGENT_MODEL, then the config's model")
 	fs.StringVar(&o.modelName, "m", defaultModel(), "shorthand for --model")
@@ -111,7 +112,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.IntVar(&o.maxOutputTokens, "max-output-tokens", 0, "per-request output-token budget sent to the provider, 0 = provider default (8192 for anthropic; config max_output_tokens)")
 	fs.StringVar(&o.output, "output", "", "write trajectory JSON")
 	fs.StringVar(&o.output, "o", "", "shorthand for --output")
-	fs.StringVar(&o.resume, "resume", "", "continue an unfinished run from a trajectory JSON checkpoint, or a finished one with -t \"<follow-up>\"")
+	fs.StringVar(&o.resume, "resume", "", "continue an unfinished run from a trajectory JSON checkpoint, a finished one with -t \"<follow-up>\", or answer a NeedsInput one with -t \"<answer>\"")
 	fs.BoolVar(&o.verbose, "verbose", false, "print tool outputs")
 	fs.BoolVar(&o.verbose, "v", false, "shorthand for --verbose")
 	fs.BoolVar(&o.noStream, "no-stream", false, "wait for full responses instead of streaming")
@@ -131,6 +132,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.Var(&o.webFetchAllowDomains, "web-fetch-allow-domain", "with --web-fetch, let web_fetch read this host (name, *.domain or IP, optional :port); repeatable, replaces web_fetch.allowed_domains")
 	fs.BoolVar(&o.lsp, "lsp", false, "start the configured language servers (lsp.servers in the user config or -c): append compiler diagnostics to edit results and add the read-only lsp tool (default off; config lsp.enabled)")
 	fs.BoolVar(&o.subagents, "subagents", false, "add the delegate tool: hand a task to a read-only subagent with a fresh context and get back only its report (default off; config subagents.enabled)")
+	fs.BoolVar(&o.askUser, "ask-user", false, "add the ask_user tool: the model may end the run with one question (status NeedsInput, exit 4), answered with --resume <trajectory> -t \"<answer>\"; requires -o (default off; config ask_user.enabled)")
 	fs.BoolVar(&o.images, "images", false, "let vision-capable models see images: the view_image tool and MCP image pass-through (default off; config images.enabled)")
 	fs.Var(&o.imagePaths, "image", fmt.Sprintf("attach this PNG, JPEG, GIF or WebP file to the task message (or a --resume follow-up); repeatable, at most %d; independent of --images", model.MaxTaskImages))
 	fs.BoolVar(&o.skills, "skills", false, "discover Agent Skills in .agents/skills (project, up to the repo root, and ~/.agents/skills) and add the skill tool (default off; config skills)")
@@ -340,6 +342,13 @@ func run() int {
 	if flagWasSet(fs, "web-fetch") {
 		cfg.WebFetch.Enabled = o.webFetch
 	}
+	if flagWasSet(fs, "ask-user") {
+		cfg.AskUser.Enabled = o.askUser
+	}
+	if msg := askUserConflict(cfg, schema != nil, o.output); msg != "" {
+		fmt.Fprintln(os.Stderr, "error: "+msg)
+		return 2
+	}
 	webFetch, err := newWebFetcher(fs, o, &cfg)
 	if err != nil {
 		return configFail(err)
@@ -535,6 +544,7 @@ func run() int {
 			Images:             cfg.Images.Enabled,
 			ApplyPatch:         cfg.ApplyPatch,
 			Delegate:           subagents != nil,
+			AskUser:            cfg.AskUser.Enabled,
 			WebFetch:           webFetch,
 			LSP:                lspTools,
 			OutputFiles:        outputFiles,
@@ -622,13 +632,39 @@ func run() int {
 		}
 		return 0
 	}
-	if t.ExitStatus == agent.StatusSubmitted || t.ExitStatus == agent.StatusCompleted {
+	return exitCode(t, o.jsonOutput)
+}
+
+// exitCode maps a run's final status to the process exit code. A
+// NeedsInput run also prints its question to stdout, unless stdout carries
+// JSONL events.
+func exitCode(t *trajectory.Trajectory, jsonOutput bool) int {
+	switch t.ExitStatus {
+	case agent.StatusSubmitted, agent.StatusCompleted:
 		return 0
-	}
-	if t.ExitStatus == agent.StatusOutputTruncated {
+	case agent.StatusOutputTruncated:
 		return exitOutputTruncated
+	case agent.StatusNeedsInput:
+		if !jsonOutput {
+			fmt.Println(t.Submission)
+		}
+		return exitNeedsInput
 	}
 	return 1
+}
+
+// askUserConflict returns why ask_user can't be on for a new run, or "".
+// A question is answered with --resume, so the run must be resumable.
+func askUserConflict(cfg config.AgentConfig, schema bool, output string) string {
+	switch {
+	case !cfg.AskUser.Enabled:
+		return ""
+	case schema:
+		return "--ask-user (ask_user.enabled) can't be combined with --output-schema: those runs can't be resumed, so a question could never be answered; pass --ask-user=false"
+	case output == "":
+		return "--ask-user (ask_user.enabled) requires -o: a question is answered with --resume <trajectory> -t \"<answer>\"; pass -o run.json or --ask-user=false"
+	}
+	return ""
 }
 
 // streamTo returns progress in place of os.Stdout for bash streaming; nil
@@ -666,8 +702,24 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	// A finished checkpoint continues only with a follow-up task; an
 	// unfinished one only without.
 	finished := trajectory.Finished(src.ExitStatus)
+	asked := src.ExitStatus == agent.StatusNeedsInput && src.PendingQuestion != nil
 	followUp := ""
 	switch {
+	case asked && len(o.imagePaths) > 0:
+		fmt.Fprintln(os.Stderr, "error: --image can't be attached to an answer; answer the question with -t only")
+		return 2
+	case asked && o.task == "":
+		fmt.Fprintf(os.Stderr, "error: checkpoint is waiting for an answer to: %s\nanswer it with: --resume %s -t \"<answer>\"\n", src.PendingQuestion.Question, o.resume)
+		return 2
+	case asked:
+		if followUp, err = readTask(o.task, os.Stdin); err != nil {
+			fmt.Fprintln(os.Stderr, "error: answer:", err)
+			return 2
+		}
+		if strings.TrimSpace(followUp) == "" {
+			fmt.Fprintf(os.Stderr, "error: the answer is empty; the checkpoint is waiting for an answer to: %s\n", src.PendingQuestion.Question)
+			return 2
+		}
 	case taskSet && !finished:
 		fmt.Fprintln(os.Stderr, "error: --resume and --task are mutually exclusive for an unfinished checkpoint; --task adds a follow-up only to a finished (Submitted or Completed) run")
 		return 2
@@ -775,6 +827,11 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return 2
 	}
 	cfg.Subagents.Enabled = src.SubagentsEnabled
+	if flagWasSet(fs, "ask-user") && o.askUser != src.AskUserEnabled {
+		fmt.Fprintln(os.Stderr, "error: resume: --ask-user conflicts with the checkpoint's recorded ask_user setting; start a fresh task")
+		return 2
+	}
+	cfg.AskUser.Enabled = src.AskUserEnabled
 	if flagWasSet(fs, "web-fetch") && o.webFetch != src.WebFetchEnabled {
 		fmt.Fprintln(os.Stderr, "error: resume: --web-fetch conflicts with the checkpoint's recorded web_fetch setting; start a fresh task")
 		return 2
@@ -970,6 +1027,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 			Images:         src.ImagesEnabled,
 			ApplyPatch:     src.ApplyPatchEnabled,
 			Delegate:       src.SubagentsEnabled,
+			AskUser:        src.AskUserEnabled,
 			WebFetch:       webFetch,
 			LSP:            lspTools,
 			OutputFiles:    outputFiles,
@@ -1024,10 +1082,14 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return nil
 	}
 
-	if finished {
+	switch {
+	case asked:
+		fmt.Fprintf(os.Stderr, "answering the question of %s from %s (after %d steps)\n", modelName, o.resume, src.Steps)
+		fmt.Fprintln(os.Stderr, "note: the full previous conversation is sent to the provider again; the workspace may have changed since the question. Live processes are not restored")
+	case finished:
 		fmt.Fprintf(os.Stderr, "following up %s from %s (previous status %s after %d steps)\n", modelName, o.resume, prevStatus, src.Steps)
 		fmt.Fprintln(os.Stderr, "note: the full previous conversation is sent to the provider again; the workspace may have changed since the run finished. Live processes are not restored")
-	} else {
+	default:
 		fmt.Fprintf(os.Stderr, "resuming %s from %s (previous status %s after %d steps)\n", modelName, o.resume, prevStatus, src.Steps)
 		fmt.Fprintln(os.Stderr, "note: inspect and revalidate the workspace; it may have changed and commands may have produced unrecorded side effects after the last save. Live processes are not restored")
 	}
@@ -1043,13 +1105,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if events.finish(t, elapsed) != nil {
 		return 1
 	}
-	if t.ExitStatus == agent.StatusSubmitted || t.ExitStatus == agent.StatusCompleted {
-		return 0
-	}
-	if t.ExitStatus == agent.StatusOutputTruncated {
-		return exitOutputTruncated
-	}
-	return 1
+	return exitCode(t, o.jsonOutput)
 }
 
 // sameFile reports whether two paths refer to the same file, following
@@ -1405,7 +1461,7 @@ var usageGroups = []struct {
 	flags [][3]string
 }{
 	{"", [][3]string{{"h", "help", ""}}},
-	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "profile", "name"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}}},
+	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "profile", "name"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}, {"", "ask-user", ""}}},
 	{"Review", [][3]string{{"", "review", ""}, {"", "review-base", "ref"}, {"", "review-commit", "rev"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
@@ -1430,7 +1486,7 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 			width = max(width, len(left(f)))
 		}
 	}
-	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n       tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <finished.json> -t \"<follow-up>\" --cwd <dir> -o <new.json> [flags]\n       tinyagent --review | --review-base <ref> | --review-commit <rev> [-t \"<focus>\"] [flags]\n       tinyagent --rewind <trajectory.json> --cwd <dir> [--to start|<step>|<id>] [--dry-run]\n       tinyagent --check [-m <model>] [-c <config>] [--profile <name>] [--cwd <dir>]\n       tinyagent --transcript <trajectory.json>\n       tinyagent --completion bash\n\n")
+	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n       tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <finished.json> -t \"<follow-up>\" --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <needs-input.json> -t \"<answer>\" --cwd <dir> -o <new.json> [flags]\n       tinyagent --review | --review-base <ref> | --review-commit <rev> [-t \"<focus>\"] [flags]\n       tinyagent --rewind <trajectory.json> --cwd <dir> [--to start|<step>|<id>] [--dry-run]\n       tinyagent --check [-m <model>] [-c <config>] [--profile <name>] [--cwd <dir>]\n       tinyagent --transcript <trajectory.json>\n       tinyagent --completion bash\n\n")
 	for _, g := range usageGroups {
 		if g.name != "" {
 			fmt.Fprintf(w, "%s:\n", g.name)
@@ -1470,13 +1526,21 @@ func reportSummary(w io.Writer, modelName string, t *trajectory.Trajectory, elap
 	if t.ExitStatus == agent.StatusError {
 		printHint(w, modelName, t.Submission)
 	}
-	if resume != "" {
+	if q := t.PendingQuestion; t.ExitStatus == agent.StatusNeedsInput && q != nil && len(q.Options) > 0 {
+		fmt.Fprintln(w, "  options: "+strings.Join(q.Options, " | "))
+	}
+	switch {
+	case resume == "":
+	case t.ExitStatus == agent.StatusNeedsInput:
+		fmt.Fprintln(w, "answer with: "+resume)
+	default:
 		fmt.Fprintln(w, "resume: "+resume)
 	}
 }
 
 // resumeCommand returns the --resume command that continues a run stopped at
-// a limit, interrupted or truncated, or "" when there is nothing to resume
+// a limit, interrupted or truncated, or answers a NeedsInput run's question
+// (with an "<answer>" placeholder), or "" when there is nothing to resume
 // (no -o, an --output-schema run, another status). Limit stops get the hit limit doubled, since
 // limits are cumulative ceilings. root is the resolved --cwd.
 func resumeCommand(t *trajectory.Trajectory, output, root string, cfg config.AgentConfig) string {
@@ -1485,6 +1549,8 @@ func resumeCommand(t *trajectory.Trajectory, output, root string, cfg config.Age
 	}
 	limit := ""
 	switch t.ExitStatus {
+	case agent.StatusNeedsInput:
+		limit = ` -t "<answer>"`
 	case agent.StatusStepLimit:
 		if cfg.StepLimit > 0 {
 			limit = " --step-limit " + strconv.Itoa(2*cfg.StepLimit)
@@ -1570,6 +1636,9 @@ func summaryLine(t *trajectory.Trajectory, elapsed time.Duration) string {
 	}
 	if t.ExitStatus == agent.StatusVerificationFailed && t.StopReason != "" {
 		s += ": " + strings.Join(strings.Fields(t.StopReason), " ")
+	}
+	if t.ExitStatus == agent.StatusNeedsInput {
+		s += ": " + strings.Join(strings.Fields(t.Submission), " ")
 	}
 	return s
 }
@@ -2076,6 +2145,13 @@ func resultFields(t *trajectory.Trajectory, elapsed time.Duration) map[string]an
 	if t.StopReason != "" {
 		fields["stop_reason"] = t.StopReason
 	}
+	if q := t.PendingQuestion; t.ExitStatus == agent.StatusNeedsInput && q != nil {
+		question := map[string]any{"tool_call_id": q.ToolCallID, "question": q.Question}
+		if len(q.Options) > 0 {
+			question["options"] = q.Options
+		}
+		fields["question"] = question
+	}
 	return fields
 }
 
@@ -2158,6 +2234,10 @@ func checkMaxOutputTokens(spec string, n int) error {
 
 // exitOutputTruncated is the exit code of an OutputTruncated run.
 const exitOutputTruncated = 3
+
+// exitNeedsInput is the exit code of a run that ended NeedsInput: it asked
+// the user a question with ask_user.
+const exitNeedsInput = 4
 
 // checkReasoningEffort rejects an unknown effort, or one the provider of spec
 // has no control for, before any provider request.

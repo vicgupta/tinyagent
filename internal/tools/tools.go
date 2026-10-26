@@ -72,6 +72,9 @@ type Executor struct {
 	// diagnostics to write_file, edit_file and apply_patch results. nil
 	// leaves both off.
 	LSP *LSP
+	// AskUser offers the opt-in ask_user tool (also in read-only mode).
+	// The agent loop handles its calls; the executor never runs them.
+	AskUser bool
 	// OutputFiles, when set, saves the full text of over-limit results to a
 	// per-run file and keeps that directory out of grep and list_files
 	// walks. nil keeps plain truncation.
@@ -363,6 +366,9 @@ func (e *Executor) Catalog() []model.ToolSpec {
 	if e.LSP != nil {
 		out = append(out, LSPSpec())
 	}
+	if e.AskUser {
+		out = append(out, AskUserSpec())
+	}
 	if e.Skills.Len() > 0 {
 		out = append(out, e.Skills.Spec())
 	}
@@ -426,6 +432,9 @@ func (e *Executor) run(ctx context.Context, name, raw string, edited *[]string) 
 	}
 	if name == DelegateToolName && e.Delegate {
 		return "", errors.New("delegate is handled by the agent loop")
+	}
+	if name == AskUserToolName && e.AskUser {
+		return "", errors.New("ask_user is handled by the agent loop")
 	}
 	skillTool := name == skills.ToolName && e.Skills.Len() > 0
 	webFetch := name == WebFetchToolName && e.WebFetch != nil

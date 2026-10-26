@@ -47,6 +47,9 @@ const (
 	// StatusOutputTruncated: too many consecutive responses were cut off at
 	// the output-token limit.
 	StatusOutputTruncated = "OutputTruncated"
+	// StatusNeedsInput: the model asked the user a question with ask_user;
+	// a resume with the answer continues the run.
+	StatusNeedsInput = trajectory.StatusNeedsInput
 )
 
 // stopNotice opens the user message that sends the model back to work after
@@ -113,8 +116,9 @@ type Agent struct {
 	Resume       *trajectory.Trajectory
 	ResumeSource string // audit-only input path for resume provenance
 	// FollowUp, with Resume, continues a finished (Submitted or Completed)
-	// checkpoint with this new user instruction. It must be empty for an
-	// unfinished checkpoint and set for a finished one.
+	// checkpoint with this new user instruction, or answers a NeedsInput
+	// checkpoint's question. It must be empty for an unfinished checkpoint
+	// and set for the others.
 	FollowUp string
 	// TaskImages (--image) are attached to the task message of a fresh run,
 	// or to the follow-up message with FollowUp. The message text gets one
@@ -165,7 +169,7 @@ type Snapshotter interface {
 var readOnlyTools = map[string]bool{
 	"read_file": true, "list_files": true, "grep": true, "read_process": true,
 	tools.PlanToolName: true, tools.ViewImageToolName: true, "skill": true, SubmitToolName: true,
-	tools.DelegateToolName: true,
+	tools.DelegateToolName: true, tools.AskUserToolName: true,
 }
 
 // mutating reports whether any call in the batch may change the workspace.
@@ -246,11 +250,20 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			return t
 		}
 		finished := trajectory.Finished(t.ExitStatus)
+		asked := t.ExitStatus == StatusNeedsInput
+		if asked && a.FollowUp == "" {
+			t.ExitStatus, t.Submission = StatusError, "checkpoint is waiting for an answer to its question; answer it with a follow-up task"
+			return t
+		}
+		if asked && len(a.TaskImages) > 0 {
+			t.ExitStatus, t.Submission = StatusError, "image attachments can't be added to an answer"
+			return t
+		}
 		if finished && a.FollowUp == "" {
 			t.ExitStatus, t.Submission = StatusError, "checkpoint already finished; continue it with a follow-up task"
 			return t
 		}
-		if !finished && a.FollowUp != "" {
+		if !finished && !asked && a.FollowUp != "" {
 			t.ExitStatus, t.Submission = StatusError, "a follow-up task can only continue a finished checkpoint"
 			return t
 		}
@@ -264,7 +277,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		}
 		t.Resume = &trajectory.ResumeInfo{
 			Source: source, ExitStatus: t.ExitStatus, Submission: t.Submission,
-			Steps: t.Steps, Message: len(t.Messages), FollowUp: finished, Previous: t.Resume,
+			Steps: t.Steps, Message: len(t.Messages), FollowUp: finished, Answer: asked, Previous: t.Resume,
 		}
 		if t.PlanEnabled != a.Tools.Plan {
 			t.ExitStatus, t.Submission = StatusError, "resume plan setting differs from checkpoint"
@@ -294,6 +307,10 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			t.ExitStatus, t.Submission = StatusError, "resume scoped_agents_md setting differs from checkpoint"
 			return t
 		}
+		if t.AskUserEnabled != a.Tools.AskUser {
+			t.ExitStatus, t.Submission = StatusError, "resume ask_user setting differs from checkpoint"
+			return t
+		}
 		t.ExitStatus, t.Submission = "", ""
 		if t.OpenAIAPI == "" {
 			t.OpenAIAPI = a.OpenAIAPI
@@ -302,30 +319,42 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			t.Profile = a.Profile
 		}
 		t.ProviderAPI, t.ProviderBaseURL = a.ProviderAPI, a.ProviderBaseURL
-		a.closeInterrupted(t)
-		notice := resumeNotice
-		if finished {
-			notice = trajectory.FollowUpNotice
+		if !asked {
+			a.closeInterrupted(t)
 		}
+		var notes []string
 		if lost := a.lostProcesses(t); lost != "" {
-			notice += "\n\n" + lost
+			notes = append(notes, lost)
 		}
 		if cur := AdditionalDirsInfo(a.Tools.ExtraDirs, a.Tools.ReadOnly); !sameDirs(t.AdditionalDirs, cur) {
-			notice += "\n\n" + dirsChangedNotice(cur)
-		}
-		if finished {
-			notice += "\n\n" + a.FollowUp
-			if a.Verbose {
-				fmt.Fprintf(a.Out, "follow-up task: %s\n", a.FollowUp)
-			}
+			notes = append(notes, dirsChangedNotice(cur))
 		}
 		t.SchemaVersion = trajectory.SchemaVersion
-		var images []model.Image
-		if finished {
-			images = a.TaskImages
-			notice += model.AttachmentLabels(images)
+		if asked {
+			// The answer becomes the pending ask_user call's result; no
+			// user message is added.
+			a.answer(t, strings.Join(notes, "\n\n"))
+		} else {
+			notice := resumeNotice
+			if finished {
+				notice = trajectory.FollowUpNotice
+			}
+			for _, n := range notes {
+				notice += "\n\n" + n
+			}
+			if finished {
+				notice += "\n\n" + a.FollowUp
+				if a.Verbose {
+					fmt.Fprintf(a.Out, "follow-up task: %s\n", a.FollowUp)
+				}
+			}
+			var images []model.Image
+			if finished {
+				images = a.TaskImages
+				notice += model.AttachmentLabels(images)
+			}
+			t.Messages = append(t.Messages, model.Message{Role: "user", Content: notice, Images: images})
 		}
-		t.Messages = append(t.Messages, model.Message{Role: "user", Content: notice, Images: images})
 		// Persist the validated starting state before the first request.
 		if err := a.step(t); err != nil {
 			return a.saveFailed(t, err)
@@ -346,7 +375,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			SystemPrompt:          system,
 			SkipAgentsMD:          a.SkipAgentsMD,
 			Tools:                 toolNames(a.Tools.Catalog()),
-			ToolSignature:         toolSignature(a.Tools.ReadOnly, a.Tools.Plan, a.Tools.Images, a.Tools.ApplyPatch, a.Tools.Delegate, a.Tools.WebFetch != nil, a.Tools.LSP != nil),
+			ToolSignature:         toolSignature(a.Tools.ReadOnly, a.Tools.Plan, a.Tools.Images, a.Tools.ApplyPatch, a.Tools.Delegate, a.Tools.WebFetch != nil, a.Tools.LSP != nil, a.Tools.AskUser),
 			PlanEnabled:           a.Tools.Plan,
 			ImagesEnabled:         a.Tools.Images,
 			ApplyPatchEnabled:     a.Tools.ApplyPatch,
@@ -354,6 +383,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			WebFetchEnabled:       a.Tools.WebFetch != nil,
 			LSPEnabled:            a.Tools.LSP != nil,
 			ScopedAgentsMDEnabled: a.scopedOn(),
+			AskUserEnabled:        a.Tools.AskUser,
 			MCPEnabled:            len(a.Tools.ExternalSpecs) > 0,
 			ExternalTools:         externalToolNames(a.Tools.ExternalSpecs),
 			ExternalToolSignature: externalToolSignature(a.Tools.ExternalSpecs),
@@ -511,6 +541,13 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			continue
 		}
 
+		if a.askUserMixed(msg.ToolCalls) {
+			if err := a.rejectMixedAskUser(t, v, msg); err != nil {
+				return a.saveFailed(t, err)
+			}
+			continue
+		}
+
 		if a.Snapshots != nil && mutating(msg.ToolCalls) {
 			if err := a.snapshot(t, "step"); err != nil {
 				// No tool runs without its snapshot; record why.
@@ -543,12 +580,26 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			var isError bool
 			var res tools.Result
 			formatError := false
-			if reason := a.Tools.FormatError(call); reason != "" {
+			reason := a.Tools.FormatError(call)
+			var question *trajectory.Question
+			if reason == "" && call.Function.Name == tools.AskUserToolName && a.Tools.AskUser {
+				q, opts, why := tools.ParseAskUser(call.Function.Arguments)
+				question, reason = &trajectory.Question{ToolCallID: call.ID, Question: q, Options: opts}, why
+			}
+			if reason != "" {
 				malformed++
 				t.FormatErrors++
 				t.LastFormatError = reason
 				t.FormatErrorMessages = append(t.FormatErrorMessages, len(t.Messages))
 				out, isError, formatError = a.Tools.FormatCorrection(reason), true, true
+			} else if question != nil {
+				if t.QuestionsAsked >= a.maxQuestions() {
+					out, isError = askUserBudgetResult, true
+				} else {
+					// A lone, valid ask_user call ends the run; the call
+					// stays pending until a resume answers it. No hook runs.
+					return a.needsInput(t, question)
+				}
 			} else if call.Function.Name == tools.PlanToolName && a.Tools.Plan {
 				out, isError = a.updatePlan(t, call)
 			} else {
@@ -886,6 +937,9 @@ func (a *Agent) systemPrompt() string {
 	system += tools.ExtraDirsNotice(effectiveDirs(a.Tools.ExtraDirs, a.Tools.ReadOnly))
 	if a.Tools.ReadOnly {
 		system += "\n\n" + readOnlyNotice
+	}
+	if a.Tools.AskUser {
+		system += "\n\n" + askUserNotice
 	}
 	if a.OutputSchema != nil {
 		system += "\n\n" + structuredOutputNotice

@@ -132,6 +132,10 @@ type AgentConfig struct {
 	// WebFetch configures the opt-in web_fetch tool (off by default;
 	// --web-fetch overrides Enabled).
 	WebFetch WebFetch `yaml:"web_fetch"`
+	// AskUser configures the opt-in ask_user tool, which ends a run with
+	// one question for the user (off by default; --ask-user overrides
+	// Enabled).
+	AskUser AskUser `yaml:"ask_user"`
 	// LSP configures opt-in language servers: diagnostics appended to edit
 	// results and the read-only lsp tool (off by default; --lsp overrides
 	// Enabled). It comes only from the user config or -c.
@@ -272,6 +276,21 @@ type Subagents struct {
 // DefaultSubagentMaxSteps is the step cap of a delegate child when
 // subagents.max_steps is 0.
 const DefaultSubagentMaxSteps = 30
+
+// AskUser configures the ask_user tool.
+type AskUser struct {
+	Enabled bool `yaml:"enabled"`
+	// MaxQuestions caps the questions one run may ask, counted across
+	// its whole resume chain: 1 to MaxAskUserQuestions.
+	MaxQuestions int `yaml:"max_questions"`
+}
+
+// DefaultAskUserMaxQuestions is the default ask_user.max_questions, and
+// MaxAskUserQuestions its upper bound.
+const (
+	DefaultAskUserMaxQuestions = 3
+	MaxAskUserQuestions        = 20
+)
 
 // Plan configures the persistent plan tool.
 type Plan struct {
@@ -549,6 +568,7 @@ func Default() AgentConfig {
 		MaxImageBytes:          DefaultMaxImageBytes,
 		WebFetch:               WebFetch{MaxBytes: DefaultWebFetchMaxBytes, TimeoutSeconds: DefaultWebFetchTimeoutSeconds},
 		LSP:                    DefaultLSP(),
+		AskUser:                AskUser{MaxQuestions: DefaultAskUserMaxQuestions},
 		LogDB:                  LogDB{Level: "metadata", MaxDays: 30, MaxRuns: 500},
 		ToolOutputFiles:        ToolOutputFiles{Dir: DefaultToolOutputDir, MaxRuns: DefaultToolOutputMaxRuns},
 		Snapshots:              Snapshots{MaxFileBytes: DefaultSnapshotMaxFileBytes},
@@ -687,6 +707,9 @@ func loadFile(path, profile string) (AgentConfig, error) {
 	}
 	if cfg.Subagents.MaxSteps < 0 {
 		return cfg, fmt.Errorf("config %s: subagents.max_steps must be a whole number >= 0, got %d", src, cfg.Subagents.MaxSteps)
+	}
+	if n := cfg.AskUser.MaxQuestions; n < 1 || n > MaxAskUserQuestions {
+		return cfg, fmt.Errorf("config %s: ask_user.max_questions must be a whole number from 1 to %d, got %d", src, MaxAskUserQuestions, n)
 	}
 	if cfg.MaxTruncations < 1 {
 		return cfg, fmt.Errorf("config %s: max_truncations must be a whole number >= 1, got %d", src, cfg.MaxTruncations)
