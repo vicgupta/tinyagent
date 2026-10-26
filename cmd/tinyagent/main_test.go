@@ -356,7 +356,7 @@ const wantUsage = `Usage: tinyagent -t "<prompt>" [flags]    (or --task "<prompt
        tinyagent --rewind <trajectory.json> --cwd <dir> [--to start|<step>|<id>] [--dry-run]
        tinyagent --check [-m <model>] [-c <config>] [--profile <name>] [--cwd <dir>]
        tinyagent --transcript <trajectory.json>
-       tinyagent --completion bash
+       tinyagent --completion bash|zsh
 
   -h, --help                         show this help and exit
 Task:
@@ -412,7 +412,7 @@ Other:
       --check                        print the resolved config, model, provider key status, fallbacks, cwd and limits, then exit; makes no model request
       --transcript path              print this trajectory JSON as a Markdown transcript (secrets redacted, long results truncated) and exit; makes no model request
       --init-config                  write a commented starter config to the user config path (or -c), refusing to overwrite, and exit
-      --completion shell             print a completion script for this shell (only bash is supported) and exit; load it with: source <(tinyagent --completion bash)
+      --completion shell             print a flag-name completion script for this shell (bash or zsh) and exit; load it with: source <(tinyagent --completion bash), or in zsh after compinit: source <(tinyagent --completion zsh); re-source it after updating
 
 Examples:
   tinyagent -t "fix the failing test" -m anthropic/claude-sonnet-4
