@@ -99,6 +99,9 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `-c, --config` | user config, else built-in | YAML config file; see [Config](#config) |
 | `--profile` | none | Apply one named profile from the config file's `profiles:` section over its base settings; see [Profiles](#profiles) |
 | `--cwd` | `.` | Root directory; tools can't reach outside it |
+| `--review` | off | Review the uncommitted changes (staged, unstaged and untracked) against `HEAD`: tinyagent collects the diff and runs a read-only review; `-t` adds focus instructions. See [Reviewing changes](#reviewing-changes) |
+| `--review-base <ref>` | — | Review what the current branch adds on top of `<ref>` (`merge-base..HEAD`), read-only. See [Reviewing changes](#reviewing-changes) |
+| `--review-commit <rev>` | — | Review the changes introduced by one commit, read-only. See [Reviewing changes](#reviewing-changes) |
 | `--worktree[=name]` | off | Run in a new Git worktree at `<repo>/.tinyagent/worktrees/<name>` on branch `tinyagent/<name>`, created from `HEAD` of the repository containing `--cwd` and kept afterwards; the name is generated when omitted. Can't be combined with `--resume` or `--rewind`. See [Worktrees](#worktrees) |
 | `--step-limit` | 0 (unlimited) | Max model calls |
 | `--cost-limit` | 0 (unlimited) | Max USD |
@@ -149,7 +152,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 
 | Type | Fields |
 |---|---|
-| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `attachments` (`index`, `name`, `mime_type`, `bytes`, `sha256` per [`--image`](#attaching-images-to-the-task) file, never the data; only with `--image`), `reasoning_effort` (only when set), `fallback_models` (only when a [fallback chain](#model-fallback) is configured), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `profile` (the name only; only with [`--profile`](#profiles)), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy), `file_access` (`deny_read`, `deny_write`; only with [file access](#restricting-file-access) rules), `web_fetch` (`allowed_domains`; only with [web fetch](#web-fetch) on), `lsp` (`servers`, the configured names; only with [language servers](#language-servers-lsp) on), `scoped_agents_md_enabled` and `scoped_agents_md` (scoped files already in context, `[]` for a fresh run; only with [`--scoped-agents-md`](#project-instructions-agentsmd) on), `additional_dirs` (`path`, `mode`; only with [additional directories](#additional-directories)), `worktree` (`path`, `branch`, `base_commit`, `repo_root`; only with [`--worktree`](#worktrees)) |
+| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `attachments` (`index`, `name`, `mime_type`, `bytes`, `sha256` per [`--image`](#attaching-images-to-the-task) file, never the data; only with `--image`), `reasoning_effort` (only when set), `fallback_models` (only when a [fallback chain](#model-fallback) is configured), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `profile` (the name only; only with [`--profile`](#profiles)), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy), `file_access` (`deny_read`, `deny_write`; only with [file access](#restricting-file-access) rules), `web_fetch` (`allowed_domains`; only with [web fetch](#web-fetch) on), `lsp` (`servers`, the configured names; only with [language servers](#language-servers-lsp) on), `scoped_agents_md_enabled` and `scoped_agents_md` (scoped files already in context, `[]` for a fresh run; only with [`--scoped-agents-md`](#project-instructions-agentsmd) on), `additional_dirs` (`path`, `mode`; only with [additional directories](#additional-directories)), `worktree` (`path`, `branch`, `base_commit`, `repo_root`; only with [`--worktree`](#worktrees)), `review` (`target`, `ref`, `base_commit`, `head_commit`, `commit`, `files_changed`, `diff_bytes`, `diff_bytes_sent`, `truncated`, `hidden_paths`; only with a [review flag](#reviewing-changes)) |
 | `assistant.message` | `text` (complete assistant message) |
 | `tool.call` | `id`, `name`, `arguments` (decoded JSON value, or a string if malformed) |
 | `tool.result` | `id`, `name`, `output` (same configured truncation as tool output), `is_error`; with [tool output files](#tool-output-files), a saved result also has `output_file` (path relative to `--cwd`) and `output_bytes` |
@@ -191,7 +194,7 @@ Environment: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (any OpenAI-compatible endpoint
 `--output-schema schema.json` makes the run end with one JSON object that conforms to a JSON Schema, for scripts and CI:
 
 ```sh
-tinyagent -t "review this diff" --output-schema review.schema.json > review.json
+tinyagent --review-base main --output-schema review.schema.json > review.json
 ```
 
 The schema file (at most 64 KiB) must be a JSON object with `"type": "object"` at the root and is checked before any provider call; a bad schema exits 2. The model is given a `submit_result` tool whose parameters are the schema, and the run finishes only when it calls that tool, alone in its message, with arguments that validate. Invalid arguments, mixing `submit_result` with other tool calls, the completion marker, or a turn with no tool call are answered with the validation errors or a reminder; after 3 consecutive invalid attempts the run ends with status `InvalidOutput`. Hooks never run for `submit_result`.
@@ -211,6 +214,33 @@ sqlite3 .tinyagent/tinyagent.db \
 ```
 
 At the default `level: metadata` no prompt, message, argument, or output bodies are stored: those fields are replaced with their lengths, and the task is stored only as a SHA-256 hash and length. `level: full` stores bodies, after redacting values of environment variables named `*_KEY`, `*_TOKEN`, `*_SECRET`, or `*_PASSWORD`, secrets set in MCP or hook `env`, and common token shapes; payloads over `max_payload_bytes` are truncated. Old runs are pruned when a run starts (`max_days`, `max_runs`; `0` keeps everything). Database errors never fail a run: tinyagent prints one warning and continues without the log. The trajectory JSON (`-o`) is unchanged and remains the resume format.
+
+### Reviewing changes
+
+`--review`, `--review-base <ref>` and `--review-commit <rev>` review one Git change set without giving the model a shell. tinyagent runs fixed, read-only `git` commands itself, puts the diff in the first user message with built-in review instructions, and runs the model with the [read-only](#flags) tool set (plus any of `skill`, `web_fetch`, `lsp` and `delegate` you turned on) so it can read the surrounding code. The model reports findings ordered by severity, each with `file:line`, a severity and a short failure scenario. Nothing in the working tree or index changes.
+
+```sh
+tinyagent --review                                  # staged + unstaged + untracked vs HEAD
+tinyagent --review-base main                        # merge-base(main, HEAD)..HEAD
+tinyagent --review-commit HEAD~1                    # changes introduced by one commit
+tinyagent --review -t "focus on error handling in pkg/api"
+cat focus.md | tinyagent --review-base origin/main -t -
+tinyagent --review-base origin/main --output-schema findings.schema.json > findings.json
+```
+
+- **Targets.** `--review` covers tracked changes against `HEAD` (staged and unstaged together) and untracked files that aren't ignored, shown as new files. `--review-base <ref>` covers the commits on `HEAD` since its merge base with `<ref>`; uncommitted changes are left out, with a note on stderr when there are some. `--review-commit <rev>` covers one commit against its first parent (a root commit against the empty tree), with its subject and author. Only one target per run.
+- **Scope.** Only changes under `--cwd` are included, with paths relative to it, matching what the file tools can read. Binary files show as `binary file changed`. Paths hidden by `file_access.deny_read` are left out; the prompt, stderr and `review.hidden_paths` give only their count.
+- **Size cap.** The diff text is capped at 200,000 bytes. Over the cap every changed file is still listed with its `+`/`-` counts, whole per-file diffs are included in order while they fit, the others are named so the model can read them with `read_file`, and stderr and `review.truncated` report it.
+- **Safety.** Refs come only from the command line (a ref starting with `-` is rejected). Git runs with `--no-ext-diff`, `--no-textconv`, `core.fsmonitor=false`, every configured filter driver turned off and `GIT_OPTIONAL_LOCKS=0`, so reviewing an untrusted repository doesn't start programs its config names and doesn't write the index.
+- **Privacy.** The diff, including untracked files that aren't ignored, is sent to the selected provider.
+- **Errors and exit status.** `git` missing, `--cwd` outside a work tree, an unknown ref, no commits or no merge base exit 2 before any model request. A clean change set prints `nothing to review` and exits 0 without a request. Otherwise the exit status means the review ran, as for any run; it doesn't encode findings. Two review flags, or a review flag with `--read-only=false`, `--resume`, `--rewind`, `--worktree`, `--snapshots`, `--check`, `--init-config` or `--update`, exit 2.
+- **Everything else as usual.** The system prompt and AGENTS.md, limits, `--json`, `-o`, `--log-db`, `--output-schema`, profiles and stop hooks behave as for other runs. `run.started`, trajectories and the event log record a `review` object (target, ref, resolved commits, `files_changed`, `diff_bytes`, `diff_bytes_sent`, `truncated`, `hidden_paths`), and `-v` prints one `review:` line. A review run saved with `-o` can be continued with `--resume review.json -t "<follow-up>"` (without a review flag) as an ordinary follow-up; it keeps the recorded read-only mode, so use it for questions about the findings, and start a new run to fix them.
+
+A minimal findings schema for CI:
+
+```json
+{"type": "object", "required": ["findings"], "properties": {"findings": {"type": "array", "items": {"type": "object", "required": ["severity", "location", "summary"], "properties": {"severity": {"enum": ["critical", "high", "medium", "low"]}, "location": {"type": "string"}, "summary": {"type": "string"}, "scenario": {"type": "string"}}}}}}
+```
 
 ### Worktrees
 

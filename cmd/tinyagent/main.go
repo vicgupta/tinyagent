@@ -79,6 +79,8 @@ type options struct {
 	completion                                       string
 	showHelp, showVersion, doUpdate, check           bool
 	initConfig                                       bool
+	review                                           bool
+	reviewBase, reviewCommit                         string
 }
 
 // newFlagSet defines the command-line flags, storing their values in o. Each
@@ -89,7 +91,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.Usage = func() { printUsage(fs.Output(), fs) }
 	fs.BoolVar(&o.showHelp, "help", false, "show this help and exit")
 	fs.BoolVar(&o.showHelp, "h", false, "shorthand for --help")
-	fs.StringVar(&o.task, "task", "", `task/prompt (required unless --resume; with --resume of a finished run, the follow-up instruction); "-" reads it from stdin`)
+	fs.StringVar(&o.task, "task", "", `task/prompt (required unless --resume or a review flag, where it adds focus instructions; with --resume of a finished run, the follow-up instruction); "-" reads it from stdin`)
 	fs.StringVar(&o.task, "t", "", "shorthand for --task")
 	fs.StringVar(&o.modelName, "model", defaultModel(), "provider/model; if unset, $AGENT_MODEL, then the config's model")
 	fs.StringVar(&o.modelName, "m", defaultModel(), "shorthand for --model")
@@ -97,6 +99,9 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.configPath, "c", "", "shorthand for --config")
 	fs.StringVar(&o.profile, "profile", "", "apply this named profile from the config file's profiles: section over its base settings")
 	fs.StringVar(&o.cwd, "cwd", ".", "working directory")
+	fs.BoolVar(&o.review, "review", false, "review the uncommitted changes (staged, unstaged and untracked) against HEAD: tinyagent collects the diff and runs a read-only review; -t adds focus instructions")
+	fs.StringVar(&o.reviewBase, "review-base", "", "review what the current branch adds on top of this ref (merge-base..HEAD), read-only; -t adds focus instructions")
+	fs.StringVar(&o.reviewCommit, "review-commit", "", "review the changes introduced by this commit, read-only; -t adds focus instructions")
 	fs.Var(&o.worktree, "worktree", "run in a new Git worktree on branch tinyagent/<name> from HEAD of the repo containing --cwd, kept afterwards (default name generated)")
 	fs.IntVar(&o.stepLimit, "step-limit", 0, "max model calls, 0 = unlimited")
 	fs.Float64Var(&o.costLimit, "cost-limit", 0, "max USD, 0 = unlimited")
@@ -191,6 +196,11 @@ func run() int {
 		fmt.Fprintln(fs.Output(), "error: "+msg)
 		return 2
 	}
+	review, err := reviewSelection(fs, &o)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	}
 	if o.showVersion {
 		fmt.Println("tinyagent", currentVersion())
 		return 0
@@ -247,18 +257,21 @@ func run() int {
 		}
 		return runResume(&o, fs)
 	}
-	if o.task == "" && len(o.imagePaths) > 0 {
+	if o.task == "" && len(o.imagePaths) > 0 && review == nil {
 		fmt.Fprintln(os.Stderr, "error: --image requires a task (-t); images are attached to the task message")
 		return 2
 	}
-	if o.task == "" {
+	if o.task == "" && review == nil {
 		fmt.Fprintln(os.Stderr, "error: --task is required")
 		fs.Usage()
 		return 2
 	}
-	task, err := readTask(o.task, os.Stdin)
-	if err != nil {
-		return fail(err)
+	// In review mode the task is optional focus for the review.
+	var task string
+	if o.task != "" {
+		if task, err = readTask(o.task, os.Stdin); err != nil {
+			return fail(err)
+		}
 	}
 	var schema *outschema.Schema
 	if o.outputSchema != "" {
@@ -299,6 +312,9 @@ func run() int {
 	}
 	if flagWasSet(fs, "read-only") {
 		cfg.ReadOnly = o.readOnly
+	}
+	if review != nil {
+		cfg.ReadOnly = true
 	}
 	applySandboxFlags(fs, &cfg, o)
 	if flagWasSet(fs, "plan") {
@@ -417,6 +433,18 @@ func run() int {
 		return configFail(err)
 	}
 	fileAccess.AddDirs(extraDirs)
+	var reviewInfo *trajectory.ReviewInfo
+	if review != nil {
+		task, reviewInfo, err = collectReview(review, root, task, fileAccess, os.Stderr, o.verbose)
+		if errors.Is(err, errNothingToReview) {
+			fmt.Fprintln(os.Stderr, "nothing to review")
+			return 0
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			return 2
+		}
+	}
 	if cfg.ReadOnly {
 		fmt.Fprintln(os.Stderr, "read-only mode: only read_file, list_files, and grep are available")
 	}
@@ -523,6 +551,7 @@ func run() int {
 		Snapshots:      snaps,
 		Subagents:      subagents,
 		Worktree:       worktree,
+		Review:         reviewInfo,
 		TaskImages:     taskImages,
 	}
 	var events *runEvents
@@ -1372,6 +1401,7 @@ var usageGroups = []struct {
 }{
 	{"", [][3]string{{"h", "help", ""}}},
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "profile", "name"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}}},
+	{"Review", [][3]string{{"", "review", ""}, {"", "review-base", "ref"}, {"", "review-commit", "rev"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
@@ -1395,7 +1425,7 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 			width = max(width, len(left(f)))
 		}
 	}
-	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n       tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <finished.json> -t \"<follow-up>\" --cwd <dir> -o <new.json> [flags]\n       tinyagent --rewind <trajectory.json> --cwd <dir> [--to start|<step>|<id>] [--dry-run]\n       tinyagent --check [-m <model>] [-c <config>] [--profile <name>] [--cwd <dir>]\n       tinyagent --completion bash\n\n")
+	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n       tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <finished.json> -t \"<follow-up>\" --cwd <dir> -o <new.json> [flags]\n       tinyagent --review | --review-base <ref> | --review-commit <rev> [-t \"<focus>\"] [flags]\n       tinyagent --rewind <trajectory.json> --cwd <dir> [--to start|<step>|<id>] [--dry-run]\n       tinyagent --check [-m <model>] [-c <config>] [--profile <name>] [--cwd <dir>]\n       tinyagent --completion bash\n\n")
 	for _, g := range usageGroups {
 		if g.name != "" {
 			fmt.Fprintf(w, "%s:\n", g.name)
@@ -1419,6 +1449,7 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 		"  tinyagent --resume run.json --cwd . --step-limit 60 -o continued.json\n"+
 		"  tinyagent --resume review.json -t \"fix the races you found\" --cwd . -o fix.json\n"+
 		"  tinyagent --profile review -t \"review this change\"\n"+
+		"  tinyagent --review-base main -t \"focus on error handling\"\n"+
 		"  tinyagent --rewind run.json --cwd . --to 3 --dry-run\n"+
 		"  tinyagent --check -m anthropic/claude-sonnet-4\n"+
 		"  source <(tinyagent --completion bash)\n")
@@ -1782,6 +1813,9 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	}
 	if wt := a.Worktree; wt != nil {
 		started["worktree"] = map[string]any{"path": wt.Path, "branch": wt.Branch, "base_commit": wt.BaseCommit, "repo_root": wt.RepoRoot}
+	}
+	if a.Review != nil {
+		started["review"] = a.Review
 	}
 	events.emit("run.started", started)
 	a.OnEvent = func(kind string, fields map[string]any) {

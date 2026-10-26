@@ -14,3 +14,13 @@ func SystemPrompt() string {
 	}
 	return string(b)
 }
+
+// ReviewPrompt returns the fixed review instructions that open the first
+// user message of a review run (--review, --review-base, --review-commit).
+func ReviewPrompt() string {
+	b, err := Prompts.ReadFile("prompts/review.txt")
+	if err != nil {
+		panic(err) // embedded at build time; cannot fail
+	}
+	return string(b)
+}
