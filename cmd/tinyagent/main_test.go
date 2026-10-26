@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -490,8 +491,72 @@ func TestBadFlagExits2(t *testing.T) {
 	if code != 2 {
 		t.Errorf("exit = %d, want 2", code)
 	}
-	if out != "" || !strings.Contains(got, "flag provided but not defined: -nope") || !strings.Contains(got, "Usage: tinyagent") {
-		t.Errorf("stdout = %q, stderr = %q; want the parse error and usage on stderr", out, got)
+	if out != "" || got != "error: unknown flag --nope (see tinyagent --help)\n" {
+		t.Errorf("stdout = %q, stderr = %q; want a one-line unknown-flag error on stderr", out, got)
+	}
+}
+
+func TestUnknownFlagSuggestsClosest(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--sandbxo", "-t", "x"}, "error: unknown flag --sandbxo; did you mean --sandbox? (see tinyagent --help)\n"},
+		{[]string{"--max-format-error=3"}, "error: unknown flag --max-format-error; did you mean --max-format-errors? (see tinyagent --help)\n"},
+		{[]string{"-sandbxo"}, "error: unknown flag -sandbxo; did you mean --sandbox? (see tinyagent --help)\n"},
+		{[]string{"--nonsense-flag"}, "error: unknown flag --nonsense-flag (see tinyagent --help)\n"},
+		{[]string{"-z"}, "error: unknown flag -z (see tinyagent --help)\n"},
+	} {
+		code, out, got := runWith(t, c.args...)
+		if code != 2 || out != "" || got != c.want {
+			t.Errorf("%v: exit = %d, stdout = %q, stderr = %q; want 2, \"\", %q", c.args, code, out, got, c.want)
+		}
+	}
+}
+
+func TestOtherParseErrorsKeepUsage(t *testing.T) {
+	code, _, got := runWith(t, "--step-limit")
+	if code != 2 || !strings.Contains(got, "flag needs an argument: -step-limit\n") || !strings.Contains(got, "Usage: tinyagent") {
+		t.Errorf("exit = %d, stderr = %q; want the parse error and usage", code, got)
+	}
+}
+
+func TestSuggestFlags(t *testing.T) {
+	var o options
+	var names []string
+	newFlagSet(&o).VisitAll(func(f *flag.Flag) { names = append(names, f.Name) })
+	for _, c := range []struct {
+		name string
+		want []string
+	}{
+		{"sandbxo", []string{"sandbox"}},
+		{"max-format-error", []string{"max-format-errors"}},
+		{"sandbox-allow", []string{"sandbox-allow-domain"}},
+		{"rev", []string{"review", "review-base", "review-commit"}},
+		{"tsk", []string{"task"}},
+		{"sandbox-netwrk", []string{"sandbox-network"}},
+		{"nonsense-flag", nil},
+		{"z", nil},
+		{"vv", nil},
+	} {
+		if got := suggestFlags(c.name, names); !slices.Equal(got, c.want) {
+			t.Errorf("suggestFlags(%q) = %q, want %q", c.name, got, c.want)
+		}
+	}
+	// Closer matches come first, then prefix extensions, then by name.
+	if got := suggestFlags("revie", []string{"review-base", "reviews", "review", "reviewer-x"}); !slices.Equal(got, []string{"review", "reviews", "review-base"}) {
+		t.Errorf("ordering = %q", got)
+	}
+}
+
+func TestLevenshtein(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		want int
+	}{{"", "", 0}, {"abc", "", 3}, {"sandbxo", "sandbox", 2}, {"kitten", "sitting", 3}, {"same", "same", 0}} {
+		if got := levenshtein(c.a, c.b); got != c.want {
+			t.Errorf("levenshtein(%q, %q) = %d, want %d", c.a, c.b, got, c.want)
+		}
 	}
 }
 

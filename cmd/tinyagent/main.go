@@ -175,7 +175,19 @@ func main() {
 func run() int {
 	var o options
 	fs := newFlagSet(&o)
-	if err := fs.Parse(os.Args[1:]); err != nil {
+	// Parse quietly so an unknown flag gets a one-line error instead of the
+	// full usage; other parse errors print as the flag package would.
+	fs.SetOutput(io.Discard)
+	usage := fs.Usage
+	fs.Usage = func() {}
+	err := fs.Parse(os.Args[1:])
+	fs.SetOutput(flagOutput)
+	fs.Usage = usage
+	if err != nil {
+		if !reportUnknownFlag(fs.Output(), fs, os.Args[1:], err) {
+			fmt.Fprintln(fs.Output(), err)
+			fs.Usage()
+		}
 		return 2
 	}
 	if o.showHelp {
