@@ -91,6 +91,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `-t, --task` | — | Task prompt (required unless `--resume`; with `--resume` of a finished run, the follow-up task; of a `NeedsInput` run, the answer); `-` reads it from stdin |
 | `--resume` | — | Continue a validated unfinished trajectory; requires explicit matching `--cwd` and a new `-o` path |
 | `--ask-user` | config `ask_user.enabled`, else off | Give the model the `ask_user` tool: it may end the run with one question (status `NeedsInput`, exit 4), answered with `--resume <trajectory> -t "<answer>"`. Requires `-o`; can't be combined with `--output-schema`; `--ask-user=false` disables it. See [Asking for input](#asking-for-input) |
+| `--acp` | off | Serve the [Agent Client Protocol](#editor-integration-acp) on stdin/stdout so editors such as Zed and JetBrains IDEs can run tinyagent as an external agent (experimental). Can't be combined with `-t`, `--resume`, `--rewind`, `--transcript`, review flags, `--worktree`, `--output-schema`, `--json`, `--ask-user`, `--check`, `--init-config`, `--completion`, `-o`, `--cwd`, `--image` or `--snapshots` (exit 2) |
 | `-m, --model` | `$AGENT_MODEL`, else config `model`, else `openai/gpt-4o` | `<provider>/<model>`; no `/` means openai. Providers: openai, openrouter, anthropic, ollama, codex, plus any defined under [`providers`](#named-providers) |
 | `--reasoning-effort` | config `reasoning_effort`, else unset | Reasoning effort sent to the provider: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; see [Reasoning](#reasoning) |
 | `--fallback-model <spec>` | config `fallback_models`, else none | Model to switch to when the current one keeps failing with `429`, `5xx` or network errors after retries; repeatable, tried in order, at most 3, and replaces `fallback_models`; see [Model fallback](#model-fallback) |
@@ -438,6 +439,59 @@ With `--skills` (or `skills: true`), tinyagent discovers [Agent Skills](https://
 
 **Trust:** skill instructions are prompt input. A project skill from a repository you don't trust can steer the agent like a malicious AGENTS.md, and bundled scripts run with your permissions if the agent invokes them. Skill text sent to the model goes to your model provider like any other prompt, and the trajectory records loaded skill content.
 
+## Editor integration (ACP)
+
+`tinyagent --acp` speaks the [Agent Client Protocol](https://agentclientprotocol.com) (protocol version 1, newline-delimited JSON-RPC on stdin/stdout), so any ACP client can run tinyagent as an external agent: you type in the editor's agent panel, tinyagent runs its normal loop in the session's directory, and the editor shows the model's text and each tool call live. The mode is **experimental**: the stop-reason mapping and the MCP default below may change based on feedback.
+
+Zed (`settings.json`):
+
+```json
+{
+  "agent_servers": {
+    "tinyagent": {
+      "type": "custom",
+      "command": "/usr/local/bin/tinyagent",
+      "args": ["--acp", "-m", "anthropic/claude-sonnet-4-5"],
+      "env": { "ANTHROPIC_API_KEY": "..." }
+    }
+  }
+}
+```
+
+JetBrains IDEs (2025.3+, `~/.jetbrains/acp.json`):
+
+```json
+{
+  "agent_servers": {
+    "tinyagent": {
+      "command": "/usr/local/bin/tinyagent",
+      "args": ["--acp", "--profile", "editor"],
+      "env": {}
+    }
+  }
+}
+```
+
+Use the full path to the binary. Pass `-m`, `-c`, `--profile` and any policy flags (`--read-only`, `--sandbox`, `--env`, `--command-env`, `--add-dir-*`, `--plan`, `--apply-patch`, `--subagents`, `--web-fetch`, `--lsp`, `--images`, `--tool-output-files`, `--skills`, `--scoped-agents-md`, `--redact-secrets`, `--log-db`, `-v`) in `args`. They mean the same as in a headless run.
+
+**How it works**
+
+- `session/new` takes the editor's absolute `cwd` as the session's root (`AGENTS.md` discovery runs as for `--cwd`) and checks the config, model and provider key there. A relative or missing directory, an invalid config or a missing API key is returned as a JSON-RPC error with the same message and `hint:` a headless run prints. Key values are never printed. A process can run several sessions.
+- The first `session/prompt` is the session's task. Each later prompt continues the same conversation, sending the provider exactly what `--resume <trajectory> -t "<follow-up>"` would. This also works after a turn that was cancelled or hit a limit. A second prompt while one is running in the same session gets a JSON-RPC error.
+- Prompt content: text blocks are joined; embedded text resources are included as quoted context naming their URI; resource links become a reference line and are not fetched; images are attached like `--image` (PNG, JPEG, GIF or WebP, at most 10, each within `max_image_bytes`). Audio, binary resources and invalid images get an invalid-params error.
+- Streaming: assistant text arrives as `agent_message_chunk` (without the submit marker). Each tool call is a `tool_call` with the model's call id, a short title, a `kind` (`read_file` → `read`; `write_file`/`edit_file`/`apply_patch` → `edit`; `grep`/`list_files` → `search`; `bash`/`start_process` → `execute`; `web_fetch` → `fetch`; others → `other`) and absolute `locations` for file tools. It is followed by `tool_call_update`s to `in_progress` and then `completed` or `failed`, carrying the same result text the model sees, after `max_output_chars` and secret redaction. `update_plan` sends `plan` updates, and each model call sends a `usage_update` when the context window is known.
+- Stop reasons: `Submitted`/`Completed` → `end_turn`, `StepLimitExceeded` → `max_turn_requests`, `OutputTruncated` → `max_tokens`, `session/cancel` → `cancelled`. Any other status (`CostLimitExceeded`, `TimeLimitExceeded`, `RepeatedFormatError`, `VerificationFailed`, `Error`) ends with a final message naming it and `end_turn`, and the session stays usable. A provider error a headless run would print a setup `hint:` for is returned as a JSON-RPC error instead.
+- `session/cancel` stops the turn the way Ctrl-C does: in-flight requests and commands are cancelled, and background processes and language servers are stopped, as at the end of every turn. Closing stdin cancels running turns, stops MCP servers and exits 0.
+- `--step-limit` and `--cost-limit` apply to each prompt (on top of what the session has already used), and `--time-limit` limits each prompt's wall-clock time.
+- `--log-db` records each prompt as a run, with an `acp.turn` event naming the session id and turn number. No trajectory files are written.
+- stdout carries only ACP messages. Warnings, the per-turn summary and `-v` traces go to stderr, which editors show in their agent logs.
+
+**Client-supplied MCP servers** are off by default: tinyagent starts only the `mcp_servers` from your config, and a session's first reply names any servers the editor offered. Set `acp.client_mcp_servers: true` in the user config or `-c` file to start the editor's stdio servers for that session, with every tool they list exposed as `<name>__<tool>` and their `env` values set (never logged). HTTP and SSE servers are not supported (`mcpCapabilities.http` is `false`). Read-only sessions start none.
+
+**Not supported:** `session/load`, session modes and config options, slash commands, per-tool approval through `session/request_permission`, delegating files or commands to the client (`fs/*`, `terminal/*`; tinyagent uses its own tools on disk), audio prompts, `ask_user` (it is turned off in this mode), workspace snapshots and reasoning (`agent_thought_chunk`) streaming.
+
+**Trust model:** the editor controls the prompts and the `cwd`, so it has the same power as whoever runs `tinyagent -t` in that directory. Everything that limits what tinyagent may do (the tool set, `--read-only`, `--sandbox`, `file_access`, `command_env`, hooks and limits) comes from your config and flags, and ACP adds no way to loosen it. Repository content stays untrusted prompt input, as in any run.
+
 ## GitHub Actions
 
 `action.yml` at the root of this repo is a composite action. It installs a tinyagent release on a Linux or macOS runner (amd64 or arm64), checks it against the release's `SHA256SUMS`, runs one task or review, and sets the result as step outputs. It adds no agent behavior: every input maps to an existing flag.
@@ -644,6 +698,8 @@ hooks:                       # omitted by default; see Tool hooks below
     - command: /usr/local/bin/verify-tests
       timeout_seconds: 300
   max_stop_continuations: 5     # default 5, range 1..50
+acp:                         # --acp editor mode; see Editor integration (ACP)
+  client_mcp_servers: false  # start the MCP servers the editor sends with session/new
 profiles:                    # omitted by default; named overlays selected with --profile, see Profiles below
   review:
     model: openai/gpt-5-mini
@@ -1035,6 +1091,7 @@ ok
 | `connection refused` with `ollama/...` | Start Ollama with `ollama serve`, or set `OLLAMA_HOST` to where it runs. |
 | `HTTP 404` with `ollama/...` | Pull the model: `ollama pull <model>`. |
 | `every model in the fallback chain failed` | Each listed model used up its retries; the message names each one and why. Check the providers' status pages, or add a model from another provider to `fallback_models`. |
+| An editor says the ACP agent failed to start or exited | Use the full path to `tinyagent` in the agent's `command`, put the API key in the agent's `env` (editors don't read your shell profile), and check the editor's agent log, which shows tinyagent's stderr. |
 | `codex: no login` | Run `codex login` and choose ChatGPT. |
 | `model is not supported` with `codex/...` | Use a model the Codex CLI's model picker shows for your plan. |
 

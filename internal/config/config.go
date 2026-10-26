@@ -157,6 +157,16 @@ type AgentConfig struct {
 	// default; --snapshots overrides enabled). It may be written as a bare
 	// bool (snapshots: true) or as a mapping.
 	Snapshots Snapshots `yaml:"snapshots"`
+	// ACP configures the --acp editor mode.
+	ACP ACP `yaml:"acp"`
+}
+
+// ACP configures the --acp editor mode.
+type ACP struct {
+	// ClientMCPServers starts the MCP servers an ACP client sends with
+	// session/new, exposing all their tools (off by default: they are
+	// ignored and named in the session's first message).
+	ClientMCPServers bool `yaml:"client_mcp_servers"`
 }
 
 // Snapshots configures workspace snapshots.
@@ -544,6 +554,11 @@ type MCPServer struct {
 	Env                 []string `yaml:"env,omitempty"`
 	DiscoveryTimeoutSec int      `yaml:"discovery_timeout_seconds"`
 	CallTimeoutSec      int      `yaml:"call_timeout_seconds"`
+	// SetEnv holds NAME=value pairs set for the server, and AllTools
+	// exposes every tool it lists. Only servers an ACP client supplies
+	// use them; a config file can't set either.
+	SetEnv   []string `yaml:"-"`
+	AllTools bool     `yaml:"-"`
 }
 
 // Provider is one config-defined model provider. Secrets come only from the
