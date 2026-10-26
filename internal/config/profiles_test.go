@@ -129,6 +129,28 @@ func TestProfileWithoutConfigFile(t *testing.T) { // AC9
 	}
 }
 
+func TestProfileNames(t *testing.T) {
+	p := writeProfileConfig(t, "profiles:\n  zebra: {}\n  apple: {}\n  banana: {}\n")
+	names, err := ProfileNames(p)
+	if err != nil || !reflect.DeepEqual(names, []string{"apple", "banana", "zebra"}) {
+		t.Errorf("names = %v, err %v", names, err)
+	}
+	if names, err := ProfileNames(""); err != nil || len(names) != 0 {
+		t.Errorf("empty path: %v, %v", names, err)
+	}
+	p = writeProfileConfig(t, "model: openai/a\n")
+	if names, err := ProfileNames(p); err != nil || len(names) != 0 {
+		t.Errorf("no section: %v, %v", names, err)
+	}
+	if _, err := ProfileNames(filepath.Join(t.TempDir(), "nope.yaml")); err == nil || !strings.Contains(err.Error(), "read config") {
+		t.Errorf("missing file: %v", err)
+	}
+	p = writeProfileConfig(t, "profiles:\n  \"a b\": {}\n")
+	if _, err := ProfileNames(p); err == nil || !strings.Contains(err.Error(), "profile name") {
+		t.Errorf("invalid name: %v", err)
+	}
+}
+
 func TestProfileListReplaceAndKindChange(t *testing.T) {
 	p := writeProfileConfig(t, "hooks:\n  stop:\n    - command: /bin/true\nprofiles:\n  quiet:\n    hooks: {stop: []}\n  big:\n    snapshots: {max_file_bytes: 7}\n")
 	cfg, err := LoadProfile(p, "quiet")

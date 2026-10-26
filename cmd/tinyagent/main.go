@@ -81,6 +81,7 @@ type options struct {
 	profile                                          string
 	completion                                       string
 	showHelp, showVersion, doUpdate, check           bool
+	listProfiles                                     bool
 	initConfig                                       bool
 	review                                           bool
 	reviewBase, reviewCommit                         string
@@ -160,6 +161,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.doUpdate, "update", false, "update to the latest release and exit")
 	fs.BoolVar(&o.initConfig, "init-config", false, "write a commented starter config to the user config path (or -c), refusing to overwrite, and exit")
 	fs.BoolVar(&o.check, "check", false, "print the resolved config, model, provider key status, fallbacks, cwd and limits, then exit; makes no model request")
+	fs.BoolVar(&o.listProfiles, "list-profiles", false, "print the profile names in the selected config file (or the user config), sorted one per line, then exit; makes no model request")
 	fs.BoolVar(&o.acp, "acp", false, "serve the Agent Client Protocol on stdin/stdout for editors such as Zed and JetBrains IDEs (experimental): each session runs in the client's cwd with this config and flags; limits apply per prompt")
 	fs.StringVar(&o.completion, "completion", "", "print a flag-name completion script for this shell (bash or zsh) and exit; load it with: source <(tinyagent --completion bash), or in zsh after compinit: source <(tinyagent --completion zsh); re-source it after updating")
 	return fs
@@ -193,6 +195,9 @@ func run() int {
 	if o.showHelp {
 		printUsage(helpOutput, fs)
 		return 0
+	}
+	if o.listProfiles {
+		return runListProfiles(&o, fs, os.Stdout)
 	}
 	if o.acp {
 		if f := acpConflict(fs); f != "" {
@@ -1531,7 +1536,7 @@ var usageGroups = []struct {
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
-	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "transcript", "path"}, {"", "init-config", ""}, {"", "completion", "shell"}}},
+	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "list-profiles", ""}, {"", "transcript", "path"}, {"", "init-config", ""}, {"", "completion", "shell"}}},
 }
 
 func printUsage(w io.Writer, fs *flag.FlagSet) {
@@ -1551,7 +1556,7 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 			width = max(width, len(left(f)))
 		}
 	}
-	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n       tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <finished.json> -t \"<follow-up>\" --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <needs-input.json> -t \"<answer>\" --cwd <dir> -o <new.json> [flags]\n       tinyagent --review | --review-base <ref> | --review-commit <rev> [-t \"<focus>\"] [flags]\n       tinyagent --rewind <trajectory.json> --cwd <dir> [--to start|<step>|<id>] [--dry-run]\n       tinyagent --check [-m <model>] [-c <config>] [--profile <name>] [--cwd <dir>]\n       tinyagent --transcript <trajectory.json>\n       tinyagent --completion bash|zsh\n\n")
+	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n       tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <finished.json> -t \"<follow-up>\" --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <needs-input.json> -t \"<answer>\" --cwd <dir> -o <new.json> [flags]\n       tinyagent --review | --review-base <ref> | --review-commit <rev> [-t \"<focus>\"] [flags]\n       tinyagent --rewind <trajectory.json> --cwd <dir> [--to start|<step>|<id>] [--dry-run]\n       tinyagent --check [-m <model>] [-c <config>] [--profile <name>] [--cwd <dir>]\n       tinyagent --list-profiles [-c <config>]\n       tinyagent --transcript <trajectory.json>\n       tinyagent --completion bash|zsh\n\n")
 	for _, g := range usageGroups {
 		if g.name != "" {
 			fmt.Fprintf(w, "%s:\n", g.name)
