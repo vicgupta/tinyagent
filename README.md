@@ -46,15 +46,29 @@ tinyagent --update
 
 This replaces the binary in place with the latest release, after checking its checksum. If it's installed in a directory you can't write to, run it with `sudo`.
 
-### Shell completion (Bash)
+### Shell completion (Bash and Zsh)
 
-`tinyagent --completion bash` prints a Bash script that completes flag names (`--sandbox-<Tab>`, `--tool-out<Tab>`, short aliases such as `-t`). Load it for the current session:
+`tinyagent --completion bash` and `tinyagent --completion zsh` print a script that completes flag names (`--sandbox-<Tab>`, `--tool-out<Tab>`, short aliases such as `-t`). Only flag names are completed, not models, profiles or other flag values.
+
+**Bash.** Load it for the current session:
 
 ```bash
 source <(tinyagent --completion bash)
 ```
 
-To keep it, add that line to `~/.bashrc`. Only Bash is supported; other shell names exit 2. Words that don't start with `-` keep Bash's normal filename completion, and pressing Tab never runs tinyagent: the flag list is fixed when the script is generated, so re-source it after updating. The command needs no task, credentials or config.
+To keep it, add that line to `~/.bashrc`.
+
+**Zsh.** The script registers itself with Zsh's native completion system (`compdef`, no `bashcompinit`), so it must be sourced after `compinit`. For the current session, or to keep it, put this in `~/.zshrc`:
+
+```zsh
+autoload -Uz compinit
+compinit
+source <(tinyagent --completion zsh)
+```
+
+If your framework (Oh My Zsh, Prezto and the like) already runs `compinit`, add only the last line, after the framework is loaded. Sourcing it before `compinit` prints an error and changes nothing.
+
+Other shell names exit 2. In both shells, words that don't start with `-` (and flag prefixes that match no flag) keep the shell's normal filename completion, and pressing Tab never runs tinyagent: the flag list is fixed when the script is generated, so re-source it (or open a new shell) after updating. The command needs no task, credentials or config.
 
 ### Build from source
 
@@ -146,7 +160,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `-V, --version` | | Print the version and exit |
 | `--update` | | Replace this binary with the latest GitHub release (checksum-verified) and exit |
 | `--check` | | Print the resolved config file, model, provider key status, fallbacks, cwd and limits (and `ask_user` when it is on or set by flag), then exit without a model request (exit 2 on a setup error) |
-| `--completion bash` | | Print a Bash flag-name completion script and exit (`source <(tinyagent --completion bash)`); see [Shell completion](#shell-completion-bash) |
+| `--completion bash\|zsh` | | Print a Bash or Zsh flag-name completion script and exit (`source <(tinyagent --completion bash)`; for Zsh, after `compinit`); see [Shell completion](#shell-completion-bash-and-zsh) |
 
 ### Machine-readable output
 

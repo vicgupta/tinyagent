@@ -161,7 +161,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.initConfig, "init-config", false, "write a commented starter config to the user config path (or -c), refusing to overwrite, and exit")
 	fs.BoolVar(&o.check, "check", false, "print the resolved config, model, provider key status, fallbacks, cwd and limits, then exit; makes no model request")
 	fs.BoolVar(&o.acp, "acp", false, "serve the Agent Client Protocol on stdin/stdout for editors such as Zed and JetBrains IDEs (experimental): each session runs in the client's cwd with this config and flags; limits apply per prompt")
-	fs.StringVar(&o.completion, "completion", "", "print a completion script for this shell (only bash is supported) and exit; load it with: source <(tinyagent --completion bash)")
+	fs.StringVar(&o.completion, "completion", "", "print a flag-name completion script for this shell (bash or zsh) and exit; load it with: source <(tinyagent --completion bash), or in zsh after compinit: source <(tinyagent --completion zsh); re-source it after updating")
 	return fs
 }
 
@@ -1539,7 +1539,7 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 			width = max(width, len(left(f)))
 		}
 	}
-	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n       tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <finished.json> -t \"<follow-up>\" --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <needs-input.json> -t \"<answer>\" --cwd <dir> -o <new.json> [flags]\n       tinyagent --review | --review-base <ref> | --review-commit <rev> [-t \"<focus>\"] [flags]\n       tinyagent --rewind <trajectory.json> --cwd <dir> [--to start|<step>|<id>] [--dry-run]\n       tinyagent --check [-m <model>] [-c <config>] [--profile <name>] [--cwd <dir>]\n       tinyagent --transcript <trajectory.json>\n       tinyagent --completion bash\n\n")
+	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n       tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <finished.json> -t \"<follow-up>\" --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <needs-input.json> -t \"<answer>\" --cwd <dir> -o <new.json> [flags]\n       tinyagent --review | --review-base <ref> | --review-commit <rev> [-t \"<focus>\"] [flags]\n       tinyagent --rewind <trajectory.json> --cwd <dir> [--to start|<step>|<id>] [--dry-run]\n       tinyagent --check [-m <model>] [-c <config>] [--profile <name>] [--cwd <dir>]\n       tinyagent --transcript <trajectory.json>\n       tinyagent --completion bash|zsh\n\n")
 	for _, g := range usageGroups {
 		if g.name != "" {
 			fmt.Fprintf(w, "%s:\n", g.name)
