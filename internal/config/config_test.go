@@ -344,3 +344,29 @@ func TestConfigFallbackModels(t *testing.T) {
 		t.Errorf("Default().FallbackModels = %v, want none", Default().FallbackModels)
 	}
 }
+
+func TestMCPServerResourcesConfig(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	write(t, p, "mcp_servers:\n  - alias: docs\n    command: docs-mcp\n    resources: [\"docs://guides/*\", \"schema://db/orders\"]\n")
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.MCPServers[0].Resources; len(got) != 2 || got[1] != "schema://db/orders" {
+		t.Fatalf("resources = %v", got)
+	}
+	for name, server := range map[string]string{
+		"no allowlist": "",
+		"empty":        "    resources: [\"\"]\n",
+		"bare star":    "    resources: [\"*\"]\n",
+		"inner star":   "    resources: [\"docs://*/x\"]\n",
+		"duplicate":    "    resources: [\"docs://a\", \"docs://a\"]\n",
+	} {
+		write(t, p, "mcp_servers:\n  - alias: docs\n    command: docs-mcp\n"+server)
+		_, err := Load(p)
+		var invalid *InvalidError
+		if !errors.As(err, &invalid) || !strings.Contains(err.Error(), `mcp server "docs"`) {
+			t.Errorf("%s: err = %v, want an InvalidError naming the server", name, err)
+		}
+	}
+}

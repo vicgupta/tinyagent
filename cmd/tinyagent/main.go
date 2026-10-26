@@ -505,12 +505,15 @@ func run() int {
 	}
 	mcpRegistry, err := mcptools.Start(ctx, root, mcpServers(os.Stderr, cfg), os.Stderr)
 	if err != nil {
-		return fail(err)
+		return configFail(err)
 	}
 	defer mcpRegistry.Close()
 	if err := checkCommandToolNames(cmdTools, mcpRegistry.Specs); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
+	}
+	if o.verbose {
+		mcpRegistry.Log = os.Stderr
 	}
 
 	var onText func(string)
@@ -1932,6 +1935,9 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	if dirs := agent.AdditionalDirsInfo(a.Tools.ExtraDirs, a.Tools.ReadOnly); len(dirs) > 0 {
 		started["additional_dirs"] = dirs
 	}
+	if res := mcpResourcePatterns(a); len(res) > 0 {
+		started["mcp_resources"] = res
+	}
 	if wf := a.Tools.WebFetch; wf != nil {
 		started["web_fetch"] = map[string]any{"allowed_domains": wf.Domains}
 	}
@@ -2164,6 +2170,26 @@ func commandLog(verbose bool) io.Writer {
 		return os.Stderr
 	}
 	return nil
+}
+
+// mcpResourcePatterns maps each started MCP server with a resources
+// allowlist to its patterns, for run.started; nil when the resource tools
+// are not offered.
+func mcpResourcePatterns(a *agent.Agent) map[string][]string {
+	offered := false
+	for _, s := range a.Tools.ExternalSpecs {
+		offered = offered || s.Function.Name == mcptools.ReadResourceTool
+	}
+	if !offered {
+		return nil
+	}
+	out := map[string][]string{}
+	for _, s := range a.Config.MCPServers {
+		if len(s.Resources) > 0 {
+			out[s.Alias] = s.Resources
+		}
+	}
+	return out
 }
 
 // mcpServers returns the MCP servers to start. Read-only runs start none:

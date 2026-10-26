@@ -211,3 +211,38 @@ func TestPreToolHookInterrupted(t *testing.T) {
 		t.Error("tool ran after interrupted pre_tool hook")
 	}
 }
+
+// TestPreToolHookDeniesMCPResourceRead: hooks match the resource tool names
+// like any other tool, and a denied read never reaches the MCP registry.
+func TestPreToolHookDeniesMCPResourceRead(t *testing.T) {
+	m := &scripted{replies: []model.Message{
+		{Role: "assistant", ToolCalls: []model.ToolCall{call("1", "read_mcp_resource", `{"server":"docs","uri":"docs://a"}`)}},
+		{Role: "assistant", ToolCalls: []model.ToolCall{call("2", "list_mcp_resources", `{}`)}},
+		{Role: "assistant", Content: "ok"},
+	}}
+	a := newAgent(t, m)
+	a.Tools.ExternalSpecs = []model.ToolSpec{{Type: "function", Function: model.FunctionSpec{Name: "list_mcp_resources"}}, {Type: "function", Function: model.FunctionSpec{Name: "read_mcp_resource"}}}
+	var called []string
+	a.Tools.ExternalCall = func(_ context.Context, name, _ string) (string, bool, bool) {
+		called = append(called, name)
+		return "server=docs uri=docs://a", false, name == "list_mcp_resources" || name == "read_mcp_resource"
+	}
+	withHooks(t, a, config.Hooks{PreTool: []config.Hook{hookstest.Hook(t, "read_mcp_resource", "exit2", "no resource reads")}})
+	var kinds []string
+	a.OnEvent = func(kind string, _ map[string]any) { kinds = append(kinds, kind) }
+
+	tr := a.Run(context.Background(), "task")
+	if tr.ExitStatus != StatusCompleted {
+		t.Fatalf("trajectory = %+v", tr)
+	}
+	if strings.Join(called, ",") != "list_mcp_resources" {
+		t.Errorf("registry calls = %v, want only the list", called)
+	}
+	res := toolResults(tr.Messages)
+	if len(res) != 2 || !strings.HasSuffix(res[0], ": no resource reads") || res[1] != "server=docs uri=docs://a" {
+		t.Errorf("tool results = %q", res)
+	}
+	if n := strings.Count(strings.Join(kinds, ","), "tool.result"); n != 2 {
+		t.Errorf("events = %v, want 2 tool.result", kinds)
+	}
+}

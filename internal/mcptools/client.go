@@ -35,10 +35,11 @@ var safeName = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 func validName(s string) bool { return len(s) <= 64 && safeName.MatchString(s) }
 
 type server struct {
-	alias   string
-	session *mcp.ClientSession
-	timeout time.Duration
-	failed  bool
+	alias     string
+	session   *mcp.ClientSession
+	timeout   time.Duration
+	failed    bool
+	resources []string // resource URI allowlist; nil when not configured
 }
 type Tool struct {
 	server   *server
@@ -49,6 +50,11 @@ type Registry struct {
 	tools    map[string]Tool
 	sessions []*mcp.ClientSession
 	once     sync.Once
+	// resourceServers are the servers with a resources allowlist, in
+	// config order.
+	resourceServers []*server
+	// Log, when set, gets one line per read_mcp_resource call (-v).
+	Log io.Writer
 }
 
 // Start validates and connects all configured servers, building a fixed catalog.
@@ -69,11 +75,17 @@ func Start(ctx context.Context, root string, cfg []config.MCPServer, stderr io.W
 			r.Close()
 			return nil, err
 		}
-		if def.AllTools {
+		switch {
+		case def.AllTools:
 			fmt.Fprintf(stderr, "mcp: enabled server %s (all tools)\n", def.Alias)
-		} else {
+		case len(def.Resources) > 0:
+			fmt.Fprintf(stderr, "mcp: enabled server %s (%d selected tools, %d resource patterns)\n", def.Alias, len(def.Tools), len(def.Resources))
+		default:
 			fmt.Fprintf(stderr, "mcp: enabled server %s (%d selected tools)\n", def.Alias, len(def.Tools))
 		}
+	}
+	if len(r.resourceServers) > 0 {
+		r.Specs = append(r.Specs, resourceSpecs()...)
 	}
 	if len(r.Specs) == 0 {
 		r.Close()
@@ -119,6 +131,16 @@ func (r *Registry) start(ctx context.Context, root string, def config.MCPServer,
 	}
 	r.sessions = append(r.sessions, sess)
 	sv := &server{alias: def.Alias, session: sess, timeout: time.Duration(def.CallTimeoutSec) * time.Second}
+	if len(def.Resources) > 0 {
+		if init := sess.InitializeResult(); init == nil || init.Capabilities == nil || init.Capabilities.Resources == nil {
+			return &config.InvalidError{Err: fmt.Errorf("mcp server %q: resources configured but the server does not declare the resources capability", def.Alias)}
+		}
+		sv.resources = def.Resources
+		r.resourceServers = append(r.resourceServers, sv)
+	}
+	if len(def.Tools) == 0 && !def.AllTools {
+		return nil
+	}
 	selected := map[string]bool{}
 	for _, name := range def.Tools {
 		selected[name] = true
@@ -201,8 +223,11 @@ func validateDefinitions(cfg []config.MCPServer) error {
 			return fmt.Errorf("mcp server %q: alias must be unique and contain only letters, digits, _ or -", def.Alias)
 		}
 		aliases[def.Alias] = true
-		if strings.TrimSpace(def.Command) == "" || (len(def.Tools) == 0 && !def.AllTools) {
-			return fmt.Errorf("mcp server %q: command and a nonempty tools allowlist are required", def.Alias)
+		if strings.TrimSpace(def.Command) == "" || (len(def.Tools)+len(def.Resources) == 0 && !def.AllTools) {
+			return fmt.Errorf("mcp server %q: command and a nonempty tools or resources allowlist are required", def.Alias)
+		}
+		if err := config.ValidateResourcePatterns(def.Resources); err != nil {
+			return fmt.Errorf("mcp server %q: %w", def.Alias, err)
 		}
 		if def.DiscoveryTimeoutSec < 0 || def.DiscoveryTimeoutSec > 300 || def.CallTimeoutSec < 0 || def.CallTimeoutSec > 600 {
 			return fmt.Errorf("mcp server %q: timeouts must be between 1 and 300 seconds (discovery) and 1 and 600 seconds (call)", def.Alias)
@@ -254,6 +279,16 @@ func (r *Registry) CallImages(maxImageBytes int) func(ctx context.Context, name,
 
 // call runs a tool; maxImageBytes > 0 enables image pass-through.
 func (r *Registry) call(ctx context.Context, name, raw string, maxImageBytes int) (out string, images []model.Image, isErr, ok bool) {
+	if len(r.resourceServers) > 0 {
+		switch name {
+		case ListResourcesTool:
+			out, isErr = r.listResources(ctx, raw)
+			return out, nil, isErr, true
+		case ReadResourceTool:
+			out, images, isErr = r.readResource(ctx, raw, maxImageBytes)
+			return out, images, isErr, true
+		}
+	}
 	t, ok := r.tools[name]
 	if !ok {
 		return "", nil, false, false
