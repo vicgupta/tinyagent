@@ -227,6 +227,15 @@ tinyagent -t "fix the failing test" --cwd ~/src/project --step-limit 20 -o run.j
 tinyagent --resume run.json --cwd ~/src/project --step-limit 40 -o continued.json
 ```
 
+When a run with `-o` stops at a step, cost or time limit, is interrupted, or hits `OutputTruncated`, the summary on stderr is followed by a ready-to-paste command with the resolved `--cwd`, the limit that was hit doubled (no limit flag after an interruption or truncation), and a new `-o` path (`-2`, then `-3`, ... before the extension):
+
+```
+StepLimitExceeded after 20 steps in 4m12s (48,213 input / 3,100 output tokens, $0.41)
+resume: tinyagent --resume run.json --cwd /home/me/src/project --step-limit 40 -o run-2.json
+```
+
+It isn't printed with `--json`, without `-o`, or for `--output-schema` runs.
+
 `--resume <trajectory.json>` is noninteractive and uses the saved task and model. Do not pass `--task` for an unfinished checkpoint (it is only for [follow-ups](#continue-a-finished-run-with-a-follow-up-task) of finished runs); an explicitly different `--model` is rejected. The saved model wins over `$AGENT_MODEL` and the config's default model. Credentials and provider endpoints come from the current normal setup, never the checkpoint. Paths to checkpoints are relative to the invoking shell's directory, independently of `--cwd`.
 
 An explicit `--cwd` must resolve to the recorded canonical root (directory symlinks are resolved). For a [`--worktree`](#worktrees) run, that is the path inside the worktree. The effective system prompt must match the saved prompt, including `{{cwd}}`/`{{os}}` substitutions and the recorded AGENTS.md loading mode. Current config is used to reconstruct it without appending AGENTS.md twice. Changed instructions, a conflicting `--no-agents-md`, or changed tool definitions/compatibility require a fresh task. In particular, a task that edits its effective AGENTS.md cannot resume under changed instructions.
