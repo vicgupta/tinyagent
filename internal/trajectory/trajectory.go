@@ -49,6 +49,14 @@ type CommandEnvInfo struct {
 	Passed         []string `json:"passed"`
 }
 
+// RedactSecretsInfo records the redact_secrets setting a run's tool output
+// was masked with: variable names only, never values.
+type RedactSecretsInfo struct {
+	Enabled  bool     `json:"enabled"`
+	Patterns bool     `json:"patterns"`
+	Names    []string `json:"names"`
+}
+
 // AdditionalDir is one additional directory: an absolute path and its
 // effective mode, "read" or "write".
 type AdditionalDir struct {
@@ -97,6 +105,10 @@ type Trajectory struct {
 	// CommandEnv is set when a command_env policy filtered the environment
 	// of bash and start_process; it records this invocation's policy.
 	CommandEnv *CommandEnvInfo `json:"command_env,omitempty"`
+	// RedactSecrets is set when redact_secrets masked known secret values
+	// in tool output; it records this invocation's setting. Earlier
+	// results in a resumed history are not rewritten.
+	RedactSecrets *RedactSecretsInfo `json:"redact_secrets,omitempty"`
 	// FileAccess is set when file_access rules restricted the file tools;
 	// it records this invocation's rules.
 	FileAccess *FileAccessInfo `json:"file_access,omitempty"`

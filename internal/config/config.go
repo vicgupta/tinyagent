@@ -45,6 +45,10 @@ type AgentConfig struct {
 	// FileAccess denies the built-in file tools access to matching paths.
 	// The zero value denies nothing.
 	FileAccess FileAccess `yaml:"file_access"`
+	// RedactSecrets masks known secret values in command, process, MCP,
+	// web_fetch and hook output before the model sees it (off by default;
+	// --redact-secrets overrides Enabled).
+	RedactSecrets RedactSecrets `yaml:"redact_secrets"`
 	// AdditionalDirs are directories outside --cwd that the built-in file
 	// tools, --sandbox and the container environment may also reach. Empty
 	// (the default) keeps everything inside --cwd. --add-dir-read and
@@ -409,6 +413,35 @@ func checkEnvName(n string, glob bool) error {
 	return nil
 }
 
+// RedactSecrets configures masking of known secret values in tool output.
+type RedactSecrets struct {
+	Enabled bool `yaml:"enabled"`
+	// Env names more variables (names or * / ? globs) whose values are
+	// secrets, beyond the secret-named ones.
+	Env []string `yaml:"env,omitempty"`
+	// Allow names variables (names or globs) not to treat as secrets.
+	Allow []string `yaml:"allow,omitempty"`
+	// Patterns also masks token-shaped strings (sk-..., ghp_..., Bearer ...).
+	Patterns bool `yaml:"patterns"`
+}
+
+// Validate checks env and allow. The error names the key.
+func (r RedactSecrets) Validate() error {
+	for key, names := range map[string][]string{"env": r.Env, "allow": r.Allow} {
+		for _, n := range names {
+			if err := checkEnvName(n, true); err != nil {
+				return fmt.Errorf("redact_secrets.%s entry %q: %w", key, n, err)
+			}
+		}
+	}
+	for _, n := range r.Env {
+		if slices.Contains(r.Allow, n) {
+			return fmt.Errorf("redact_secrets: %q is in both env and allow", n)
+		}
+	}
+	return nil
+}
+
 // AdditionalDir is one additional_dirs entry.
 type AdditionalDir struct {
 	// Path is an absolute directory outside --cwd.
@@ -655,6 +688,7 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		MaxTruncations  yaml.Node `yaml:"max_truncations"`
 		CommandEnv      yaml.Node `yaml:"command_env"`
 		LSP             yaml.Node `yaml:"lsp"`
+		RedactSecrets   yaml.Node `yaml:"redact_secrets"`
 	}
 	if yaml.Unmarshal(data, &probe) == nil {
 		for _, c := range []struct {
@@ -676,6 +710,11 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		}
 		if probe.LSP.Kind != 0 {
 			if err := checkStrict(&probe.LSP, "lsp", &LSP{}); err != nil {
+				return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+			}
+		}
+		if probe.RedactSecrets.Kind != 0 {
+			if err := checkRedactSecrets(&probe.RedactSecrets); err != nil {
 				return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 			}
 		}
@@ -729,6 +768,9 @@ func loadFile(path, profile string) (AgentConfig, error) {
 	if err := cfg.FileAccess.Validate(); err != nil {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
+	if err := cfg.RedactSecrets.Validate(); err != nil {
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+	}
 	if err := cfg.WebFetch.Validate(); err != nil {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
@@ -756,6 +798,20 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		return cfg, fmt.Errorf("config %s: sandbox_allowed_domains %v", src, err)
 	}
 	return cfg, nil
+}
+
+// checkRedactSecrets rejects unknown keys under redact_secrets and
+// enabled or patterns values that aren't plain true or false.
+func checkRedactSecrets(n *yaml.Node) error {
+	if n.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k, v := n.Content[i].Value, n.Content[i+1]
+			if (k == "enabled" || k == "patterns") && v.ShortTag() != "!!bool" {
+				return fmt.Errorf("redact_secrets.%s must be true or false, got %q", k, v.Value)
+			}
+		}
+	}
+	return checkStrict(n, "redact_secrets", &RedactSecrets{})
 }
 
 // checkCommandEnv rejects unknown keys and non-string set values under

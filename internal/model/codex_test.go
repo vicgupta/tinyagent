@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -141,8 +142,15 @@ func TestCodexRefreshesExpiredToken(t *testing.T) {
 	expired := fakeJWT(map[string]any{"exp": time.Now().Add(-time.Hour).Unix()})
 	path := writeCodexAuth(t, expired)
 	c := &Codex{BaseURL: srv.URL, TokenURL: srv.URL + "/oauth/token", AuthFile: path, Model: "m"}
+	var creds []string
+	OnCredentials = func(v ...string) { creds = append(creds, v...) }
+	defer func() { OnCredentials = nil }()
 	if _, _, err := c.Query(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil); err != nil {
 		t.Fatal(err)
+	}
+	// Loaded and refreshed tokens both go to redaction.
+	if !slices.Contains(creds, expired) || !slices.Contains(creds, fresh) || !slices.Contains(creds, "r2") {
+		t.Errorf("OnCredentials got %q", creds)
 	}
 
 	var saved map[string]any

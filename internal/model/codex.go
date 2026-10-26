@@ -95,6 +95,7 @@ func (c *Codex) loadAuth() (*codexAuth, error) {
 		jwtClaims(a.idToken, &claims)
 		a.accountID = claims.Auth.AccountID
 	}
+	credentialsLoaded(a.accessToken, a.refreshToken, a.idToken)
 	return a, nil
 }
 
@@ -150,6 +151,7 @@ func (c *Codex) refresh(ctx context.Context, a *codexAuth) error {
 	if resp.IDToken != "" {
 		a.idToken = resp.IDToken
 	}
+	credentialsLoaded(a.accessToken, a.refreshToken, a.idToken)
 
 	tokens, _ := a.raw["tokens"].(map[string]any)
 	if tokens == nil {

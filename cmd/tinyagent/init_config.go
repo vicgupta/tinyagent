@@ -14,6 +14,8 @@ const starterConfig = `# tinyagent user config. Flags override these values. Ful
 # cost_limit: 2.0
 # wall_time_seconds: 1800
 # read_only: false
+# redact_secrets:             # mask known secret values in command, MCP, web_fetch and hook output
+#   enabled: false            # same as --redact-secrets
 # ask_user:                   # let the model end a run with one question (exit 4)
 #   enabled: false            # answer with: --resume run.json -t "<answer>"
 #   max_questions: 3          # per run, across resumes (1-20)

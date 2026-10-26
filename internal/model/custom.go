@@ -140,23 +140,15 @@ func providerHeaders(d ProviderDef) (map[string]string, error) {
 	return h, nil
 }
 
-// ProviderSecrets returns the current values of every variable the
-// configured providers read, for redaction.
-func ProviderSecrets() []string {
-	var vals []string
-	for _, d := range configured {
-		if d.APIKeyEnv != "" {
-			if v := os.Getenv(d.APIKeyEnv); v != "" {
-				vals = append(vals, v)
-			}
-		}
-		for _, env := range d.EnvHeaders {
-			if v := os.Getenv(env); v != "" {
-				vals = append(vals, v)
-			}
-		}
+// OnCredentials, when set, receives credential values a provider loads
+// from somewhere other than the environment, such as the codex provider's
+// tokens (including ones refreshed during the run), for redaction.
+var OnCredentials func(values ...string)
+
+func credentialsLoaded(values ...string) {
+	if OnCredentials != nil {
+		OnCredentials(values...)
 	}
-	return vals
 }
 
 // InsecureBaseURL reports whether d sends requests over plain http to a

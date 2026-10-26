@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vicgupta/tinyagent/internal/eventlog"
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/skills"
 )
@@ -88,6 +89,10 @@ type Executor struct {
 	// directories, and all of them in read-only mode, refuse writes. nil
 	// keeps the tools inside Root.
 	ExtraDirs []ExtraDir
+	// Redactor, when set (redact_secrets), masks known secret values in
+	// the results of every tool except the built-in file tools, before
+	// truncation, saving and hooks. nil masks nothing.
+	Redactor *eventlog.Redactor
 
 	procs registry
 }
@@ -242,6 +247,8 @@ type Result struct {
 	// Instructions is the suffix of Text holding scoped AGENTS.md blocks
 	// appended by the agent loop; feedback re-truncation keeps it whole.
 	Instructions string
+	// Redactions counts the secret values Redactor masked in the result.
+	Redactions int
 }
 
 // RunResult is RunWithImages plus where an over-limit result was saved.
