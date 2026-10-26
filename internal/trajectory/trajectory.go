@@ -100,6 +100,9 @@ type Trajectory struct {
 	// OpenAIAPI is the openai provider's resolved transport, "responses" or
 	// "chat"; empty for other providers and older trajectories.
 	OpenAIAPI string `json:"openai_api,omitempty"`
+	// Profile is the config profile selected with --profile; empty when
+	// none. Only the name is recorded, never the profile's settings.
+	Profile string `json:"profile,omitempty"`
 	// ProviderAPI and ProviderBaseURL describe a config-defined provider
 	// (its id is the model spec's prefix); empty for built-in providers.
 	// Keys and header values are never recorded.

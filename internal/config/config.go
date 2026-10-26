@@ -586,6 +586,34 @@ func Find(explicit string) string {
 // returns the defaults. Unknown keys are an error, so a typo can't silently
 // drop a setting.
 func Load(path string) (AgentConfig, error) {
+	return LoadProfile(path, "")
+}
+
+// LoadProfile is Load with the named profile from the file's profiles:
+// section merged over the base settings before decoding and validation. An
+// empty profile applies none; the profiles: section is still validated.
+// With a profile selected, every invalid-config error is an *InvalidError
+// and names the profile.
+func LoadProfile(path, profile string) (AgentConfig, error) {
+	if profile == "" {
+		return loadFile(path, "")
+	}
+	if path == "" {
+		where := "the user config"
+		if p, err := DefaultPath(); err == nil {
+			where = p
+		}
+		return Default(), &InvalidError{fmt.Errorf("--profile %s: no config file defines profiles (no -c given and no user config at %s)", profile, where)}
+	}
+	cfg, err := loadFile(path, profile)
+	var invalid *InvalidError
+	if err != nil && !errors.As(err, &invalid) && !errors.Is(err, fs.ErrNotExist) && !strings.HasPrefix(err.Error(), "read config") {
+		err = &InvalidError{err}
+	}
+	return cfg, err
+}
+
+func loadFile(path, profile string) (AgentConfig, error) {
 	cfg := Default()
 	if path == "" {
 		return cfg, nil
@@ -593,6 +621,13 @@ func Load(path string) (AgentConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return cfg, fmt.Errorf("read config: %w", err)
+	}
+	if data, err = applyProfiles(path, data, profile); err != nil {
+		return cfg, err
+	}
+	src := path
+	if profile != "" {
+		src = fmt.Sprintf("%s (profile %s)", path, profile)
 	}
 	var probe struct {
 		MaxFormatErrors yaml.Node `yaml:"max_format_errors"`
@@ -611,91 +646,91 @@ func Load(path string) (AgentConfig, error) {
 			{"max_truncations", ">= 1", &probe.MaxTruncations},
 		} {
 			if n := c.n; n.Kind != 0 && (n.Kind != yaml.ScalarNode || n.ShortTag() != "!!int") {
-				return cfg, fmt.Errorf("config %s: %s must be a whole number %s, got %q", path, c.key, c.want, n.Value)
+				return cfg, fmt.Errorf("config %s: %s must be a whole number %s, got %q", src, c.key, c.want, n.Value)
 			}
 		}
 		if probe.CommandEnv.Kind != 0 {
 			if err := checkCommandEnv(&probe.CommandEnv); err != nil {
-				return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
+				return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 			}
 		}
 		if probe.LSP.Kind != 0 {
 			if err := checkStrict(&probe.LSP, "lsp", &LSP{}); err != nil {
-				return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
+				return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 			}
 		}
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) { // io.EOF: empty or comment-only file
-		return cfg, fmt.Errorf("parse config %s: %w", path, err)
+		return cfg, fmt.Errorf("parse config %s: %w", src, err)
 	}
 	if l := cfg.LogDB.Level; l != "metadata" && l != "full" {
-		return cfg, fmt.Errorf("config %s: log_db.level %q must be metadata or full", path, l)
+		return cfg, fmt.Errorf("config %s: log_db.level %q must be metadata or full", src, l)
 	}
 	if cfg.LogDB.MaxDays < 0 || cfg.LogDB.MaxRuns < 0 || cfg.LogDB.MaxPayloadBytes < 0 {
-		return cfg, fmt.Errorf("config %s: log_db max_days, max_runs and max_payload_bytes must be >= 0", path)
+		return cfg, fmt.Errorf("config %s: log_db max_days, max_runs and max_payload_bytes must be >= 0", src)
 	}
 	if cfg.ToolOutputFiles.MaxRuns < 0 {
-		return cfg, fmt.Errorf("config %s: tool_output_files.max_runs must be >= 0, got %d", path, cfg.ToolOutputFiles.MaxRuns)
+		return cfg, fmt.Errorf("config %s: tool_output_files.max_runs must be >= 0, got %d", src, cfg.ToolOutputFiles.MaxRuns)
 	}
 	if d := cfg.ToolOutputFiles.Dir; d != "" && !filepath.IsAbs(d) {
 		if c := filepath.Clean(d); c == "." || c == ".." || strings.HasPrefix(c, ".."+string(filepath.Separator)) {
-			return cfg, fmt.Errorf("config %s: tool_output_files.dir %q must be a subdirectory of --cwd", path, d)
+			return cfg, fmt.Errorf("config %s: tool_output_files.dir %q must be a subdirectory of --cwd", src, d)
 		}
 	}
 	if cfg.MaxFormatErrors < 1 {
-		return cfg, fmt.Errorf("config %s: max_format_errors must be a whole number >= 1, got %d", path, cfg.MaxFormatErrors)
+		return cfg, fmt.Errorf("config %s: max_format_errors must be a whole number >= 1, got %d", src, cfg.MaxFormatErrors)
 	}
 	if cfg.MaxOutputTokens < 0 {
-		return cfg, fmt.Errorf("config %s: max_output_tokens must be a whole number >= 0, got %d", path, cfg.MaxOutputTokens)
+		return cfg, fmt.Errorf("config %s: max_output_tokens must be a whole number >= 0, got %d", src, cfg.MaxOutputTokens)
 	}
 	if cfg.Subagents.MaxSteps < 0 {
-		return cfg, fmt.Errorf("config %s: subagents.max_steps must be a whole number >= 0, got %d", path, cfg.Subagents.MaxSteps)
+		return cfg, fmt.Errorf("config %s: subagents.max_steps must be a whole number >= 0, got %d", src, cfg.Subagents.MaxSteps)
 	}
 	if cfg.MaxTruncations < 1 {
-		return cfg, fmt.Errorf("config %s: max_truncations must be a whole number >= 1, got %d", path, cfg.MaxTruncations)
+		return cfg, fmt.Errorf("config %s: max_truncations must be a whole number >= 1, got %d", src, cfg.MaxTruncations)
 	}
 	if cfg.Snapshots.MaxFileBytes < 1 {
-		return cfg, fmt.Errorf("config %s: snapshots.max_file_bytes must be >= 1, got %d", path, cfg.Snapshots.MaxFileBytes)
+		return cfg, fmt.Errorf("config %s: snapshots.max_file_bytes must be >= 1, got %d", src, cfg.Snapshots.MaxFileBytes)
 	}
 	if cfg.MaxImageBytes < 1 {
-		return cfg, fmt.Errorf("config %s: max_image_bytes must be >= 1, got %d", path, cfg.MaxImageBytes)
+		return cfg, fmt.Errorf("config %s: max_image_bytes must be >= 1, got %d", src, cfg.MaxImageBytes)
 	}
 	if !ValidEnvironment(cfg.Environment) {
-		return cfg, fmt.Errorf("config %s: environment %q must be local or container", path, cfg.Environment)
+		return cfg, fmt.Errorf("config %s: environment %q must be local or container", src, cfg.Environment)
 	}
 	if err := cfg.CommandEnv.Validate(); err != nil {
-		return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.FileAccess.Validate(); err != nil {
-		return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.WebFetch.Validate(); err != nil {
-		return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.LSP.Validate(); err != nil {
-		return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := validateAdditionalDirs(cfg.AdditionalDirs); err != nil {
-		return cfg, &InvalidError{fmt.Errorf("config %s: %w", path, err)}
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if r := cfg.Container.Runtime; r != "" && r != "docker" && r != "podman" {
-		return cfg, fmt.Errorf("config %s: container.runtime %q must be docker or podman", path, r)
+		return cfg, fmt.Errorf("config %s: container.runtime %q must be docker or podman", src, r)
 	}
 	if err := validateProviders(cfg.Providers); err != nil {
-		return cfg, fmt.Errorf("config %s: %w", path, err)
+		return cfg, fmt.Errorf("config %s: %w", src, err)
 	}
 	for _, p := range cfg.SandboxWritablePaths {
 		if !filepath.IsAbs(p) {
-			return cfg, fmt.Errorf("config %s: sandbox_writable_paths entry %q must be an absolute path", path, p)
+			return cfg, fmt.Errorf("config %s: sandbox_writable_paths entry %q must be an absolute path", src, p)
 		}
 		if fi, err := os.Stat(p); err != nil || !fi.IsDir() {
-			return cfg, fmt.Errorf("config %s: sandbox_writable_paths entry %q is not an existing directory", path, p)
+			return cfg, fmt.Errorf("config %s: sandbox_writable_paths entry %q is not an existing directory", src, p)
 		}
 	}
 	if _, err := sandboxnet.ParseRules(cfg.SandboxAllowedDomains); err != nil {
-		return cfg, fmt.Errorf("config %s: sandbox_allowed_domains %v", path, err)
+		return cfg, fmt.Errorf("config %s: sandbox_allowed_domains %v", src, err)
 	}
 	return cfg, nil
 }

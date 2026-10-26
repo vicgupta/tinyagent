@@ -331,7 +331,7 @@ const wantUsage = `Usage: tinyagent -t "<prompt>" [flags]    (or --task "<prompt
        tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]
        tinyagent --resume <finished.json> -t "<follow-up>" --cwd <dir> -o <new.json> [flags]
        tinyagent --rewind <trajectory.json> --cwd <dir> [--to start|<step>|<id>] [--dry-run]
-       tinyagent --check [-m <model>] [-c <config>] [--cwd <dir>]
+       tinyagent --check [-m <model>] [-c <config>] [--profile <name>] [--cwd <dir>]
 
   -h, --help                         show this help and exit
 Task:
@@ -342,6 +342,7 @@ Task:
       --no-fallback                  don't fall back to other models (clears fallback_models)
       --openai-api api               openai provider transport: auto, responses, or chat
   -c, --config path                  YAML config (default: user config if present, else built-in)
+      --profile name                 apply this named profile from the config file's profiles: section over its base settings
       --cwd dir                      working directory (default ".")
       --worktree [=name]             run in a new Git worktree on branch tinyagent/<name> from HEAD of the repo containing --cwd, kept afterwards (default name generated)
       --resume path                  continue an unfinished run from a trajectory JSON checkpoint, or a finished one with -t "<follow-up>"
@@ -384,6 +385,7 @@ Examples:
   cat task.md | tinyagent -t - --step-limit 30 -o run.json
   tinyagent --resume run.json --cwd . --step-limit 60 -o continued.json
   tinyagent --resume review.json -t "fix the races you found" --cwd . -o fix.json
+  tinyagent --profile review -t "review this change"
   tinyagent --rewind run.json --cwd . --to 3 --dry-run
   tinyagent --check -m anthropic/claude-sonnet-4
 `

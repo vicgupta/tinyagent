@@ -72,6 +72,9 @@ type Agent struct {
 	// OpenAIAPI is the openai provider's resolved transport, recorded in
 	// trajectories and run.started; the Model uses it.
 	OpenAIAPI string
+	// Profile is the config profile selected with --profile, recorded in
+	// the trajectory and run.started; "" when none.
+	Profile string
 	// ProviderAPI and ProviderBaseURL describe a config-defined provider,
 	// recorded in trajectories and run.started; empty for built-ins.
 	ProviderAPI     string
@@ -284,6 +287,9 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		if t.OpenAIAPI == "" {
 			t.OpenAIAPI = a.OpenAIAPI
 		}
+		if a.Profile != "" {
+			t.Profile = a.Profile
+		}
 		t.ProviderAPI, t.ProviderBaseURL = a.ProviderAPI, a.ProviderBaseURL
 		a.closeInterrupted(t)
 		notice := resumeNotice
@@ -316,6 +322,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			Model:                 a.ModelName,
 			ReasoningEffort:       a.ReasoningEffort,
 			OpenAIAPI:             a.OpenAIAPI,
+			Profile:               a.Profile,
 			ProviderAPI:           a.ProviderAPI,
 			ProviderBaseURL:       a.ProviderBaseURL,
 			SchemaVersion:         trajectory.SchemaVersion,

@@ -57,7 +57,7 @@ func (h checkHint) Error() string { return h.err.Error() }
 // would stop on before its first request.
 func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 	cfgPath := config.Find(o.configPath)
-	cfg, err := config.Load(cfgPath)
+	cfg, err := config.LoadProfile(cfgPath, o.profile)
 	if err != nil {
 		return nil, err
 	}
@@ -121,6 +121,9 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 		add("config", cfgPath+" (user config)")
 	default:
 		add("config", "none (built-in defaults)")
+	}
+	if o.profile != "" {
+		add("profile", o.profile)
 	}
 	add("model", spec+" ("+modelSource(fs, cfg.Model)+")")
 	add("provider", providerStatus(spec, m))

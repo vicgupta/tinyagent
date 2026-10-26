@@ -74,6 +74,7 @@ type options struct {
 	worktree                                         worktreeFlag
 	snapshots, dryRun                                bool
 	rewind, rewindTo                                 string
+	profile                                          string
 	showHelp, showVersion, doUpdate, check           bool
 }
 
@@ -91,6 +92,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.modelName, "m", defaultModel(), "shorthand for --model")
 	fs.StringVar(&o.configPath, "config", "", "YAML config (default: user config if present, else built-in)")
 	fs.StringVar(&o.configPath, "c", "", "shorthand for --config")
+	fs.StringVar(&o.profile, "profile", "", "apply this named profile from the config file's profiles: section over its base settings")
 	fs.StringVar(&o.cwd, "cwd", ".", "working directory")
 	fs.Var(&o.worktree, "worktree", "run in a new Git worktree on branch tinyagent/<name> from HEAD of the repo containing --cwd, kept afterwards (default name generated)")
 	fs.IntVar(&o.stepLimit, "step-limit", 0, "max model calls, 0 = unlimited")
@@ -208,6 +210,10 @@ func run() int {
 			fmt.Fprintln(os.Stderr, "error: --rewind and --resume are mutually exclusive")
 			return 2
 		}
+		if o.profile != "" {
+			fmt.Fprintln(os.Stderr, "error: --profile doesn't apply to --rewind, which reads no config")
+			return 2
+		}
 		return runRewind(&o, fs)
 	}
 	if flagWasSet(fs, "to", "dry-run") {
@@ -249,7 +255,7 @@ func run() int {
 	}
 
 	cfgPath := config.Find(o.configPath)
-	cfg, err := config.Load(cfgPath)
+	cfg, err := config.LoadProfile(cfgPath, o.profile)
 	if err != nil {
 		return loadConfigError(err)
 	}
@@ -424,6 +430,7 @@ func run() int {
 	if openaiAPI != "" && o.verbose {
 		fmt.Fprintf(os.Stderr, "openai transport: %s\n", openaiAPI)
 	}
+	announceProfile(os.Stderr, o.profile, cfgPath, o.verbose)
 	announceProvider(os.Stderr, o.modelName, o.verbose)
 	m, err := model.NewWith(o.modelName, onText, model.Options{OpenAIAPI: openaiAPI})
 	if err != nil {
@@ -452,6 +459,7 @@ func run() int {
 		FallbackModels:  fallbacks,
 		ReasoningEffort: cfg.ReasoningEffort,
 		OpenAIAPI:       openaiAPI,
+		Profile:         o.profile,
 		ProviderAPI:     providerAPI,
 		ProviderBaseURL: providerBaseURL,
 		Tools: &tools.Executor{
@@ -624,7 +632,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	}
 
 	cfgPath := config.Find(o.configPath)
-	cfg, err := config.Load(cfgPath)
+	cfg, err := config.LoadProfile(cfgPath, o.profile)
 	if err != nil {
 		return loadConfigError(err)
 	}
@@ -835,6 +843,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if openaiAPI != "" && o.verbose {
 		fmt.Fprintf(os.Stderr, "openai transport: %s\n", openaiAPI)
 	}
+	announceProfile(os.Stderr, o.profile, cfgPath, o.verbose)
 	announceProvider(os.Stderr, modelName, o.verbose)
 	m, err := model.NewWith(modelName, onText, model.Options{OpenAIAPI: openaiAPI})
 	if err != nil {
@@ -873,6 +882,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		FallbackModels:  fallbacks,
 		ReasoningEffort: src.ReasoningEffort,
 		OpenAIAPI:       openaiAPI,
+		Profile:         o.profile,
 		ProviderAPI:     providerAPI,
 		ProviderBaseURL: providerBaseURL,
 		Tools: &tools.Executor{
@@ -1281,7 +1291,7 @@ var usageGroups = []struct {
 	flags [][3]string
 }{
 	{"", [][3]string{{"h", "help", ""}}},
-	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}}},
+	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "profile", "name"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
@@ -1305,7 +1315,7 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 			width = max(width, len(left(f)))
 		}
 	}
-	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n       tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <finished.json> -t \"<follow-up>\" --cwd <dir> -o <new.json> [flags]\n       tinyagent --rewind <trajectory.json> --cwd <dir> [--to start|<step>|<id>] [--dry-run]\n       tinyagent --check [-m <model>] [-c <config>] [--cwd <dir>]\n\n")
+	fmt.Fprint(w, "Usage: tinyagent -t \"<prompt>\" [flags]    (or --task \"<prompt>\")\n       echo \"<prompt>\" | tinyagent -t -\n       tinyagent --resume <trajectory.json> --cwd <dir> -o <new.json> [flags]\n       tinyagent --resume <finished.json> -t \"<follow-up>\" --cwd <dir> -o <new.json> [flags]\n       tinyagent --rewind <trajectory.json> --cwd <dir> [--to start|<step>|<id>] [--dry-run]\n       tinyagent --check [-m <model>] [-c <config>] [--profile <name>] [--cwd <dir>]\n\n")
 	for _, g := range usageGroups {
 		if g.name != "" {
 			fmt.Fprintf(w, "%s:\n", g.name)
@@ -1328,6 +1338,7 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 		"  cat task.md | tinyagent -t - --step-limit 30 -o run.json\n"+
 		"  tinyagent --resume run.json --cwd . --step-limit 60 -o continued.json\n"+
 		"  tinyagent --resume review.json -t \"fix the races you found\" --cwd . -o fix.json\n"+
+		"  tinyagent --profile review -t \"review this change\"\n"+
 		"  tinyagent --rewind run.json --cwd . --to 3 --dry-run\n"+
 		"  tinyagent --check -m anthropic/claude-sonnet-4\n")
 }
@@ -1649,6 +1660,9 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	}
 	if a.OpenAIAPI != "" {
 		started["openai_api"] = a.OpenAIAPI
+	}
+	if a.Profile != "" {
+		started["profile"] = a.Profile
 	}
 	if a.ProviderAPI != "" {
 		started["provider_api"] = a.ProviderAPI
@@ -2072,5 +2086,12 @@ func loadSkills(a *agent.Agent, root string, warn func(string)) {
 		for _, k := range set.Skills {
 			fmt.Fprintf(a.Out, "loaded skill %s (%s) from %s\n", k.Name, k.Scope, k.Path)
 		}
+	}
+}
+
+// announceProfile prints, with -v, the config profile a run uses.
+func announceProfile(w io.Writer, profile, cfgPath string, verbose bool) {
+	if profile != "" && verbose {
+		fmt.Fprintf(w, "config profile: %s (from %s)\n", profile, cfgPath)
 	}
 }
