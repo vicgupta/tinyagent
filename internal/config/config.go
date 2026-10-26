@@ -121,6 +121,10 @@ type AgentConfig struct {
 	// ApplyPatch offers the opt-in apply_patch tool (off by default;
 	// --apply-patch overrides it).
 	ApplyPatch bool `yaml:"apply_patch"`
+	// ScopedAgentsMD also delivers AGENTS.md files in directories below
+	// --cwd with the results of file tools touching paths there (off by
+	// default; --scoped-agents-md overrides it).
+	ScopedAgentsMD bool `yaml:"scoped_agents_md"`
 	// Subagents configures the opt-in delegate tool, which runs a
 	// read-only child agent (off by default; --subagents overrides
 	// Enabled).

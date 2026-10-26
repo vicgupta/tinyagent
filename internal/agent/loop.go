@@ -86,6 +86,10 @@ type Agent struct {
 	// SkipAgentsMD stops Run from appending the nearest AGENTS.md at or above
 	// <root> to the system prompt.
 	SkipAgentsMD bool
+	// ScopedAgentsMD delivers AGENTS.md files in directories below <root>
+	// with the results of the built-in file tools that touch paths there
+	// (--scoped-agents-md). SkipAgentsMD turns it off.
+	ScopedAgentsMD bool
 	// SkillsEnabled records that skills discovery was on for this run; the
 	// discovered skills are Tools.Skills.
 	SkillsEnabled bool
@@ -130,6 +134,11 @@ type Agent struct {
 	Subagents *Subagents
 	// subagentID is set on a delegate child (d1, d2, ...).
 	subagentID string
+	// scopedReported dedupes this invocation's instructions.skipped reports.
+	scopedReported map[string]bool
+	// scopedWritten holds the AGENTS.md files the built-in edit tools wrote
+	// in this invocation; they are not delivered.
+	scopedWritten map[string]bool
 	// delegateStop is the status a delegate child ended with when it must
 	// also end the parent: Interrupted, TimeLimitExceeded or
 	// CostLimitExceeded.
@@ -267,6 +276,10 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			t.ExitStatus, t.Submission = StatusError, "resume lsp setting differs from checkpoint"
 			return t
 		}
+		if t.ScopedAgentsMDEnabled != a.scopedOn() {
+			t.ExitStatus, t.Submission = StatusError, "resume scoped_agents_md setting differs from checkpoint"
+			return t
+		}
 		t.ExitStatus, t.Submission = "", ""
 		if t.OpenAIAPI == "" {
 			t.OpenAIAPI = a.OpenAIAPI
@@ -317,6 +330,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			SubagentsEnabled:      a.Tools.Delegate,
 			WebFetchEnabled:       a.Tools.WebFetch != nil,
 			LSPEnabled:            a.Tools.LSP != nil,
+			ScopedAgentsMDEnabled: a.scopedOn(),
 			MCPEnabled:            len(a.Tools.ExternalSpecs) > 0,
 			ExternalTools:         externalToolNames(a.Tools.ExternalSpecs),
 			ExternalToolSignature: externalToolSignature(a.Tools.ExternalSpecs),
@@ -329,6 +343,9 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 				{Role: "system", Content: system},
 				{Role: "user", Content: task},
 			},
+		}
+		if a.scopedOn() {
+			t.ScopedAgentsMDSince = time.Now().UTC().Format(time.RFC3339Nano)
 		}
 	}
 	a.cur = t
@@ -757,14 +774,16 @@ func (a *Agent) runTool(ctx context.Context, t *trajectory.Trajectory, call mode
 
 // withFeedback appends post_tool feedback to a result, re-truncating to max.
 // A notice pointing at saved output stays whole at the end.
+// Scoped AGENTS.md blocks (res.Instructions) stay whole after both.
 func withFeedback(res tools.Result, feedback string, max int) string {
+	res.Text = strings.TrimSuffix(res.Text, res.Instructions)
 	if res.Notice != "" {
 		body := strings.TrimSuffix(strings.TrimSuffix(res.Text, res.Notice), "\n")
 		if text, ok := tools.TruncateWithNotice(body+feedback, res.Notice, max); ok {
-			return text
+			return text + res.Instructions
 		}
 	}
-	return tools.Truncate(res.Text+feedback, max)
+	return tools.Truncate(res.Text+feedback, max) + res.Instructions
 }
 
 // hookRan reports one hook run as an event, a verbose line, and, for a
@@ -1002,6 +1021,9 @@ func (a *Agent) saveFailed(t *trajectory.Trajectory, err error) *trajectory.Traj
 
 func (a *Agent) step(t *trajectory.Trajectory) error {
 	a.recordNetworkDenials(t)
+	if a.scopedOn() && a.view != nil {
+		t.ScopedAgentsMD = scopedDeliveredIn(t, a.view)
+	}
 	if a.OnStep != nil {
 		return a.OnStep(t)
 	}

@@ -208,6 +208,17 @@ type Trajectory struct {
 	LSPEnabled bool `json:"lsp_enabled,omitempty"`
 	// LSPServers names this invocation's configured language servers.
 	LSPServers []string `json:"lsp_servers,omitempty"`
+	// ScopedAgentsMDEnabled (schema 2) records whether AGENTS.md files
+	// below Root were delivered with file tool results (--scoped-agents-md).
+	ScopedAgentsMDEnabled bool `json:"scoped_agents_md_enabled,omitempty"`
+	// ScopedAgentsMD lists the scoped AGENTS.md paths (relative to Root,
+	// slash separated) whose delivering tool result is still in context.
+	ScopedAgentsMD []string `json:"scoped_agents_md,omitempty"`
+	// ScopedAgentsMDLoads records every scoped AGENTS.md delivery, in order.
+	ScopedAgentsMDLoads []ScopedAgentsMDLoad `json:"scoped_agents_md_loads,omitempty"`
+	// ScopedAgentsMDSince is when the run first started with scoped
+	// AGENTS.md on (RFC 3339): files modified after it are not delivered.
+	ScopedAgentsMDSince string `json:"scoped_agents_md_since,omitempty"`
 	// Subagents records each delegate call's child run, in call order,
 	// with its full history. Their tokens and cost are included in the
 	// run totals; their model calls are counted in SubagentSteps, not
@@ -440,4 +451,22 @@ type Subagent struct {
 	Cost             float64         `json:"cost"`
 	Report           string          `json:"report,omitempty"`
 	Messages         []model.Message `json:"messages"`
+}
+
+// ScopedAgentsMDLoad is one scoped AGENTS.md delivered with a tool result.
+type ScopedAgentsMDLoad struct {
+	// Path is the file, relative to Root and slash separated.
+	Path string `json:"path"`
+	// ScopeDir is its directory with a trailing slash, e.g. "pkg/a/".
+	ScopeDir string `json:"scope_dir"`
+	// Bytes is the file's size on disk.
+	Bytes     int  `json:"bytes"`
+	Truncated bool `json:"truncated,omitempty"`
+	// Delivered is the number of content bytes appended (after the cap).
+	Delivered  int    `json:"delivered_bytes"`
+	Tool       string `json:"tool"`
+	ToolCallID string `json:"tool_call_id"`
+	Step       int    `json:"step"`
+	// Message is the index in Messages of the tool result carrying it.
+	Message int `json:"message"`
 }

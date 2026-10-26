@@ -122,6 +122,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--log-db[=path]` | off | Also record run events in a local SQLite database (default `<cwd>/.tinyagent/tinyagent.db`); see [Event log database](#event-log-database) |
 | `--no-stream` | off | Wait for each full response instead of streaming it |
 | `--no-agents-md` | off | Don't append the nearest `AGENTS.md` (at or above `<cwd>`, up to the repo root; capped at 32KB) to the system prompt |
+| `--scoped-agents-md` | off | Also deliver `AGENTS.md` files in directories below `<cwd>`, appended to the first file tool result that touches a path there; see [Project instructions](#project-instructions-agentsmd). Can't be combined with `--no-agents-md` |
 | `-V, --version` | | Print the version and exit |
 | `--update` | | Replace this binary with the latest GitHub release (checksum-verified) and exit |
 
@@ -133,7 +134,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 
 | Type | Fields |
 |---|---|
-| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `reasoning_effort` (only when set), `fallback_models` (only when a [fallback chain](#model-fallback) is configured), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy), `file_access` (`deny_read`, `deny_write`; only with [file access](#restricting-file-access) rules), `web_fetch` (`allowed_domains`; only with [web fetch](#web-fetch) on), `lsp` (`servers`, the configured names; only with [language servers](#language-servers-lsp) on), `additional_dirs` (`path`, `mode`; only with [additional directories](#additional-directories)), `worktree` (`path`, `branch`, `base_commit`, `repo_root`; only with [`--worktree`](#worktrees)) |
+| `run.started` | `schema_version` (currently `1`), `model`, canonical `root`, `read_only`, `resumed`, `follow_up` (`true`, only for a follow-up run), `reasoning_effort` (only when set), `fallback_models` (only when a [fallback chain](#model-fallback) is configured), `openai_api` (the resolved `responses` or `chat`, only for the `openai` provider), `command_env` (`inherit`, `exclude_secrets`, sorted `passed` names; only with a [command environment](#command-environment) policy), `file_access` (`deny_read`, `deny_write`; only with [file access](#restricting-file-access) rules), `web_fetch` (`allowed_domains`; only with [web fetch](#web-fetch) on), `lsp` (`servers`, the configured names; only with [language servers](#language-servers-lsp) on), `scoped_agents_md_enabled` and `scoped_agents_md` (scoped files already in context, `[]` for a fresh run; only with [`--scoped-agents-md`](#project-instructions-agentsmd) on), `additional_dirs` (`path`, `mode`; only with [additional directories](#additional-directories)), `worktree` (`path`, `branch`, `base_commit`, `repo_root`; only with [`--worktree`](#worktrees)) |
 | `assistant.message` | `text` (complete assistant message) |
 | `tool.call` | `id`, `name`, `arguments` (decoded JSON value, or a string if malformed) |
 | `tool.result` | `id`, `name`, `output` (same configured truncation as tool output), `is_error`; with [tool output files](#tool-output-files), a saved result also has `output_file` (path relative to `--cwd`) and `output_bytes` |
@@ -149,6 +150,8 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 | `sandbox.network_denied` | `host`, `port`, `reason`; the sandbox allowlist proxy refused a request from a command (see [Network allowlist](#network-allowlist)) |
 | `web_fetch` | `url`, `final_url`, `status`, `content_type`, `bytes`, `truncated`, `duration_ms`, and `denied_reason` (for a refused URL) or `error` (for a failed fetch); one per fetch attempt, emitted before its `tool.result` (see [Web fetch](#web-fetch)) |
 | `lsp.server` | `name`, `state` (`started`, `unavailable`, `crashed` or `stopped`), `reason` (for `unavailable` and `crashed`); one per language-server state change (see [Language servers (LSP)](#language-servers-lsp)) |
+| `instructions.loaded` | `path`, `scope_dir` (both relative to `--cwd`), `bytes` (file size), `truncated`, `tool`, `tool_call_id`, `step`; a scoped `AGENTS.md` was appended to that call's result, emitted before its `tool.result` (only with [`--scoped-agents-md`](#project-instructions-agentsmd)) |
+| `instructions.skipped` | `path`, `scope_dir`, `reason` (`file_access`, `outside_root`, `modified`, `read_error` or `cap`), `tool`, `tool_call_id`, `step`, and `error` for `read_error`; a scoped `AGENTS.md` that applied was not delivered |
 | `provider.retry` | `attempt` (the upcoming attempt number), `reason` (`http_<status>` or `network`), `backoff_ms`; only emitted when a model request is retried |
 | `model.fallback` | `step`, `from`, `to`, `reason` (`http_<status>` or `network`), `attempts`; the run switched to the next [fallback model](#model-fallback) after `from` used up its retries |
 | `result` | `status`, `submission`, cumulative `steps`, `structured_output` (only with `--output-schema` and status `Submitted`), `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cost_usd`, invocation `duration_ms` |
@@ -296,6 +299,24 @@ cat next.md | tinyagent --resume fix.json -t - --cwd . -o next.json
 
 Unless `--no-agents-md` is set, tinyagent looks for `AGENTS.md` starting at `--cwd` and walking up through its parents, stopping at the repository root (the nearest directory containing `.git`). The nearest file wins, and only that one is added to the system prompt. Without a `.git` above `--cwd`, only `<cwd>/AGENTS.md` is checked. The lookup never goes above the repository root, and `-v` prints which file was loaded. This only changes the prompt: tools are still confined to `--cwd`.
 
+#### Scoped AGENTS.md in subdirectories
+
+Monorepos often keep instructions next to the code they cover, such as `services/api/AGENTS.md`. With `--scoped-agents-md` (or `scoped_agents_md: true`), tinyagent also delivers those files, lazily: the first time a successful built-in file tool call touches a path below `--cwd`, every `AGENTS.md` in a directory between `--cwd` (exclusive) and that path is appended to the call's result, outermost first. The startup file above stays in the system prompt and is never sent again. It is off by default; with it off, prompts, tool results, and checkpoints are unchanged.
+
+```
+[AGENTS.md for services/api/ (812 bytes): instructions for files under services/api/; they take precedence over broader project instructions there]
+...file contents...
+[end AGENTS.md for services/api/]
+```
+
+- **Triggers:** `read_file`, `write_file`, `edit_file`, `view_image`, `lsp`, every path of an `apply_patch` (including move targets), and the directory argument of `list_files` and `grep` (so `grep` from `--cwd` itself triggers nothing). `bash`, background processes, MCP tools, and failed or denied calls never trigger delivery.
+- **Once per context:** a file is sent once while its block is still in the model's context. If [compaction](#long-runs) elides or summarizes that result, the file is sent again on the next access; it is not pinned. Subagents start with nothing delivered, and `--resume` doesn't resend files the checkpoint already has in context.
+- **Limits:** each file is capped at 32 KiB (cut on a UTF-8 boundary, with `[AGENTS.md truncated]`), and a run delivers at most 64 KiB of distinct scoped files; past that, the result gets a one-line notice instead and stderr a warning. Blocks are added after `max_output_chars` truncation and hook feedback, so they are never cut off, and `post_tool` hooks see them.
+- **Safety:** files denied by [`file_access`](#restricting-file-access) and symlinks resolving outside `--cwd` are skipped (`-v` prints a line). A file modified after the run started (by the model or anything else) is not delivered, so the model can't inject instructions into its own context. Empty, unreadable, or non-UTF-8 files are skipped with a warning; the run continues.
+- **Records:** `-v` prints each loaded file, `--json` emits `instructions.loaded` and `instructions.skipped`, and `-o` trajectories record `scoped_agents_md_enabled`, `scoped_agents_md` (files in context) and `scoped_agents_md_loads`. `--resume` keeps the checkpoint's setting; a conflicting `--scoped-agents-md` exits 2. `--no-agents-md` turns scoped delivery off too, and combining the two flags exits 2.
+
+**Trust:** like the startup file, a scoped `AGENTS.md` is prompt input that can steer the agent, so only enable this for repositories you trust. Configs with `scoped_agents_md` fail to load on older tinyagent versions, which reject unknown keys.
+
 ### Agent Skills
 
 With `--skills` (or `skills: true`), tinyagent discovers [Agent Skills](https://agentskills.io): folders containing a `SKILL.md` with YAML frontmatter (`name` and `description`) and Markdown instructions, optionally with `scripts/`, `references/`, or `assets/`. Skills are off by default.
@@ -362,6 +383,7 @@ plan:
   enabled: false          # give the model the update_plan tool (same as --plan)
 skills: false             # discover Agent Skills and offer the skill tool (same as --skills)
 apply_patch: false        # offer the apply_patch tool (same as --apply-patch)
+scoped_agents_md: false   # deliver AGENTS.md files below --cwd on first access (same as --scoped-agents-md)
 subagents:
   enabled: false          # offer the delegate tool (same as --subagents)
   model: ""               # child model, e.g. openai/gpt-5-mini; empty uses the parent model
@@ -563,7 +585,7 @@ If a provider rejects a request as too long (`prompt is too long`, `context_leng
 
 The window comes from a small built-in table (`internal/model/context.go`), a named provider's per-model `context_window` (see [Named providers](#named-providers)), or top-level `context_window` in the config, which wins. Without either, only the retry-on-error path runs. Each compaction prints one line to stderr, such as `compacted context: ~182,000 → ~31,000 tokens (summarized 41 messages)`. The summary request's tokens and cost count toward the run's totals and `--cost-limit`, but not `--step-limit`. With `-o`, the trajectory keeps every original message, and `compactions` records each one: the step, the estimates before and after, the stage, the summary, and which messages the model was sent next.
 
-Summaries lose detail. Put instructions that must hold for the whole run in `AGENTS.md`, which is part of the system prompt and never compacted. `--no-compact` turns all of this off.
+Summaries lose detail. Put instructions that must hold for the whole run in `AGENTS.md`, which is part of the system prompt and never compacted. Scoped `AGENTS.md` files from [`--scoped-agents-md`](#scoped-agentsmd-in-subdirectories) live in tool results instead, so they can be compacted away; they are sent again the next time the agent touches their directory. `--no-compact` turns all of this off.
 
 ### Plan tool
 

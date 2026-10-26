@@ -33,6 +33,11 @@ func TestSchemaV2Validation(t *testing.T) {
 			c.PendingCalls = []PendingCall{{ID: "a", Name: "list_files"}}
 		}, "pending"},
 		{"v1 with pending", func(c *Trajectory) { pending(c); c.SchemaVersion = 1 }, "version 2 fields"},
+		{"v1 with scoped AGENTS.md", func(c *Trajectory) { c.SchemaVersion, c.ScopedAgentsMDEnabled = 1, true }, "version 2 fields"},
+		{"v2 with scoped AGENTS.md", func(c *Trajectory) {
+			c.SchemaVersion, c.ScopedAgentsMDEnabled = 2, true
+			c.ScopedAgentsMDLoads = []ScopedAgentsMDLoad{{Path: "pkg/AGENTS.md", ScopeDir: "pkg/", Bytes: 3, Delivered: 3, Tool: "read_file", ToolCallID: "b", Step: 1, Message: 4}}
+		}, ""},
 		{"plan while disabled", func(c *Trajectory) { c.SchemaVersion = 2; c.Plan = &Plan{Version: 1} }, "not enabled"},
 		{"invalid plan", func(c *Trajectory) {
 			c.SchemaVersion, c.PlanEnabled = 2, true

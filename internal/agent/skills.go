@@ -159,7 +159,9 @@ func (a *Agent) execTool(ctx context.Context, t *trajectory.Trajectory, call mod
 	if name, file, ok := skillCallArgs(call); ok && file == "" && a.Tools.Skills.Len() > 0 && a.view != nil && a.skillInContext(t, a.view, name) {
 		return tools.Result{Text: fmt.Sprintf("skill %q is already loaded earlier in this conversation; follow those instructions (no second copy was added)", name)}
 	}
-	return a.Tools.RunResult(ctx, call)
+	res := a.Tools.RunResult(ctx, call)
+	a.deliverScoped(t, call, &res)
+	return res
 }
 
 func (a *Agent) skillInContext(t *trajectory.Trajectory, v *view, name string) bool {

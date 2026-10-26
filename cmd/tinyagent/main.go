@@ -53,6 +53,7 @@ type options struct {
 	webFetch                                         bool
 	webFetchAllowDomains                             domainList
 	lsp                                              bool
+	scopedAgentsMD                                   bool
 	toolOutputFiles                                  bool
 	skills, noSkills                                 bool
 	reasoningEffort                                  string
@@ -104,6 +105,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.verbose, "v", false, "shorthand for --verbose")
 	fs.BoolVar(&o.noStream, "no-stream", false, "wait for full responses instead of streaming")
 	fs.BoolVar(&o.noAgentsMD, "no-agents-md", false, "don't add AGENTS.md (nearest, up to the repo root) to the system prompt")
+	fs.BoolVar(&o.scopedAgentsMD, "scoped-agents-md", false, "also deliver AGENTS.md files in directories below --cwd, appended to the first file tool result that touches a path there (default off; config scoped_agents_md)")
 	fs.BoolVar(&o.noCompact, "no-compact", false, "don't compact the history when it nears the context window")
 	fs.BoolVar(&o.readOnly, "read-only", false, "allow only read_file, list_files, and grep; blocks edits and commands")
 	fs.BoolVar(&o.sandbox, "sandbox", false, "confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths")
@@ -208,6 +210,10 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "error: --to and --dry-run apply only to --rewind")
 		return 2
 	}
+	if o.noAgentsMD && o.scopedAgentsMD {
+		fmt.Fprintln(os.Stderr, "error: --no-agents-md and --scoped-agents-md can't be combined: --no-agents-md turns off all AGENTS.md handling, scoped files included; drop one of them")
+		return 2
+	}
 	if o.resume != "" {
 		if flagWasSet(fs, "output-schema") {
 			fmt.Fprintln(os.Stderr, "error: --resume and --output-schema are mutually exclusive; runs with an output schema cannot be resumed")
@@ -283,6 +289,9 @@ func run() int {
 	}
 	if flagWasSet(fs, "lsp") {
 		cfg.LSP.Enabled = o.lsp
+	}
+	if flagWasSet(fs, "scoped-agents-md") {
+		cfg.ScopedAgentsMD = o.scopedAgentsMD
 	}
 	if code := checkLSP(cfg, cfgPath, ""); code != 0 {
 		return code
@@ -463,18 +472,19 @@ func run() int {
 			MaxImageBytes:      cfg.MaxImageBytes,
 			ExternalCallImages: mcpRegistry.CallImages(cfg.MaxImageBytes),
 		},
-		Config:       cfg,
-		Hooks:        hookRunner,
-		Out:          outputTo(runOutput(o.jsonOutput), progress),
-		Err:          os.Stderr,
-		Verbose:      o.verbose,
-		Streamed:     !o.noStream,
-		SkipAgentsMD: o.noAgentsMD,
-		NoCompact:    o.noCompact,
-		OutputSchema: schema,
-		Snapshots:    snaps,
-		Subagents:    subagents,
-		Worktree:     worktree,
+		Config:         cfg,
+		Hooks:          hookRunner,
+		Out:            outputTo(runOutput(o.jsonOutput), progress),
+		Err:            os.Stderr,
+		Verbose:        o.verbose,
+		Streamed:       !o.noStream,
+		SkipAgentsMD:   o.noAgentsMD,
+		ScopedAgentsMD: cfg.ScopedAgentsMD && !o.noAgentsMD,
+		NoCompact:      o.noCompact,
+		OutputSchema:   schema,
+		Snapshots:      snaps,
+		Subagents:      subagents,
+		Worktree:       worktree,
 	}
 	var events *runEvents
 	warn := func(msg string) { events.warn(msg) }
@@ -690,6 +700,11 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return 2
 	}
 	cfg.LSP.Enabled = src.LSPEnabled
+	if flagWasSet(fs, "scoped-agents-md") && o.scopedAgentsMD != src.ScopedAgentsMDEnabled {
+		fmt.Fprintln(os.Stderr, "error: resume: --scoped-agents-md conflicts with the checkpoint's recorded scoped_agents_md setting; start a fresh task")
+		return 2
+	}
+	cfg.ScopedAgentsMD = src.ScopedAgentsMDEnabled
 	if on, set, err := skillsFlag(fs, *o); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
@@ -871,20 +886,21 @@ func runResume(o *options, fs *flag.FlagSet) int {
 			ExtraDirs:      extraDirs,
 			MaxImageBytes:  cfg.MaxImageBytes,
 		},
-		Config:       cfg,
-		Hooks:        hookRunner,
-		Out:          runOutput(o.jsonOutput),
-		Err:          os.Stderr,
-		Verbose:      o.verbose,
-		Streamed:     !o.noStream,
-		SkipAgentsMD: src.SkipAgentsMD,
-		NoCompact:    o.noCompact,
-		Resume:       src,
-		ResumeSource: o.resume,
-		Worktree:     src.Worktree,
-		Snapshots:    snaps,
-		FollowUp:     followUp,
-		Subagents:    subagents,
+		Config:         cfg,
+		Hooks:          hookRunner,
+		Out:            runOutput(o.jsonOutput),
+		Err:            os.Stderr,
+		Verbose:        o.verbose,
+		Streamed:       !o.noStream,
+		SkipAgentsMD:   src.SkipAgentsMD,
+		ScopedAgentsMD: src.ScopedAgentsMDEnabled,
+		NoCompact:      o.noCompact,
+		Resume:         src,
+		ResumeSource:   o.resume,
+		Worktree:       src.Worktree,
+		Snapshots:      snaps,
+		FollowUp:       followUp,
+		Subagents:      subagents,
 	}
 	var events *runEvents
 	warn := func(msg string) { events.warn(msg) }
@@ -1255,7 +1271,7 @@ var usageGroups = []struct {
 	{"", [][3]string{{"h", "help", ""}}},
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
-	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
+	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}}},
 }
@@ -1581,6 +1597,14 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	}
 	if l := a.Tools.LSP; l != nil {
 		started["lsp"] = map[string]any{"servers": l.Manager.Names()}
+	}
+	if a.ScopedAgentsMD && !a.SkipAgentsMD {
+		delivered := []string{}
+		if resumed {
+			delivered = append(delivered, agent.ScopedAgentsMDDelivered(a.Resume)...)
+		}
+		started["scoped_agents_md_enabled"] = true
+		started["scoped_agents_md"] = delivered
 	}
 	if wt := a.Worktree; wt != nil {
 		started["worktree"] = map[string]any{"path": wt.Path, "branch": wt.Branch, "base_commit": wt.BaseCommit, "repo_root": wt.RepoRoot}
