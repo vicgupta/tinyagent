@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/vicgupta/tinyagent/internal/model"
 )
@@ -29,6 +30,37 @@ func SniffImage(data []byte) string {
 		return mime
 	}
 	return ""
+}
+
+// LoadImageFile reads a user-chosen image file (an --image attachment). The
+// path is not sandboxed. The type is sniffed from content, and the image's
+// Label is the file's base name, so no absolute path reaches the model.
+func LoadImageFile(path string, maxBytes int) (model.Image, error) {
+	if maxBytes <= 0 {
+		maxBytes = DefaultMaxImageBytes
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return model.Image{}, err
+	}
+	if fi.IsDir() {
+		return model.Image{}, fmt.Errorf("%s is a directory, not an image", path)
+	}
+	if fi.Size() > int64(maxBytes) {
+		return model.Image{}, fmt.Errorf("%s is %s bytes; max_image_bytes is %s", path, model.FormatBytes(int(fi.Size())), model.FormatBytes(maxBytes))
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return model.Image{}, err
+	}
+	if len(data) > maxBytes {
+		return model.Image{}, fmt.Errorf("%s is %s bytes; max_image_bytes is %s", path, model.FormatBytes(len(data)), model.FormatBytes(maxBytes))
+	}
+	mime := SniffImage(data)
+	if mime == "" {
+		return model.Image{}, fmt.Errorf("%s is not a PNG, JPEG, GIF, or WebP image", path)
+	}
+	return model.NewImage(mime, filepath.Base(path), data), nil
 }
 
 // ViewImage reads an image under root. The text names the path, MIME type,

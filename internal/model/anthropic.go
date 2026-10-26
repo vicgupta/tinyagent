@@ -118,6 +118,10 @@ func toAnthropic(messages []Message) (string, []anthropicMessage) {
 		case "system":
 			system = append(system, m.Content)
 		case "user":
+			if len(m.Images) > 0 {
+				addRaw("user", anthropicUserImages(m))
+				continue
+			}
 			if m.Content != "" {
 				add("user", anthropicBlock{Type: "text", Text: m.Content})
 			}
@@ -352,15 +356,34 @@ func anthropicReplay(m Message) ([]json.RawMessage, bool) {
 	return raw, true
 }
 
+// anthropicUserImages is a user message with task attachments: one base64
+// image block per image, then the text, as Anthropic recommends.
+func anthropicUserImages(m Message) []json.RawMessage {
+	var blocks []json.RawMessage
+	for _, im := range m.Images {
+		raw, _ := json.Marshal(anthropicImageBlock(im))
+		blocks = append(blocks, raw)
+	}
+	if m.Content != "" {
+		raw, _ := json.Marshal(anthropicBlock{Type: "text", Text: m.Content})
+		blocks = append(blocks, raw)
+	}
+	return blocks
+}
+
+func anthropicImageBlock(im Image) map[string]any {
+	return map[string]any{
+		"type":   "image",
+		"source": map[string]any{"type": "base64", "media_type": im.MIMEType, "data": im.Data},
+	}
+}
+
 // anthropicImageResult is a tool_result whose content is a text block
 // followed by one base64 image block per image.
 func anthropicImageResult(m Message) json.RawMessage {
 	content := []map[string]any{{"type": "text", "text": m.Content}}
 	for _, im := range m.Images {
-		content = append(content, map[string]any{
-			"type":   "image",
-			"source": map[string]any{"type": "base64", "media_type": im.MIMEType, "data": im.Data},
-		})
+		content = append(content, anthropicImageBlock(im))
 	}
 	raw, _ := json.Marshal(map[string]any{"type": "tool_result", "tool_use_id": m.ToolCallID, "content": content})
 	return raw
