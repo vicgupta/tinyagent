@@ -12,10 +12,14 @@ import (
 
 	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/lsp/lsptest"
+	"github.com/vicgupta/tinyagent/internal/tools"
 )
 
 func TestMain(m *testing.M) {
 	lsptest.Run()
+	if len(os.Args) > 1 && os.Args[1] == tools.SandboxHelperArg {
+		os.Exit(tools.RunSandboxHelper(os.Args[2:]))
+	}
 	os.Exit(m.Run())
 }
 

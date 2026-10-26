@@ -123,6 +123,11 @@ type Agent struct {
 	// checkpoint's question. It must be empty for an unfinished checkpoint
 	// and set for the others.
 	FollowUp string
+	// Continue marks Resume as the trajectory this process's previous Run
+	// returned (an ACP session's earlier turn), not a loaded checkpoint:
+	// the checks against changes between invocations are skipped, and
+	// FollowUp continues it whatever status that turn ended with.
+	Continue bool
 	// TaskImages (--image) are attached to the task message of a fresh run,
 	// or to the follow-up message with FollowUp. The message text gets one
 	// label line per image.
@@ -248,11 +253,13 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			t.ExitStatus, t.Submission = StatusError, "resume model differs from checkpoint"
 			return t
 		}
-		if err := ValidateResume(t, a.Config, a.Tools.Root); err != nil {
-			t.ExitStatus, t.Submission = StatusError, err.Error()
-			return t
+		if !a.Continue {
+			if err := ValidateResume(t, a.Config, a.Tools.Root); err != nil {
+				t.ExitStatus, t.Submission = StatusError, err.Error()
+				return t
+			}
 		}
-		finished := trajectory.Finished(t.ExitStatus)
+		finished := trajectory.Finished(t.ExitStatus) || (a.Continue && t.ExitStatus != StatusNeedsInput)
 		asked := t.ExitStatus == StatusNeedsInput
 		if asked && a.FollowUp == "" {
 			t.ExitStatus, t.Submission = StatusError, "checkpoint is waiting for an answer to its question; answer it with a follow-up task"

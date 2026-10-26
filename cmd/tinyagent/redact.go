@@ -24,7 +24,7 @@ type namedSecret struct{ name, value string }
 func configSecrets(cfg config.AgentConfig) []namedSecret {
 	var out []namedSecret
 	for _, s := range cfg.MCPServers {
-		for _, kv := range s.Env {
+		for _, kv := range append(append([]string(nil), s.Env...), s.SetEnv...) {
 			if k, v, ok := strings.Cut(kv, "="); ok {
 				out = append(out, namedSecret{k, v})
 			}

@@ -69,7 +69,11 @@ func Start(ctx context.Context, root string, cfg []config.MCPServer, stderr io.W
 			r.Close()
 			return nil, err
 		}
-		fmt.Fprintf(stderr, "mcp: enabled server %s (%d selected tools)\n", def.Alias, len(def.Tools))
+		if def.AllTools {
+			fmt.Fprintf(stderr, "mcp: enabled server %s (all tools)\n", def.Alias)
+		} else {
+			fmt.Fprintf(stderr, "mcp: enabled server %s (%d selected tools)\n", def.Alias, len(def.Tools))
+		}
 	}
 	if len(r.Specs) == 0 {
 		r.Close()
@@ -101,6 +105,7 @@ func (r *Registry) start(ctx context.Context, root string, def config.MCPServer,
 	for _, k := range def.Env {
 		env = append(env, k+"="+os.Getenv(k)) // presence checked by validateDefinitions
 	}
+	env = append(env, def.SetEnv...)
 	cmd := exec.Command(def.Command, def.Args...)
 	cmd.Dir = root
 	cmd.Env = env
@@ -135,7 +140,7 @@ func (r *Registry) start(ctx context.Context, root string, def config.MCPServer,
 			return fmt.Errorf("mcp server %q: discovery exceeds %d tools", def.Alias, maxTools)
 		}
 		for _, t := range res.Tools {
-			if t == nil || !selected[t.Name] {
+			if t == nil || (!def.AllTools && !selected[t.Name]) {
 				continue
 			}
 			found[t.Name] = true
@@ -148,6 +153,12 @@ func (r *Registry) start(ctx context.Context, root string, def config.MCPServer,
 				return fmt.Errorf("mcp server %q: external tool name collision %q", def.Alias, name)
 			}
 			params, err := schema(t.InputSchema)
+			if err != nil && def.AllTools {
+				// Unlike an allowlisted tool, one the server merely lists is
+				// left out instead of failing the server.
+				fmt.Fprintf(stderr, "mcp: server %s: skipping tool %q: unsupported input schema: %v\n", def.Alias, t.Name, err)
+				continue
+			}
 			if err != nil {
 				return fmt.Errorf("mcp server %q tool %q: unsupported input schema: %w", def.Alias, t.Name, err)
 			}
@@ -190,7 +201,7 @@ func validateDefinitions(cfg []config.MCPServer) error {
 			return fmt.Errorf("mcp server %q: alias must be unique and contain only letters, digits, _ or -", def.Alias)
 		}
 		aliases[def.Alias] = true
-		if strings.TrimSpace(def.Command) == "" || len(def.Tools) == 0 {
+		if strings.TrimSpace(def.Command) == "" || (len(def.Tools) == 0 && !def.AllTools) {
 			return fmt.Errorf("mcp server %q: command and a nonempty tools allowlist are required", def.Alias)
 		}
 		if def.DiscoveryTimeoutSec < 0 || def.DiscoveryTimeoutSec > 300 || def.CallTimeoutSec < 0 || def.CallTimeoutSec > 600 {

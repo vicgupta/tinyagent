@@ -180,3 +180,39 @@ func TestFollowUpCompactedRun(t *testing.T) { // AC12
 		t.Fatal("follow-up re-summarized")
 	}
 }
+
+// An in-process continuation (ACP session turns) sends the provider exactly
+// what --resume -t of the saved checkpoint sends, and also continues turns
+// that did not finish, such as an interrupted one.
+func TestContinueMatchesFollowUp(t *testing.T) {
+	a, tr := finishedRun(t, model.Message{Role: "assistant", Content: "found two races\n" + SubmitMarker})
+	saved := roundTrip(t, tr)
+	reply := []model.Message{{Role: "assistant", Content: "fixed\n" + SubmitMarker}}
+
+	viaFile := &scripted{replies: reply}
+	a.Model, a.Resume, a.FollowUp = viaFile, saved, "fix the races you found"
+	a.cur, a.view = nil, nil
+	if got := a.Run(context.Background(), ""); got.ExitStatus != StatusSubmitted {
+		t.Fatalf("resume: %s %s", got.ExitStatus, got.Submission)
+	}
+	inProcess := &scripted{replies: reply}
+	a.Model, a.Resume, a.Continue = inProcess, tr, true
+	if got := a.Run(context.Background(), ""); got.ExitStatus != StatusSubmitted {
+		t.Fatalf("continue: %s %s", got.ExitStatus, got.Submission)
+	}
+	if !reflect.DeepEqual(inProcess.seen, viaFile.seen) {
+		t.Fatalf("continuation request differs from --resume -t:\n%+v\n%+v", inProcess.seen, viaFile.seen)
+	}
+
+	// An interrupted turn continues with the new instruction too.
+	tr.ExitStatus, tr.Submission = StatusInterrupted, ""
+	next := &scripted{replies: reply}
+	a.Model, a.Resume, a.FollowUp = next, tr, "carry on"
+	if got := a.Run(context.Background(), ""); got.ExitStatus != StatusSubmitted || got.Resume.ExitStatus != StatusInterrupted {
+		t.Fatalf("after interrupt: %s %s", got.ExitStatus, got.Submission)
+	}
+	last := next.seen[0][len(next.seen[0])-1]
+	if last.Role != "user" || !strings.HasSuffix(last.Content, "carry on") {
+		t.Fatalf("follow-up message: %+v", last)
+	}
+}

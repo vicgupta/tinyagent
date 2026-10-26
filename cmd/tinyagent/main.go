@@ -84,6 +84,7 @@ type options struct {
 	initConfig                                       bool
 	review                                           bool
 	reviewBase, reviewCommit                         string
+	acp                                              bool
 }
 
 // newFlagSet defines the command-line flags, storing their values in o. Each
@@ -159,6 +160,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.doUpdate, "update", false, "update to the latest release and exit")
 	fs.BoolVar(&o.initConfig, "init-config", false, "write a commented starter config to the user config path (or -c), refusing to overwrite, and exit")
 	fs.BoolVar(&o.check, "check", false, "print the resolved config, model, provider key status, fallbacks, cwd and limits, then exit; makes no model request")
+	fs.BoolVar(&o.acp, "acp", false, "serve the Agent Client Protocol on stdin/stdout for editors such as Zed and JetBrains IDEs (experimental): each session runs in the client's cwd with this config and flags; limits apply per prompt")
 	fs.StringVar(&o.completion, "completion", "", "print a completion script for this shell (only bash is supported) and exit; load it with: source <(tinyagent --completion bash)")
 	return fs
 }
@@ -179,6 +181,12 @@ func run() int {
 	if o.showHelp {
 		printUsage(helpOutput, fs)
 		return 0
+	}
+	if o.acp {
+		if f := acpConflict(fs); f != "" {
+			fmt.Fprintf(fs.Output(), "error: --acp can't be combined with %s: the editor supplies each session's prompts and cwd\n", f)
+			return 2
+		}
 	}
 	if flagWasSet(fs, "transcript") {
 		return runTranscript(&o, fs, os.Stdout)
@@ -204,6 +212,9 @@ func run() int {
 	if msg := validateLimits(o); msg != "" {
 		fmt.Fprintln(fs.Output(), "error: "+msg)
 		return 2
+	}
+	if o.acp {
+		return runACP(&o, fs, os.Stdin, os.Stdout)
 	}
 	review, err := reviewSelection(fs, &o)
 	if err != nil {
@@ -1214,8 +1225,17 @@ func envConflict(cfg config.AgentConfig) string {
 // container environment, which the servers (host processes) would escape.
 // It returns the exit code (0 when fine).
 func checkLSP(cfg config.AgentConfig, cfgPath, prefix string) int {
+	if err := lspError(cfg, cfgPath); err != nil {
+		fmt.Fprintln(os.Stderr, "error: "+prefix+err.Error())
+		return 2
+	}
+	return 0
+}
+
+// lspError is checkLSP's error, or nil.
+func lspError(cfg config.AgentConfig, cfgPath string) error {
 	if !cfg.LSP.Enabled {
-		return 0
+		return nil
 	}
 	err := cfg.LSP.CheckEnabled(cfgPath)
 	if err == nil {
@@ -1224,11 +1244,7 @@ func checkLSP(cfg config.AgentConfig, cfgPath, prefix string) int {
 	if err == nil && (cfg.Sandbox || cfg.Environment == "container") {
 		err = errors.New("lsp can't be combined with --sandbox or --env container: language servers run on the host, outside the sandbox or container; turn lsp off for this run")
 	}
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "error: "+prefix+err.Error())
-		return 2
-	}
-	return 0
+	return err
 }
 
 // newLSP returns the executor's language-server settings, or nil when lsp
@@ -1477,7 +1493,7 @@ var usageGroups = []struct {
 	flags [][3]string
 }{
 	{"", [][3]string{{"h", "help", ""}}},
-	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "profile", "name"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}, {"", "ask-user", ""}}},
+	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "profile", "name"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}, {"", "ask-user", ""}, {"", "acp", ""}}},
 	{"Review", [][3]string{{"", "review", ""}, {"", "review-base", "ref"}, {"", "review-commit", "rev"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},

@@ -173,3 +173,21 @@ func TestCallImagesPassesThroughWithCaps(t *testing.T) {
 		t.Errorf("oversize: %d images, %q", len(images), text)
 	}
 }
+
+// A client-supplied server (ACP) sets its env values itself and exposes
+// every tool it lists.
+func TestAllToolsAndSetEnv(t *testing.T) {
+	def := config.MCPServer{Alias: "docs", Command: os.Args[0], Args: []string{"-test.run=^TestMCPFixtureProcess$"}, SetEnv: []string{"TINYAGENT_MCP_FIXTURE=1"}, AllTools: true}
+	var stderr bytes.Buffer
+	r, err := Start(context.Background(), t.TempDir(), []config.MCPServer{def}, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if len(r.Specs) < 3 || !strings.Contains(stderr.String(), "docs (all tools)") {
+		t.Fatalf("catalog = %d tools, stderr %q", len(r.Specs), stderr.String())
+	}
+	if _, err := Start(context.Background(), t.TempDir(), []config.MCPServer{{Alias: "x", Command: "x"}}, &stderr); err == nil {
+		t.Error("a config server without a tools allowlist was accepted")
+	}
+}
