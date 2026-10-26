@@ -85,6 +85,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--fallback-model <spec>` | config `fallback_models`, else none | Model to switch to when the current one keeps failing with `429`, `5xx` or network errors after retries; repeatable, tried in order, at most 3, and replaces `fallback_models`; see [Model fallback](#model-fallback) |
 | `--no-fallback` | off | Don't fall back to other models (clears `fallback_models`); conflicts with `--fallback-model` |
 | `--openai-api` | config `openai_api`, else `auto` | Transport for the `openai` provider: `auto`, `responses`, or `chat`; see [OpenAI transport](#openai-transport) |
+| `--init-config` | | Write a commented starter config to the user config path (or `-c PATH`), refuse overwrites, and exit |
 | `-c, --config` | user config, else built-in | YAML config file; see [Config](#config) |
 | `--cwd` | `.` | Root directory; tools can't reach outside it |
 | `--worktree[=name]` | off | Run in a new Git worktree at `<repo>/.tinyagent/worktrees/<name>` on branch `tinyagent/<name>`, created from `HEAD` of the repository containing `--cwd` and kept afterwards; the name is generated when omitted. Can't be combined with `--resume` or `--rewind`. See [Worktrees](#worktrees) |
@@ -344,6 +345,8 @@ With `--skills` (or `skills: true`), tinyagent discovers [Agent Skills](https://
 **Trust:** skill instructions are prompt input. A project skill from a repository you don't trust can steer the agent like a malicious AGENTS.md, and bundled scripts run with your permissions if the agent invokes them. Skill text sent to the model goes to your model provider like any other prompt, and the trajectory records loaded skill content.
 
 ## Config
+
+Run `tinyagent --init-config` to create a commented starter config at the default path below, or `tinyagent --init-config -c PATH` to choose a path; it creates parent directories, writes with mode 0600, refuses existing files (exit 2), and makes no model request. It cannot be combined with `-t`, `--resume`, `--rewind`, or `--update`.
 
 Without `-c`, tinyagent loads a per-user config file if one exists, so settings you always want don't need a flag:
 

@@ -378,6 +378,7 @@ Other:
   -V, --version                      print the version and exit
       --update                       update to the latest release and exit
       --check                        print the resolved config, model, provider key status, fallbacks, cwd and limits, then exit; makes no model request
+      --init-config                  write a commented starter config to the user config path (or -c), refusing to overwrite, and exit
 
 Examples:
   tinyagent -t "fix the failing test" -m anthropic/claude-sonnet-4
