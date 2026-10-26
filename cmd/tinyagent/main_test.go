@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/agent"
 	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/eventlog"
+	"github.com/vicgupta/tinyagent/internal/mcptools"
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
@@ -308,6 +310,25 @@ func TestReadOnlyStartsNoMCPServers(t *testing.T) {
 	}
 	if got := mcpServers(&w, config.AgentConfig{ReadOnly: true, MCPServers: servers}); got != nil || !strings.Contains(w.String(), "not started") {
 		t.Errorf("read-only mode: servers %v, note %q", got, w.String())
+	}
+}
+
+// TestRunStartedListsMCPResourcePatterns: run.started names each server's
+// resource patterns only when the resource tools are offered.
+func TestRunStartedListsMCPResourcePatterns(t *testing.T) {
+	a := newTestAgent(t, &replies{})
+	a.Config.MCPServers = []config.MCPServer{{Alias: "docs", Resources: []string{"docs://guides/*"}}, {Alias: "gh", Tools: []string{"search"}}}
+	started := func() string {
+		var out bytes.Buffer
+		startEvents(&out, true, a, false, func() {}, nil)
+		return out.String()
+	}
+	if got := started(); strings.Contains(got, "mcp_resources") {
+		t.Errorf("run.started without resource tools = %s", got)
+	}
+	a.Tools.ExternalSpecs = []model.ToolSpec{{Type: "function", Function: model.FunctionSpec{Name: mcptools.ReadResourceTool}}}
+	if got := started(); !strings.Contains(got, `"mcp_resources":{"docs":["docs://guides/*"]}`) {
+		t.Errorf("run.started = %s", got)
 	}
 }
 

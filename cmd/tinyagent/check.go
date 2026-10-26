@@ -152,6 +152,9 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 		"cost " + limitText(fs, "cost-limit", cfg.CostLimit > 0, formatCost(cfg.CostLimit)),
 		"time " + limitText(fs, "time-limit", cfg.WallTimeSec > 0, fmt.Sprintf("%ds", cfg.WallTimeSec)),
 	}, ", "))
+	for _, s := range cfg.MCPServers {
+		add("mcp", fmt.Sprintf("%s: %d tools, %d resource patterns", s.Alias, len(s.Tools), len(s.Resources)))
+	}
 	if flagWasSet(fs, "ask-user") {
 		cfg.AskUser.Enabled = o.askUser
 	}

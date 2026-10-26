@@ -539,6 +539,54 @@ func validateAccessPattern(p string) error {
 	return nil
 }
 
+// validateMCPServers checks each server's allowlists: a nonempty tools or
+// resources list, and well-formed resource patterns.
+func validateMCPServers(servers []MCPServer) error {
+	for _, def := range servers {
+		if len(def.Tools) == 0 && len(def.Resources) == 0 {
+			return fmt.Errorf("mcp server %q: a nonempty tools or resources allowlist is required", def.Alias)
+		}
+		if err := ValidateResourcePatterns(def.Resources); err != nil {
+			return fmt.Errorf("mcp server %q: %w", def.Alias, err)
+		}
+	}
+	return nil
+}
+
+// ValidateResourcePatterns rejects empty, duplicate and bare "*" resource
+// patterns, and "*" anywhere but at the end.
+func ValidateResourcePatterns(patterns []string) error {
+	seen := map[string]bool{}
+	for _, p := range patterns {
+		switch {
+		case p == "" || p == "*":
+			return fmt.Errorf("resources pattern %q must be a URI or a URI prefix ending in *", p)
+		case strings.Contains(strings.TrimSuffix(p, "*"), "*"):
+			return fmt.Errorf("resources pattern %q: * is allowed only at the end", p)
+		case seen[p]:
+			return fmt.Errorf("resources pattern %q is duplicated", p)
+		}
+		seen[p] = true
+	}
+	return nil
+}
+
+// MatchResource reports whether uri matches one of patterns: equal to an
+// exact pattern, or starting with the text before a trailing "*". URIs are
+// compared literally, without normalization or decoding.
+func MatchResource(patterns []string, uri string) bool {
+	for _, p := range patterns {
+		if prefix, ok := strings.CutSuffix(p, "*"); ok {
+			if strings.HasPrefix(uri, prefix) {
+				return true
+			}
+		} else if uri == p {
+			return true
+		}
+	}
+	return false
+}
+
 // InvalidError is a config error that should exit with usage status 2.
 type InvalidError struct{ Err error }
 
@@ -567,12 +615,16 @@ type CommandTool struct {
 	Dir string `yaml:"dir,omitempty"`
 }
 
-// MCPServer grants access to selected tools from one local stdio server.
+// MCPServer grants access to selected tools and resources from one local
+// stdio server. At least one of Tools and Resources must be nonempty.
 type MCPServer struct {
-	Alias               string   `yaml:"alias"`
-	Command             string   `yaml:"command"`
-	Args                []string `yaml:"args,omitempty"`
-	Tools               []string `yaml:"tools"`
+	Alias   string   `yaml:"alias"`
+	Command string   `yaml:"command"`
+	Args    []string `yaml:"args,omitempty"`
+	Tools   []string `yaml:"tools"`
+	// Resources allowlists the resource URIs the model may list and read:
+	// each pattern is an exact URI or a literal prefix ending in "*".
+	Resources           []string `yaml:"resources,omitempty"`
 	Env                 []string `yaml:"env,omitempty"`
 	DiscoveryTimeoutSec int      `yaml:"discovery_timeout_seconds"`
 	CallTimeoutSec      int      `yaml:"call_timeout_seconds"`
@@ -815,6 +867,9 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := validateAdditionalDirs(cfg.AdditionalDirs); err != nil {
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+	}
+	if err := validateMCPServers(cfg.MCPServers); err != nil {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if r := cfg.Container.Runtime; r != "" && r != "docker" && r != "podman" {

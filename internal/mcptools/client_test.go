@@ -13,10 +13,14 @@ import (
 )
 
 func TestMCPFixtureProcess(t *testing.T) {
-	if os.Getenv("TINYAGENT_MCP_FIXTURE") != "1" {
+	mode := os.Getenv("TINYAGENT_MCP_FIXTURE")
+	if mode != "1" && mode != "plain" {
 		return
 	}
-	s := mcp.NewServer(&mcp.Implementation{Name: "fixture", Version: "1"}, nil)
+	s := mcp.NewServer(&mcp.Implementation{Name: "fixture", Version: "1"}, &mcp.ServerOptions{PageSize: 2})
+	if mode == "1" {
+		addFixtureResources(s)
+	}
 	mcp.AddTool[map[string]any, any](s, &mcp.Tool{Name: "echo", Description: "return arguments", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"payload": map[string]any{"type": "object"}}}}, func(_ context.Context, _ *mcp.CallToolRequest, in map[string]any) (*mcp.CallToolResult, any, error) {
 		return nil, in, nil
 	})
@@ -61,8 +65,14 @@ func TestMCPFixtureProcess(t *testing.T) {
 
 // startFixture connects to the fixture server above with the given allowlist.
 func startFixture(t *testing.T, def config.MCPServer) (*Registry, error) {
+	return startFixtureMode(t, "1", def)
+}
+
+// startFixtureMode is startFixture with a fixture mode: "1" serves
+// resources, "plain" only tools.
+func startFixtureMode(t *testing.T, mode string, def config.MCPServer) (*Registry, error) {
 	t.Helper()
-	t.Setenv("TINYAGENT_MCP_FIXTURE", "1")
+	t.Setenv("TINYAGENT_MCP_FIXTURE", mode)
 	def.Alias = "docs"
 	def.Command = os.Args[0]
 	def.Args = []string{"-test.run=^TestMCPFixtureProcess$"}
