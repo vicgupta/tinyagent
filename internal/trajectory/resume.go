@@ -64,37 +64,9 @@ func finalShape(m model.Message, status string) bool {
 // Load reads a trusted local checkpoint without modifying it. Parse diagnostics
 // intentionally omit decoder errors, which can contain transcript values.
 func Load(path string) (*Trajectory, error) {
-	fi, err := os.Stat(path)
+	data, err := readBounded(path, "checkpoint", "the 64 MiB resume size limit")
 	if err != nil {
-		return nil, fmt.Errorf("reading checkpoint: %w", err)
-	}
-	if !fi.Mode().IsRegular() {
-		return nil, errors.New("checkpoint must be a regular file")
-	}
-	if fi.Size() > maxCheckpointBytes {
-		return nil, errors.New("checkpoint exceeds the 64 MiB resume size limit")
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading checkpoint: %w", err)
-	}
-	defer f.Close()
-	fi, err = f.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("reading checkpoint: %w", err)
-	}
-	if !fi.Mode().IsRegular() {
-		return nil, errors.New("checkpoint must be a regular file")
-	}
-	data, err := io.ReadAll(io.LimitReader(f, maxCheckpointBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("reading checkpoint: %w", err)
-	}
-	if len(data) > maxCheckpointBytes {
-		return nil, errors.New("checkpoint exceeds the 64 MiB resume size limit")
-	}
-	if len(bytes.TrimSpace(data)) == 0 {
-		return nil, errors.New("checkpoint is empty")
+		return nil, err
 	}
 	var t *Trajectory
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -117,6 +89,67 @@ func Load(path string) (*Trajectory, error) {
 	}
 	if err := t.Validate(); err != nil {
 		return nil, err
+	}
+	return t, nil
+}
+
+// readBounded reads a regular file of at most maxCheckpointBytes that isn't
+// blank. noun names the file in errors, and limit the size limit.
+func readBounded(path, noun, limit string) ([]byte, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", noun, err)
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s must be a regular file", noun)
+	}
+	if fi.Size() > maxCheckpointBytes {
+		return nil, fmt.Errorf("%s exceeds %s", noun, limit)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", noun, err)
+	}
+	defer f.Close()
+	fi, err = f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", noun, err)
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s must be a regular file", noun)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxCheckpointBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", noun, err)
+	}
+	if len(data) > maxCheckpointBytes {
+		return nil, fmt.Errorf("%s exceeds %s", noun, limit)
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil, fmt.Errorf("%s is empty", noun)
+	}
+	return data, nil
+}
+
+// Read reads any trajectory file this or an older version of tinyagent
+// wrote, finished or not, for display. Unlike Load it applies no resume
+// validation and ignores fields it doesn't know; it shares Load's file
+// checks and, like Load, never puts decoder text in its errors.
+func Read(path string) (*Trajectory, error) {
+	data, err := readBounded(path, "trajectory", "the 64 MiB size limit")
+	if err != nil {
+		return nil, err
+	}
+	var t *Trajectory
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if err := dec.Decode(&t); err != nil || t == nil {
+		return nil, errors.New("not a trajectory JSON file")
+	}
+	if err := dec.Decode(new(any)); err != io.EOF {
+		return nil, errors.New("invalid trajectory JSON: trailing data")
+	}
+	if t.SchemaVersion < 0 || t.SchemaVersion > SchemaVersion {
+		return nil, fmt.Errorf("trajectory schema version %d is unsupported (want %d or older)", t.SchemaVersion, SchemaVersion)
 	}
 	return t, nil
 }
