@@ -196,7 +196,7 @@ func run() int {
 		return 2
 	}
 	if o.showHelp {
-		printUsage(helpOutput, fs)
+		printHelp(helpOutput, fs, o.verbose)
 		return 0
 	}
 	if o.listProfiles {

@@ -449,42 +449,26 @@ func TestUsage(t *testing.T) {
 		if code != 0 {
 			t.Errorf("%s exit = %d, want 0", arg, code)
 		}
-		if got != wantUsage {
-			t.Errorf("%s usage on stdout:\n%s\nwant:\n%s", arg, got, wantUsage)
+		if got != helpBrief {
+			t.Errorf("%s usage on stdout:\n%s\nwant:\n%s", arg, got, helpBrief)
 		}
 		if errOut != "" {
 			t.Errorf("%s wrote to stderr: %q", arg, errOut)
 		}
-		for _, line := range strings.Split(got, "\n") {
-			if strings.HasPrefix(line, "  -task") || strings.Contains(line, "shorthand for") {
-				t.Errorf("old-style line: %q", line)
-			}
-		}
 	}
-	// Every flag row starts its help text in the same column.
-	_, got, _ := runWith(t, "--help")
-	col := -1
-	for _, line := range strings.Split(got, "\n") {
-		if !strings.HasPrefix(line, "  -") && !strings.HasPrefix(line, "      --") {
-			continue
-		}
-		i := strings.Index(line, "--")
-		i += strings.Index(line[i:], "    ")
-		for i < len(line) && line[i] == ' ' {
-			i++
-		}
-		if col == -1 {
-			col = i
-		} else if i != col {
-			t.Errorf("help starts at column %d, want %d: %q", i, col, line)
-		}
+	// Usage errors still print the full flag list.
+	var b strings.Builder
+	var o options
+	printUsage(&b, newFlagSet(&o))
+	if b.String() != wantUsage {
+		t.Errorf("printUsage:\n%s\nwant:\n%s", b.String(), wantUsage)
 	}
 }
 
 func TestUsageShowsModelDefaultFromEnv(t *testing.T) {
 	t.Setenv("AGENT_MODEL", "ollama/llama3.1")
-	_, got, _ := runWith(t, "--help")
-	if !strings.Contains(got, `  -m, --model string                 provider/model; if unset, $AGENT_MODEL, then the config's model (default "ollama/llama3.1")`+"\n") {
+	_, got, _ := runWith(t, "--help", "--verbose")
+	if !strings.Contains(got, `(default: "ollama/llama3.1")`+"\n") {
 		t.Errorf("model row doesn't show $AGENT_MODEL:\n%s", got)
 	}
 }
@@ -886,7 +870,7 @@ func TestHelpIgnoresMalformedUserConfig(t *testing.T) {
 	if err := os.WriteFile(p, []byte("model: [not a string\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if code, got, _ := runWith(t, "--help"); code != 0 || !strings.Contains(got, "the config's model") {
+	if code, got, _ := runWith(t, "--help", "-v"); code != 0 || !strings.Contains(got, "the config's model") {
 		t.Errorf("--help exit = %d, want 0 and the model fallback documented:\n%s", code, got)
 	}
 }
