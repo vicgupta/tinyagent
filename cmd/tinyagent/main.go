@@ -705,6 +705,7 @@ func run() int {
 	}
 	if cfg.Memory.Enabled {
 		loadMemory(a, cfg.Memory, root, warn)
+		a.Tools.Remember = memoryWriter(a, cfg.Memory)
 	}
 	if o.output != "" {
 		a.OnStep = func(t *trajectory.Trajectory) error {
@@ -1236,6 +1237,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	startOutputFiles(outputFiles, cfg.ToolOutputFiles.MaxRuns, warn)
 	if src.SkillsEnabled {
 		loadSkills(a, root, warn)
+	}
+	if agent.RememberOffered(src) {
+		a.Tools.Remember = resumeMemoryWriter(src, cfg.Memory, root, modelName, a.Tools.Redactor, warn)
 	}
 	initial := true
 	a.OnStep = func(t *trajectory.Trajectory) error {
