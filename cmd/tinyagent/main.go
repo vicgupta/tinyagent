@@ -24,6 +24,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/mcptools"
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/outschema"
+	"github.com/vicgupta/tinyagent/internal/permissions"
 	"github.com/vicgupta/tinyagent/internal/sandboxnet"
 	"github.com/vicgupta/tinyagent/internal/skills"
 	"github.com/vicgupta/tinyagent/internal/telemetry"
@@ -369,6 +370,10 @@ func run() int {
 	if err != nil {
 		return fail(err)
 	}
+	policy, err := permissions.New(cfg.Permissions)
+	if err != nil {
+		return configFail(err)
+	}
 	otelCfg, err := otelSettings(fs, o, cfg)
 	if err != nil {
 		return configFail(err)
@@ -651,6 +656,7 @@ func run() int {
 		RedactSecrets:  redactInfo,
 		Config:         cfg,
 		Hooks:          hookRunner,
+		Policy:         policy,
 		Out:            outputTo(runOutput(o.jsonOutput), progress),
 		Err:            os.Stderr,
 		Verbose:        o.verbose,
@@ -665,6 +671,9 @@ func run() int {
 		Worktree:       worktree,
 		Review:         reviewInfo,
 		TaskImages:     taskImages,
+	}
+	if policy != nil && !o.jsonOutput {
+		a.PermissionApprover = terminalPermissionApprover
 	}
 	var events *runEvents
 	warn := func(msg string) { events.warn(msg) }
@@ -891,6 +900,10 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	hookRunner, err := hooks.New(cfg.Hooks, cfgPath)
 	if err != nil {
 		return fail(err)
+	}
+	policy, err := permissions.New(cfg.Permissions)
+	if err != nil {
+		return configFail(err)
 	}
 	if src.MCPEnabled || len(src.ExternalTools) > 0 {
 		return fail(errors.New("resume: MCP-enabled runs cannot be resumed; start a fresh task"))
@@ -1168,6 +1181,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		RedactSecrets:  redactInfo,
 		Config:         cfg,
 		Hooks:          hookRunner,
+		Policy:         policy,
 		Out:            runOutput(o.jsonOutput),
 		Err:            os.Stderr,
 		Verbose:        o.verbose,
@@ -1183,6 +1197,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		TaskImages:     taskImages,
 		Subagents:      subagents,
 		Workers:        workers,
+	}
+	if policy != nil && !o.jsonOutput {
+		a.PermissionApprover = terminalPermissionApprover
 	}
 	var events *runEvents
 	warn := func(msg string) { events.warn(msg) }
@@ -2043,6 +2060,9 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	}
 	if fa := agent.FileAccessInfo(a.Tools.FileAccess); fa != nil {
 		started["file_access"] = fa
+	}
+	if pi := agent.PermissionsInfo(a.Policy); pi != nil {
+		started["permissions"] = pi
 	}
 	if dirs := agent.AdditionalDirsInfo(a.Tools.ExtraDirs, a.Tools.ReadOnly); len(dirs) > 0 {
 		started["additional_dirs"] = dirs

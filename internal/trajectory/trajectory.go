@@ -103,6 +103,25 @@ type FileAccessInfo struct {
 	DenyWrite []string `json:"deny_write"`
 }
 
+// PermissionsInfo records the tool permission policy a run enforced. Rules
+// are config data, never secrets.
+type PermissionsInfo struct {
+	Default        string                `json:"default"`
+	NonInteractive string                `json:"non_interactive"`
+	RuleCount      int                   `json:"rule_count"`
+	Rules          []PermissionsRuleInfo `json:"rules,omitempty"`
+}
+
+// PermissionsRuleInfo is one permissions rule in a trajectory's summary.
+type PermissionsRuleInfo struct {
+	Tool     string `json:"tool"`
+	Command  string `json:"command,omitempty"`
+	Path     string `json:"path,omitempty"`
+	Host     string `json:"host,omitempty"`
+	Decision string `json:"decision"`
+	Message  string `json:"message,omitempty"`
+}
+
 type Trajectory struct {
 	// Environment is set when bash and start_process ran outside the host,
 	// e.g. in a container.
@@ -124,6 +143,9 @@ type Trajectory struct {
 	// FileAccess is set when file_access rules restricted the file tools;
 	// it records this invocation's rules.
 	FileAccess *FileAccessInfo `json:"file_access,omitempty"`
+	// Permissions is set when a permissions policy restricted tool calls;
+	// it records this invocation's policy.
+	Permissions *PermissionsInfo `json:"permissions,omitempty"`
 	// Worktree is set when the run was started with --worktree: Root is
 	// that worktree (or its subdirectory).
 	Worktree *WorktreeInfo `json:"worktree,omitempty"`

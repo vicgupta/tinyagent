@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/hooks"
 	"github.com/vicgupta/tinyagent/internal/mcptools"
 	"github.com/vicgupta/tinyagent/internal/model"
+	"github.com/vicgupta/tinyagent/internal/permissions"
 	"github.com/vicgupta/tinyagent/internal/telemetry"
 	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
@@ -100,6 +102,7 @@ type acpSession struct {
 	model                        model.Model
 	subagents                    *agent.Subagents
 	hooks                        *hooks.Runner
+	policy                       *permissions.Policy
 	env                          tools.Environment
 	closeEnv                     func()
 	mcp                          *mcptools.Registry
@@ -141,6 +144,9 @@ func newACPSession(ctx context.Context, o *options, fs *flag.FlagSet, id, cwd st
 	}
 	registerProviders(cfg)
 	if s.hooks, err = hooks.New(cfg.Hooks, cfgPath); err != nil {
+		return nil, err
+	}
+	if s.policy, err = permissions.New(cfg.Permissions); err != nil {
 		return nil, err
 	}
 	if s.otel, err = otelSettings(fs, *o, cfg); err != nil {
@@ -446,6 +452,7 @@ func (s *acpSession) Prompt(ctx context.Context, p acp.Prompt, u *acp.Updates) (
 		RedactSecrets:  s.redactInfo,
 		Config:         cfg,
 		Hooks:          s.hooks,
+		Policy:         s.policy,
 		Out:            os.Stderr,
 		Err:            os.Stderr,
 		Verbose:        o.verbose,
@@ -461,6 +468,9 @@ func (s *acpSession) Prompt(ctx context.Context, p acp.Prompt, u *acp.Updates) (
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	if s.policy != nil {
+		a.PermissionApprover = s.permissionApprover(u, cancel)
+	}
 	var events *runEvents
 	warn := func(msg string) { events.warn(msg) }
 	db, dbErr := openLogDB(s.fs, *o, cfg, s.root, p.Text, s.modelName, prev != nil, a, warn)
@@ -501,6 +511,48 @@ func (s *acpSession) Prompt(ctx context.Context, p acp.Prompt, u *acp.Updates) (
 	events.finish(t, elapsed)
 	s.traj = t
 	return s.stopReason(t, elapsed, u)
+}
+
+// permissionApprover answers a policy ask through the editor's
+// session/request_permission, with allow_once, allow_always and reject_once
+// options. A "cancelled" outcome cancels the turn like session/cancel.
+func (s *acpSession) permissionApprover(u *acp.Updates, cancel context.CancelFunc) func(ctx context.Context, req permissions.Request) permissions.Answer {
+	return func(ctx context.Context, req permissions.Request) permissions.Answer {
+		params := map[string]any{
+			"sessionId": s.id,
+			"toolCall":  map[string]any{"toolCallId": req.ToolCallID},
+			"options": []map[string]any{
+				{"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
+				{"optionId": "allow-always", "name": "Allow always", "kind": "allow_always"},
+				{"optionId": "reject-once", "name": "Reject", "kind": "reject_once"},
+			},
+		}
+		result, err := u.Request(ctx, "session/request_permission", params)
+		if err != nil {
+			// Interrupted, or the client returned a JSON-RPC error; reject.
+			return permissions.Answer{Decision: permissions.DecisionDeny, Channel: "acp"}
+		}
+		var out struct {
+			Outcome struct {
+				Outcome  string `json:"outcome"`
+				OptionID string `json:"optionId"`
+			} `json:"outcome"`
+		}
+		if json.Unmarshal(result, &out) != nil {
+			return permissions.Answer{Decision: permissions.DecisionDeny, Channel: "acp"}
+		}
+		switch {
+		case out.Outcome.Outcome == "cancelled":
+			cancel()
+			return permissions.Answer{Decision: permissions.DecisionDeny, Channel: "acp"}
+		case out.Outcome.OptionID == "allow-always":
+			return permissions.Answer{Decision: permissions.DecisionAllow, Always: true, Channel: "acp"}
+		case out.Outcome.OptionID == "allow-once":
+			return permissions.Answer{Decision: permissions.DecisionAllow, Channel: "acp"}
+		default:
+			return permissions.Answer{Decision: permissions.DecisionDeny, Channel: "acp"}
+		}
+	}
 }
 
 // promptImages validates a prompt's images like --image attachments.

@@ -35,6 +35,42 @@ type accessRule struct {
 	dirOnly  bool     // trailing "/": matches directories only
 }
 
+// AccessPattern is a compiled gitignore-style pattern, in the same syntax as
+// file_access, for matching one slash-separated relative path. It is used by
+// the permissions policy's path matcher.
+type AccessPattern struct {
+	r    accessRule
+	fold bool
+}
+
+// CompileAccessPattern compiles one gitignore-style pattern for matching a
+// relative path (slash-separated, relative to the working directory).
+func CompileAccessPattern(p string) (*AccessPattern, error) {
+	r, err := compileRule(p, foldCase())
+	if err != nil {
+		return nil, err
+	}
+	return &AccessPattern{r: r, fold: foldCase()}, nil
+}
+
+// Match reports whether relPath matches the pattern. relPath is relative to
+// the working directory, slash-separated; the final segment is treated as a
+// file (not a directory), so directory-only patterns (a trailing "/") do not
+// match it.
+func (a *AccessPattern) Match(relPath string) bool {
+	if a == nil {
+		return false
+	}
+	relPath = strings.Trim(filepath.ToSlash(relPath), "/")
+	if relPath == "" {
+		return false
+	}
+	if a.fold {
+		relPath = strings.ToLower(relPath)
+	}
+	return a.r.matches(strings.Split(relPath, "/"), false)
+}
+
 // DeniedError is returned for a call that touches a denied path.
 type DeniedError struct {
 	Path    string // the path as the caller named it

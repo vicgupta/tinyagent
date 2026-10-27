@@ -224,6 +224,22 @@ func scalarArg(v any) (string, bool) {
 	return "", false
 }
 
+// CommandToolArgv returns the resolved argv for a call to the command tool
+// named name, or nil when name is not a command tool (or its arguments are
+// invalid). It is used by the permissions policy to match command rules
+// against a command tool's final argv without running it.
+func (e *Executor) CommandToolArgv(name, raw string) []string {
+	c := e.commandTool(name)
+	if c == nil {
+		return nil
+	}
+	argv, errs := c.Expand(raw)
+	if errs != nil {
+		return nil
+	}
+	return argv
+}
+
 // commandTool returns the command tool called name, or nil.
 func (e *Executor) commandTool(name string) *CommandTool {
 	for _, c := range e.CommandTools {

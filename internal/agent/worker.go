@@ -247,8 +247,11 @@ func (a *Agent) worker(ctx context.Context, t *trajectory.Trajectory, call model
 		ScopedAgentsMD: a.ScopedAgentsMD,
 		NoCompact:      a.NoCompact,
 		Hooks:          a.Hooks,
-		subagentID:     id,
-		isWorker:       true,
+		// The permission policy also governs a worker's own tool calls.
+		Policy:             a.Policy,
+		PermissionApprover: a.PermissionApprover,
+		subagentID:         id,
+		isWorker:           true,
 	}
 	if a.OnEvent != nil {
 		parent := a.OnEvent

@@ -611,7 +611,7 @@ Use the full path to the binary. Pass `-m`, `-c`, `--profile` and any policy fla
 
 **Client-supplied MCP servers** are off by default: tinyagent starts only the `mcp_servers` from your config, and a session's first reply names any servers the editor offered. Set `acp.client_mcp_servers: true` in the user config or `-c` file to start the editor's stdio servers for that session, with every tool they list exposed as `<name>__<tool>` and their `env` values set (never logged). HTTP and SSE servers are not supported (`mcpCapabilities.http` is `false`). Read-only sessions start none.
 
-**Not supported:** `session/load`, session modes and config options, slash commands, per-tool approval through `session/request_permission`, delegating files or commands to the client (`fs/*`, `terminal/*`; tinyagent uses its own tools on disk), audio prompts, `ask_user` (it is turned off in this mode), workspace snapshots and reasoning (`agent_thought_chunk`) streaming.
+**Not supported:** `session/load`, session modes and config options, slash commands, delegating files or commands to the client (`fs/*`, `terminal/*`; tinyagent uses its own tools on disk), audio prompts, `ask_user` (it is turned off in this mode), workspace snapshots and reasoning (`agent_thought_chunk`) streaming. Per-tool approval is available through the [`permissions`](#permissions) policy: a rule with `decision: ask` sends `session/request_permission` and the editor's Approve/Reject buttons answer it.
 
 **Trust model:** the editor controls the prompts and the `cwd`, so it has the same power as whoever runs `tinyagent -t` in that directory. Everything that limits what tinyagent may do (the tool set, `--read-only`, `--sandbox`, `file_access`, `command_env`, hooks and limits) comes from your config and flags, and ACP adds no way to loosen it. Repository content stays untrusted prompt input, as in any run.
 
@@ -727,6 +727,15 @@ command_env:               # omitted by default (inherit everything); see Comman
 file_access:               # omitted by default (no rules); see Restricting file access
   deny_read: [".env", "*.pem", "secrets/"]
   deny_write: [go.sum, "vendor/"]
+permissions:               # omitted by default (no policy); see Permissions
+  default: allow           # allow (default), ask or deny, when no rule matches
+  non_interactive: deny    # what an ask becomes with nobody to answer: deny (default) or allow
+  rules:                   # a profile's rules replace the base list
+    - {tool: bash, command: "go test *", decision: allow}
+    - {tool: "bash|start_process", command: "git push *", decision: ask}
+    - {tool: bash, command: "curl *", decision: deny, message: "use web_fetch"}
+    - {tool: "write_file|edit_file|apply_patch", path: "migrations/**", decision: deny}
+    - {tool: web_fetch, host: "*.internal.example.com", decision: ask}
 redact_secrets:            # mask known secret values in tool output; see Redacting secrets from tool output
   enabled: false           # same as --redact-secrets
   env: [DATABASE_URL]      # more variables (names or globs) whose values are secrets
@@ -1001,6 +1010,54 @@ Command tools run where `bash` runs and under the same controls: the [execution 
 They are not offered with `--read-only` (a forged call is rejected like any other read-only denial), and subagents never get them. [Hooks](#tool-hooks) match them by name, with `arguments` as the decoded JSON the model sent. `-v` prints one stderr line per call with the final argv, `--json` and `--log-db` record the usual `tool.call` and `tool.result` events, `run.started` lists their names as `command_tools`, and trajectories record each definition (`name`, `argv` template, `schema_digest`). With `--resume`, the current config's command tools apply; if they differ from the checkpoint's, stderr and the model are told, and a call to one that no longer exists gets an error result.
 
 **Security:** command tools are trusted definitions that run with your privileges, like hooks and MCP servers. Schema checks limit what the model can pass; they don't make an unsafe `argv` safe: `[bash, -c, "{{script}}"]` gives back arbitrary execution. An argument starting with `-` is passed through as is and can be read as an option (for example `--output=/etc/passwd`), so constrain every placeholder with a `pattern`, `enum` or similar, as in the `^\./` pattern above. Older tinyagent versions reject a config file containing the `command_tools` key.
+
+### Permissions
+
+`permissions` is an opt-in, declarative tool permission policy: `allow` / `ask` / `deny` rules that match a tool call by its name and one primary argument (a shell command, a file path, or a URL host), applied before any tool runs. It fills the gap between full autonomy and `--read-only` without changing the default: a config without a `permissions` key behaves exactly as before.
+
+```yaml
+permissions:
+  default: allow            # allow (default) | ask | deny, when no rule matches
+  non_interactive: deny     # what an ask becomes with nobody to answer: deny (default) | allow
+  rules:
+    - tool: "bash|start_process"
+      command: "go test *"
+      decision: allow
+    - tool: "bash|start_process"
+      command: "git push *"
+      decision: ask
+    - tool: bash
+      command: "curl *"
+      decision: deny
+      message: "use web_fetch for allowlisted URLs"
+    - tool: "write_file|edit_file|apply_patch"
+      path: "migrations/**"
+      decision: deny
+    - tool: web_fetch
+      host: "*.internal.example.com"
+      decision: ask
+    - tool: "github__*"
+      decision: ask
+```
+
+- `tool` is required: a `|`-separated list of tool-name globs (`*` wildcard), covering built-ins, MCP `<alias>__<tool>` names and [`command_tools`](#command-tools) names.
+- At most one argument matcher per rule: `command` (a `*` wildcard over the command text, for `bash`, `start_process` and a command tool's resolved argv), `path` (gitignore-style, relative to `--cwd`, in the [`file_access`](#restricting-file-access) syntax; for `apply_patch`, the rule matches when any path in the patch matches), or `host` (the [`sandbox_allowed_domains`](#sandboxing-commands) syntax, for `web_fetch`). A matcher that doesn't apply to the named tool (for example `path` on `bash`) is a config error.
+- `decision` is required: `allow`, `ask`, or `deny`. `message` is optional and shown to the model on deny.
+- Precedence is deterministic: **deny > ask > allow > default**.
+- Compound shell commands are split on unquoted `&&`, `||`, `;`, `|` and newlines before matching. A `deny`/`ask` rule matches when it matches **any** segment; an `allow` rule allows only when **every** segment is matched by some allow rule; and a command containing `$(...)`, backticks or `eval` never matches an allow rule.
+- `update_plan`, `ask_user` and `submit_result` are exempt: they are never prompted or denied, even under `tool: "*"`, `decision: deny`.
+
+An `ask` is answered through the channel the run has:
+
+- **Interactive terminal** (`tinyagent -t ...`, not `--json`, not `--acp`): tinyagent prints the tool, the matched rule and the primary argument (after secret redaction) to stderr and reads one answer from the controlling terminal (`/dev/tty`, never stdin, so `-t -` keeps working): `y` allows once, `a` allows that exact tool and argument for the rest of the run, and `n` (optionally with a reason) denies. Ctrl-C ends the run as `Interrupted`; the `--time-limit` firing mid-prompt ends it as `TimeLimitExceeded`.
+- **ACP** (`--acp`): tinyagent sends `session/request_permission` with the call's `toolCallId` and the `allow_once`, `allow_always` and `reject_once` options; the editor's Approve/Reject buttons answer it. A `cancelled` outcome cancels the turn like `session/cancel`.
+- **Non-interactive** (no terminal, `--json`, piped CI/GitHub Action runs): an `ask` resolves to `permissions.non_interactive` (`deny` by default), so nobody can answer but the run continues.
+
+A denied call does not run and no `pre_tool` hook runs for it; the model gets `error: denied by permission rule <index>: <message>` (or `... by user: <reason>`), and the run continues. An allowed call then runs its [`pre_tool` hooks](#tool-hooks) as usual, which can still deny it — but a hook can never cause a policy-denied call to run. Rules come only from the user config, `-c` or a profile, never from the repository; a profile's `rules` replace the base list. Validation errors (unknown keys, an empty `tool`, an invalid decision, two matchers in one rule, a matcher/tool mismatch) exit 2 before any model request, naming the file, profile and rule index.
+
+Every decision is recorded: a `permission` event goes to `--json`, `--log-db` and `--otel` (with `tool_call_id`, `tool_name`, `decision`, `source` (`rule`, `default`, `user`, `session` or `non_interactive`), the rule index, and the channel for asks), `run.started` and trajectories record a `permissions` summary, `-v` prints one stderr line per non-default decision, and `--check` prints the rule count, default and resolved non-interactive behavior.
+
+**This is a guardrail, not a security boundary.** Command-text matching cannot stop a determined model from running something equivalent (for example `Bash(rm *)` doesn't stop `/bin/rm` or `bash -c 'rm ...'`). For real containment keep using [`--sandbox`](#sandboxing-commands), [`sandbox_allowed_domains`](#sandboxing-commands) and `--env container`. Older tinyagent versions reject a config containing `permissions`.
 
 ### Tool hooks
 

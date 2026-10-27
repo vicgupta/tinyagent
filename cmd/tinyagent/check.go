@@ -11,6 +11,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/hooks"
 	"github.com/vicgupta/tinyagent/internal/model"
+	"github.com/vicgupta/tinyagent/internal/permissions"
 	"github.com/vicgupta/tinyagent/internal/tools"
 )
 
@@ -64,6 +65,10 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 	}
 	registerProviders(cfg)
 	if _, err := hooks.New(cfg.Hooks, cfgPath); err != nil {
+		return nil, err
+	}
+	policy, err := permissions.New(cfg.Permissions)
+	if err != nil {
 		return nil, err
 	}
 	applyFlagOverrides(fs, &cfg, o.stepLimit, o.costLimit, o.timeLimit)
@@ -172,6 +177,9 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 			names[i] = c.Name
 		}
 		add("tools", fmt.Sprintf("%d command tools (%s)", n, strings.Join(names, ", ")))
+	}
+	if policy != nil {
+		add("permissions", fmt.Sprintf("%d rules, default %s, non-interactive %s", policy.RuleCount(), policy.Summary().Default, policy.Summary().NonInteractive))
 	}
 	return lines, nil
 }
