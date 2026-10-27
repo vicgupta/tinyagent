@@ -91,6 +91,7 @@ type options struct {
 	review                                           bool
 	reviewBase, reviewCommit                         string
 	acp                                              bool
+	workflow, workflowName                           string
 }
 
 // newFlagSet defines the command-line flags, storing their values in o. Each
@@ -174,6 +175,8 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.listProfiles, "list-profiles", false, "print the profile names in the selected config file (or the user config), sorted one per line, then exit; makes no model request")
 	fs.BoolVar(&o.acp, "acp", false, "serve the Agent Client Protocol on stdin/stdout for editors such as Zed and JetBrains IDEs (experimental): each session runs in the client's cwd with this config and flags; limits apply per prompt")
 	fs.StringVar(&o.completion, "completion", "", "print a flag-name completion script for this shell (bash, zsh or fish) and exit; load it with: source <(tinyagent --completion bash), or in zsh after compinit: source <(tinyagent --completion zsh), or in fish: tinyagent --completion fish | source; re-source it after --update")
+	fs.StringVar(&o.workflow, "workflow", "", "run the skill workflow in this YAML file on the task (-t): the router picks a workflow or skill by intent, and each stage runs automatically with the previous stage's output, gated by its success check")
+	fs.StringVar(&o.workflowName, "workflow-name", "", "with --workflow: run this workflow or skill instead of routing by the task's intent")
 	return fs
 }
 
@@ -243,6 +246,13 @@ func run() int {
 	if !flagWasSet(fs, "eval") && flagWasSet(fs, "eval-out", "eval-keep", "eval-min-pass-rate") {
 		fmt.Fprintln(fs.Output(), "error: --eval-out, --eval-keep and --eval-min-pass-rate apply only to --eval")
 		return 2
+	}
+	if !flagWasSet(fs, "workflow") && flagWasSet(fs, "workflow-name") {
+		fmt.Fprintln(fs.Output(), "error: --workflow-name applies only to --workflow")
+		return 2
+	}
+	if flagWasSet(fs, "workflow") {
+		return runWorkflow(&o, fs, os.Args[1:], os.Stdout, os.Stderr)
 	}
 	if flagWasSet(fs, "eval") {
 		return runEval(&o, fs, os.Args[1:], os.Stderr)

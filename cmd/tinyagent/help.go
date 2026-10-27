@@ -39,8 +39,14 @@ var evalGroup = struct {
 	flags [][3]string
 }{"Eval", [][3]string{{"", "eval", "suite.yaml"}, {"", "eval-out", "dir"}, {"", "eval-keep", ""}, {"", "eval-min-pass-rate", "rate"}}}
 
-// verboseGroups is usageGroups with toolsGroup before Output and evalGroup
-// after Rewind.
+// workflowGroup lists the --workflow flags.
+var workflowGroup = struct {
+	name  string
+	flags [][3]string
+}{"Workflow", [][3]string{{"", "workflow", "file.yaml"}, {"", "workflow-name", "name"}}}
+
+// verboseGroups is usageGroups with toolsGroup before Output, and evalGroup
+// and workflowGroup after Rewind.
 func verboseGroups() []struct {
 	name  string
 	flags [][3]string
@@ -55,7 +61,7 @@ func verboseGroups() []struct {
 		}
 		gs = append(gs, g)
 		if g.name == "Rewind" {
-			gs = append(gs, evalGroup)
+			gs = append(gs, evalGroup, workflowGroup)
 		}
 	}
 	return gs

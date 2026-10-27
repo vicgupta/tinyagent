@@ -510,6 +510,58 @@ With `--skills` (or `skills: true`), tinyagent discovers [Agent Skills](https://
 
 **Trust:** skill instructions are prompt input. A project skill from a repository you don't trust can steer the agent like a malicious AGENTS.md, and bundled scripts run with your permissions if the agent invokes them. Skill text sent to the model goes to your model provider like any other prompt, and the trajectory records loaded skill content.
 
+### Skill workflows
+
+`--workflow file.yaml` runs a sequence of small skills on the task (`-t`) as one automatic pipeline, for example plan, then generate, then validate, then test. Each stage is a fresh, unattended tinyagent run in `--cwd` that gets the original task and the previous stage's output. As soon as a stage passes its success check the next one starts; there is no pause or approval between stages. Without `--workflow`, tinyagent behaves exactly as before, and `--skills` Agent Skills are unaffected.
+
+**Skill format.** A workflow skill is a Markdown file with three required parts: a heading, an intent line, and a list of inputs. A one-line success check is required too, unless the workflow gives that stage a `check` command.
+
+```markdown
+# Skill: plan-tasks
+> Intent: Break a spec into small, ordered tasks before writing any code.
+
+**Inputs**
+- spec
+- repo_path
+
+**Success check:** every task has acceptance criteria and a verification step, in dependency order.
+```
+
+Skills live in the workflow's `skills_dir` (default `skills/` next to the workflow file) as `<name>.md` or `<name>/SKILL.md`. Names are lowercase letters, digits, `.`, `_` and `-`. A `SKILL.md` with `name`/`description` frontmatter can use the description as its intent. The whole file (frontmatter removed) is the stage's instructions. These input names are filled automatically: `task` and `spec` (the `-t` task), `repo_path` and `cwd` (the absolute `--cwd`), `previous_output` or the previous skill's name (the previous stage's output). Any other input comes from the stage's `inputs:` map or is marked as not provided.
+
+**Workflow format.**
+
+```yaml
+version: 1
+skills_dir: skills        # relative to this file
+default: implement        # used when routing finds no match (optional)
+defaults:                 # apply to every stage
+  retries: 1
+  step_limit: 50
+workflows:
+  implement:
+    intent: Implement a feature from a spec, then validate and test it.
+    stages:
+      - skill: plan-tasks
+      - skill: generate-code
+        step_limit: 100
+      - skill: validate-diff
+        check: [go, vet, ./...]
+      - skill: run-tests
+        check: [go, test, -count=1, ./...]
+        check_timeout: 600
+```
+
+Settings in `defaults` or on a stage: `model`, `profile`, `step_limit`, `cost_limit`, `time_limit`, `retries`, and `check_timeout` (seconds). The defaults are 1 retry (at most 5), 50 steps, a 300 second check timeout, and otherwise your usual config. Flags you pass with `--workflow` (such as `--sandbox` or `-m`) are forwarded to every stage, and stage settings override them. Workflows are sequential and have at most 20 stages. A complete example is in [docs/workflows](docs/workflows).
+
+**Routing.** `--workflow-name name` runs that workflow, or a single skill, directly. Otherwise the router matches the task against each workflow's intent and each skill's intent line. A clear best match runs. A tie or no match falls back to `default`, or exits 2 with an error suggesting `--workflow-name`, before any model call.
+
+**Success checks.** A stage with `check` (an argv list, run in `--cwd` without a shell) passes when the command exits 0. Otherwise the model is told the skill's success check and must end its answer with `SUCCESS CHECK: PASS` or `SUCCESS CHECK: FAIL - <reason>`. The last such line decides, and a missing line fails. A stage run that ends without submitting (for example on a step, cost or time limit) also fails. A failed stage is retried with the failure reason in its prompt. When its retries run out, the workflow stops, prints the stage and reason, and exits 1 without running later stages. Earlier stages are not re-run.
+
+**Output and exit status.** Progress lines go to stderr, and the last stage's output goes to stdout. `-o run.json` writes a workflow record (`"kind": "workflow"`) with the route, status, failed stage and reason, total cost, and one entry per attempt with its input, output, exit status, check result, and paths to that attempt's trajectory and log under `run.json.stages/`. Without `-o`, the per-stage files are temporary. `--json` prints JSONL events `workflow.started`, `stage.started` (with the input), `stage.finished` (input, output and `check`), and `workflow.finished`. Exit status is 0 when every stage passes, 1 when a stage fails, 2 for an invalid skill or workflow file, a routing error or a conflicting flag (all before any model request), and 130 when interrupted. `--workflow` can't be combined with flags for one interactive or resumed run, such as `--resume`, `--review`, `--worktree`, `--eval` or `--ask-user`.
+
+**Trust:** workflow skills are prompt input, and `check` commands run with your permissions, just like a project's AGENTS.md or Agent Skills. Only run workflow files you trust.
+
 ## Editor integration (ACP)
 
 `tinyagent --acp` speaks the [Agent Client Protocol](https://agentclientprotocol.com) (protocol version 1, newline-delimited JSON-RPC on stdin/stdout), so any ACP client can run tinyagent as an external agent: you type in the editor's agent panel, tinyagent runs its normal loop in the session's directory, and the editor shows the model's text and each tool call live. The mode is **experimental**: the stop-reason mapping and the MCP default below may change based on feedback.
