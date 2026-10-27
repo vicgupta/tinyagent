@@ -1681,6 +1681,7 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 // ready-to-paste command (empty prints nothing).
 func reportSummary(w io.Writer, modelName string, t *trajectory.Trajectory, elapsed time.Duration, resume string) {
 	fmt.Fprintln(w, summaryLine(t, elapsed))
+	reportWorkers(w, t)
 	if t.ExitStatus == agent.StatusError {
 		printHint(w, modelName, t.Submission)
 	}
@@ -2412,6 +2413,9 @@ func resultFields(t *trajectory.Trajectory, elapsed time.Duration) map[string]an
 	if len(t.Subagents) > 0 {
 		fields["subagents"] = len(t.Subagents)
 		fields["subagent_steps"] = t.SubagentSteps
+	}
+	if kept := workerResultFields(t); kept != nil {
+		fields["worker_branches"] = kept
 	}
 	if t.StopReason != "" {
 		fields["stop_reason"] = t.StopReason
