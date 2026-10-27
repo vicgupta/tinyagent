@@ -667,6 +667,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 					res = a.runTool(ctx, t, call)
 				}
 				a.recordWebFetches()
+				a.recordMemorySaves()
 				a.recordLSPEvents()
 				out, images, isError = res.Text, res.Images, res.IsError
 				switch stop := a.takeDelegateStop(); stop {

@@ -705,6 +705,7 @@ func run() int {
 	}
 	if cfg.Memory.Enabled {
 		loadMemory(a, cfg.Memory, root, warn)
+		events.emit("memory.loaded", agent.MemoryLoadedFields(a.Memory))
 		a.Tools.Remember = memoryWriter(a, cfg.Memory)
 	}
 	if o.output != "" {
