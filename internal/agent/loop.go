@@ -21,6 +21,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/lsp"
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/outschema"
+	"github.com/vicgupta/tinyagent/internal/permissions"
 	"github.com/vicgupta/tinyagent/internal/sandboxnet"
 	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
@@ -109,6 +110,17 @@ type Agent struct {
 	// Hooks run around tool calls the executor permits, and stop hooks
 	// before a successful finish; nil runs none.
 	Hooks *hooks.Runner
+	// Policy is the compiled tool permission policy; nil enforces nothing.
+	// It is applied between the executor's Permits check and the hooks, so a
+	// denial reuses the error-result path and hooks never override it.
+	Policy *permissions.Policy
+	// PermissionApprover answers a policy "ask" through the channel the run
+	// has (a terminal prompt, ACP session/request_permission, ...). nil
+	// resolves asks with the policy's non-interactive decision.
+	PermissionApprover func(ctx context.Context, req permissions.Request) permissions.Answer
+	// permissionApprovals holds the "allow always" answers given this run,
+	// keyed by Call.Key.
+	permissionApprovals map[string]bool
 	// OnStep is called after every step, e.g. to save the trajectory. A
 	// non-nil error stops the run.
 	OnStep func(*trajectory.Trajectory) error
@@ -435,6 +447,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 	t.Sandbox, t.Environment, t.CommandEnv = nil, nil, nil
 	t.RedactSecrets = a.RedactSecrets
 	t.FileAccess = FileAccessInfo(a.Tools.FileAccess)
+	t.Permissions = PermissionsInfo(a.Policy)
 	t.CommandTools = CommandToolsInfo(a.Tools)
 	for _, c := range t.CommandTools {
 		if !slices.Contains(t.CommandToolNames, c.Name) {
@@ -848,8 +861,12 @@ func (a *Agent) maxFormatErrors() int {
 
 // runTool executes call with its matching hooks. Calls the executor rejects
 // (read-only denials, unknown tools) never reach hooks, so hooks cannot widen
-// tool authority.
+// tool authority. The permission policy runs first: a policy denial never
+// reaches hooks, and a policy allow still runs them.
 func (a *Agent) runTool(ctx context.Context, t *trajectory.Trajectory, call model.ToolCall) tools.Result {
+	if res, decided := a.permit(ctx, t, call); decided {
+		return res
+	}
 	if a.Hooks == nil || !a.Tools.Permits(call.Function.Name) {
 		return a.execTool(ctx, t, call)
 	}
@@ -878,6 +895,157 @@ func (a *Agent) runTool(ctx context.Context, t *trajectory.Trajectory, call mode
 		res.Text = withFeedback(res, fb, a.Tools.MaxOutputChars)
 	}
 	return res
+}
+
+// permit applies the permission policy to call. A true second value means
+// the call was decided (denied) and must not run; a false value means it may
+// proceed to hooks and execution.
+func (a *Agent) permit(ctx context.Context, t *trajectory.Trajectory, call model.ToolCall) (tools.Result, bool) {
+	if a.Policy == nil {
+		return tools.Result{}, false
+	}
+	pc := permissionCall(call, a.Tools)
+	res := a.Policy.Check(pc)
+	switch res.Decision {
+	case permissions.DecisionAllow:
+		a.permissionEvent(call, res, permissions.DecisionAllow, res.Source, "")
+		return tools.Result{}, false
+	case permissions.DecisionDeny:
+		a.permissionEvent(call, res, permissions.DecisionDeny, res.Source, "")
+		return tools.Result{Text: tools.Truncate(deniedMessage(res), a.Tools.MaxOutputChars), IsError: true}, true
+	case permissions.DecisionAsk:
+		return a.askPermission(ctx, call, pc, res)
+	}
+	return tools.Result{}, false
+}
+
+// deniedMessage renders the tool result for a policy deny.
+func deniedMessage(res permissions.Result) string {
+	if res.Rule >= 0 {
+		msg := fmt.Sprintf("error: denied by permission rule %d", res.Rule)
+		if res.Message != "" {
+			msg += ": " + res.Message
+		}
+		return msg
+	}
+	return "error: denied by permission policy"
+}
+
+// askPermission answers a policy ask: through the approver when one is set,
+// or with the policy's non-interactive decision.
+func (a *Agent) askPermission(ctx context.Context, call model.ToolCall, pc permissions.Call, res permissions.Result) (tools.Result, bool) {
+	if a.permissionApprovals[pc.Key()] {
+		a.permissionEvent(call, res, permissions.DecisionAllow, permissions.SourceSession, "")
+		return tools.Result{}, false
+	}
+	req := permissions.Request{
+		Tool:       call.Function.Name,
+		ToolCallID: call.ID,
+		Rule:       res.Rule,
+		Argument:   a.redactArgument(pc.Argument()),
+		Subagent:   a.subagentID,
+	}
+	if a.PermissionApprover != nil {
+		ans := a.PermissionApprover(ctx, req)
+		switch ans.Decision {
+		case permissions.DecisionAllow:
+			if ans.Always {
+				if a.permissionApprovals == nil {
+					a.permissionApprovals = map[string]bool{}
+				}
+				a.permissionApprovals[pc.Key()] = true
+			}
+			a.permissionEvent(call, res, permissions.DecisionAllow, permissions.SourceUser, ans.Channel)
+			return tools.Result{}, false
+		case permissions.DecisionDeny:
+			msg := "error: denied by user"
+			if ans.Reason != "" {
+				msg += ": " + ans.Reason
+			}
+			a.permissionEvent(call, res, permissions.DecisionDeny, permissions.SourceUser, ans.Channel)
+			return tools.Result{Text: tools.Truncate(msg, a.Tools.MaxOutputChars), IsError: true}, true
+		}
+	}
+	// Nobody can answer: resolve to non_interactive.
+	dec := a.Policy.NonInteractive
+	if dec == "" {
+		dec = permissions.DecisionDeny
+	}
+	if dec == permissions.DecisionAllow {
+		a.permissionEvent(call, res, permissions.DecisionAllow, permissions.SourceNonInteractive, "none")
+		return tools.Result{}, false
+	}
+	msg := "error: denied: approval required by permission rule "
+	if res.Rule >= 0 {
+		msg += fmt.Sprintf("%d", res.Rule)
+	} else {
+		msg += "policy"
+	}
+	msg += " but no one can approve in this run"
+	a.permissionEvent(call, res, permissions.DecisionDeny, permissions.SourceNonInteractive, "none")
+	return tools.Result{Text: tools.Truncate(msg, a.Tools.MaxOutputChars), IsError: true}, true
+}
+
+// redactArgument masks secret values in an argument shown to a person.
+func (a *Agent) redactArgument(s string) string {
+	if a.Tools.Redactor == nil || s == "" {
+		return s
+	}
+	out, _ := a.Tools.Redactor.RedactCount(s)
+	return out
+}
+
+// permissionEvent emits one permission decision as an event and a verbose
+// line.
+func (a *Agent) permissionEvent(call model.ToolCall, res permissions.Result, decision permissions.Decision, source, channel string) {
+	fields := map[string]any{
+		"tool_call_id": call.ID,
+		"tool_name":    call.Function.Name,
+		"decision":     string(decision),
+		"source":       source,
+	}
+	if res.Rule >= 0 {
+		fields["rule"] = res.Rule
+	}
+	if channel != "" {
+		fields["channel"] = channel
+	}
+	if a.subagentID != "" {
+		fields["subagent"] = a.subagentID
+	}
+	a.event("permission", fields)
+	if a.Verbose {
+		fmt.Fprintf(a.Err, "permission: %s %s -> %s (%s)\n", call.Function.Name, call.Function.Arguments, decision, source)
+	}
+}
+
+// permissionCall extracts a call's primary argument(s) for the policy.
+func permissionCall(call model.ToolCall, e *tools.Executor) permissions.Call {
+	pc := permissions.Call{Tool: call.Function.Name}
+	var a struct {
+		Command string `json:"command"`
+		Path    string `json:"path"`
+		URL     string `json:"url"`
+		Input   string `json:"input"`
+	}
+	if err := json.Unmarshal([]byte(call.Function.Arguments), &a); err != nil {
+		return pc
+	}
+	switch call.Function.Name {
+	case "bash", "start_process":
+		pc.Command = a.Command
+	case "web_fetch":
+		pc.Host = permissions.HostOf(a.URL)
+	case "apply_patch":
+		pc.Paths = tools.ApplyPatchPaths(a.Input)
+	default:
+		if argv := e.CommandToolArgv(call.Function.Name, call.Function.Arguments); argv != nil {
+			pc.Command = strings.Join(argv, " ")
+		} else if a.Path != "" {
+			pc.Paths = []string{a.Path}
+		}
+	}
+	return pc
 }
 
 // withFeedback appends post_tool feedback to a result, re-truncating to max.
@@ -1366,6 +1534,22 @@ func FileAccessInfo(f *tools.FileAccess) *trajectory.FileAccessInfo {
 	}
 	read, write := f.Rules()
 	return &trajectory.FileAccessInfo{DenyRead: append([]string{}, read...), DenyWrite: append([]string{}, write...)}
+}
+
+// PermissionsInfo records p's policy for trajectories and run.started; nil
+// when p is nil.
+func PermissionsInfo(p *permissions.Policy) *trajectory.PermissionsInfo {
+	if p == nil {
+		return nil
+	}
+	s := p.Summary()
+	info := &trajectory.PermissionsInfo{Default: s.Default, NonInteractive: s.NonInteractive, RuleCount: s.Rules}
+	for _, r := range p.Rules() {
+		info.Rules = append(info.Rules, trajectory.PermissionsRuleInfo{
+			Tool: r.Tool, Command: r.Command, Path: r.Path, Host: r.Host, Decision: r.Decision, Message: r.Message,
+		})
+	}
+	return info
 }
 
 // effectiveDirs returns dirs with every mode read when readOnly.

@@ -116,6 +116,11 @@ type AgentConfig struct {
 	// Hooks are trusted local executables run around matching tool calls.
 	Hooks Hooks `yaml:"hooks,omitempty"`
 
+	// Permissions is the opt-in tool permission policy: allow/ask/deny rules
+	// matched on the tool name and its main argument, applied before hooks.
+	// The zero value enforces nothing.
+	Permissions Permissions `yaml:"permissions"`
+
 	// CommandTools are user-defined tools that run a fixed argv filled in
 	// with schema-checked arguments, without a shell. They come only from
 	// the user config or -c.
@@ -422,6 +427,143 @@ type Hook struct {
 	TimeoutSec *int   `yaml:"timeout_seconds,omitempty"`
 	OnError    string `yaml:"on_error,omitempty"` // pre_tool only: deny (default) or allow
 }
+
+// Permissions is the opt-in tool permission policy. A rule matches a tool
+// call by tool name and, optionally, one primary argument (the command text,
+// a path, or a URL host). Decisions are applied deny > ask > allow > default.
+type Permissions struct {
+	// Default is the decision when no rule matches: allow (default), ask or
+	// deny.
+	Default string `yaml:"default"`
+	// NonInteractive is what an ask becomes when nobody can answer (no
+	// terminal, --json, or an ACP client that does not answer): deny
+	// (default) or allow.
+	NonInteractive string `yaml:"non_interactive"`
+	// Rules are evaluated in order; a deny or ask matches when any of its
+	// patterns match, and an allow matches only when every compound-command
+	// segment is covered. A profile's rules replace the base list.
+	Rules []PermissionRule `yaml:"rules,omitempty"`
+}
+
+// PermissionRule is one permissions.rules entry.
+type PermissionRule struct {
+	// Tool is a "|"-separated list of tool-name globs ("*" wildcard). It is
+	// required.
+	Tool string `yaml:"tool"`
+	// Command matches the shell command text (bash, start_process, and
+	// command tools' resolved argv). At most one of command, path and host
+	// may be set.
+	Command string `yaml:"command,omitempty"`
+	// Path matches a path relative to --cwd in the file_access syntax (for
+	// apply_patch, when any path matches).
+	Path string `yaml:"path,omitempty"`
+	// Host matches a web_fetch URL host in the sandbox_allowed_domains
+	// syntax.
+	Host string `yaml:"host,omitempty"`
+	// Decision is allow, ask or deny; it is required.
+	Decision string `yaml:"decision"`
+	// Message is shown to the model on deny.
+	Message string `yaml:"message,omitempty"`
+}
+
+// Configured reports whether any permission rule or setting is present.
+func (p Permissions) Configured() bool {
+	return p.Default != "" || p.NonInteractive != "" || len(p.Rules) > 0
+}
+
+// Permissions decisions.
+const (
+	DecisionAllow = "allow"
+	DecisionAsk   = "ask"
+	DecisionDeny  = "deny"
+)
+
+// Validate checks the policy's settings and rules. The error names the
+// offending key and rule index.
+func (p Permissions) Validate() error {
+	switch p.Default {
+	case "", DecisionAllow, DecisionAsk, DecisionDeny:
+	default:
+		return fmt.Errorf("permissions.default %q must be allow, ask or deny", p.Default)
+	}
+	switch p.NonInteractive {
+	case "", DecisionDeny, DecisionAllow:
+	default:
+		return fmt.Errorf("permissions.non_interactive %q must be deny or allow", p.NonInteractive)
+	}
+	for i, r := range p.Rules {
+		if err := r.validate(i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r PermissionRule) validate(i int) error {
+	where := fmt.Sprintf("permissions.rules[%d]", i)
+	if strings.TrimSpace(r.Tool) == "" {
+		return fmt.Errorf("%s: tool is required", where)
+	}
+	switch r.Decision {
+	case DecisionAllow, DecisionAsk, DecisionDeny:
+	default:
+		return fmt.Errorf("%s: decision must be allow, ask or deny, got %q", where, r.Decision)
+	}
+	n := 0
+	for _, v := range []struct{ key, val string }{
+		{"command", r.Command}, {"path", r.Path}, {"host", r.Host},
+	} {
+		if v.val != "" {
+			n++
+		}
+	}
+	if n > 1 {
+		return fmt.Errorf("%s: at most one of command, path and host may be set", where)
+	}
+	// Validate the tool-name globs and, where a literal built-in name makes
+	// the matcher family unambiguous, reject a mismatched matcher.
+	for _, t := range strings.Split(r.Tool, "|") {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			return fmt.Errorf("%s: tool %q has an empty name", where, r.Tool)
+		}
+		if strings.ContainsAny(t, "*?[]") {
+			if strings.ContainsAny(t, "?[]") {
+				return fmt.Errorf("%s: tool %q: only the * wildcard is supported", where, t)
+			}
+			continue // a glob can't be checked against a matcher family
+		}
+		if r.Command != "" && (fileFamilyTools[t] || t == "web_fetch") {
+			return fmt.Errorf("%s: command matches shell commands; it does not apply to %q", where, t)
+		}
+		if r.Path != "" && (commandFamilyTools[t] || t == "web_fetch") {
+			return fmt.Errorf("%s: path matches file tools; it does not apply to %q", where, t)
+		}
+		if r.Host != "" && t != "web_fetch" {
+			return fmt.Errorf("%s: host matches web_fetch URLs; it does not apply to %q", where, t)
+		}
+	}
+	if r.Path != "" {
+		if err := validateAccessPattern(r.Path); err != nil {
+			return fmt.Errorf("%s: path: %v", where, err)
+		}
+	}
+	if r.Host != "" {
+		if _, err := sandboxnet.ParseRule(r.Host); err != nil {
+			return fmt.Errorf("%s: host: %v", where, err)
+		}
+	}
+	return nil
+}
+
+// fileFamilyTools are the built-in tools a path matcher applies to.
+var fileFamilyTools = map[string]bool{
+	"read_file": true, "write_file": true, "edit_file": true, "apply_patch": true,
+	"list_files": true, "grep": true, "view_image": true,
+}
+
+// commandFamilyTools are the built-in tools a command matcher applies to.
+var commandFamilyTools = map[string]bool{"bash": true, "start_process": true}
 
 // Container is the image and runtime used by the "container" environment.
 type Container struct {
@@ -842,6 +984,7 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		LSP             yaml.Node `yaml:"lsp"`
 		RedactSecrets   yaml.Node `yaml:"redact_secrets"`
 		OTel            yaml.Node `yaml:"otel"`
+		Permissions     yaml.Node `yaml:"permissions"`
 	}
 	if yaml.Unmarshal(data, &probe) == nil {
 		for _, c := range []struct {
@@ -873,6 +1016,11 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		}
 		if probe.RedactSecrets.Kind != 0 {
 			if err := checkRedactSecrets(&probe.RedactSecrets); err != nil {
+				return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+			}
+		}
+		if probe.Permissions.Kind != 0 {
+			if err := checkStrict(&probe.Permissions, "permissions", &Permissions{}); err != nil {
 				return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 			}
 		}
@@ -924,6 +1072,9 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.FileAccess.Validate(); err != nil {
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+	}
+	if err := cfg.Permissions.Validate(); err != nil {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.RedactSecrets.Validate(); err != nil {

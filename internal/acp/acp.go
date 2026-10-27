@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strconv"
 	"sync"
 )
 
@@ -98,6 +99,18 @@ type Server struct {
 	mu       sync.Mutex
 	sessions map[string]*session
 	turns    sync.WaitGroup
+
+	// reqMu guards pending and reqSeq, which track agent-to-client requests
+	// (session/request_permission) awaiting a response.
+	reqMu   sync.Mutex
+	reqSeq  int
+	pending map[string]chan pendingReply
+}
+
+// pendingReply is the response to one agent-to-client request.
+type pendingReply struct {
+	result json.RawMessage
+	err    *Error
 }
 
 type session struct {
@@ -113,6 +126,8 @@ type message struct {
 	ID      json.RawMessage `json:"id,omitempty"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   *Error          `json:"error,omitempty"`
 }
 
 type response struct {
@@ -120,6 +135,13 @@ type response struct {
 	ID      json.RawMessage `json:"id"`
 	Result  any             `json:"result,omitempty"`
 	Error   *Error          `json:"error,omitempty"`
+}
+
+type request struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id"`
+	Method  string          `json:"method"`
+	Params  any             `json:"params,omitempty"`
 }
 
 type notification struct {
@@ -220,6 +242,50 @@ func (s *Server) fail(id json.RawMessage, err error) {
 	s.write(response{JSONRPC: "2.0", ID: id, Error: e})
 }
 
+// Request sends a JSON-RPC request to the client and waits for its response.
+// It is called from a turn goroutine (for session/request_permission); Serve's
+// read loop routes the response back through deliverResponse. A cancelled ctx
+// returns ctx's error.
+func (s *Server) Request(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	s.reqMu.Lock()
+	s.reqSeq++
+	id := json.RawMessage(strconv.Itoa(s.reqSeq))
+	if s.pending == nil {
+		s.pending = map[string]chan pendingReply{}
+	}
+	ch := make(chan pendingReply, 1)
+	s.pending[string(id)] = ch
+	s.reqMu.Unlock()
+	defer func() {
+		s.reqMu.Lock()
+		delete(s.pending, string(id))
+		s.reqMu.Unlock()
+	}()
+	s.write(request{JSONRPC: "2.0", ID: id, Method: method, Params: params})
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case r := <-ch:
+		if r.err != nil {
+			return nil, r.err
+		}
+		return r.result, nil
+	}
+}
+
+// deliverResponse routes a response to its pending request, reporting whether
+// one was waiting.
+func (s *Server) deliverResponse(m message) bool {
+	s.reqMu.Lock()
+	ch, ok := s.pending[string(m.ID)]
+	s.reqMu.Unlock()
+	if !ok {
+		return false
+	}
+	ch <- pendingReply{result: m.Result, err: m.Error}
+	return true
+}
+
 func (s *Server) handle(ctx context.Context, line []byte) {
 	var m message
 	if err := json.Unmarshal(line, &m); err != nil {
@@ -232,10 +298,14 @@ func (s *Server) handle(ctx context.Context, line []byte) {
 		return
 	}
 	isRequest := len(m.ID) > 0 && string(m.ID) != "null"
-	if m.JSONRPC != "2.0" || m.Method == "" {
-		if m.Method == "" && m.JSONRPC == "2.0" && isRequest {
-			return // a response to a request we never send
+	if m.Method == "" && m.JSONRPC == "2.0" && isRequest {
+		// A response to one of our requests (session/request_permission).
+		if !s.deliverResponse(m) {
+			s.logf("response to unknown request id %s", m.ID)
 		}
+		return
+	}
+	if m.JSONRPC != "2.0" || m.Method == "" {
 		s.fail(m.ID, &Error{Code: CodeInvalidRequest, Message: `invalid request: want "jsonrpc": "2.0" and a method`})
 		return
 	}
@@ -401,6 +471,12 @@ type Updates struct {
 // Send sends update as a session/update notification.
 func (u *Updates) Send(update any) {
 	u.s.write(notification{JSONRPC: "2.0", Method: "session/update", Params: map[string]any{"sessionId": u.id, "update": update}})
+}
+
+// Request sends a request to the client and waits for its response (used for
+// session/request_permission).
+func (u *Updates) Request(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	return u.s.Request(ctx, method, params)
 }
 
 // Message sends a chunk of the agent's reply.

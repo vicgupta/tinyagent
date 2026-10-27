@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Features
+
+- Add an opt-in tool permission policy (`permissions` config with `default`, `non_interactive` and `rules`): declarative `allow`/`ask`/`deny` rules matched on a tool call's name and one primary argument (a `command` for `bash`/`start_process`/command tools, a `path` for the file tools in the `file_access` syntax, or a `host` for `web_fetch` in the `sandbox_allowed_domains` syntax). Precedence is `deny` > `ask` > `allow` > `default`; compound shell commands are split on unquoted `&&`/`||`/`;`/`|`/newlines, with a deny/ask matching any segment, an allow only when every segment is covered, and `$(...)`/backticks/`eval` never matching an allow. An `ask` is answered through the channel the run has: a single-line terminal prompt (`y`/`a`/`n <reason>` read from `/dev/tty`, never stdin), ACP `session/request_permission` (`allow_once`/`allow_always`/`reject_once`; `cancelled` cancels the turn), or the `non_interactive` fallback (`deny` by default) for `--json` and piped/CI runs. A denial is returned to the model as an error and skips `pre_tool` hooks; an allowed call still runs them. `update_plan`, `ask_user` and `submit_result` are exempt. Every decision emits a `permission` event (`--json`, `--log-db`, `--otel`), `run.started` and trajectories record a `permissions` summary, `-v` prints one line per non-default decision, and `--check` prints the rule count, default and resolved non-interactive behavior. Rules come only from the user config, `-c` or a profile (never the repository); a profile's `rules` replace the base list; and invalid settings exit 2 naming the file, profile and rule index. Off by default with no change to configs without `permissions`; older tinyagent versions reject a config file containing the `permissions` key.
+
 ## [v0.6.0] - 2026-10-27
 
 ### Features

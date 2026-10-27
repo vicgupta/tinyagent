@@ -461,6 +461,25 @@ func applyPatchFiles(root, input string, sc *scope) (string, []string, error) {
 	return sb.String(), written, nil
 }
 
+// ApplyPatchPaths returns the paths (and move destinations) named in an
+// apply_patch input, in patch order, without applying it. A malformed patch
+// yields nil. It is used by the permissions policy to match path rules
+// against an apply_patch call's files.
+func ApplyPatchPaths(input string) []string {
+	ops, err := parsePatch(input)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, op := range ops {
+		out = append(out, op.path)
+		if op.moveTo != "" {
+			out = append(out, op.moveTo)
+		}
+	}
+	return out
+}
+
 func listOrNone(s []string) string {
 	if len(s) == 0 {
 		return "none"
