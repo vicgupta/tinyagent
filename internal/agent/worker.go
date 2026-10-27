@@ -33,6 +33,9 @@ type Workers struct {
 	// RunName prefixes worker branch and worktree names
 	// (tinyagent/<RunName>-w<n>); "" generates one per process.
 	RunName string
+	// MaxConcurrent caps how many of one response's worker calls run at
+	// once; 0 or 1 runs them one at a time.
+	MaxConcurrent int
 }
 
 func (w *Workers) maxSteps() int {
@@ -147,27 +150,54 @@ func within(dir, path string) bool {
 // in its own worktree, whose changes tinyagent commits to the worker's
 // branch. Its history is kept in t.Subagents and its usage added to t.
 func (a *Agent) worker(ctx context.Context, t *trajectory.Trajectory, call model.ToolCall) tools.Result {
-	var args struct {
-		Task  string `json:"task"`
-		Label string `json:"label"`
+	j, res, ok := a.prepareWorker(t, call, a.nextWorkerID(t, 0))
+	if !ok {
+		return res
 	}
-	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
-		return toolErr("invalid worker arguments: %s", err)
-	}
-	if strings.TrimSpace(args.Task) == "" {
-		return toolErr("worker needs a non-empty task: a complete brief of what to change and how to verify it")
-	}
-	if a.Workers == nil || a.Workers.Model == nil {
-		return toolErr("worker is not available in this run")
-	}
-	label := clipRunes(strings.TrimSpace(args.Label), maxDelegateLabel)
-	n := 1
+	j.ct = j.child.Run(ctx, j.task)
+	return a.finishWorker(t, j)
+}
+
+// nextWorkerID returns the id of the worker started after the run's
+// existing workers and skip more not yet recorded.
+func (a *Agent) nextWorkerID(t *trajectory.Trajectory, skip int) string {
+	n := 1 + skip
 	for _, s := range t.Subagents {
 		if s.Kind == "worker" {
 			n++
 		}
 	}
-	id := fmt.Sprintf("w%d", n)
+	return fmt.Sprintf("w%d", n)
+}
+
+// workerJob is one started worker: prepared by prepareWorker, run, then
+// recorded by finishWorker.
+type workerJob struct {
+	call                  model.ToolCall
+	task, label, id       string
+	child                 *Agent
+	top, wt, branch, base string
+	parentStep            int
+	ct                    *trajectory.Trajectory
+}
+
+// prepareWorker validates a worker call and creates its worktree and
+// child agent; ok is false with the error result when it did not start.
+func (a *Agent) prepareWorker(t *trajectory.Trajectory, call model.ToolCall, id string) (*workerJob, tools.Result, bool) {
+	var args struct {
+		Task  string `json:"task"`
+		Label string `json:"label"`
+	}
+	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
+		return nil, toolErr("invalid worker arguments: %s", err), false
+	}
+	if strings.TrimSpace(args.Task) == "" {
+		return nil, toolErr("worker needs a non-empty task: a complete brief of what to change and how to verify it"), false
+	}
+	if a.Workers == nil || a.Workers.Model == nil {
+		return nil, toolErr("worker is not available in this run"), false
+	}
+	label := clipRunes(strings.TrimSpace(args.Label), maxDelegateLabel)
 
 	cfg := a.Config
 	cfg.StepLimit = a.Workers.maxSteps()
@@ -176,47 +206,46 @@ func (a *Agent) worker(ctx context.Context, t *trajectory.Trajectory, call model
 		left := a.Config.CostLimit - t.Cost
 		if left <= 0 {
 			a.delegateStop = StatusCostLimit
-			return toolErr("worker %s not started: the cost limit is reached", id)
+			return nil, toolErr("worker %s not started: the cost limit is reached", id), false
 		}
 		cfg.CostLimit = left
 	}
 	only := a.workerTools()
 	if len(only) == 0 {
-		return toolErr("worker %s not started: none of the configured worker tools are available in this run", id)
+		return nil, toolErr("worker %s not started: none of the configured worker tools are available in this run", id), false
 	}
 
 	top, err := gitwt.Top(a.Tools.Root)
 	if err != nil {
-		return toolErr("worker %s not started: %s", id, err)
+		return nil, toolErr("worker %s not started: %s", id, err), false
 	}
 	rel, err := filepath.Rel(top, a.Tools.Root)
 	if err != nil || !within(top, a.Tools.Root) {
-		return toolErr("worker %s not started: the working directory is not inside the repository at %s", id, top)
+		return nil, toolErr("worker %s not started: the working directory is not inside the repository at %s", id, top), false
 	}
 	base, err := gitwt.Snapshot(top)
 	if err != nil {
-		return toolErr("worker %s not started: %s", id, err)
+		return nil, toolErr("worker %s not started: %s", id, err), false
 	}
 	name := a.Workers.runName() + "-" + id
 	wt, branch, err := gitwt.Create(top, name, base)
 	if err != nil {
-		return toolErr("worker %s not started: %s", id, err)
+		return nil, toolErr("worker %s not started: %s", id, err), false
 	}
 	root := filepath.Join(wt, rel)
 	env, err := workerEnv(a.Tools.Env, a.Tools.Root, root)
 	if err != nil {
 		gitwt.Remove(top, wt, branch)
-		return toolErr("worker %s not started: %s", id, err)
+		return nil, toolErr("worker %s not started: %s", id, err), false
 	}
 	var fa *tools.FileAccess
 	if dr, dw := a.Tools.FileAccess.Rules(); len(dr)+len(dw) > 0 {
 		if fa, err = tools.NewFileAccess(root, dr, dw); err != nil {
 			gitwt.Remove(top, wt, branch)
-			return toolErr("worker %s not started: %s", id, err)
+			return nil, toolErr("worker %s not started: %s", id, err), false
 		}
 		fa.AddDirs(a.Tools.ExtraDirs)
 	}
-
 	out := io.Discard
 	if a.Verbose {
 		out = a.Out
@@ -273,8 +302,15 @@ func (a *Agent) worker(ctx context.Context, t *trajectory.Trajectory, call model
 		fmt.Fprintf(a.Err, "worker %s started%s (%s) in %s\n", id, labelSuffix(label), child.ModelName, wt)
 	}
 
-	ct := child.Run(ctx, args.Task)
+	return &workerJob{call: call, task: args.Task, label: label, id: id, child: child,
+		top: top, wt: wt, branch: branch, base: base, parentStep: t.Steps}, tools.Result{}, true
+}
 
+// finishWorker adds a run worker's usage to t, commits its changes and
+// records it, and returns the worker call's result.
+func (a *Agent) finishWorker(t *trajectory.Trajectory, j *workerJob) tools.Result {
+	ct, call, id, label, top, wt, branch, base := j.ct, j.call, j.id, j.label, j.top, j.wt, j.branch, j.base
+	args := struct{ Task string }{j.task}
 	t.Cost += ct.Cost
 	t.InputTokens += ct.InputTokens
 	t.OutputTokens += ct.OutputTokens
@@ -300,8 +336,8 @@ func (a *Agent) worker(ctx context.Context, t *trajectory.Trajectory, call model
 	}
 
 	rec := trajectory.Subagent{
-		ID: id, ToolCallID: call.ID, Task: args.Task, Label: label, Model: child.ModelName,
-		ParentStep: t.Steps, Status: ct.ExitStatus, Steps: ct.Steps,
+		ID: id, ToolCallID: call.ID, Task: args.Task, Label: label, Model: j.child.ModelName,
+		ParentStep: j.parentStep, Status: ct.ExitStatus, Steps: ct.Steps,
 		InputTokens: ct.InputTokens, OutputTokens: ct.OutputTokens,
 		CacheReadTokens: ct.CacheReadTokens, CacheWriteTokens: ct.CacheWriteTokens,
 		Cost: ct.Cost, Messages: ct.Messages,
