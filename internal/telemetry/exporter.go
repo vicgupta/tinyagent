@@ -317,11 +317,18 @@ func (e *Exporter) subagentStarted(ag *agentSpans, now time.Time, fields map[str
 		parent = p
 	}
 	id := str(fields["id"])
-	sp := e.newSpan(parent, opInvokeAgent+" delegate", kindInternal, now)
+	name := "delegate"
+	if str(fields["kind"]) == "worker" {
+		name = "worker"
+	}
+	sp := e.newSpan(parent, opInvokeAgent+" "+name, kindInternal, now)
 	sp.set(attrOperation, opInvokeAgent)
-	sp.set(attrAgentName, "delegate")
+	sp.set(attrAgentName, name)
 	sp.set(attrSubagentID, id)
 	setModel(sp, str(fields["model"]))
+	if name == "worker" {
+		setWorkerStarted(sp, fields)
+	}
 	e.agents[id] = &agentSpans{span: sp, tools: map[string]*span{}}
 }
 
@@ -340,6 +347,9 @@ func (e *Exporter) subagentFinished(now time.Time, fields map[string]any) {
 	sp.set(attrInputTokens, fields["input_tokens"])
 	sp.set(attrOutputTokens, fields["output_tokens"])
 	sp.set(attrCostUSD, fields["cost_usd"])
+	if str(fields["kind"]) == "worker" {
+		setWorkerFinished(sp, fields)
+	}
 	if status != "Submitted" && status != "Completed" {
 		sp.status, sp.statusMsg = statusError, status
 	}

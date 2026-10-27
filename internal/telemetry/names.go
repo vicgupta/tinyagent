@@ -45,5 +45,11 @@ const (
 	attrHookDecision = "tinyagent.hook.decision"
 	attrSubagentID   = "tinyagent.subagent.id"
 
+	attrSubagentKind      = "tinyagent.subagent.kind"
+	attrWorkerBranch      = "tinyagent.worker.branch"
+	attrWorkerBaseCommit  = "tinyagent.worker.base_commit"
+	attrWorkerCommit      = "tinyagent.worker.commit"
+	attrWorkerFilesChange = "tinyagent.worker.files_changed"
+
 	scopeName = "github.com/vicgupta/tinyagent"
 )

@@ -116,6 +116,8 @@ type SQLite struct {
 	runID string
 	seq   int
 	calls map[string]pendingCall
+	// subStart holds each running subagent's start time.
+	subStart map[string]time.Time
 
 	ch   chan []op
 	done chan struct{}
@@ -166,7 +168,7 @@ func Open(opts Options) (*SQLite, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	s := &SQLite{opts: opts, db: db, calls: map[string]pendingCall{}, ch: make(chan []op, 256), done: make(chan struct{})}
+	s := &SQLite{opts: opts, db: db, calls: map[string]pendingCall{}, subStart: map[string]time.Time{}, ch: make(chan []op, 256), done: make(chan struct{})}
 	// Switching a new file to WAL needs an exclusive lock and can report
 	// SQLITE_BUSY without waiting on the busy timeout, so retry briefly.
 	err = s.init()
@@ -276,6 +278,7 @@ func (s *SQLite) prune(ctx context.Context) error {
 	for _, q := range []string{
 		`DELETE FROM events WHERE run_id IN (SELECT id FROM prune_ids)`,
 		`DELETE FROM tool_calls WHERE run_id IN (SELECT id FROM prune_ids)`,
+		`DELETE FROM subagents WHERE run_id IN (SELECT id FROM prune_ids)`,
 		`DELETE FROM runs WHERE id IN (SELECT id FROM prune_ids)`,
 	} {
 		if _, err := tx.ExecContext(ctx, q); err != nil {
@@ -330,6 +333,8 @@ func (s *SQLite) Emit(kind string, fields map[string]any) {
 		isErr, _ := fields["is_error"].(bool)
 		ops = append(ops, op{`UPDATE tool_calls SET result_summary = ?, duration_ms = ?, is_error = ? WHERE id = (SELECT id FROM tool_calls WHERE run_id = ? AND call_id = ? AND is_error IS NULL ORDER BY id DESC LIMIT 1)`,
 			[]any{summary, dur, isErr, s.runID, id}})
+	case "subagent.started", "subagent.finished", "worker.applied":
+		ops = append(ops, s.subagentOps(kind, fields, now)...)
 	case "result":
 		ops = append(ops, op{`UPDATE runs SET ended_at = ?, status = ?, steps = ?, input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_write_tokens = ?, cost_usd = ?, duration_ms = ? WHERE id = ?`,
 			[]any{now.UnixMilli(), str(fields["status"]), num(fields["steps"]), num(fields["input_tokens"]), num(fields["output_tokens"]),
