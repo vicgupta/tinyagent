@@ -97,10 +97,10 @@ func testCompletionOfflineWithBrokenConfig(t *testing.T, shell, prefix, register
 }
 
 func TestCompletionUnsupportedShell(t *testing.T) {
-	for _, shell := range []string{"fish", ""} {
+	for _, shell := range []string{"powershell", ""} {
 		code, stdout, stderr := runCLI(t, "--completion", shell)
-		if code != 2 || stdout != "" || !strings.Contains(stderr, "supported shells are bash and zsh") {
-			t.Errorf("--completion %q: exit %d, stdout %q, stderr %q; want exit 2 naming bash and zsh", shell, code, stdout, stderr)
+		if code != 2 || stdout != "" || !strings.Contains(stderr, "supported shells are bash, zsh and fish") {
+			t.Errorf("--completion %q: exit %d, stdout %q, stderr %q; want exit 2 naming bash, zsh and fish", shell, code, stdout, stderr)
 		}
 	}
 	code, _, stderr := runCLI(t, "--completion")
@@ -302,5 +302,101 @@ func TestCompletionZshNeedsCompinit(t *testing.T) {
 	out, err := exec.Command(zshPath(t), "-f", "-c", `source "$1"`, "zsh", script).CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "compinit") {
 		t.Errorf("sourcing without compinit: %v, output %q; want a failure naming compinit", err, out)
+	}
+}
+
+func TestCompletionFishOfflineWithBrokenConfig(t *testing.T) {
+	testCompletionOfflineWithBrokenConfig(t, "fish", "# Fish completion for tinyagent flags.\n", "\n")
+}
+
+func TestCompletionFishFlagsMatchFlagSet(t *testing.T) {
+	stdout, _ := shellCompletionScript(t, "fish")
+	var got []string
+	for _, line := range strings.Split(stdout, "\n") {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) != 5 || fields[0] != "complete" || fields[1] != "-c" || fields[2] != "tinyagent" {
+			t.Fatalf("unexpected registration: %q", line)
+		}
+		switch fields[3] {
+		case "-l":
+			got = append(got, "--"+fields[4])
+		case "-s":
+			got = append(got, "-"+fields[4])
+		default:
+			t.Fatalf("unexpected option: %q", line)
+		}
+	}
+	if want := completionFlags(newFlagSet(&options{})); !reflect.DeepEqual(got, want) {
+		t.Errorf("script flags = %v, want %v", got, want)
+	}
+	again, _ := shellCompletionScript(t, "fish")
+	if stdout != again {
+		t.Error("script is not deterministic")
+	}
+}
+
+func TestCompletionFishCandidates(t *testing.T) {
+	fish, err := exec.LookPath("fish")
+	if err != nil || runtime.GOOS == "windows" {
+		if os.Getenv("TINYAGENT_REQUIRE_FISH") != "" {
+			t.Fatalf("TINYAGENT_REQUIRE_FISH is set but fish is unavailable: %v", err)
+		}
+		t.Skip("needs fish")
+	}
+	_, script := shellCompletionScript(t, "fish")
+	if out, err := exec.Command(fish, "-n", script).CombinedOutput(); err != nil {
+		t.Fatalf("fish -n: %v\n%s", err, out)
+	}
+	dir, bin := t.TempDir(), t.TempDir()
+	for _, name := range []string{"my file.txt", "other.txt"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tripwire := filepath.Join(dir, "tinyagent-ran")
+	if err := os.WriteFile(filepath.Join(bin, "tinyagent"), []byte("#!/bin/sh\n: > \"$PWD/tinyagent-ran\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		line string
+		want []string
+	}{
+		{"tinyagent --tool-out", []string{"--tool-output-files"}},
+		{"tinyagent --sandbox-", []string{"--sandbox-allow-domain", "--sandbox-network"}},
+		{"tinyagent -v --sandbox", []string{"--sandbox", "--sandbox-allow-domain", "--sandbox-network"}},
+		{"tinyagent -", completionFlags(newFlagSet(&options{}))},
+		{"tinyagent --he", []string{"--help"}},
+		{"tinyagent --nope-", nil},
+		{`tinyagent -t "do it" my`, []string{"my file.txt"}},
+		{"tinyagent --cwd . oth", []string{"other.txt"}},
+	} {
+		t.Run(tc.line, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, fish, "--no-config", "-c", `set -g fish_complete_path; source $argv[1]; complete -C $argv[2]`, script, tc.line)
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(), "PATH="+bin, "HOME="+t.TempDir(), "XDG_CONFIG_HOME="+t.TempDir())
+			out, err := cmd.Output()
+			if err != nil {
+				t.Fatalf("fish completing %q: %v", tc.line, err)
+			}
+			var got []string
+			for _, line := range strings.Split(strings.TrimSuffix(string(out), "\n"), "\n") {
+				if line != "" {
+					candidate, _, _ := strings.Cut(line, "\t")
+					got = append(got, candidate)
+				}
+			}
+			slices.Sort(got)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("candidates = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	if _, err := os.Stat(tripwire); !os.IsNotExist(err) {
+		t.Errorf("completion executed tinyagent (tripwire stat: %v)", err)
 	}
 }

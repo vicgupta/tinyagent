@@ -18,8 +18,10 @@ func runCompletion(shell string, fs *flag.FlagSet, w io.Writer) int {
 		fmt.Fprint(w, bashCompletion(fs))
 	case "zsh":
 		fmt.Fprint(w, zshCompletion(fs))
+	case "fish":
+		fmt.Fprint(w, fishCompletion(fs))
 	default:
-		fmt.Fprintf(os.Stderr, "error: --completion %q is not supported; supported shells are bash and zsh: tinyagent --completion bash|zsh\n", shell)
+		fmt.Fprintf(os.Stderr, "error: --completion %q is not supported; supported shells are bash, zsh and fish: tinyagent --completion bash|zsh|fish\n", shell)
 		return 2
 	}
 	return 0
@@ -79,4 +81,19 @@ _tinyagent() {
 }
 compdef _tinyagent tinyagent
 `
+}
+
+// fishCompletion embeds the registered flags using Fish's native completion
+// command. Filename completion stays enabled; Tab never invokes tinyagent.
+func fishCompletion(fs *flag.FlagSet) string {
+	var script strings.Builder
+	script.WriteString("# Fish completion for tinyagent flags.\n# Load it with: tinyagent --completion fish | source\n")
+	for _, name := range completionFlags(fs) {
+		if strings.HasPrefix(name, "--") {
+			fmt.Fprintf(&script, "complete -c tinyagent -l %s\n", strings.TrimPrefix(name, "--"))
+		} else {
+			fmt.Fprintf(&script, "complete -c tinyagent -s %s\n", strings.TrimPrefix(name, "-"))
+		}
+	}
+	return script.String()
 }
