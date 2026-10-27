@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## [v0.7.0] - 2026-10-27
+
+### Features
+
+- Add `--workflow file.yaml` (with `--workflow-name`), a skill-harness runner that executes a sequence of minimal Markdown skills as one automatic pipeline. Tasks are routed to a workflow or skill by intent (or `default:`), each stage runs as a fresh child tinyagent run that receives the previous stage's output, and each stage is gated by its success check with retries. A failing stage stops the run with exit 1 naming the stage and reason; invalid skill or workflow files and routing failures exit 2 before any model request. `-o` writes a workflow record with per-stage trajectories, and `--json` emits `workflow.started`, `stage.started`, `stage.finished` and `workflow.finished` events. See the README's "Skill workflows" section and `docs/workflows/`.
+- Add eval mode: `tinyagent --eval suite.yaml --eval-out dir` runs a declarative `version: 1` suite of coding tasks across a models × profiles × trials matrix, each trial in its own detached worktree as a child tinyagent run, grades trials with argv checks, and reports pass rate, pass@k, cost, tokens, steps and wall time, with suite-level `--cost-limit`/`--time-limit` budgets, `--eval-keep`, and a `results.jsonl` output.
+
+### Changes
+
+- `tinyagent --help` now prints a brief 3-line summary; `--help --verbose` lists every flag grouped under headings, sorted, aligned and wrapped, with defaults shown, including tool flags previously missing from help.
+
 ## [v0.6.0] - 2026-10-27
 
 ### Features
