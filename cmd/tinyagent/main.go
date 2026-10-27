@@ -444,6 +444,9 @@ func run() int {
 	} else if set {
 		cfg.Skills = on
 	}
+	if flagWasSet(fs, "memory") {
+		cfg.Memory.Enabled = o.memory.enabled
+	}
 	if flagWasSet(fs, "snapshots") {
 		cfg.Snapshots.Enabled = o.snapshots
 	}
@@ -699,6 +702,9 @@ func run() int {
 	startOutputFiles(outputFiles, cfg.ToolOutputFiles.MaxRuns, warn)
 	if cfg.Skills {
 		loadSkills(a, root, warn)
+	}
+	if cfg.Memory.Enabled {
+		loadMemory(a, cfg.Memory, root, warn)
 	}
 	if o.output != "" {
 		a.OnStep = func(t *trajectory.Trajectory) error {
@@ -986,6 +992,11 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return fail(errors.New("resume: --skills/--no-skills conflicts with the checkpoint's recorded skills setting; start a fresh task"))
 	}
 	cfg.Skills = src.SkillsEnabled
+	if flagWasSet(fs, "memory") && o.memory.enabled != src.MemoryEnabled {
+		fmt.Fprintln(os.Stderr, "error: resume: --memory conflicts with the checkpoint's recorded memory setting; start a fresh task")
+		return 2
+	}
+	cfg.Memory.Enabled = src.MemoryEnabled
 	// Snapshots are per invocation: config or --snapshots decides for this
 	// resume, and earlier snapshots stay in the trajectory either way.
 	if flagWasSet(fs, "snapshots") {

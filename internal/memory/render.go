@@ -34,23 +34,67 @@ func Render(entries []Entry, maxBytes int) Rendered {
 	if len(active) == 0 {
 		return Rendered{}
 	}
-	var b strings.Builder
-	b.WriteString(renderHeader)
 	var r Rendered
+	size := len(renderHeader)
 	for i, e := range active {
-		line := fmt.Sprintf("- [%s, %s] %s\n", e.ID, e.UpdatedAt.UTC().Format("2006-01-02"), e.Text)
-		if b.Len()+len(line) > maxBytes {
+		n := len(renderLine(LineOf(e)))
+		if size+n > maxBytes {
 			r.Omitted = len(active) - i
 			break
 		}
-		b.WriteString(line)
+		size += n
 		r.Loaded = append(r.Loaded, e)
 	}
-	if r.Omitted > 0 {
-		fmt.Fprintf(&b, "\n(%d older memory %s omitted to stay within the size limit.)\n", r.Omitted, plural(r.Omitted, "entry", "entries"))
-	}
-	r.Section = b.String()
+	r.Section = RenderLines(Lines(r.Loaded), r.Omitted)
 	return r
+}
+
+// Line is one loaded entry as it appears in the prompt section: its id,
+// its date (YYYY-MM-DD, UTC) and its text. A run records its loaded lines
+// so a resume can rebuild the identical section without reading the store.
+type Line struct {
+	ID   string `json:"id"`
+	Date string `json:"date"`
+	Text string `json:"text"`
+}
+
+// LineOf returns e as a prompt line.
+func LineOf(e Entry) Line {
+	return Line{ID: e.ID, Date: e.UpdatedAt.UTC().Format("2006-01-02"), Text: e.Text}
+}
+
+// Lines returns entries as prompt lines, in order.
+func Lines(entries []Entry) []Line {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]Line, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, LineOf(e))
+	}
+	return out
+}
+
+func renderLine(l Line) string {
+	return fmt.Sprintf("- [%s, %s] %s\n", l.ID, l.Date, l.Text)
+}
+
+// RenderLines builds the prompt section from already-selected lines and the
+// number of omitted entries, exactly as Render does. It returns "" when
+// there are no lines and nothing was omitted.
+func RenderLines(lines []Line, omitted int) string {
+	if len(lines) == 0 && omitted == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(renderHeader)
+	for _, l := range lines {
+		b.WriteString(renderLine(l))
+	}
+	if omitted > 0 {
+		fmt.Fprintf(&b, "\n(%d older memory %s omitted to stay within the size limit.)\n", omitted, plural(omitted, "entry", "entries"))
+	}
+	return b.String()
 }
 
 func plural(n int, one, many string) string {
