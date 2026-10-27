@@ -6,6 +6,17 @@
 
 - Add an opt-in tool permission policy (`permissions` config with `default`, `non_interactive` and `rules`): declarative `allow`/`ask`/`deny` rules matched on a tool call's name and one primary argument (a `command` for `bash`/`start_process`/command tools, a `path` for the file tools in the `file_access` syntax, or a `host` for `web_fetch` in the `sandbox_allowed_domains` syntax). Precedence is `deny` > `ask` > `allow` > `default`; compound shell commands are split on unquoted `&&`/`||`/`;`/`|`/newlines, with a deny/ask matching any segment, an allow only when every segment is covered, and `$(...)`/backticks/`eval` never matching an allow. An `ask` is answered through the channel the run has: a single-line terminal prompt (`y`/`a`/`n <reason>` read from `/dev/tty`, never stdin), ACP `session/request_permission` (`allow_once`/`allow_always`/`reject_once`; `cancelled` cancels the turn), or the `non_interactive` fallback (`deny` by default) for `--json` and piped/CI runs. A denial is returned to the model as an error and skips `pre_tool` hooks; an allowed call still runs them. `update_plan`, `ask_user` and `submit_result` are exempt. Every decision emits a `permission` event (`--json`, `--log-db`, `--otel`), `run.started` and trajectories record a `permissions` summary, `-v` prints one line per non-default decision, and `--check` prints the rule count, default and resolved non-interactive behavior. Rules come only from the user config, `-c` or a profile (never the repository); a profile's `rules` replace the base list; and invalid settings exit 2 naming the file, profile and rule index. Off by default with no change to configs without `permissions`; older tinyagent versions reject a config file containing the `permissions` key.
 
+## [v0.7.0] - 2026-10-27
+
+### Features
+
+- Add `--workflow file.yaml` (with `--workflow-name`), a skill-harness runner that executes a sequence of minimal Markdown skills as one automatic pipeline. Tasks are routed to a workflow or skill by intent (or `default:`), each stage runs as a fresh child tinyagent run that receives the previous stage's output, and each stage is gated by its success check with retries. A failing stage stops the run with exit 1 naming the stage and reason; invalid skill or workflow files and routing failures exit 2 before any model request. `-o` writes a workflow record with per-stage trajectories, and `--json` emits `workflow.started`, `stage.started`, `stage.finished` and `workflow.finished` events. See the README's "Skill workflows" section and `docs/workflows/`.
+- Add eval mode: `tinyagent --eval suite.yaml --eval-out dir` runs a declarative `version: 1` suite of coding tasks across a models × profiles × trials matrix, each trial in its own detached worktree as a child tinyagent run, grades trials with argv checks, and reports pass rate, pass@k, cost, tokens, steps and wall time, with suite-level `--cost-limit`/`--time-limit` budgets, `--eval-keep`, and a `results.jsonl` output.
+
+### Changes
+
+- `tinyagent --help` now prints a brief 3-line summary; `--help --verbose` lists every flag grouped under headings, sorted, aligned and wrapped, with defaults shown, including tool flags previously missing from help.
+
 ## [v0.6.0] - 2026-10-27
 
 ### Features

@@ -1,0 +1,19 @@
+# Example skill-harness workflow: tinyagent --workflow docs/workflows/workflow.yaml -t "..."
+version: 1
+skills_dir: skills
+default: implement
+defaults:
+  retries: 1
+  step_limit: 50
+workflows:
+  implement:
+    intent: Implement a feature from a spec, then validate and test it.
+    stages:
+      - skill: plan-tasks
+      - skill: generate-code
+        step_limit: 100
+      - skill: validate-diff
+        check: [go, vet, ./...]
+      - skill: run-tests
+        check: [go, test, -count=1, ./...]
+        check_timeout: 600

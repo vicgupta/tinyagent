@@ -264,6 +264,9 @@ type Trajectory struct {
 	// SubagentsEnabled (schema 2) records whether the opt-in delegate tool
 	// was offered. A resume must use the same setting.
 	SubagentsEnabled bool `json:"subagents_enabled,omitempty"`
+	// WorkersEnabled records whether the opt-in worker and apply_worker
+	// tools were offered. A resume must use the same setting.
+	WorkersEnabled bool `json:"workers_enabled,omitempty"`
 	// WebFetchEnabled (schema 2) records whether the opt-in web_fetch tool
 	// was offered. A resume must use the same setting.
 	WebFetchEnabled bool `json:"web_fetch_enabled,omitempty"`
@@ -540,6 +543,16 @@ type Subagent struct {
 	Cost             float64         `json:"cost"`
 	Report           string          `json:"report,omitempty"`
 	Messages         []model.Message `json:"messages"`
+	// Kind is "worker" for a worker run; empty for a delegate child.
+	Kind string `json:"kind,omitempty"`
+	// Worker runs only: the worktree, its branch, the snapshot commit it
+	// started from, the commit holding its changes ("" when it changed
+	// nothing), and whether apply_worker applied it.
+	Worktree   string `json:"worktree,omitempty"`
+	Branch     string `json:"branch,omitempty"`
+	BaseCommit string `json:"base_commit,omitempty"`
+	Commit     string `json:"commit,omitempty"`
+	Applied    bool   `json:"applied,omitempty"`
 }
 
 // ScopedAgentsMDLoad is one scoped AGENTS.md delivered with a tool result.

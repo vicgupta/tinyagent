@@ -167,8 +167,14 @@ type Agent struct {
 	// Subagents runs the opt-in delegate tool's children; Tools.Delegate
 	// offers the tool. nil leaves delegate calls failing with an error.
 	Subagents *Subagents
-	// subagentID is set on a delegate child (d1, d2, ...).
+	// subagentID is set on a delegate child (d1, d2, ...) or a worker
+	// (w1, w2, ...).
 	subagentID string
+	// Workers runs the opt-in worker tool's children; Tools.Workers
+	// offers the tool. nil leaves worker calls failing with an error.
+	Workers *Workers
+	// isWorker is set on a worker child.
+	isWorker bool
 	// scopedReported dedupes this invocation's instructions.skipped reports.
 	scopedReported map[string]bool
 	// scopedWritten holds the AGENTS.md files the built-in edit tools wrote
@@ -191,6 +197,8 @@ var readOnlyTools = map[string]bool{
 	"read_file": true, "list_files": true, "grep": true, "read_process": true,
 	tools.PlanToolName: true, tools.ViewImageToolName: true, "skill": true, SubmitToolName: true,
 	tools.DelegateToolName: true, tools.AskUserToolName: true,
+	// A worker changes only its own worktree; apply_worker is mutating.
+	tools.WorkerToolName: true,
 }
 
 // mutating reports whether any call in the batch may change the workspace.
@@ -318,6 +326,10 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			t.ExitStatus, t.Submission = StatusError, "resume subagents setting differs from checkpoint"
 			return t
 		}
+		if t.WorkersEnabled != a.workersOn() {
+			t.ExitStatus, t.Submission = StatusError, "resume workers setting differs from checkpoint"
+			return t
+		}
 		if t.WebFetchEnabled != (a.Tools.WebFetch != nil) {
 			t.ExitStatus, t.Submission = StatusError, "resume web_fetch setting differs from checkpoint"
 			return t
@@ -408,6 +420,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			ImagesEnabled:         a.Tools.Images,
 			ApplyPatchEnabled:     a.Tools.ApplyPatch,
 			SubagentsEnabled:      a.Tools.Delegate,
+			WorkersEnabled:        a.workersOn(),
 			WebFetchEnabled:       a.Tools.WebFetch != nil,
 			LSPEnabled:            a.Tools.LSP != nil,
 			ScopedAgentsMDEnabled: a.scopedOn(),
@@ -873,7 +886,7 @@ func (a *Agent) runTool(ctx context.Context, t *trajectory.Trajectory, call mode
 	in := hooks.Input{
 		ToolName: call.Function.Name, ToolCallID: call.ID, Arguments: eventArguments(call.Function.Arguments),
 		Root: a.Tools.Root, ReadOnly: a.Tools.ReadOnly, Step: t.Steps,
-		Subagent: a.subagentID,
+		Subagent: a.subagentID, Worker: a.isWorker,
 	}
 	for _, r := range a.Hooks.Pre(ctx, in) {
 		a.hookRan(call, r)
@@ -1166,7 +1179,9 @@ func (a *Agent) systemPrompt() string {
 	if a.OutputSchema != nil {
 		system += "\n\n" + structuredOutputNotice
 	}
-	if a.subagentID != "" {
+	if a.isWorker {
+		system += "\n\n" + workerNotice
+	} else if a.subagentID != "" {
 		system += "\n\n" + subagentNotice
 	}
 	return system

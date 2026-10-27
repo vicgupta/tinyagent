@@ -510,6 +510,58 @@ With `--skills` (or `skills: true`), tinyagent discovers [Agent Skills](https://
 
 **Trust:** skill instructions are prompt input. A project skill from a repository you don't trust can steer the agent like a malicious AGENTS.md, and bundled scripts run with your permissions if the agent invokes them. Skill text sent to the model goes to your model provider like any other prompt, and the trajectory records loaded skill content.
 
+### Skill workflows
+
+`--workflow file.yaml` runs a sequence of small skills on the task (`-t`) as one automatic pipeline, for example plan, then generate, then validate, then test. Each stage is a fresh, unattended tinyagent run in `--cwd` that gets the original task and the previous stage's output. As soon as a stage passes its success check the next one starts; there is no pause or approval between stages. Without `--workflow`, tinyagent behaves exactly as before, and `--skills` Agent Skills are unaffected.
+
+**Skill format.** A workflow skill is a Markdown file with three required parts: a heading, an intent line, and a list of inputs. A one-line success check is required too, unless the workflow gives that stage a `check` command.
+
+```markdown
+# Skill: plan-tasks
+> Intent: Break a spec into small, ordered tasks before writing any code.
+
+**Inputs**
+- spec
+- repo_path
+
+**Success check:** every task has acceptance criteria and a verification step, in dependency order.
+```
+
+Skills live in the workflow's `skills_dir` (default `skills/` next to the workflow file) as `<name>.md` or `<name>/SKILL.md`. Names are lowercase letters, digits, `.`, `_` and `-`. A `SKILL.md` with `name`/`description` frontmatter can use the description as its intent. The whole file (frontmatter removed) is the stage's instructions. These input names are filled automatically: `task` and `spec` (the `-t` task), `repo_path` and `cwd` (the absolute `--cwd`), `previous_output` or the previous skill's name (the previous stage's output). Any other input comes from the stage's `inputs:` map or is marked as not provided.
+
+**Workflow format.**
+
+```yaml
+version: 1
+skills_dir: skills        # relative to this file
+default: implement        # used when routing finds no match (optional)
+defaults:                 # apply to every stage
+  retries: 1
+  step_limit: 50
+workflows:
+  implement:
+    intent: Implement a feature from a spec, then validate and test it.
+    stages:
+      - skill: plan-tasks
+      - skill: generate-code
+        step_limit: 100
+      - skill: validate-diff
+        check: [go, vet, ./...]
+      - skill: run-tests
+        check: [go, test, -count=1, ./...]
+        check_timeout: 600
+```
+
+Settings in `defaults` or on a stage: `model`, `profile`, `step_limit`, `cost_limit`, `time_limit`, `retries`, and `check_timeout` (seconds). The defaults are 1 retry (at most 5), 50 steps, a 300 second check timeout, and otherwise your usual config. Flags you pass with `--workflow` (such as `--sandbox` or `-m`) are forwarded to every stage, and stage settings override them. Workflows are sequential and have at most 20 stages. A complete example is in [docs/workflows](docs/workflows).
+
+**Routing.** `--workflow-name name` runs that workflow, or a single skill, directly. Otherwise the router matches the task against each workflow's intent and each skill's intent line. A clear best match runs. A tie or no match falls back to `default`, or exits 2 with an error suggesting `--workflow-name`, before any model call.
+
+**Success checks.** A stage with `check` (an argv list, run in `--cwd` without a shell) passes when the command exits 0. Otherwise the model is told the skill's success check and must end its answer with `SUCCESS CHECK: PASS` or `SUCCESS CHECK: FAIL - <reason>`. The last such line decides, and a missing line fails. A stage run that ends without submitting (for example on a step, cost or time limit) also fails. A failed stage is retried with the failure reason in its prompt. When its retries run out, the workflow stops, prints the stage and reason, and exits 1 without running later stages. Earlier stages are not re-run.
+
+**Output and exit status.** Progress lines go to stderr, and the last stage's output goes to stdout. `-o run.json` writes a workflow record (`"kind": "workflow"`) with the route, status, failed stage and reason, total cost, and one entry per attempt with its input, output, exit status, check result, and paths to that attempt's trajectory and log under `run.json.stages/`. Without `-o`, the per-stage files are temporary. `--json` prints JSONL events `workflow.started`, `stage.started` (with the input), `stage.finished` (input, output and `check`), and `workflow.finished`. Exit status is 0 when every stage passes, 1 when a stage fails, 2 for an invalid skill or workflow file, a routing error or a conflicting flag (all before any model request), and 130 when interrupted. `--workflow` can't be combined with flags for one interactive or resumed run, such as `--resume`, `--review`, `--worktree`, `--eval` or `--ask-user`.
+
+**Trust:** workflow skills are prompt input, and `check` commands run with your permissions, just like a project's AGENTS.md or Agent Skills. Only run workflow files you trust.
+
 ## Editor integration (ACP)
 
 `tinyagent --acp` speaks the [Agent Client Protocol](https://agentclientprotocol.com) (protocol version 1, newline-delimited JSON-RPC on stdin/stdout), so any ACP client can run tinyagent as an external agent: you type in the editor's agent panel, tinyagent runs its normal loop in the session's directory, and the editor shows the model's text and each tool call live. The mode is **experimental**: the stop-reason mapping and the MCP default below may change based on feedback.
@@ -1152,6 +1204,32 @@ A checkpoint records whether `apply_patch` was enabled (`apply_patch_enabled`), 
 - **Resume.** A checkpoint records whether subagents were enabled, and `--resume` keeps that setting: a conflicting `--subagents` exits 2. A run interrupted mid-delegation resumes with that `delegate` call marked interrupted; the child is not resumed.
 
 Not in this version: children that can write or run commands, parallel children, nested delegation, and streaming the child's output.
+
+### Workers
+
+`--workers` (or `subagents.workers.enabled: true`) adds two tools. `worker` hands a well-scoped implementation subtask to a child agent that may edit files and run commands, but only in its own Git worktree. `apply_worker` then applies the worker's change to your working tree. Nothing is merged, pushed or applied automatically.
+
+```yaml
+subagents:
+  workers:
+    enabled: true
+    model: ""            # default: the parent's model
+    max_steps: 60        # per worker
+    max_concurrent: 1    # 1 to 4; this version runs worker calls one at a time
+    tools: [read_file, list_files, grep, write_file, edit_file, apply_patch, bash]
+```
+
+- **How a worker runs.** tinyagent snapshots the working tree (tracked changes plus untracked, non-ignored files) into a commit using a temporary index, so your index, `HEAD` and refs are untouched. It creates a worktree at `.tinyagent/worktrees/<run>-w<n>` on branch `tinyagent/<run>-w<n>` with repository hooks disabled. The child runs there with a fresh context; its file tools, commands and sandbox writable root are the worktree. When it finishes, whether it submitted or stopped early, tinyagent (not the child) commits its changes to the branch. With no changes there is no commit, and the worktree and branch are removed.
+- **Result.** The worker's report, a footer such as `[worker w1: Submitted · branch tinyagent/run-…-w1 · commit abc1234 · 3 files changed, 40 insertions(+), 5 deletions(-) · 18 steps · $0.0400]` and the `git diff --stat`.
+- **Applying.** `apply_worker` with `{"worker": "w1"}` applies the worker's base-to-commit diff to the working tree (not the index), atomically: on a conflict nothing changes and it lists the conflicting files and the branch. It is refused when the diff touches a [`file_access`](#restricting-file-access) `deny_write` path or a file outside `--cwd`. It counts as a file-changing tool for `--snapshots` and runs through `pre_tool`/`post_tool` hooks.
+- **Tools.** A worker gets the configured `tools` that the parent itself has, never `delegate`, the worker tools, `ask_user`, `update_plan`, MCP tools or `web_fetch`. Hooks run for its calls with `subagent` set to `w1`, `w2`, … and `worker: true`.
+- **Budgets.** Worker usage counts toward the parent's `--cost-limit`; a worker that hits a limit stops, its partial work is still committed, and the run ends with the limit status.
+- **Requirements.** `--workers` needs a Git repository with at least one commit, and can't be combined with `--read-only` or the `--review` modes. Commits use the repository's identity, or `tinyagent <tinyagent@localhost>` when none is configured.
+- **Observability.** `--json` adds `kind: "worker"`, `branch`, `commit` and `files_changed` to `subagent.started`/`subagent.finished`, and a `worker.applied` event. The trajectory records each worker's history, branch, base commit and commit.
+- **Cleanup.** Worker branches and worktrees are kept, applied or not. Remove them with `git worktree remove .tinyagent/worktrees/<name>` and `git branch -D tinyagent/<name>`.
+- **Resume.** A checkpoint records whether workers were enabled; a conflicting `--workers` on `--resume` exits 2. `--rewind` affects only your tree, never worker branches.
+
+Not in this version: running several workers concurrently, `--acp` sessions, log-db and OpenTelemetry worker rows, and listing unapplied worker branches in the final summary.
 
 ### Web fetch
 
