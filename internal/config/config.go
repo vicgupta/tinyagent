@@ -158,6 +158,9 @@ type AgentConfig struct {
 	// Skills turns on Agent Skills discovery from .agents/skills (off by
 	// default; --skills / --no-skills override it).
 	Skills bool `yaml:"skills"`
+	// Memory configures opt-in cross-run project memory (off by default;
+	// --memory overrides Enabled). It comes only from the user config or -c.
+	Memory Memory `yaml:"memory"`
 	// LogDB is the opt-in SQLite event log.
 	LogDB LogDB `yaml:"log_db"`
 	// OTel is the opt-in OpenTelemetry (OTLP/HTTP) trace export.
@@ -955,6 +958,7 @@ func Default() AgentConfig {
 		LogDB:                  LogDB{Level: "metadata", MaxDays: 30, MaxRuns: 500},
 		ToolOutputFiles:        ToolOutputFiles{Dir: DefaultToolOutputDir, MaxRuns: DefaultToolOutputMaxRuns},
 		Snapshots:              Snapshots{MaxFileBytes: DefaultSnapshotMaxFileBytes},
+		Memory:                 DefaultMemory(),
 	}
 }
 
@@ -1041,6 +1045,7 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		RedactSecrets   yaml.Node `yaml:"redact_secrets"`
 		OTel            yaml.Node `yaml:"otel"`
 		Permissions     yaml.Node `yaml:"permissions"`
+		Memory          yaml.Node `yaml:"memory"`
 	}
 	if yaml.Unmarshal(data, &probe) == nil {
 		for _, c := range []struct {
@@ -1072,6 +1077,11 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		}
 		if probe.RedactSecrets.Kind != 0 {
 			if err := checkRedactSecrets(&probe.RedactSecrets); err != nil {
+				return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+			}
+		}
+		if probe.Memory.Kind != 0 {
+			if err := checkStrict(&probe.Memory, "memory", &Memory{}); err != nil {
 				return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 			}
 		}
@@ -1137,6 +1147,9 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.RedactSecrets.Validate(); err != nil {
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+	}
+	if err := cfg.Memory.Validate(); err != nil {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.OTel.Validate(); err != nil {

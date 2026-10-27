@@ -104,6 +104,9 @@ type Agent struct {
 	// SkillsEnabled records that skills discovery was on for this run; the
 	// discovered skills are Tools.Skills.
 	SkillsEnabled bool
+	// Memory is the project memory loaded at run start (memory.enabled);
+	// nil means memory is off. Its section follows AGENTS.md.
+	Memory *ProjectMemory
 	// NoCompact turns off context compaction: the full history is always
 	// sent, and a context-overflow error ends the run.
 	NoCompact bool
@@ -442,6 +445,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		if a.scopedOn() {
 			t.ScopedAgentsMDSince = time.Now().UTC().Format(time.RFC3339Nano)
 		}
+		a.recordMemory(t)
 	}
 	a.cur = t
 	t.FallbackModels, t.ActiveModel = a.FallbackModels, ""
@@ -1168,6 +1172,7 @@ func (a *Agent) systemPrompt() string {
 		}
 		system += section
 	}
+	system += memorySection(a.Memory)
 	system += a.Tools.Skills.Catalog()
 	system += tools.ExtraDirsNotice(effectiveDirs(a.Tools.ExtraDirs, a.Tools.ReadOnly))
 	if a.Tools.ReadOnly {

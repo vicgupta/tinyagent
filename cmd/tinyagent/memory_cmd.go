@@ -22,6 +22,8 @@ type memoryCmd struct {
 	approve string
 	forget  string
 	yes     bool
+	// enabled is --memory: load project memory into this run.
+	enabled bool
 }
 
 // memoryCommandFlags are the management flags; exactly one may be set.
@@ -37,6 +39,7 @@ func registerMemoryFlags(fs *flag.FlagSet, m *memoryCmd) {
 	fs.StringVar(&m.approve, "memory-approve", "", "approve the pending project memory entry with this id, or all pending entries, and exit")
 	fs.StringVar(&m.forget, "memory-forget", "", "delete the project memory entry with this id, or all entries (all requires --memory-yes), and exit")
 	fs.BoolVar(&m.yes, "memory-yes", false, "with --memory-forget all: confirm deleting every entry")
+	fs.BoolVar(&m.enabled, "memory", false, "load this project's active memory entries into the system prompt (overrides memory.enabled; --memory=false turns it off); a resume keeps the checkpoint's setting")
 }
 
 // memoryCommandSet reports whether any management flag was given.

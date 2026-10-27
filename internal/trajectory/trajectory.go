@@ -323,6 +323,24 @@ type Trajectory struct {
 	// first, across resumes and rewinds. The file contents live in the
 	// snapshot store named by each entry, never in the trajectory.
 	Snapshots []Snapshot `json:"snapshots,omitempty"`
+	// MemoryEnabled records whether project memory was on (issue #170).
+	// A resume or follow-up rebuilds the Project memory section from
+	// Memory and never re-reads the store. Older checkpoints, without the
+	// field, resume with memory off.
+	MemoryEnabled bool `json:"memory_enabled,omitempty"`
+	// Memory is the snapshot of entries loaded into the system prompt at
+	// run start, newest first.
+	Memory []MemoryLine `json:"memory,omitempty"`
+	// MemoryOmitted counts active entries left out of the section to stay
+	// within memory.max_bytes.
+	MemoryOmitted int `json:"memory_omitted,omitempty"`
+}
+
+// MemoryLine is one project memory entry loaded into the system prompt.
+type MemoryLine struct {
+	ID   string `json:"id"`
+	Date string `json:"date"`
+	Text string `json:"text"`
 }
 
 // Snapshot is the trajectory's record of one workspace snapshot.

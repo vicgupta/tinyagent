@@ -129,6 +129,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--profile` | none | Apply one named profile from the config file's `profiles:` section over its base settings; see [Profiles](#profiles) |
 | `--list-profiles` | | Print the profile names in the selected config file (`-c`) or the user config, sorted, one per line, then exit. Makes no model request and needs no credentials; see [Profiles](#profiles) |
 | `--cwd` | `.` | Root directory; tools can't reach outside it |
+| `--memory` | off | Load this project's active [project memory](#project-memory) entries into the system prompt (overrides `memory.enabled`; `--memory=false` turns it off). `--resume` keeps the checkpoint's setting; a conflicting `--memory` exits 2 |
 | `--memory-list` | | Print the [project memory](#project-memory) entries for `--cwd` (pending first, then newest first), or a JSON array with `--json`, then exit. Makes no model request and needs no credentials |
 | `--memory-approve <id\|all>` | | Approve one pending project memory entry, or every pending entry, then exit |
 | `--memory-forget <id\|all>` | | Delete one project memory entry; `all` deletes every entry and requires `--memory-yes` |
@@ -500,7 +501,13 @@ Monorepos often keep instructions next to the code they cover, such as `services
 
 ### Project memory
 
-Project memory (experimental, in progress; see [#170](https://github.com/vicgupta/tinyagent/issues/170)) keeps short notes that runs save about a project so later runs don't relearn them. Each project has one store file outside the repository, keyed by the repository's Git common directory, so the main checkout and every `--worktree` share it: `$XDG_STATE_HOME/tinyagent/memory/<project>.json`, else `~/.local/state/tinyagent/memory/` on Linux and `tinyagent/memory/` under the user config directory on macOS and Windows. Entries record the run, model and whether untrusted content was in context, and may be held as *pending* until you approve them; pending entries are never loaded into a prompt. The `memory` config section, `--memory` and the model-facing `remember` tool arrive in a later release.
+Project memory (experimental, in progress; see [#170](https://github.com/vicgupta/tinyagent/issues/170)) keeps short notes that runs save about a project so later runs don't relearn them. Each project has one store file outside the repository, keyed by the repository's Git common directory, so the main checkout and every `--worktree` share it: `$XDG_STATE_HOME/tinyagent/memory/<project>.json`, else `~/.local/state/tinyagent/memory/` on Linux and `tinyagent/memory/` under the user config directory on macOS and Windows. Entries record the run, model and whether untrusted content was in context, and may be held as *pending* until you approve them; pending entries are never loaded into a prompt. The model-facing `remember` tool that saves entries arrives in a later release.
+
+**Loading.** Memory is off by default. With `--memory` (or `memory.enabled: true` in the user config or `-c`; never from the repository), a run loads the project's *active* entries into a "Project memory" system prompt section right after AGENTS.md, newest first, one line each as `- [id, date] text`. The section says the notes come from earlier runs and that AGENTS.md and the task outrank them. Only the newest entries that fit within `memory.max_bytes` (default 8 KiB) are loaded; when entries are left out, the section says how many and tinyagent warns once on stderr. `-v` prints how many entries were loaded and from which file. A missing store loads nothing and creates nothing, so memory on with no entries sends exactly the same prompt as memory off. A corrupt or unreadable store warns once and the run continues without memory. Invalid `memory` settings exit 2.
+
+**Resume.** The trajectory records whether memory was on and the exact entries loaded (`memory_enabled`, `memory`, `memory_omitted`). `--resume` rebuilds the section from that snapshot and never re-reads the store, so approving, forgetting or adding entries doesn't block a resume; passing a `--memory` value that conflicts with the checkpoint exits 2. Checkpoints from before this feature resume with memory off. Delegated subagents and workers don't load project memory, and ACP sessions don't load it yet.
+
+**Trust:** loaded entries are prompt input that can steer the agent, and they go to your model provider like any other prompt. Only approved (active) entries are loaded.
 
 You can already inspect and edit the store for `--cwd` without credentials or a model request:
 
@@ -780,6 +787,12 @@ plan:
 skills: false             # discover Agent Skills and offer the skill tool (same as --skills)
 apply_patch: false        # offer the apply_patch tool (same as --apply-patch)
 scoped_agents_md: false   # deliver AGENTS.md files below --cwd on first access (same as --scoped-agents-md)
+memory:                   # project memory; see Project memory (user config or -c only)
+  enabled: false          # load active entries into the system prompt (same as --memory)
+  approval: pending       # pending or auto: policy for entries runs save (saving arrives in a later release)
+  max_writes_per_run: 5   # entries one run may add, replace or forget; >= 1
+  max_entries: 50         # active entries kept per project; >= 1
+  max_bytes: 8192         # cap on the Project memory prompt section; 1 to 65536
 subagents:
   enabled: false          # offer the delegate tool (same as --subagents)
   model: ""               # child model, e.g. openai/gpt-5-mini; empty uses the parent model
