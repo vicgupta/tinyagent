@@ -20,6 +20,9 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == tools.SandboxHelperArg {
 		os.Exit(tools.RunSandboxHelper(os.Args[2:]))
 	}
+	if os.Getenv(evalChildEnv) == "1" { // a trial run by --eval in eval_test.go
+		os.Exit(run())
+	}
 	os.Exit(m.Run())
 }
 

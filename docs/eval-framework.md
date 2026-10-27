@@ -1,8 +1,10 @@
 # TinyAgent eval framework (`tinyagent --eval`)
 
-> **Status: proposed, not yet implemented. Flags and file formats below are the target design.**
+> **Status: experimental; v1 implemented.** `tinyagent --eval suite.yaml --eval-out dir` runs the suite sequentially (code in `internal/eval/` and `cmd/tinyagent/eval.go`). What v1 ships and how it differs from the target design below:
 >
-> None of the commands, flags, files or outputs in this guide exist in tinyagent today. This document is the design specification and implementation guide for the planned feature. Nothing here should be read as describing current behavior. Where the design is not settled, the question is listed under [Open questions](#13-open-questions); a suggested default is marked **Recommendation**.
+> - **Shipped:** strict `version: 1` suite files (`version`, `models`, `profiles`, `trials`, and per task `id`, `repo`, `base`, `task`/`task_file`, `model`, `profile`, `checks`, `checks_on_limit`, `limits`, `tags`); a detached worktree per trial at `base`, removed afterwards (also on Ctrl-C) unless `--eval-keep`; one child tinyagent run per trial with `-o` written to `<eval-out>/trajectories/<trial_id>.json` and its output to `logs/<trial_id>.log`; `results.jsonl`, `report.json`, `report.md` (pass rate, pass@k and pass^k, cost, tokens, steps, wall time, outcome counts, per-task passes); suite-level `--cost-limit` / `--time-limit`; `--dry-run`; `--eval-min-pass-rate` (exit 1). Other flags on the command line (e.g. `-c`, `--no-stream`, `--ask-user`, `--step-limit`) are forwarded to every trial.
+> - **Differences:** `trials` is required. `--time-limit` takes seconds (as in single runs), not `30m`. Check output kept in `results.jsonl` is capped to the last 4096 bytes. Checks run on the host in the worktree. A trial's `--profile` is passed only for names other than `default` (unless the config defines a profile called `default`).
+> - **Not yet implemented:** `--eval-jobs` (trials are sequential), `--json` eval events, `output_schema` / `expected_json` (rejected as unknown keys), `profile_digest`, the GitHub Action `eval` input.
 
 ## Contents
 
@@ -213,7 +215,7 @@ Strict keys: any unknown key, at any level, is an error. The suite is fully vali
 ### Annotated example
 
 ```yaml
-# evals/suite.yaml — target format, not yet implemented
+# evals/suite.yaml — target format (v1 does not support output_schema yet)
 version: 1                       # required; only 1 is valid
 
 models:                          # every task runs on each model...
@@ -329,7 +331,7 @@ Records contain no message content by default.
 The planned rollout includes a GitHub Action input for eval mode (PR 4 in the split below); the existing `action.yml` has no such input today. Until then, the target CI pattern is to run the binary directly with a threshold, which makes the job fail when quality regresses:
 
 ```yaml
-# Target design — not functional until --eval ships
+# Target design — the action has no eval input yet; call the binary directly
 on: pull_request
 permissions:
   contents: read

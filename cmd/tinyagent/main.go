@@ -78,6 +78,9 @@ type options struct {
 	otel                                             bool
 	worktree                                         worktreeFlag
 	snapshots, dryRun                                bool
+	eval, evalOut                                    string
+	evalKeep                                         bool
+	evalMinPassRate                                  float64
 	rewind, rewindTo                                 string
 	transcript                                       string
 	profile                                          string
@@ -156,6 +159,10 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.rewind, "rewind", "", "restore --cwd to a workspace snapshot recorded in this trajectory JSON (see --to and --dry-run)")
 	fs.StringVar(&o.rewindTo, "to", "", "with --rewind: start (the baseline, the default), a step number (the state before that step's tool batch), or a snapshot id")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "with --rewind: print what would change and write nothing")
+	fs.StringVar(&o.eval, "eval", "", "run the task suite in this YAML file and report pass rates; with --dry-run, print the trial matrix and a cost bound (see docs/eval-framework.md)")
+	fs.StringVar(&o.evalOut, "eval-out", "", "with --eval: directory for results.jsonl, report.json, report.md and trajectories")
+	fs.BoolVar(&o.evalKeep, "eval-keep", false, "with --eval: keep each trial's worktree")
+	fs.Float64Var(&o.evalMinPassRate, "eval-min-pass-rate", 0, "with --eval: exit 1 if any configuration's pass rate is below this (0-1)")
 	fs.StringVar(&o.transcript, "transcript", "", "print this trajectory JSON as a Markdown transcript (secrets redacted, long results truncated) and exit; makes no model request")
 	fs.Var(&o.logDB, "log-db", "also log run events to SQLite (default .tinyagent/tinyagent.db under --cwd); --log-db=false turns config log_db off")
 	fs.BoolVar(&o.otel, "otel", false, "export the run as an OpenTelemetry trace over OTLP/HTTP (otel.endpoint, else OTEL_EXPORTER_OTLP_ENDPOINT, else localhost:4318); OTEL_* variables alone never turn it on (default off; config otel.enabled)")
@@ -232,6 +239,13 @@ func run() int {
 	if msg := validateLimits(o); msg != "" {
 		fmt.Fprintln(fs.Output(), "error: "+msg)
 		return 2
+	}
+	if !flagWasSet(fs, "eval") && flagWasSet(fs, "eval-out", "eval-keep", "eval-min-pass-rate") {
+		fmt.Fprintln(fs.Output(), "error: --eval-out, --eval-keep and --eval-min-pass-rate apply only to --eval")
+		return 2
+	}
+	if flagWasSet(fs, "eval") {
+		return runEval(&o, fs, os.Args[1:], os.Stderr)
 	}
 	if o.acp {
 		return runACP(&o, fs, os.Stdin, os.Stdout)
