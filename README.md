@@ -1148,6 +1148,32 @@ A checkpoint records whether `apply_patch` was enabled (`apply_patch_enabled`), 
 
 Not in this version: children that can write or run commands, parallel children, nested delegation, and streaming the child's output.
 
+### Workers
+
+`--workers` (or `subagents.workers.enabled: true`) adds two tools. `worker` hands a well-scoped implementation subtask to a child agent that may edit files and run commands, but only in its own Git worktree. `apply_worker` then applies the worker's change to your working tree. Nothing is merged, pushed or applied automatically.
+
+```yaml
+subagents:
+  workers:
+    enabled: true
+    model: ""            # default: the parent's model
+    max_steps: 60        # per worker
+    max_concurrent: 1    # 1 to 4; this version runs worker calls one at a time
+    tools: [read_file, list_files, grep, write_file, edit_file, apply_patch, bash]
+```
+
+- **How a worker runs.** tinyagent snapshots the working tree (tracked changes plus untracked, non-ignored files) into a commit using a temporary index, so your index, `HEAD` and refs are untouched. It creates a worktree at `.tinyagent/worktrees/<run>-w<n>` on branch `tinyagent/<run>-w<n>` with repository hooks disabled. The child runs there with a fresh context; its file tools, commands and sandbox writable root are the worktree. When it finishes, whether it submitted or stopped early, tinyagent (not the child) commits its changes to the branch. With no changes there is no commit, and the worktree and branch are removed.
+- **Result.** The worker's report, a footer such as `[worker w1: Submitted · branch tinyagent/run-…-w1 · commit abc1234 · 3 files changed, 40 insertions(+), 5 deletions(-) · 18 steps · $0.0400]` and the `git diff --stat`.
+- **Applying.** `apply_worker` with `{"worker": "w1"}` applies the worker's base-to-commit diff to the working tree (not the index), atomically: on a conflict nothing changes and it lists the conflicting files and the branch. It is refused when the diff touches a [`file_access`](#restricting-file-access) `deny_write` path or a file outside `--cwd`. It counts as a file-changing tool for `--snapshots` and runs through `pre_tool`/`post_tool` hooks.
+- **Tools.** A worker gets the configured `tools` that the parent itself has, never `delegate`, the worker tools, `ask_user`, `update_plan`, MCP tools or `web_fetch`. Hooks run for its calls with `subagent` set to `w1`, `w2`, … and `worker: true`.
+- **Budgets.** Worker usage counts toward the parent's `--cost-limit`; a worker that hits a limit stops, its partial work is still committed, and the run ends with the limit status.
+- **Requirements.** `--workers` needs a Git repository with at least one commit, and can't be combined with `--read-only` or the `--review` modes. Commits use the repository's identity, or `tinyagent <tinyagent@localhost>` when none is configured.
+- **Observability.** `--json` adds `kind: "worker"`, `branch`, `commit` and `files_changed` to `subagent.started`/`subagent.finished`, and a `worker.applied` event. The trajectory records each worker's history, branch, base commit and commit.
+- **Cleanup.** Worker branches and worktrees are kept, applied or not. Remove them with `git worktree remove .tinyagent/worktrees/<name>` and `git branch -D tinyagent/<name>`.
+- **Resume.** A checkpoint records whether workers were enabled; a conflicting `--workers` on `--resume` exits 2. `--rewind` affects only your tree, never worker branches.
+
+Not in this version: running several workers concurrently, `--acp` sessions, log-db and OpenTelemetry worker rows, and listing unapplied worker branches in the final summary.
+
 ### Web fetch
 
 `--web-fetch` (or `web_fetch.enabled: true`) adds a `web_fetch` tool that reads one URL and returns it as text, for documentation, changelogs and API references. It is off by default; with it off, requests, tools, and checkpoints are unchanged. It is separate from command networking: it runs inside tinyagent, not through `bash`, so enabling it gives commands no network access, and `--sandbox`, `--sandbox-network` and `sandbox_allowed_domains` neither restrict nor widen it.

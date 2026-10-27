@@ -156,6 +156,9 @@ func (a *Agent) execTool(ctx context.Context, t *trajectory.Trajectory, call mod
 	if call.Function.Name == tools.DelegateToolName && a.Tools.Delegate {
 		return a.delegate(ctx, t, call)
 	}
+	if res, ok := a.workerCall(ctx, t, call); ok {
+		return res
+	}
 	if name, file, ok := skillCallArgs(call); ok && file == "" && a.Tools.Skills.Len() > 0 && a.view != nil && a.skillInContext(t, a.view, name) {
 		return tools.Result{Text: fmt.Sprintf("skill %q is already loaded earlier in this conversation; follow those instructions (no second copy was added)", name)}
 	}

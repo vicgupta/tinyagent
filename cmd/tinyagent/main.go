@@ -52,6 +52,7 @@ type options struct {
 	imagePaths                                       imageList
 	applyPatch                                       bool
 	subagents                                        bool
+	workers                                          bool
 	askUser                                          bool
 	webFetch                                         bool
 	webFetchAllowDomains                             domainList
@@ -141,6 +142,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.Var(&o.webFetchAllowDomains, "web-fetch-allow-domain", "with --web-fetch, let web_fetch read this host (name, *.domain or IP, optional :port); repeatable, replaces web_fetch.allowed_domains")
 	fs.BoolVar(&o.lsp, "lsp", false, "start the configured language servers (lsp.servers in the user config or -c): append compiler diagnostics to edit results and add the read-only lsp tool (default off; config lsp.enabled)")
 	fs.BoolVar(&o.subagents, "subagents", false, "add the delegate tool: hand a task to a read-only subagent with a fresh context and get back only its report (default off; config subagents.enabled)")
+	fs.BoolVar(&o.workers, "workers", false, "add the worker and apply_worker tools: a worker subagent edits files and runs commands in its own Git worktree, its changes are committed to branch tinyagent/<run>-w<n>, and apply_worker applies them (default off; config subagents.workers.enabled)")
 	fs.BoolVar(&o.askUser, "ask-user", false, "add the ask_user tool: the model may end the run with one question (status NeedsInput, exit 4), answered with --resume <trajectory> -t \"<answer>\"; requires -o (default off; config ask_user.enabled)")
 	fs.BoolVar(&o.images, "images", false, "let vision-capable models see images: the view_image tool and MCP image pass-through (default off; config images.enabled)")
 	fs.Var(&o.imagePaths, "image", fmt.Sprintf("attach this PNG, JPEG, GIF or WebP file to the task message (or a --resume follow-up); repeatable, at most %d; independent of --images", model.MaxTaskImages))
@@ -400,6 +402,9 @@ func run() int {
 	if flagWasSet(fs, "subagents") {
 		cfg.Subagents.Enabled = o.subagents
 	}
+	if flagWasSet(fs, "workers") {
+		setWorkers(&cfg, o.workers)
+	}
 	if flagWasSet(fs, "web-fetch") {
 		cfg.WebFetch.Enabled = o.webFetch
 	}
@@ -472,6 +477,15 @@ func run() int {
 		return 2
 	}
 	subagents, err := newSubagents(cfg, o.modelName, cfg.ReasoningEffort)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	}
+	if err := checkWorkers(cfg, review != nil, o.cwd); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	}
+	workers, err := newWorkers(cfg, o.modelName, cfg.ReasoningEffort)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
@@ -623,6 +637,7 @@ func run() int {
 			Images:             cfg.Images.Enabled,
 			ApplyPatch:         cfg.ApplyPatch,
 			Delegate:           subagents != nil,
+			Workers:            workers != nil,
 			AskUser:            cfg.AskUser.Enabled,
 			WebFetch:           webFetch,
 			LSP:                lspTools,
@@ -646,6 +661,7 @@ func run() int {
 		OutputSchema:   schema,
 		Snapshots:      snaps,
 		Subagents:      subagents,
+		Workers:        workers,
 		Worktree:       worktree,
 		Review:         reviewInfo,
 		TaskImages:     taskImages,
@@ -916,6 +932,11 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return 2
 	}
 	cfg.Subagents.Enabled = src.SubagentsEnabled
+	if flagWasSet(fs, "workers") && o.workers != src.WorkersEnabled {
+		fmt.Fprintln(os.Stderr, "error: resume: --workers conflicts with the checkpoint's recorded workers setting; start a fresh task")
+		return 2
+	}
+	setWorkers(&cfg, src.WorkersEnabled)
 	if flagWasSet(fs, "ask-user") && o.askUser != src.AskUserEnabled {
 		fmt.Fprintln(os.Stderr, "error: resume: --ask-user conflicts with the checkpoint's recorded ask_user setting; start a fresh task")
 		return 2
@@ -1083,6 +1104,11 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		fmt.Fprintln(os.Stderr, "error: resume:", err)
 		return 2
 	}
+	workers, err := newWorkers(cfg, modelName, src.ReasoningEffort)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error: resume:", err)
+		return 2
+	}
 	if err := model.SetMaxOutputTokens(m, modelName, cfg.MaxOutputTokens); err != nil {
 		return fail(fmt.Errorf("resume: %w", err))
 	}
@@ -1127,6 +1153,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 			Images:         src.ImagesEnabled,
 			ApplyPatch:     src.ApplyPatchEnabled,
 			Delegate:       src.SubagentsEnabled,
+			Workers:        workers != nil,
 			AskUser:        src.AskUserEnabled,
 			WebFetch:       webFetch,
 			LSP:            lspTools,
@@ -1155,6 +1182,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		FollowUp:       followUp,
 		TaskImages:     taskImages,
 		Subagents:      subagents,
+		Workers:        workers,
 	}
 	var events *runEvents
 	warn := func(msg string) { events.warn(msg) }

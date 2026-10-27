@@ -98,6 +98,13 @@ type Executor struct {
 	// the results of every tool except the built-in file tools, before
 	// truncation, saving and hooks. nil masks nothing.
 	Redactor *eventlog.Redactor
+	// Workers offers the opt-in worker and apply_worker tools (never in
+	// read-only mode). The agent loop runs their calls; the executor never
+	// does.
+	Workers bool
+	// Only, when set, restricts the catalog and dispatch to these tool
+	// names (a worker's configured tools). nil allows the whole catalog.
+	Only []string
 
 	procs registry
 }
@@ -258,6 +265,9 @@ type Result struct {
 
 // RunResult is RunWithImages plus where an over-limit result was saved.
 func (e *Executor) RunResult(ctx context.Context, call model.ToolCall) Result {
+	if !e.onlyAllows(call.Function.Name) {
+		return notOffered(call.Function.Name)
+	}
 	if e.Images && !e.ReadOnly && e.ExternalCallImages != nil {
 		if out, images, isErr, ok := e.ExternalCallImages(ctx, call.Function.Name, call.Function.Arguments); ok {
 			r := e.limit(call, out, isErr)
@@ -367,6 +377,10 @@ func (e *Executor) touched(name string, a args) []string {
 // built-ins: command and external MCP tools must never be offered (or dispatched, see Run) when only
 // read_file, list_files, and grep are available.
 func (e *Executor) Catalog() []model.ToolSpec {
+	return e.filterOnly(e.catalog())
+}
+
+func (e *Executor) catalog() []model.ToolSpec {
 	out := Specs(e.ReadOnly)
 	if e.Plan {
 		out = append(out, PlanSpec())
@@ -379,6 +393,9 @@ func (e *Executor) Catalog() []model.ToolSpec {
 	}
 	if e.Delegate {
 		out = append(out, DelegateSpec())
+	}
+	if e.Workers && !e.ReadOnly {
+		out = append(out, WorkerSpec(), ApplyWorkerSpec())
 	}
 	if e.WebFetch != nil {
 		out = append(out, WebFetchSpec())
@@ -458,6 +475,9 @@ func (e *Executor) run(ctx context.Context, name, raw string, edited *[]string) 
 	}
 	if name == AskUserToolName && e.AskUser {
 		return "", errors.New("ask_user is handled by the agent loop")
+	}
+	if (name == WorkerToolName || name == ApplyWorkerToolName) && e.Workers && !e.ReadOnly {
+		return "", fmt.Errorf("%s is handled by the agent loop", name)
 	}
 	skillTool := name == skills.ToolName && e.Skills.Len() > 0
 	webFetch := name == WebFetchToolName && e.WebFetch != nil
