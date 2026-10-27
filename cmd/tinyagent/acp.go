@@ -101,6 +101,7 @@ type acpSession struct {
 	fallbacks                    []string
 	model                        model.Model
 	subagents                    *agent.Subagents
+	workers                      *agent.Workers
 	hooks                        *hooks.Runner
 	policy                       *permissions.Policy
 	env                          tools.Environment
@@ -175,6 +176,12 @@ func newACPSession(ctx context.Context, o *options, fs *flag.FlagSet, id, cwd st
 	if flagWasSet(fs, "subagents") {
 		cfg.Subagents.Enabled = o.subagents
 	}
+	if flagWasSet(fs, "workers") {
+		setWorkers(&cfg, o.workers)
+	}
+	if err := checkWorkers(cfg, false, root); err != nil {
+		return nil, err
+	}
 	if flagWasSet(fs, "web-fetch") {
 		cfg.WebFetch.Enabled = o.webFetch
 	}
@@ -237,6 +244,9 @@ func newACPSession(ctx context.Context, o *options, fs *flag.FlagSet, id, cwd st
 		return nil, err
 	}
 	if s.subagents, err = newSubagents(cfg, s.modelName, cfg.ReasoningEffort); err != nil {
+		return nil, err
+	}
+	if s.workers, err = newWorkers(cfg, s.modelName, cfg.ReasoningEffort); err != nil {
 		return nil, err
 	}
 	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
@@ -440,6 +450,7 @@ func (s *acpSession) Prompt(ctx context.Context, p acp.Prompt, u *acp.Updates) (
 			Images:             cfg.Images.Enabled,
 			ApplyPatch:         cfg.ApplyPatch,
 			Delegate:           s.subagents != nil,
+			Workers:            s.workers != nil,
 			WebFetch:           s.webFetch,
 			LSP:                newLSP(cfg, s.root), // a turn's end stops them
 			OutputFiles:        s.outputFiles,
@@ -461,6 +472,7 @@ func (s *acpSession) Prompt(ctx context.Context, p acp.Prompt, u *acp.Updates) (
 		ScopedAgentsMD: cfg.ScopedAgentsMD && !o.noAgentsMD,
 		NoCompact:      o.noCompact,
 		Subagents:      s.subagents,
+		Workers:        s.workers,
 		TaskImages:     images,
 	}
 	if prev != nil {

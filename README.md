@@ -623,7 +623,7 @@ JetBrains IDEs (2025.3+, `~/.jetbrains/acp.json`):
 }
 ```
 
-Use the full path to the binary. Pass `-m`, `-c`, `--profile` and any policy flags (`--read-only`, `--sandbox`, `--env`, `--command-env`, `--add-dir-*`, `--plan`, `--apply-patch`, `--subagents`, `--web-fetch`, `--lsp`, `--images`, `--tool-output-files`, `--skills`, `--scoped-agents-md`, `--redact-secrets`, `--log-db`, `-v`) in `args`. They mean the same as in a headless run.
+Use the full path to the binary. Pass `-m`, `-c`, `--profile` and any policy flags (`--read-only`, `--sandbox`, `--env`, `--command-env`, `--add-dir-*`, `--plan`, `--apply-patch`, `--subagents`, `--workers`, `--web-fetch`, `--lsp`, `--images`, `--tool-output-files`, `--skills`, `--scoped-agents-md`, `--redact-secrets`, `--log-db`, `-v`) in `args`. They mean the same as in a headless run.
 
 **How it works**
 
@@ -1264,7 +1264,7 @@ subagents:
 - **Cleanup.** Worker branches and worktrees are kept, applied or not; tinyagent never removes them on its own. After the summary line, the run lists every kept worker branch, unapplied ones first, with ready-to-paste commands: `review:` (`git show --stat <commit>`) and `discard:` for unapplied workers, `clean up:` for applied ones (`git worktree remove --force <worktree> && git branch -D tinyagent/<name>`). With `--json`, the `result` event carries the same list as `worker_branches` (`id`, `branch`, `commit`, `worktree`, `applied`, `status`, `cleanup`).
 - **Resume.** A checkpoint records whether workers were enabled; a conflicting `--workers` on `--resume` exits 2. `--rewind` affects only your tree, never worker branches.
 
-Not in this version: `--acp` sessions, and log-db and OpenTelemetry worker rows.
+**ACP.** Workers are also available in editor sessions with `--acp --workers` or the same config. Each session must start in a Git repository with a commit; read-only sessions reject workers. Later prompts can review and apply workers from earlier turns. Worker tool results appear in the editor, and kept branches and cleanup commands appear in the per-turn summary in the agent log.
 
 ### Web fetch
 
