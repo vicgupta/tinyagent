@@ -293,6 +293,62 @@ type Subagents struct {
 	// MaxSteps caps each child's model calls; 0 means
 	// DefaultSubagentMaxSteps.
 	MaxSteps int `yaml:"max_steps"`
+	// Workers configures the opt-in worker tool (--workers), whose
+	// children may edit files and run commands in their own Git worktree.
+	// nil when the config has no subagents.workers section.
+	Workers *Workers `yaml:"workers"`
+}
+
+// Workers configures the opt-in worker and apply_worker tools.
+type Workers struct {
+	Enabled bool `yaml:"enabled"`
+	// Model is the provider/model workers use; "" means the parent's.
+	Model string `yaml:"model"`
+	// MaxSteps caps each worker's model calls; 0 means
+	// DefaultWorkerMaxSteps.
+	MaxSteps int `yaml:"max_steps"`
+	// MaxConcurrent is the cap on workers running at once (1..4; 0 means
+	// 1). This version runs worker calls one at a time.
+	MaxConcurrent int `yaml:"max_concurrent"`
+	// Tools are the tools a worker may use, intersected with the parent's;
+	// empty means DefaultWorkerTools.
+	Tools []string `yaml:"tools"`
+}
+
+// DefaultWorkerMaxSteps is a worker's step cap when
+// subagents.workers.max_steps is 0.
+const DefaultWorkerMaxSteps = 60
+
+// DefaultWorkerTools are a worker's tools when subagents.workers.tools is
+// empty.
+var DefaultWorkerTools = []string{"read_file", "list_files", "grep", "write_file", "edit_file", "apply_patch", "bash"}
+
+// WorkerToolChoices are the tool names subagents.workers.tools accepts.
+var WorkerToolChoices = []string{"read_file", "list_files", "grep", "write_file", "edit_file", "apply_patch", "bash", "start_process", "read_process", "stop_process"}
+
+// validateWorkers checks subagents.workers.
+func validateWorkers(w *Workers) error {
+	if w == nil {
+		return nil
+	}
+	if w.MaxSteps < 0 {
+		return fmt.Errorf("subagents.workers.max_steps must be a whole number >= 0, got %d", w.MaxSteps)
+	}
+	if w.MaxConcurrent < 0 || w.MaxConcurrent > 4 {
+		return fmt.Errorf("subagents.workers.max_concurrent must be a whole number from 1 to 4, got %d", w.MaxConcurrent)
+	}
+	for _, t := range w.Tools {
+		ok := false
+		for _, c := range WorkerToolChoices {
+			if t == c {
+				ok = true
+			}
+		}
+		if !ok {
+			return fmt.Errorf("subagents.workers.tools: unknown tool %q (choose from %s)", t, strings.Join(WorkerToolChoices, ", "))
+		}
+	}
+	return nil
 }
 
 // DefaultSubagentMaxSteps is the step cap of a delegate child when
@@ -901,6 +957,9 @@ func loadFile(path, profile string) (AgentConfig, error) {
 	}
 	if cfg.MaxOutputTokens < 0 {
 		return cfg, fmt.Errorf("config %s: max_output_tokens must be a whole number >= 0, got %d", src, cfg.MaxOutputTokens)
+	}
+	if err := validateWorkers(cfg.Subagents.Workers); err != nil {
+		return cfg, fmt.Errorf("config %s: %w", src, err)
 	}
 	if cfg.Subagents.MaxSteps < 0 {
 		return cfg, fmt.Errorf("config %s: subagents.max_steps must be a whole number >= 0, got %d", src, cfg.Subagents.MaxSteps)

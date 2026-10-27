@@ -31,7 +31,7 @@ const (
 var toolsGroup = struct {
 	name  string
 	flags [][3]string
-}{"Tools", [][3]string{{"", "apply-patch", ""}, {"", "image", "path"}, {"", "images", ""}, {"", "lsp", ""}, {"", "no-skills", ""}, {"", "plan", ""}, {"", "plan-file", "path"}, {"", "redact-secrets", ""}, {"", "skills", ""}, {"", "subagents", ""}, {"", "tool-output-files", ""}, {"", "web-fetch", ""}, {"", "web-fetch-allow-domain", "host"}}}
+}{"Tools", [][3]string{{"", "apply-patch", ""}, {"", "image", "path"}, {"", "images", ""}, {"", "lsp", ""}, {"", "no-skills", ""}, {"", "plan", ""}, {"", "plan-file", "path"}, {"", "redact-secrets", ""}, {"", "skills", ""}, {"", "subagents", ""}, {"", "tool-output-files", ""}, {"", "web-fetch", ""}, {"", "web-fetch-allow-domain", "host"}, {"", "workers", ""}}}
 
 // evalGroup lists the --eval flags; --dry-run is shared with Rewind.
 var evalGroup = struct {

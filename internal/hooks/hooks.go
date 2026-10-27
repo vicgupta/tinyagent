@@ -169,6 +169,9 @@ type Input struct {
 	// Subagent is the delegate child's id (d1, d2, ...) when a subagent,
 	// not the main agent, made this call.
 	Subagent string `json:"subagent,omitempty"`
+	// Worker is true when that subagent is a worker (w1, w2, ...), which
+	// works in its own Git worktree.
+	Worker bool `json:"worker,omitempty"`
 }
 
 type payload struct {
