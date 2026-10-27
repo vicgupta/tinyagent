@@ -316,7 +316,7 @@ type Workers struct {
 	// DefaultWorkerMaxSteps.
 	MaxSteps int `yaml:"max_steps"`
 	// MaxConcurrent is the cap on workers running at once (1..4; 0 means
-	// 1). This version runs worker calls one at a time.
+	// 1). Worker calls in one response run concurrently up to this cap.
 	MaxConcurrent int `yaml:"max_concurrent"`
 	// Tools are the tools a worker may use, intersected with the parent's;
 	// empty means DefaultWorkerTools.

@@ -630,6 +630,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		}
 		malformed := 0
 		costStop := false
+		batch := a.runWorkerBatch(ctx, t, msg.ToolCalls)
 		for _, call := range msg.ToolCalls {
 			a.event("tool.call", map[string]any{"id": call.ID, "name": call.Function.Name, "arguments": eventArguments(call.Function.Arguments)})
 			var out string
@@ -660,7 +661,11 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			} else if call.Function.Name == tools.PlanToolName && a.Tools.Plan {
 				out, isError = a.updatePlan(t, call)
 			} else {
-				res = a.runTool(ctx, t, call)
+				if r, ok := a.batched(batch, call); ok {
+					res = r
+				} else {
+					res = a.runTool(ctx, t, call)
+				}
 				a.recordWebFetches()
 				a.recordLSPEvents()
 				out, images, isError = res.Text, res.Images, res.IsError

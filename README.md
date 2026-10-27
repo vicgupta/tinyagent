@@ -1248,7 +1248,7 @@ subagents:
     enabled: true
     model: ""            # default: the parent's model
     max_steps: 60        # per worker
-    max_concurrent: 1    # 1 to 4; this version runs worker calls one at a time
+    max_concurrent: 1    # 1 to 4 workers from one response at once
     tools: [read_file, list_files, grep, write_file, edit_file, apply_patch, bash]
 ```
 
@@ -1257,12 +1257,13 @@ subagents:
 - **Applying.** `apply_worker` with `{"worker": "w1"}` applies the worker's base-to-commit diff to the working tree (not the index), atomically: on a conflict nothing changes and it lists the conflicting files and the branch. It is refused when the diff touches a [`file_access`](#restricting-file-access) `deny_write` path or a file outside `--cwd`. It counts as a file-changing tool for `--snapshots` and runs through `pre_tool`/`post_tool` hooks.
 - **Tools.** A worker gets the configured `tools` that the parent itself has, never `delegate`, the worker tools, `ask_user`, `update_plan`, MCP tools or `web_fetch`. Hooks run for its calls with `subagent` set to `w1`, `w2`, … and `worker: true`.
 - **Budgets.** Worker usage counts toward the parent's `--cost-limit`; a worker that hits a limit stops, its partial work is still committed, and the run ends with the limit status.
+- **Concurrency.** With `max_concurrent` above 1, two or more `worker` calls in one model response run at the same time, at most `max_concurrent` at once. Permission checks, `pre_tool` hooks and worktree creation run first, one call at a time in call order, so every worker starts from the same snapshot; commits, `post_tool` hooks and results then follow in call order. The workers share the remaining `--cost-limit`: once their combined spend reaches it, or the run is interrupted or hits `--wall-time`, every running worker is cancelled, each keeps its partial work committed, and the run ends with that status. `--json` adds a `workers.batch` event (`workers`, `max_concurrent`, `stop`). Calls from different responses, and `apply_worker`, still run one at a time.
 - **Requirements.** `--workers` needs a Git repository with at least one commit, and can't be combined with `--read-only` or the `--review` modes. Commits use the repository's identity, or `tinyagent <tinyagent@localhost>` when none is configured.
 - **Observability.** `--json` adds `kind: "worker"`, `branch`, `commit` and `files_changed` to `subagent.started`/`subagent.finished`, and a `worker.applied` event. The trajectory records each worker's history, branch, base commit and commit.
 - **Cleanup.** Worker branches and worktrees are kept, applied or not; tinyagent never removes them on its own. After the summary line, the run lists every kept worker branch, unapplied ones first, with ready-to-paste commands: `review:` (`git show --stat <commit>`) and `discard:` for unapplied workers, `clean up:` for applied ones (`git worktree remove --force <worktree> && git branch -D tinyagent/<name>`). With `--json`, the `result` event carries the same list as `worker_branches` (`id`, `branch`, `commit`, `worktree`, `applied`, `status`, `cleanup`).
 - **Resume.** A checkpoint records whether workers were enabled; a conflicting `--workers` on `--resume` exits 2. `--rewind` affects only your tree, never worker branches.
 
-Not in this version: running several workers concurrently, `--acp` sessions, and log-db and OpenTelemetry worker rows.
+Not in this version: `--acp` sessions, and log-db and OpenTelemetry worker rows.
 
 ### Web fetch
 
