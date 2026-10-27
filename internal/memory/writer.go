@@ -34,6 +34,7 @@ type Writer struct {
 	writes    int
 	known     map[string]bool // ids loaded at run start or added this run
 	untrusted bool
+	saved     []Saved // successful writes not yet taken by TakeSaved
 	now       func() time.Time
 }
 
@@ -141,7 +142,7 @@ func (w *Writer) Add(text string) (Result, error) {
 	}
 	w.writes++
 	w.known[id] = true
-	return Result{Op: "add", ID: id, Status: status, Redacted: red}, nil
+	return w.record(Result{Op: "add", ID: id, Status: status, Redacted: red}), nil
 }
 
 // Replace changes the text of entry id. When the new text would be pending
@@ -186,7 +187,7 @@ func (w *Writer) Replace(id, text string) (Result, error) {
 	}
 	w.writes++
 	w.known[res.ID] = true
-	return res, nil
+	return w.record(res), nil
 }
 
 // Forget removes entry id from the store.
@@ -206,5 +207,5 @@ func (w *Writer) Forget(id string) (Result, error) {
 		return Result{}, err
 	}
 	w.writes++
-	return Result{Op: "forget", ID: id, Status: "forgotten"}, nil
+	return w.record(Result{Op: "forget", ID: id, Status: "forgotten"}), nil
 }
