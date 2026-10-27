@@ -179,7 +179,7 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--scoped-agents-md` | off | Also deliver `AGENTS.md` files in directories below `<cwd>`, appended to the first file tool result that touches a path there; see [Project instructions](#project-instructions-agentsmd). Can't be combined with `--no-agents-md` |
 | `-V, --version` | | Print the version and exit |
 | `--update` | | Replace this binary with the latest GitHub release (checksum-verified) and exit |
-| `--check` | | Print the resolved config file, model, provider key status, fallbacks, cwd and limits (and `ask_user` when it is on or set by flag), then exit without a model request (exit 2 on a setup error) |
+| `--check` | | Print the resolved config file, model, provider key status, fallbacks, cwd and limits (and `ask_user` when it is on or set by flag, and the [project memory](#project-memory) approval policy, store path and active/pending entry counts when memory is on or `--memory` is passed), then exit without a model request (exit 2 on a setup error) |
 | `--completion bash\|zsh\|fish` | | Print a Bash, Zsh or Fish flag-name completion script and exit (`source <(tinyagent --completion bash)`; for Zsh, after `compinit`; for Fish, `tinyagent --completion fish \| source`); see [Shell completion](#shell-completion-bash-zsh-and-fish) |
 
 ### Machine-readable output
@@ -504,7 +504,7 @@ Monorepos often keep instructions next to the code they cover, such as `services
 
 ### Project memory
 
-Project memory (experimental, in progress; see [#170](https://github.com/vicgupta/tinyagent/issues/170)) keeps short notes that runs save about a project so later runs don't relearn them. Each project has one store file outside the repository, keyed by the repository's Git common directory, so the main checkout and every `--worktree` share it: `$XDG_STATE_HOME/tinyagent/memory/<project>.json`, else `~/.local/state/tinyagent/memory/` on Linux and `tinyagent/memory/` under the user config directory on macOS and Windows. Entries record the run, model and whether untrusted content was in context, and may be held as *pending* until you approve them; pending entries are never loaded into a prompt. The model-facing `remember` tool that saves entries arrives in a later release.
+Project memory (experimental, in progress; see [#170](https://github.com/vicgupta/tinyagent/issues/170)) keeps short notes that runs save about a project so later runs don't relearn them. Each project has one store file outside the repository, keyed by the repository's Git common directory, so the main checkout and every `--worktree` share it: `$XDG_STATE_HOME/tinyagent/memory/<project>.json`, else `~/.local/state/tinyagent/memory/` on Linux and `tinyagent/memory/` under the user config directory on macOS and Windows. Entries record the run, model and whether untrusted content was in context, and may be held as *pending* until you approve them; pending entries are never loaded into a prompt. The model saves entries with the `remember` tool when memory is on.
 
 **Loading.** Memory is off by default. With `--memory` (or `memory.enabled: true` in the user config or `-c`; never from the repository), a run loads the project's *active* entries into a "Project memory" system prompt section right after AGENTS.md, newest first, one line each as `- [id, date] text`. The section says the notes come from earlier runs and that AGENTS.md and the task outrank them. Only the newest entries that fit within `memory.max_bytes` (default 8 KiB) are loaded; when entries are left out, the section says how many and tinyagent warns once on stderr. `-v` prints how many entries were loaded and from which file. A missing store loads nothing and creates nothing, so memory on with no entries sends exactly the same prompt as memory off. A corrupt or unreadable store warns once and the run continues without memory. Invalid `memory` settings exit 2.
 
@@ -792,7 +792,7 @@ apply_patch: false        # offer the apply_patch tool (same as --apply-patch)
 scoped_agents_md: false   # deliver AGENTS.md files below --cwd on first access (same as --scoped-agents-md)
 memory:                   # project memory; see Project memory (user config or -c only)
   enabled: false          # load active entries into the system prompt (same as --memory)
-  approval: pending       # pending or auto: policy for entries runs save (saving arrives in a later release)
+  approval: pending       # pending or auto: policy for entries the remember tool saves
   max_writes_per_run: 5   # entries one run may add, replace or forget; >= 1
   max_entries: 50         # active entries kept per project; >= 1
   max_bytes: 8192         # cap on the Project memory prompt section; 1 to 65536
