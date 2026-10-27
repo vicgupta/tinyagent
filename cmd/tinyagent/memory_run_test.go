@@ -106,16 +106,24 @@ func TestMemoryRunLoadsActiveEntries(t *testing.T) {
 
 func TestMemoryRunOffIsUnchanged(t *testing.T) {
 	cwd, store, body := memoryRunEnv(t)
-	if code, stderr := runMemoryTask(t, cwd); code != 0 {
+	if code, stderr := runMemoryTask(t, cwd, "--read-only"); code != 0 {
 		t.Fatalf("exit %d, stderr %q", code, stderr)
 	}
 	off := body()
-	// With memory on but an empty store, the prompt is identical too.
-	if code, stderr := runMemoryTask(t, cwd, "--memory"); code != 0 {
+	// With memory on but an empty store, the request is identical too. Read-only
+	// keeps the remember tool out of both catalogs.
+	if code, stderr := runMemoryTask(t, cwd, "--memory", "--read-only"); code != 0 {
 		t.Fatalf("exit %d, stderr %q", code, stderr)
 	}
 	if body() != off {
 		t.Error("memory on with an empty store changed the request")
+	}
+	// Outside read-only, memory on adds only the remember tool.
+	if code, stderr := runMemoryTask(t, cwd, "--memory"); code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	if !strings.Contains(body(), `"name":"remember"`) {
+		t.Error("memory on did not offer the remember tool")
 	}
 	if _, err := os.Stat(store); !os.IsNotExist(err) {
 		t.Errorf("store was created (err %v)", err)

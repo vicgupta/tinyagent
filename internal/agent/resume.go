@@ -129,6 +129,9 @@ func ValidateResume(t *trajectory.Trajectory, cfg config.AgentConfig, root strin
 		return errors.New("tool compatibility has changed; start a fresh task")
 	}
 	names := toolNames(builtinSpecs(t.ReadOnly, t.PlanEnabled, t.ImagesEnabled, t.ApplyPatchEnabled, t.SubagentsEnabled, t.WebFetchEnabled, t.LSPEnabled, t.AskUserEnabled))
+	if RememberOffered(t) {
+		names = append(names, tools.RememberToolName)
+	}
 	var set *skills.Set
 	if t.SkillsEnabled {
 		set, _ = skills.Discover(root, skills.UserDir())

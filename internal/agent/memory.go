@@ -2,6 +2,7 @@ package agent
 
 import (
 	"github.com/vicgupta/tinyagent/internal/memory"
+	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
 )
 
@@ -60,4 +61,40 @@ func checkpointMemory(t *trajectory.Trajectory) *ProjectMemory {
 		m.Lines = append(m.Lines, memory.Line{ID: l.ID, Date: l.Date, Text: l.Text})
 	}
 	return m
+}
+
+// RememberOffered reports whether a resumed checkpoint offered the remember
+// tool, so the resumed run offers the same tool set. Checkpoints written
+// before the tool existed resume without it.
+func RememberOffered(t *trajectory.Trajectory) bool {
+	if !t.MemoryEnabled || t.ReadOnly {
+		return false
+	}
+	for _, name := range t.Tools {
+		if name == tools.RememberToolName {
+			return true
+		}
+	}
+	return false
+}
+
+// ResumeUntrusted reports whether a checkpoint's conversation already holds
+// untrusted external content (a review diff, a web_fetch result or an
+// external tool result), so a resumed run's memory writes stay pending.
+func ResumeUntrusted(t *trajectory.Trajectory) bool {
+	if t.Review != nil {
+		return true
+	}
+	external := map[string]bool{tools.WebFetchToolName: true}
+	for _, name := range t.ExternalTools {
+		external[name] = true
+	}
+	for _, m := range t.Messages {
+		for _, c := range m.ToolCalls {
+			if external[c.Function.Name] {
+				return true
+			}
+		}
+	}
+	return false
 }

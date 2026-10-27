@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/vicgupta/tinyagent/internal/eventlog"
+	"github.com/vicgupta/tinyagent/internal/memory"
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/skills"
 )
@@ -105,6 +106,11 @@ type Executor struct {
 	// Only, when set, restricts the catalog and dispatch to these tool
 	// names (a worker's configured tools). nil allows the whole catalog.
 	Only []string
+	// Remember, when set, offers the opt-in remember tool (never in
+	// read-only mode) and writes through it to the project memory store
+	// (memory.enabled). Once a web_fetch or external (MCP) tool runs, its
+	// later writes are saved pending as untrusted. nil leaves it off.
+	Remember *memory.Writer
 
 	procs registry
 }
@@ -268,6 +274,7 @@ func (e *Executor) RunResult(ctx context.Context, call model.ToolCall) Result {
 	if !e.onlyAllows(call.Function.Name) {
 		return notOffered(call.Function.Name)
 	}
+	e.markUntrusted(call.Function.Name)
 	if e.Images && !e.ReadOnly && e.ExternalCallImages != nil {
 		if out, images, isErr, ok := e.ExternalCallImages(ctx, call.Function.Name, call.Function.Arguments); ok {
 			r := e.limit(call, out, isErr)
@@ -406,6 +413,9 @@ func (e *Executor) catalog() []model.ToolSpec {
 	if e.AskUser {
 		out = append(out, AskUserSpec())
 	}
+	if e.Remember != nil && !e.ReadOnly {
+		out = append(out, RememberSpec())
+	}
 	if e.Skills.Len() > 0 {
 		out = append(out, e.Skills.Spec())
 	}
@@ -453,6 +463,25 @@ func PlanSpec() model.ToolSpec {
 	}
 }
 
+// markUntrusted marks the run's memory writes untrusted before a tool that
+// brings third-party content into context runs: web_fetch and external
+// (MCP) tools, whether or not the call succeeds.
+func (e *Executor) markUntrusted(name string) {
+	if e.Remember == nil {
+		return
+	}
+	if name == WebFetchToolName && e.WebFetch != nil {
+		e.Remember.MarkUntrusted()
+		return
+	}
+	for _, s := range e.ExternalSpecs {
+		if s.Function.Name == name {
+			e.Remember.MarkUntrusted()
+			return
+		}
+	}
+}
+
 // Permits reports whether a call to name would be dispatched: name is in the
 // catalog, which in read-only mode holds only the read-only built-ins.
 func (e *Executor) Permits(name string) bool {
@@ -493,6 +522,9 @@ func (e *Executor) run(ctx context.Context, name, raw string, edited *[]string) 
 	}
 	if webFetch {
 		return e.WebFetch.Fetch(ctx, a.URL)
+	}
+	if name == RememberToolName && e.Remember != nil {
+		return e.remember(raw)
 	}
 	if skillTool {
 		return e.Skills.Load(a.Name, a.File)
