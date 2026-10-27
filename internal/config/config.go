@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -154,6 +155,8 @@ type AgentConfig struct {
 	Skills bool `yaml:"skills"`
 	// LogDB is the opt-in SQLite event log.
 	LogDB LogDB `yaml:"log_db"`
+	// OTel is the opt-in OpenTelemetry (OTLP/HTTP) trace export.
+	OTel OTel `yaml:"otel"`
 	// ToolOutputFiles saves the full text of over-limit tool results to
 	// per-run files the model can page (off by default;
 	// --tool-output-files overrides Enabled).
@@ -331,6 +334,66 @@ type LogDB struct {
 	MaxRuns int `yaml:"max_runs"`
 	// MaxPayloadBytes caps each stored event payload; 0 means 65536.
 	MaxPayloadBytes int `yaml:"max_payload_bytes"`
+}
+
+// OTel configures the opt-in OpenTelemetry trace export. It is off unless
+// Enabled (or --otel) is set; OTEL_* variables alone never turn it on. Empty
+// fields fall back to the standard OTEL_EXPORTER_OTLP_* variables.
+type OTel struct {
+	Enabled bool `yaml:"enabled"`
+	// Endpoint is the OTLP/HTTP base URL; /v1/traces is appended.
+	Endpoint string `yaml:"endpoint"`
+	// Protocol is http/protobuf or http/json.
+	Protocol string `yaml:"protocol"`
+	// HeadersEnv names environment variables whose values are k=v,k2=v2
+	// header lists. Header values never come from the config itself.
+	HeadersEnv []string `yaml:"headers_env"`
+	// Timeout bounds each export, retries included, and the final flush,
+	// as a Go duration such as "10s".
+	Timeout string `yaml:"timeout"`
+	// ServiceName is the resource service.name.
+	ServiceName string `yaml:"service_name"`
+	// Content adds redacted task, assistant, argument and output text.
+	Content bool `yaml:"content"`
+	// MaxAttributeBytes caps each content attribute; 0 means 4096.
+	MaxAttributeBytes int `yaml:"max_attribute_bytes"`
+}
+
+// OTelProtocols are the supported OTLP transports.
+var OTelProtocols = []string{"http/protobuf", "http/json"}
+
+// ValidOTelProtocol reports whether p is a supported OTLP protocol.
+func ValidOTelProtocol(p string) bool { return slices.Contains(OTelProtocols, p) }
+
+// OTelProtocolError is the error for an unsupported OTLP protocol from src.
+func OTelProtocolError(src, p string) error {
+	return fmt.Errorf("%s %q is not supported; use %s (OTLP/gRPC is not supported)", src, p, strings.Join(OTelProtocols, " or "))
+}
+
+// Validate checks the settings that don't depend on the environment.
+func (o OTel) Validate() error {
+	if o.Endpoint != "" {
+		if u, err := url.Parse(o.Endpoint); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("otel.endpoint %q must be an http:// or https:// URL", o.Endpoint)
+		}
+	}
+	if o.Protocol != "" && !ValidOTelProtocol(o.Protocol) {
+		return OTelProtocolError("otel.protocol", o.Protocol)
+	}
+	if o.Timeout != "" {
+		if d, err := time.ParseDuration(o.Timeout); err != nil || d <= 0 {
+			return fmt.Errorf("otel.timeout %q must be a positive duration such as 10s", o.Timeout)
+		}
+	}
+	for _, n := range o.HeadersEnv {
+		if n == "" || strings.ContainsAny(n, "= ") {
+			return fmt.Errorf("otel.headers_env entry %q must be an environment variable name", n)
+		}
+	}
+	if o.MaxAttributeBytes < 0 {
+		return fmt.Errorf("otel.max_attribute_bytes must be >= 0, got %d", o.MaxAttributeBytes)
+	}
+	return nil
 }
 
 // Hooks lists the commands run before and after matching tool calls, and
@@ -778,6 +841,7 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		CommandEnv      yaml.Node `yaml:"command_env"`
 		LSP             yaml.Node `yaml:"lsp"`
 		RedactSecrets   yaml.Node `yaml:"redact_secrets"`
+		OTel            yaml.Node `yaml:"otel"`
 	}
 	if yaml.Unmarshal(data, &probe) == nil {
 		for _, c := range []struct {
@@ -799,6 +863,11 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		}
 		if probe.LSP.Kind != 0 {
 			if err := checkStrict(&probe.LSP, "lsp", &LSP{}); err != nil {
+				return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+			}
+		}
+		if probe.OTel.Kind != 0 {
+			if err := checkStrict(&probe.OTel, "otel", &OTel{}); err != nil {
 				return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 			}
 		}
@@ -858,6 +927,9 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.RedactSecrets.Validate(); err != nil {
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+	}
+	if err := cfg.OTel.Validate(); err != nil {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.WebFetch.Validate(); err != nil {

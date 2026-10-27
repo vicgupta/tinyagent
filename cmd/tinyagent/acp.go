@@ -22,6 +22,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/hooks"
 	"github.com/vicgupta/tinyagent/internal/mcptools"
 	"github.com/vicgupta/tinyagent/internal/model"
+	"github.com/vicgupta/tinyagent/internal/telemetry"
 	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
 )
@@ -108,6 +109,7 @@ type acpSession struct {
 	extraDirs                    []tools.ExtraDir
 	redactor                     *eventlog.Redactor
 	redactInfo                   *trajectory.RedactSecretsInfo
+	otel                         *telemetry.Settings
 	notes                        []string // shown before the first turn
 	traj                         *trajectory.Trajectory
 	turn                         int
@@ -139,6 +141,9 @@ func newACPSession(ctx context.Context, o *options, fs *flag.FlagSet, id, cwd st
 	}
 	registerProviders(cfg)
 	if s.hooks, err = hooks.New(cfg.Hooks, cfgPath); err != nil {
+		return nil, err
+	}
+	if s.otel, err = otelSettings(fs, *o, cfg); err != nil {
 		return nil, err
 	}
 	applyFlagOverrides(fs, &cfg, o.stepLimit, o.costLimit, o.timeLimit)
@@ -459,10 +464,14 @@ func (s *acpSession) Prompt(ctx context.Context, p acp.Prompt, u *acp.Updates) (
 	var events *runEvents
 	warn := func(msg string) { events.warn(msg) }
 	db, dbErr := openLogDB(s.fs, *o, cfg, s.root, p.Text, s.modelName, prev != nil, a, warn)
-	events = startEvents(io.Discard, false, a, prev != nil, cancel, db)
-	defer events.closeDB()
+	tr, trWarn := startOTel(s.otel, cfg, a, p.Text, prev != nil, o.verbose && s.turn == 1)
+	events = startEvents(io.Discard, false, a, prev != nil, cancel, db, tr)
+	defer events.close()
 	if dbErr != nil {
 		warn(dbErr.Error())
+	}
+	if trWarn != "" {
+		warn(trWarn)
 	}
 	events.emit("acp.turn", map[string]any{"session_id": s.id, "turn": s.turn})
 	if s.turn == 1 {

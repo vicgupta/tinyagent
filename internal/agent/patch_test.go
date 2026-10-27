@@ -97,7 +97,7 @@ func TestApplyPatchHooks(t *testing.T) { // AC11
 	if _, err := os.Stat(filepath.Join(a.Tools.Root, "new.txt")); err == nil {
 		t.Error("denied patch was applied")
 	}
-	if !strings.HasPrefix(strings.Join(kinds, ","), "tool.call,hook,tool.result,") {
+	if !strings.HasPrefix(strings.Join(kinds, ","), "model.request,tool.call,hook,tool.result,") {
 		t.Errorf("events = %v", kinds)
 	}
 
@@ -114,7 +114,7 @@ func TestApplyPatchHooks(t *testing.T) { // AC11
 	if res := toolResults(tr.Messages); len(res) != 1 || !strings.HasPrefix(res[0], "ok\nA new.txt\n[post_tool hook ") || !strings.HasSuffix(res[0], "]\nchecked") {
 		t.Fatalf("results = %q", res)
 	}
-	if !strings.HasPrefix(strings.Join(kinds, ","), "tool.call,hook,tool.result,") {
+	if !strings.HasPrefix(strings.Join(kinds, ","), "model.request,tool.call,hook,tool.result,") {
 		t.Errorf("events = %v", kinds)
 	}
 }

@@ -80,7 +80,7 @@ func TestPreToolHookDenies(t *testing.T) {
 	if resultEvent["is_error"] != true {
 		t.Errorf("tool.result = %v", resultEvent)
 	}
-	if strings.Join(kinds, ",") != "tool.call,hook,tool.result,assistant.message" {
+	if strings.Join(kinds, ",") != "model.request,tool.call,hook,tool.result,model.request,assistant.message" {
 		t.Errorf("events = %v", kinds)
 	}
 	if hookEvent["event"] != "pre_tool" || hookEvent["tool_call_id"] != "1" || hookEvent["tool_name"] != "bash" ||

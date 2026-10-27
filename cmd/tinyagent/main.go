@@ -26,6 +26,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/outschema"
 	"github.com/vicgupta/tinyagent/internal/sandboxnet"
 	"github.com/vicgupta/tinyagent/internal/skills"
+	"github.com/vicgupta/tinyagent/internal/telemetry"
 	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
 	"github.com/vicgupta/tinyagent/internal/update"
@@ -74,6 +75,7 @@ type options struct {
 	addDirRead, addDirWrite                          dirList
 	jsonOutput                                       bool
 	logDB                                            optionalPath
+	otel                                             bool
 	worktree                                         worktreeFlag
 	snapshots, dryRun                                bool
 	rewind, rewindTo                                 string
@@ -156,6 +158,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.dryRun, "dry-run", false, "with --rewind: print what would change and write nothing")
 	fs.StringVar(&o.transcript, "transcript", "", "print this trajectory JSON as a Markdown transcript (secrets redacted, long results truncated) and exit; makes no model request")
 	fs.Var(&o.logDB, "log-db", "also log run events to SQLite (default .tinyagent/tinyagent.db under --cwd); --log-db=false turns config log_db off")
+	fs.BoolVar(&o.otel, "otel", false, "export the run as an OpenTelemetry trace over OTLP/HTTP (otel.endpoint, else OTEL_EXPORTER_OTLP_ENDPOINT, else localhost:4318); OTEL_* variables alone never turn it on (default off; config otel.enabled)")
 	fs.BoolVar(&o.showVersion, "version", false, "print the version and exit")
 	fs.BoolVar(&o.showVersion, "V", false, "shorthand for --version")
 	fs.BoolVar(&o.doUpdate, "update", false, "update to the latest release and exit")
@@ -339,6 +342,10 @@ func run() int {
 	hookRunner, err := hooks.New(cfg.Hooks, cfgPath)
 	if err != nil {
 		return fail(err)
+	}
+	otelCfg, err := otelSettings(fs, o, cfg)
+	if err != nil {
+		return configFail(err)
 	}
 	applyFlagOverrides(fs, &cfg, o.stepLimit, o.costLimit, o.timeLimit)
 	if flagWasSet(fs, "max-format-errors") {
@@ -622,14 +629,18 @@ func run() int {
 	var events *runEvents
 	warn := func(msg string) { events.warn(msg) }
 	db, dbErr := openLogDB(fs, o, cfg, root, task, o.modelName, false, a, warn)
-	events = startEvents(os.Stdout, o.jsonOutput, a, false, stop, db)
+	tr, trWarn := startOTel(otelCfg, cfg, a, task, false, o.verbose)
+	events = startEvents(os.Stdout, o.jsonOutput, a, false, stop, db, tr)
 	if events.err != nil {
-		events.closeDB()
+		events.close()
 		return 1
 	}
-	defer events.closeDB()
+	defer events.close()
 	if dbErr != nil {
 		warn(dbErr.Error())
+	}
+	if trWarn != "" {
+		warn(trWarn)
 	}
 	startOutputFiles(outputFiles, cfg.ToolOutputFiles.MaxRuns, warn)
 	if cfg.Skills {
@@ -812,6 +823,10 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return 2
 	}
 	announceTaskImages(os.Stderr, taskImages, o.verbose)
+	otelCfg, err := otelSettings(fs, *o, cfg)
+	if err != nil {
+		return configFail(err)
+	}
 	// Checked after the config load so configured providers resolve.
 	if err := checkReasoningEffort(modelName, src.ReasoningEffort); err != nil {
 		return fail(fmt.Errorf("resume: %w", err))
@@ -1120,14 +1135,18 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	var events *runEvents
 	warn := func(msg string) { events.warn(msg) }
 	db, dbErr := openLogDB(fs, *o, cfg, root, src.Task, modelName, true, a, warn)
-	events = startEvents(os.Stdout, o.jsonOutput, a, true, stop, db)
+	tr, trWarn := startOTel(otelCfg, cfg, a, a.FollowUp, true, o.verbose)
+	events = startEvents(os.Stdout, o.jsonOutput, a, true, stop, db, tr)
 	if events.err != nil {
-		events.closeDB()
+		events.close()
 		return 1
 	}
-	defer events.closeDB()
+	defer events.close()
 	if dbErr != nil {
 		warn(dbErr.Error())
+	}
+	if trWarn != "" {
+		warn(trWarn)
 	}
 	startOutputFiles(outputFiles, cfg.ToolOutputFiles.MaxRuns, warn)
 	if src.SkillsEnabled {
@@ -1534,7 +1553,7 @@ var usageGroups = []struct {
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "profile", "name"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}, {"", "ask-user", ""}, {"", "acp", ""}}},
 	{"Review", [][3]string{{"", "review", ""}, {"", "review-base", "ref"}, {"", "review-commit", "rev"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
-	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
+	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "otel", ""}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "list-profiles", ""}, {"", "transcript", "path"}, {"", "init-config", ""}, {"", "completion", "shell"}}},
 }
@@ -1857,11 +1876,13 @@ func fail(err error) int {
 }
 
 // runEvents fans run events out to the enabled sinks: the --json JSONL
-// stream and the SQLite log. Both receive the same events.
+// stream, the SQLite log and the OpenTelemetry exporter. All receive the
+// same events.
 type runEvents struct {
 	fan  eventlog.Fanout
 	json *eventlog.JSONL
 	db   *eventlog.SQLite
+	otel *telemetry.Exporter
 	err  error // first JSONL write error
 }
 
@@ -1872,8 +1893,8 @@ func (e *runEvents) emit(kind string, fields map[string]any) {
 	}
 }
 
-// warn reports a log-db problem on stderr and, with --json, as a warning
-// event. It is not sent to the database that failed.
+// warn reports a log-db or trace export problem on stderr and, with --json,
+// as a warning event. It is not sent to the database or exporter.
 func (e *runEvents) warn(msg string) {
 	fmt.Fprintln(os.Stderr, "warning:", msg)
 	if e != nil && e.json != nil {
@@ -1891,11 +1912,29 @@ func (e *runEvents) closeDB() {
 	}
 }
 
+// closeOTel flushes the trace exporter, within its timeout, and reports any
+// export failure as one warning.
+func (e *runEvents) closeOTel() {
+	if e.otel != nil {
+		tr := e.otel
+		e.otel = nil
+		if msg := tr.Close(); msg != "" {
+			e.warn(msg)
+		}
+	}
+}
+
+func (e *runEvents) close() {
+	e.closeDB()
+	e.closeOTel()
+}
+
 // startEvents writes run.started (and the unpriced cost-limit warning) and
-// routes a's events to the JSONL stream on out (when enabled) and to db
-// (when non-nil). A failed JSONL write cancels the run through stop. With
-// no sinks it returns a no-op stream and leaves a.OnEvent nil.
-func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop func(), db *eventlog.SQLite) *runEvents {
+// routes a's events to the JSONL stream on out (when enabled), to db and to
+// the trace exporter tr (when non-nil). A failed JSONL write cancels the run
+// through stop. With no sinks it returns a no-op stream and leaves a.OnEvent
+// nil.
+func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop func(), db *eventlog.SQLite, tr *telemetry.Exporter) *runEvents {
 	events := &runEvents{}
 	if enabled {
 		events.json = eventlog.NewJSONL(out)
@@ -1904,6 +1943,10 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	if db != nil {
 		events.db = db
 		events.fan = append(events.fan, db)
+	}
+	if tr != nil {
+		events.otel = tr
+		events.fan = append(events.fan, tr)
 	}
 	if len(events.fan) == 0 {
 		return events
@@ -1975,6 +2018,10 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	if a.Review != nil {
 		started["review"] = a.Review
 	}
+	if tr != nil {
+		s := tr.Settings()
+		started["otel"] = map[string]any{"enabled": true, "endpoint_host": s.Host(), "protocol": s.Protocol, "trace_id": tr.TraceID()}
+	}
 	events.emit("run.started", started)
 	a.OnEvent = func(kind string, fields map[string]any) {
 		events.emit(kind, fields)
@@ -1991,8 +2038,9 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 }
 
 // finish writes the closing events for t and returns the first JSONL write
-// error. The database gets result first and is flushed and closed, so any
-// log-db warning precedes the JSONL result, which stays the last line.
+// error. The database and the trace exporter get result first and are
+// flushed and closed, so any log-db or export warning precedes the JSONL
+// result, which stays the last line.
 func (e *runEvents) finish(t *trajectory.Trajectory, elapsed time.Duration) error {
 	if len(e.fan) == 0 {
 		return nil
@@ -2004,6 +2052,10 @@ func (e *runEvents) finish(t *trajectory.Trajectory, elapsed time.Duration) erro
 	if e.db != nil {
 		e.db.Emit("result", result)
 		e.closeDB()
+	}
+	if e.otel != nil {
+		e.otel.Emit("result", result)
+		e.closeOTel()
 	}
 	if e.json != nil {
 		e.json.Emit("result", result)
@@ -2141,6 +2193,42 @@ func openLogDB(fs *flag.FlagSet, o options, cfg config.AgentConfig, root, task, 
 		return nil, fmt.Errorf("%v; continuing without the event log", err)
 	}
 	return db, nil
+}
+
+// otelSettings resolves the trace export settings, or nil when export is
+// off. --otel overrides otel.enabled; OTEL_* variables alone never turn it
+// on. Errors are config errors (exit 2).
+func otelSettings(fs *flag.FlagSet, o options, cfg config.AgentConfig) (*telemetry.Settings, error) {
+	on := cfg.OTel.Enabled
+	if flagWasSet(fs, "otel") {
+		on = o.otel
+	}
+	if !on {
+		return nil, nil
+	}
+	s, err := telemetry.Resolve(cfg.OTel, os.Getenv)
+	if err != nil {
+		return nil, &config.InvalidError{Err: fmt.Errorf("otel: %w", err)}
+	}
+	return &s, nil
+}
+
+// startOTel starts the trace exporter for one invocation when s is
+// non-nil, parented by an inbound TRACEPARENT. The warning is non-empty for
+// a malformed TRACEPARENT. With verbose it prints the endpoint host and
+// protocol, never headers.
+func startOTel(s *telemetry.Settings, cfg config.AgentConfig, a *agent.Agent, task string, resumed, verbose bool) (*telemetry.Exporter, string) {
+	if s == nil {
+		return nil, ""
+	}
+	if verbose {
+		fmt.Fprintf(os.Stderr, "otel: exporting traces to %s (%s)\n", s.Host(), s.Protocol)
+	}
+	return telemetry.New(telemetry.Options{
+		Settings: *s, Model: a.ModelName, Task: task, ReadOnly: a.Tools.ReadOnly, Resumed: resumed, Version: currentVersion(),
+		Redactor:    eventlog.EnvRedactor(configuredSecrets(cfg)...),
+		TraceParent: os.Getenv("TRACEPARENT"), TraceState: os.Getenv("TRACESTATE"),
+	})
 }
 
 // configuredSecrets returns the env values set for MCP servers, hooks,

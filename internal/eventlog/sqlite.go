@@ -37,9 +37,9 @@ const DefaultMaxPayloadBytes = 64 << 10
 // resultSummaryBytes caps tool_calls.result_summary at level full.
 const resultSummaryBytes = 1024
 
-// bodyKeys are the payload fields that carry bodies; at LevelMetadata they
+// BodyKeys are the payload fields that carry bodies; at LevelMetadata they
 // are replaced by <key>_len.
-var bodyKeys = []string{"text", "arguments", "output", "submission", "task", "content", "prompt", "question"}
+var BodyKeys = []string{"text", "arguments", "output", "submission", "task", "content", "prompt", "question"}
 
 //go:embed migrations/*.sql
 var migrationFS embed.FS
@@ -346,7 +346,7 @@ func (s *SQLite) payload(fields map[string]any) string {
 		m[k] = v
 	}
 	if s.opts.Level != LevelFull {
-		for _, k := range bodyKeys {
+		for _, k := range BodyKeys {
 			v, ok := m[k]
 			if !ok {
 				continue

@@ -489,7 +489,9 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			}
 		}
 
+		queried := time.Now()
 		msg, cost, err := a.Model.Query(ctx, a.request(t, v), specs)
+		a.requested(t, queried, cost, err)
 		if err != nil && !a.NoCompact && model.IsContextOverflow(err) && ctx.Err() == nil {
 			if cerr := a.compact(ctx, t, v, "overflow"); cerr != nil {
 				return a.compactFailed(ctx, t, fmt.Errorf("%w: %v", cerr, err))
@@ -497,7 +499,9 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			if status, ok := a.checkLimits(ctx, t); !ok {
 				return a.finish(t, status, "")
 			}
+			queried = time.Now()
 			msg, cost, err = a.Model.Query(ctx, a.request(t, v), specs)
+			a.requested(t, queried, cost, err)
 			if err != nil && model.IsContextOverflow(err) {
 				err = fmt.Errorf("%w: %v", errStillTooLong, err)
 			}
@@ -926,6 +930,27 @@ func externalToolNames(specs []model.ToolSpec) []string {
 func externalToolSignature(specs []model.ToolSpec) string {
 	data, _ := json.Marshal(specs)
 	return fmt.Sprintf("mcp-tools-v1:%x", sha256.Sum256(data))
+}
+
+// requested reports one model request that began at start as a
+// model.request event: the model that served it (after any fallback), its
+// duration, and its token usage or error.
+func (a *Agent) requested(t *trajectory.Trajectory, start time.Time, cost model.Cost, err error) {
+	if a.OnEvent == nil {
+		return
+	}
+	name := a.ModelName
+	if t.ActiveModel != "" {
+		name = t.ActiveModel
+	}
+	fields := map[string]any{"step": t.Steps + 1, "model": name, "duration_ms": time.Since(start).Milliseconds()}
+	if err != nil {
+		fields["error"] = err.Error()
+	} else {
+		fields["input_tokens"], fields["output_tokens"] = cost.InputTokens, cost.OutputTokens
+		fields["cache_read_tokens"], fields["cache_write_tokens"] = cost.CacheReadTokens, cost.CacheWriteTokens
+	}
+	a.event("model.request", fields)
 }
 
 func (a *Agent) event(kind string, fields map[string]any) {

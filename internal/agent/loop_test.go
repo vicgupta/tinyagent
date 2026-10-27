@@ -162,7 +162,7 @@ func TestRunEmitsAssistantAndToolEvents(t *testing.T) {
 	if tr.ExitStatus != StatusCompleted {
 		t.Fatalf("status = %s", tr.ExitStatus)
 	}
-	want := []string{"assistant.message", "tool.call", "tool.result", "assistant.message"}
+	want := []string{"model.request", "assistant.message", "tool.call", "tool.result", "model.request", "assistant.message"}
 	if len(got) != len(want) {
 		t.Fatalf("events = %#v", got)
 	}
@@ -171,8 +171,11 @@ func TestRunEmitsAssistantAndToolEvents(t *testing.T) {
 			t.Errorf("event %d = %s, want %s", i, got[i].kind, kind)
 		}
 	}
-	if got[1].fields["id"] != "denied" || got[2].fields["id"] != "denied" || got[2].fields["is_error"] != true || !strings.Contains(got[2].fields["output"].(string), "read-only mode") {
-		t.Errorf("denied call/result events = %#v / %#v", got[1].fields, got[2].fields)
+	if got[2].fields["id"] != "denied" || got[3].fields["id"] != "denied" || got[3].fields["is_error"] != true || !strings.Contains(got[3].fields["output"].(string), "read-only mode") {
+		t.Errorf("denied call/result events = %#v / %#v", got[2].fields, got[3].fields)
+	}
+	if r := got[4].fields; r["step"] != 2 || r["model"] != a.ModelName || r["input_tokens"] == nil || r["duration_ms"] == nil {
+		t.Errorf("model.request = %#v", r)
 	}
 }
 
