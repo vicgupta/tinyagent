@@ -1226,10 +1226,10 @@ subagents:
 - **Budgets.** Worker usage counts toward the parent's `--cost-limit`; a worker that hits a limit stops, its partial work is still committed, and the run ends with the limit status.
 - **Requirements.** `--workers` needs a Git repository with at least one commit, and can't be combined with `--read-only` or the `--review` modes. Commits use the repository's identity, or `tinyagent <tinyagent@localhost>` when none is configured.
 - **Observability.** `--json` adds `kind: "worker"`, `branch`, `commit` and `files_changed` to `subagent.started`/`subagent.finished`, and a `worker.applied` event. The trajectory records each worker's history, branch, base commit and commit.
-- **Cleanup.** Worker branches and worktrees are kept, applied or not. Remove them with `git worktree remove .tinyagent/worktrees/<name>` and `git branch -D tinyagent/<name>`.
+- **Cleanup.** Worker branches and worktrees are kept, applied or not; tinyagent never removes them on its own. After the summary line, the run lists every kept worker branch, unapplied ones first, with ready-to-paste commands: `review:` (`git show --stat <commit>`) and `discard:` for unapplied workers, `clean up:` for applied ones (`git worktree remove --force <worktree> && git branch -D tinyagent/<name>`). With `--json`, the `result` event carries the same list as `worker_branches` (`id`, `branch`, `commit`, `worktree`, `applied`, `status`, `cleanup`).
 - **Resume.** A checkpoint records whether workers were enabled; a conflicting `--workers` on `--resume` exits 2. `--rewind` affects only your tree, never worker branches.
 
-Not in this version: running several workers concurrently, `--acp` sessions, log-db and OpenTelemetry worker rows, and listing unapplied worker branches in the final summary.
+Not in this version: running several workers concurrently, `--acp` sessions, and log-db and OpenTelemetry worker rows.
 
 ### Web fetch
 
