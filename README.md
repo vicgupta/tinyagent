@@ -129,6 +129,10 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--profile` | none | Apply one named profile from the config file's `profiles:` section over its base settings; see [Profiles](#profiles) |
 | `--list-profiles` | | Print the profile names in the selected config file (`-c`) or the user config, sorted, one per line, then exit. Makes no model request and needs no credentials; see [Profiles](#profiles) |
 | `--cwd` | `.` | Root directory; tools can't reach outside it |
+| `--memory-list` | | Print the [project memory](#project-memory) entries for `--cwd` (pending first, then newest first), or a JSON array with `--json`, then exit. Makes no model request and needs no credentials |
+| `--memory-approve <id\|all>` | | Approve one pending project memory entry, or every pending entry, then exit |
+| `--memory-forget <id\|all>` | | Delete one project memory entry; `all` deletes every entry and requires `--memory-yes` |
+| `--memory-path` | | Print the project memory store path for `--cwd`, then exit |
 | `--review` | off | Review the uncommitted changes (staged, unstaged and untracked) against `HEAD`: tinyagent collects the diff and runs a read-only review; `-t` adds focus instructions. See [Reviewing changes](#reviewing-changes) |
 | `--review-base <ref>` | — | Review what the current branch adds on top of `<ref>` (`merge-base..HEAD`), read-only. See [Reviewing changes](#reviewing-changes) |
 | `--review-commit <rev>` | — | Review the changes introduced by one commit, read-only. See [Reviewing changes](#reviewing-changes) |
@@ -493,6 +497,22 @@ Monorepos often keep instructions next to the code they cover, such as `services
 - **Records:** `-v` prints each loaded file, `--json` emits `instructions.loaded` and `instructions.skipped`, and `-o` trajectories record `scoped_agents_md_enabled`, `scoped_agents_md` (files in context) and `scoped_agents_md_loads`. `--resume` keeps the checkpoint's setting; a conflicting `--scoped-agents-md` exits 2. `--no-agents-md` turns scoped delivery off too, and combining the two flags exits 2.
 
 **Trust:** like the startup file, a scoped `AGENTS.md` is prompt input that can steer the agent, so only enable this for repositories you trust. Configs with `scoped_agents_md` fail to load on older tinyagent versions, which reject unknown keys.
+
+### Project memory
+
+Project memory (experimental, in progress; see [#170](https://github.com/vicgupta/tinyagent/issues/170)) keeps short notes that runs save about a project so later runs don't relearn them. Each project has one store file outside the repository, keyed by the repository's Git common directory, so the main checkout and every `--worktree` share it: `$XDG_STATE_HOME/tinyagent/memory/<project>.json`, else `~/.local/state/tinyagent/memory/` on Linux and `tinyagent/memory/` under the user config directory on macOS and Windows. Entries record the run, model and whether untrusted content was in context, and may be held as *pending* until you approve them; pending entries are never loaded into a prompt. The `memory` config section, `--memory` and the model-facing `remember` tool arrive in a later release.
+
+You can already inspect and edit the store for `--cwd` without credentials or a model request:
+
+```sh
+tinyagent --memory-path                     # print the store path
+tinyagent --memory-list [--json]            # id, status, date, source and text
+tinyagent --memory-approve <id|all>         # approve one or every pending entry
+tinyagent --memory-forget <id>              # delete one entry (and any pending replacement of it)
+tinyagent --memory-forget all --memory-yes  # delete every entry
+```
+
+These commands accept only `--cwd` (and `--json` with `--memory-list`); combining them with `-t`, `--resume` or any other run or mode flag exits 2, as does an unknown id. A corrupt store is reported, exits 1 and is left unchanged.
 
 ### Agent Skills
 

@@ -45,8 +45,14 @@ var workflowGroup = struct {
 	flags [][3]string
 }{"Workflow", [][3]string{{"", "workflow", "file.yaml"}, {"", "workflow-name", "name"}}}
 
-// verboseGroups is usageGroups with toolsGroup before Output, and evalGroup
-// and workflowGroup after Rewind.
+// memoryGroup lists the project memory management flags.
+var memoryGroup = struct {
+	name  string
+	flags [][3]string
+}{"Memory", [][3]string{{"", "memory-approve", "id|all"}, {"", "memory-forget", "id|all"}, {"", "memory-list", ""}, {"", "memory-path", ""}, {"", "memory-yes", ""}}}
+
+// verboseGroups is usageGroups with toolsGroup before Output, and evalGroup,
+// workflowGroup and memoryGroup after Rewind.
 func verboseGroups() []struct {
 	name  string
 	flags [][3]string
@@ -61,7 +67,7 @@ func verboseGroups() []struct {
 		}
 		gs = append(gs, g)
 		if g.name == "Rewind" {
-			gs = append(gs, evalGroup, workflowGroup)
+			gs = append(gs, evalGroup, workflowGroup, memoryGroup)
 		}
 	}
 	return gs
