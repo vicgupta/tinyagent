@@ -33,7 +33,14 @@ var toolsGroup = struct {
 	flags [][3]string
 }{"Tools", [][3]string{{"", "apply-patch", ""}, {"", "image", "path"}, {"", "images", ""}, {"", "lsp", ""}, {"", "no-skills", ""}, {"", "plan", ""}, {"", "plan-file", "path"}, {"", "redact-secrets", ""}, {"", "skills", ""}, {"", "subagents", ""}, {"", "tool-output-files", ""}, {"", "web-fetch", ""}, {"", "web-fetch-allow-domain", "host"}}}
 
-// verboseGroups is usageGroups with toolsGroup before Output.
+// evalGroup lists the --eval flags; --dry-run is shared with Rewind.
+var evalGroup = struct {
+	name  string
+	flags [][3]string
+}{"Eval", [][3]string{{"", "eval", "suite.yaml"}, {"", "eval-out", "dir"}, {"", "eval-keep", ""}, {"", "eval-min-pass-rate", "rate"}}}
+
+// verboseGroups is usageGroups with toolsGroup before Output and evalGroup
+// after Rewind.
 func verboseGroups() []struct {
 	name  string
 	flags [][3]string
@@ -47,6 +54,9 @@ func verboseGroups() []struct {
 			gs = append(gs, toolsGroup)
 		}
 		gs = append(gs, g)
+		if g.name == "Rewind" {
+			gs = append(gs, evalGroup)
+		}
 	}
 	return gs
 }
