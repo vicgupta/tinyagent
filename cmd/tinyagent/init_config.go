@@ -19,6 +19,12 @@ const starterConfig = `# tinyagent user config. Flags override these values. Ful
 # ask_user:                   # let the model end a run with one question (exit 4)
 #   enabled: false            # answer with: --resume run.json -t "<answer>"
 #   max_questions: 3          # per run, across resumes (1-20)
+# memory:                     # project memory: notes runs save for later runs (same as --memory)
+#   enabled: false            # load active entries and offer the remember tool
+#   approval: pending         # pending (approve with --memory-approve) or auto
+#   max_writes_per_run: 5
+#   max_entries: 50
+#   max_bytes: 8192           # cap on the Project memory prompt section (1-65536)
 `
 
 func runInitConfig(path string) int {

@@ -178,6 +178,9 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 		}
 		add("tools", fmt.Sprintf("%d command tools (%s)", n, strings.Join(names, ", ")))
 	}
+	if mem := checkMemory(fs, o, cfg.Memory, root); mem != "" {
+		add("memory", mem)
+	}
 	if policy != nil {
 		add("permissions", fmt.Sprintf("%d rules, default %s, non-interactive %s", policy.RuleCount(), policy.Summary().Default, policy.Summary().NonInteractive))
 	}
