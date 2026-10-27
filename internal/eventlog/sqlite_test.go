@@ -47,7 +47,7 @@ func count(t *testing.T, db *sql.DB, q string, args ...any) int {
 func dump(t *testing.T, db *sql.DB) string {
 	t.Helper()
 	var b strings.Builder
-	for _, table := range []string{"runs", "events", "tool_calls", "schema_migrations"} {
+	for _, table := range []string{"runs", "events", "tool_calls", "subagents", "schema_migrations"} {
 		rows, err := db.Query("SELECT * FROM " + table)
 		if err != nil {
 			t.Fatal(err)
@@ -86,7 +86,7 @@ func TestFreshDatabaseHasSchema(t *testing.T) {
 	emitRun(s)
 	s.Close()
 	db := rawDB(t, path)
-	for _, table := range []string{"runs", "events", "tool_calls", "schema_migrations"} {
+	for _, table := range []string{"runs", "events", "tool_calls", "subagents", "schema_migrations"} {
 		if count(t, db, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table) != 1 {
 			t.Errorf("table %s missing", table)
 		}
