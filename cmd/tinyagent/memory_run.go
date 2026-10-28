@@ -88,6 +88,20 @@ func resumeMemoryWriter(src *trajectory.Trajectory, cfg config.Memory, root, mod
 	return memory.NewWriter(path, cfg.Approval, limits, red, srcInfo, snapshot)
 }
 
+// emitResumeMemoryLoaded emits memory.loaded for a resumed or follow-up
+// run whose checkpoint ran with memory on. The event describes the replayed
+// checkpoint snapshot; the store is never read, only its path resolved.
+func emitResumeMemoryLoaded(events *runEvents, src *trajectory.Trajectory, root string) {
+	if !src.MemoryEnabled {
+		return
+	}
+	path, err := memory.StorePath("", root)
+	if err != nil {
+		path = ""
+	}
+	events.emit("memory.loaded", agent.ResumeMemoryLoadedFields(src, path))
+}
+
 func entryWord(n int) string {
 	if n == 1 {
 		return "entry"

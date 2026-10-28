@@ -1239,6 +1239,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if src.SkillsEnabled {
 		loadSkills(a, root, warn)
 	}
+	emitResumeMemoryLoaded(events, src, root)
 	if agent.RememberOffered(src) {
 		a.Tools.Remember = resumeMemoryWriter(src, cfg.Memory, root, modelName, a.Tools.Redactor, warn)
 	}
