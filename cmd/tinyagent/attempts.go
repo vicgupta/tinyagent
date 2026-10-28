@@ -80,6 +80,10 @@ func runAttempts(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.
 	if err != nil {
 		return usage("%v", err)
 	}
+	applySandboxFlags(fs, &cfg, *o)
+	if msg := envConflict(cfg); msg != "" {
+		return usage("%s", msg)
+	}
 	plan, err := planAttempts(o, fs, cfg, false)
 	if err != nil {
 		return usage("%v", err)
@@ -112,6 +116,10 @@ func runAttempts(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.
 		fmt.Fprintf(stderr, "attempts: stop_on_pass %t, keep %s\n", cfg.Attempts.StopsOnPass(), cfg.Attempts.KeepMode())
 	}
 
+	if place := attemptCheckPlace(cfg); place != "host" {
+		fmt.Fprintf(stderr, "attempts: checks run in the %s, like the attempts' commands\n", place)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	run := attempts.ExecAgent(exe)
@@ -120,8 +128,9 @@ func runAttempts(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.
 		events = stdout
 	}
 	_, code := attempts.Run(ctx, attempts.Options{
-		Events: events,
-		Models: models, Checks: checks, BaseName: base, Output: o.output,
+		Events:   events,
+		CheckEnv: attemptCheckEnv(fs, *o, cfg, stderr),
+		Models:   models, Checks: checks, BaseName: base, Output: o.output,
 		CostLimit: o.costLimit, TimeLimit: time.Duration(o.timeLimit) * time.Second,
 		ExtraArgs: forwardArgs(fs, args, attemptOwn), Stderr: stderr, Stdout: stdout,
 		Redact: red.Redact, RunAll: !cfg.Attempts.StopsOnPass(), Keep: cfg.Attempts.KeepMode(),
