@@ -54,7 +54,7 @@ func startACPLockdown(st *lockdown.State, clientMCP []string, env tools.Environm
 	if wf != nil {
 		wf.Gate = st.WebFetchGate
 	}
-	confineLockdownCommands(st, tools.CommandSandbox(env), stderr)
+	confineLockdownEnv(st, env, stderr)
 	fmt.Fprintln(stderr, st.Describe())
 	for _, s := range st.Sources() {
 		fmt.Fprintf(stderr, "lockdown: session starts tainted (%s)\n", s.Source)

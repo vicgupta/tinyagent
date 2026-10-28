@@ -120,6 +120,9 @@ type Container struct {
 	// Extra are additional directories mounted at the same paths; read
 	// mode ones are mounted read-only.
 	Extra []ExtraDir
+	// lockdown is the untrusted-content lockdown network switch, nil
+	// unless PrepareLockdownNetwork set it (see lockdown_container.go).
+	lockdown *containerLockdown
 }
 
 // StartContainer checks that runtime is usable and starts a container from
@@ -190,6 +193,9 @@ func (c *Container) Exec(ctx context.Context, root string, argv []string) *exec.
 	cmd := exec.CommandContext(ctx, c.Runtime, args...)
 	cmd.Dir = root
 	setProcessGroup(cmd)
+	if err := c.lockdownErr(); err != nil {
+		cmd.Err = err
+	}
 	hostCancel := cmd.Cancel
 	cmd.Cancel = func() error {
 		c.kill(token)
