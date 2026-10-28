@@ -4,8 +4,10 @@
 // winner: the lowest-numbered attempt whose run ended Submitted or
 // Completed and whose checks all exited 0.
 //
-// Attempts run sequentially and stop at the first pass. tinyagent never
-// commits, merges or pushes an attempt, and keeps every attempt's worktree.
+// Attempts run sequentially and, by default, stop at the first pass
+// (RunAll runs every attempt). tinyagent never commits, merges or pushes an
+// attempt. Every worktree is kept unless Keep asks to remove non-winners
+// once an attempt wins.
 package attempts
 
 import (
@@ -45,6 +47,15 @@ const (
 	StopBudget    = "budget exhausted"
 	StopInterrupt = "interrupted"
 	StopError     = "error"
+	// StopCompleted: RunAll ran every attempt and at least one passed.
+	StopCompleted = "completed"
+)
+
+// Keep modes: which non-winning worktrees survive once an attempt wins.
+const (
+	KeepAll    = "all"
+	KeepFailed = "failed"
+	KeepNone   = "none"
 )
 
 // Check is one verification command, run with bash -c in the attempt's
@@ -79,6 +90,16 @@ type Options struct {
 	RunAgent func(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	// Now is the clock; nil means time.Now.
 	Now func() time.Time
+	// RunAll runs every attempt instead of stopping at the first pass. The
+	// lowest-numbered passing attempt still wins.
+	RunAll bool
+	// Keep is KeepAll (or empty), KeepFailed or KeepNone. With a winner,
+	// KeepFailed removes passing non-winners and KeepNone removes every
+	// non-winner through Remove. Nothing is removed without a winner.
+	Keep string
+	// Remove deletes one attempt's worktree and branch. Nil disables
+	// cleanup.
+	Remove func(a Attempt) error
 }
 
 // ExecAgent returns a RunAgent that runs exe as a child process. On context
@@ -122,6 +143,8 @@ type Attempt struct {
 	Trajectory   string        `json:"trajectory,omitempty"`
 	Checks       []CheckResult `json:"checks"`
 	Error        string        `json:"error,omitempty"`
+	// Removed is true when Keep cleanup deleted the worktree and branch.
+	Removed bool `json:"removed,omitempty"`
 
 	root   string
 	stdout string
@@ -134,6 +157,8 @@ type Report struct {
 	Winner        *int      `json:"winner"`
 	WinnerBranch  string    `json:"winner_branch,omitempty"`
 	StopReason    string    `json:"stop_reason"`
+	StopOnPass    bool      `json:"stop_on_pass"`
+	Keep          string    `json:"keep"`
 	Attempts      []Attempt `json:"attempts"`
 	TotalCostUSD  float64   `json:"total_cost_usd"`
 	TotalWallMS   int64     `json:"total_wall_time_ms"`
@@ -176,7 +201,12 @@ func Run(ctx context.Context, o Options) (Report, int) {
 	if now == nil {
 		now = time.Now
 	}
-	rep := Report{SchemaVersion: SchemaVersion, Requested: len(o.Models), Attempts: []Attempt{}}
+	keep := o.Keep
+	if keep == "" {
+		keep = KeepAll
+	}
+	rep := Report{SchemaVersion: SchemaVersion, Requested: len(o.Models), Attempts: []Attempt{},
+		StopOnPass: !o.RunAll, Keep: keep}
 	start := now()
 	trajDir := ""
 	if o.Output == "" {
@@ -224,8 +254,13 @@ func Run(ctx context.Context, o Options) (Report, int) {
 		fmt.Fprintln(o.Stderr, attemptLine(a))
 		switch {
 		case a.Passed:
-			w := n
-			rep.Winner, rep.WinnerBranch, rep.StopReason = &w, a.Branch, StopPassed
+			if rep.Winner == nil {
+				w := n
+				rep.Winner, rep.WinnerBranch = &w, a.Branch
+			}
+			if !o.RunAll {
+				rep.StopReason = StopPassed
+			}
 		case a.Status == "Interrupted" || ctx.Err() != nil:
 			rep.StopReason = StopInterrupt
 		case a.Status == "CostLimitExceeded" && o.CostLimit > 0, a.Status == "TimeLimitExceeded" && o.TimeLimit > 0:
@@ -239,7 +274,11 @@ func Run(ctx context.Context, o Options) (Report, int) {
 	}
 	if rep.StopReason == "" {
 		rep.StopReason = StopExhausted
+		if rep.Winner != nil {
+			rep.StopReason = StopCompleted
+		}
 	}
+	cleanup(&rep, o)
 	rep.TotalWallMS = now().Sub(start).Milliseconds()
 
 	if rep.Winner != nil {
@@ -443,4 +482,57 @@ func runCheck(ctx context.Context, dir string, c Check, redact func(string) stri
 	}
 	cr.Output = capTail(s)
 	return cr
+}
+
+// removable reports whether keep mode keep removes non-winning attempt a.
+func removable(keep string, a Attempt) bool {
+	switch keep {
+	case KeepNone:
+		return true
+	case KeepFailed:
+		return a.Passed
+	}
+	return false
+}
+
+// cleanup removes the non-winning worktrees rep.Keep asks for. It only runs
+// when an attempt won, never touches the winner, and only removes
+// attempts that recorded a worktree. A failure is reported and the
+// attempt is left in place.
+func cleanup(rep *Report, o Options) {
+	if rep.Winner == nil || o.Remove == nil || rep.Keep == KeepAll {
+		return
+	}
+	for i := range rep.Attempts {
+		a := &rep.Attempts[i]
+		if a.Attempt == *rep.Winner || a.Worktree == "" || !removable(rep.Keep, *a) {
+			continue
+		}
+		if err := o.Remove(*a); err != nil {
+			fmt.Fprintf(o.Stderr, "tinyagent: attempts: keep %s: could not remove attempt %d (%s): %v\n", rep.Keep, a.Attempt, a.Worktree, err)
+			continue
+		}
+		a.Removed = true
+		fmt.Fprintf(o.Stderr, "removed attempt %d worktree %s and branch %s (keep: %s)\n", a.Attempt, a.Worktree, a.Branch, rep.Keep)
+	}
+}
+
+// RemoveWorktree deletes the worktree at path and its branch from the
+// repository at repoRoot, discarding the worktree's uncommitted changes.
+func RemoveWorktree(repoRoot, path, branch string) error {
+	run := func(args ...string) error {
+		cmd := exec.Command("git", append([]string{"-C", repoRoot}, args...)...)
+		cmd.Env = gitEnv()
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("git %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	}
+	if err := run("worktree", "remove", "--force", path); err != nil {
+		return err
+	}
+	if branch == "" {
+		return nil
+	}
+	return run("branch", "-D", branch)
 }

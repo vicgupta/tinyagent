@@ -178,6 +178,8 @@ type AgentConfig struct {
 	// UntrustedContent configures the opt-in untrusted-content lockdown
 	// (off by default; --lockdown overrides Enabled).
 	UntrustedContent UntrustedContent `yaml:"untrusted_content"`
+	// Attempts configures --attempts best-of-N runs.
+	Attempts Attempts `yaml:"attempts"`
 }
 
 // ACP configures the --acp editor mode.
@@ -1059,6 +1061,7 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		// UntrustedContent is checked strictly here so a typo under
 		// untrusted_content exits 2 like any other lockdown config error.
 		UntrustedContent yaml.Node `yaml:"untrusted_content"`
+		Attempts         yaml.Node `yaml:"attempts"`
 	}
 	if yaml.Unmarshal(data, &probe) == nil {
 		for _, c := range []struct {
@@ -1105,6 +1108,11 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		}
 		if probe.UntrustedContent.Kind != 0 {
 			if err := checkUntrustedContent(&probe.UntrustedContent); err != nil {
+				return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+			}
+		}
+		if probe.Attempts.Kind != 0 {
+			if err := checkAttempts(&probe.Attempts); err != nil {
 				return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 			}
 		}
@@ -1177,6 +1185,9 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.UntrustedContent.Validate(); err != nil {
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+	}
+	if err := cfg.Attempts.Validate(); err != nil {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.LSP.Validate(); err != nil {
