@@ -95,11 +95,11 @@ func (a *Agent) lockdownTaint(t *trajectory.Trajectory, call model.ToolCall, res
 		return
 	}
 	src := lockdown.Source{Step: t.Steps, ToolCallID: call.ID, Tool: call.Function.Name}
-	switch a.lockdownChannel(call.Function.Name) {
-	case lockdown.ChannelWebFetch:
+	switch a.Tools.UntrustedSource(call.Function.Name) {
+	case tools.UntrustedWebFetch:
 		src.Source = lockdown.SourceWebFetch
 		src.Host, _, _ = webFetchURLHost(call.Function.Arguments)
-	case lockdown.ChannelMCP:
+	case tools.UntrustedMCP:
 		if !a.Lockdown.MCPCallTaints(a.mcpServersOf(call.Function.Name, call.Function.Arguments)) {
 			return
 		}

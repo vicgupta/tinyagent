@@ -86,13 +86,9 @@ func ResumeUntrusted(t *trajectory.Trajectory) bool {
 	if t.Review != nil || t.Tainted {
 		return true
 	}
-	external := map[string]bool{tools.WebFetchToolName: true}
-	for _, name := range t.ExternalTools {
-		external[name] = true
-	}
 	for _, m := range t.Messages {
 		for _, c := range m.ToolCalls {
-			if external[c.Function.Name] {
+			if tools.UntrustedHistoryCall(c.Function.Name, t.ExternalTools) {
 				return true
 			}
 		}
