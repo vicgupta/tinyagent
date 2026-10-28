@@ -1,10 +1,12 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/vicgupta/tinyagent/internal/lockdown"
 	"github.com/vicgupta/tinyagent/internal/sandboxnet"
+	"gopkg.in/yaml.v3"
 )
 
 // UntrustedContent configures the opt-in untrusted-content lockdown (issue
@@ -43,6 +45,18 @@ func (u UntrustedContent) Validate() error {
 	}
 	if _, err := sandboxnet.ParseRules(u.Lockdown.WebFetchAllowedDomains); err != nil {
 		return fmt.Errorf("untrusted_content.lockdown.web_fetch_allowed_domains %v", err)
+	}
+	return nil
+}
+
+// checkUntrustedContent decodes an untrusted_content section strictly, so
+// Load can report an unknown or mistyped key as an InvalidError (exit
+// status 2) instead of a parse error. The section is re-encoded for the
+// strict decode, so the decoder's line numbers would point into that copy;
+// they are dropped.
+func checkUntrustedContent(n *yaml.Node) error {
+	if err := checkStrict(n, "untrusted_content", &UntrustedContent{}); err != nil {
+		return errors.New(yamlLine.ReplaceAllString(err.Error(), ""))
 	}
 	return nil
 }
