@@ -46,7 +46,12 @@ func checkLockdown(fs *flag.FlagSet, l lockdownFlags, cfg config.AgentConfig) (s
 	// only under the local sandbox. With sandbox_network they lose their
 	// direct network at taint (if the host can deny it; the run says so at
 	// startup otherwise).
-	if cfg.Sandbox && cfg.Environment != "container" {
+	if cfg.Environment == "container" && !cfg.ReadOnly {
+		// The container's networks are disconnected at taint (if its
+		// network mode allows; the run says so at startup otherwise).
+		st.ConfineCommands(false, nil)
+		st.SetCommandsInContainer(true)
+	} else if cfg.Sandbox && cfg.Environment != "container" {
 		if cfg.SandboxNetwork {
 			st.ConfineCommands(len(cfg.UntrustedContent.Lockdown.AllowedDomains) > 0, nil)
 			st.SetCommandsDirectUntilTaint()

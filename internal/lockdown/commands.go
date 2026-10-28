@@ -25,6 +25,10 @@ type commandPolicy struct {
 	// direct: commands have direct network (sandbox_network) until the
 	// first taint, when narrow takes it away. See SetCommandsDirectUntilTaint.
 	direct bool
+	// container: commands run in the container environment, whose network
+	// (containerRemoved) is disconnected at the first taint. See
+	// SetCommandsInContainer.
+	container, containerRemoved bool
 }
 
 // SetCommandAllowedDomains records untrusted_content.lockdown.allowed_domains,
@@ -108,6 +112,12 @@ func (s *State) describeCommands() string {
 	sandboxed := "commands sandboxed"
 	if c.direct {
 		sandboxed += " (direct network until taint)"
+	}
+	if c.container {
+		sandboxed = "commands in container"
+		if c.containerRemoved {
+			sandboxed += " (network removed at taint)"
+		}
 	}
 	switch {
 	case !c.confined:

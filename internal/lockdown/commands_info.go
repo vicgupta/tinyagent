@@ -35,8 +35,11 @@ func (s *State) CommandsInfo() map[string]any {
 		info["network"] = CommandNetworkProxy
 		info["allowed_domains"] = append([]string{}, c.domains...)
 	}
-	if c.direct {
+	if c.direct || c.containerRemoved {
 		info["network_before_taint"] = CommandNetworkDirect
+	}
+	if c.container {
+		info["environment"] = CommandEnvironmentContainer
 	}
 	return info
 }

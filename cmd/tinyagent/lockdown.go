@@ -78,7 +78,7 @@ func startLockdown(a *agent.Agent, st *lockdown.State, stderr io.Writer, events 
 		a.Tools.WebFetch.Gate = st.WebFetchGate
 	}
 	if a.Tools != nil {
-		confineLockdownCommands(st, tools.CommandSandbox(a.Tools.Env), stderr)
+		confineLockdownEnv(st, a.Tools.Env, stderr)
 	}
 	fmt.Fprintln(stderr, st.Describe())
 	for _, s := range st.Sources() {
