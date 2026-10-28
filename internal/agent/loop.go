@@ -18,6 +18,7 @@ import (
 
 	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/hooks"
+	"github.com/vicgupta/tinyagent/internal/lockdown"
 	"github.com/vicgupta/tinyagent/internal/lsp"
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/outschema"
@@ -117,6 +118,9 @@ type Agent struct {
 	// It is applied between the executor's Permits check and the hooks, so a
 	// denial reuses the error-result path and hooks never override it.
 	Policy *permissions.Policy
+	// Lockdown is the run's untrusted-content taint state (#171); nil is
+	// off. Children share their parent's.
+	Lockdown *lockdown.State
 	// PermissionApprover answers a policy "ask" through the channel the run
 	// has (a terminal prompt, ACP session/request_permission, ...). nil
 	// resolves asks with the policy's non-interactive decision.
@@ -887,11 +891,14 @@ func (a *Agent) maxFormatErrors() int {
 // tool authority. The permission policy runs first: a policy denial never
 // reaches hooks, and a policy allow still runs them.
 func (a *Agent) runTool(ctx context.Context, t *trajectory.Trajectory, call model.ToolCall) tools.Result {
+	if res, refused := a.lockdownRefuse(t, call); refused {
+		return res
+	}
 	if res, decided := a.permit(ctx, t, call); decided {
 		return res
 	}
 	if a.Hooks == nil || !a.Tools.Permits(call.Function.Name) {
-		return a.execTool(ctx, t, call)
+		return a.lockdownExec(ctx, t, call)
 	}
 	in := hooks.Input{
 		ToolName: call.Function.Name, ToolCallID: call.ID, Arguments: eventArguments(call.Function.Arguments),
@@ -905,7 +912,7 @@ func (a *Agent) runTool(ctx context.Context, t *trajectory.Trajectory, call mode
 		}
 	}
 	// Hooks see only the text, whose placeholders stand in for images.
-	res := a.execTool(ctx, t, call)
+	res := a.lockdownExec(ctx, t, call)
 	in.OutputFile = res.OutputFile
 	var feedback strings.Builder
 	for _, r := range a.Hooks.Post(ctx, in, res.Text, res.IsError) {
