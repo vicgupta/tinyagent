@@ -79,6 +79,9 @@ func attemptsResultFields(rep Report, reportPath string) map[string]any {
 		"attempts_run": len(rep.Attempts), "winner": rep.Winner, "stop_reason": rep.StopReason,
 		"stop_on_pass": rep.StopOnPass, "keep": rep.Keep, "removed": removed,
 		"total_cost_usd": rep.TotalCostUSD, "total_wall_time_ms": rep.TotalWallMS}
+	if rep.AttemptsID != "" {
+		f["attempts_id"] = rep.AttemptsID
+	}
 	if rep.WinnerBranch != "" {
 		f["winner_branch"] = rep.WinnerBranch
 	}

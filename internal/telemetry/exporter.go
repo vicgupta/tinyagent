@@ -189,6 +189,7 @@ func (e *Exporter) Emit(kind string, fields map[string]any) {
 	e.lockdownEvent(kind, fields)
 	switch kind {
 	case "run.started":
+		e.attemptStarted(fields)
 	case "model.request":
 		e.modelRequest(ag, now, fields)
 	case "provider.retry", "model.fallback":

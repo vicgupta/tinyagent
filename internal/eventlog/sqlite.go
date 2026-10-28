@@ -335,6 +335,8 @@ func (s *SQLite) Emit(kind string, fields map[string]any) {
 			[]any{summary, dur, isErr, s.runID, id}})
 	case "subagent.started", "subagent.finished", "worker.applied":
 		ops = append(ops, s.subagentOps(kind, fields, now)...)
+	case "run.started":
+		ops = append(ops, s.attemptOps(fields)...)
 	case "result":
 		ops = append(ops, op{`UPDATE runs SET ended_at = ?, status = ?, steps = ?, input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_write_tokens = ?, cost_usd = ?, duration_ms = ? WHERE id = ?`,
 			[]any{now.UnixMilli(), str(fields["status"]), num(fields["steps"]), num(fields["input_tokens"]), num(fields["output_tokens"]),

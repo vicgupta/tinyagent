@@ -2064,6 +2064,7 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 		return events
 	}
 	started := map[string]any{"schema_version": 1, "model": a.ModelName, "root": a.Tools.Root, "read_only": a.Tools.ReadOnly, "resumed": resumed}
+	addAttemptLink(started)
 	if a.ReasoningEffort != "" {
 		started["reasoning_effort"] = a.ReasoningEffort
 	}
