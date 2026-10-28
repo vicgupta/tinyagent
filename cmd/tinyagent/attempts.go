@@ -59,7 +59,8 @@ func attemptsActive(fs *flag.FlagSet) bool {
 
 // attemptConflicts can't be combined with --attempts: each attempt is a
 // fresh run in its own worktree, and this release has no per-attempt
-// --json event stream or --check display.
+// --json event stream. --check is listed for runs; with --attempts it
+// prints the plan instead (see checkAttempts).
 var attemptConflicts = []string{"resume", "rewind", "to", "transcript", "acp", "review", "review-base",
 	"review-commit", "read-only", "ask-user", "snapshots", "eval", "workflow", "json", "check",
 	"list-profiles", "init-config", "update", "version", "follow-up"}
@@ -75,76 +76,15 @@ func runAttempts(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.
 		fmt.Fprintf(fs.Output(), "error: "+format+"\n", v...)
 		return 2
 	}
-	for _, f := range attemptConflicts {
-		if fs.Lookup(f) != nil && flagWasSet(fs, f) {
-			return usage("--attempts can't be combined with -%s", dashName(f))
-		}
-	}
-	if a.n < 1 || a.n > attempts.MaxAttempts {
-		return usage("--attempts must be between 1 and %d", attempts.MaxAttempts)
-	}
-	if len(a.models) > 0 && len(a.models) != a.n {
-		return usage("--attempt-model was given %d times but --attempts is %d: give one per attempt, or none to use -m for every attempt", len(a.models), a.n)
-	}
-	if len(a.models) > 0 && flagWasSet(fs, "m", "model") {
-		return usage("use either -m or --attempt-model with --attempts, not both")
-	}
 	cfg, err := config.LoadProfile(config.Find(o.configPath), o.profile)
 	if err != nil {
 		return usage("%v", err)
 	}
-	if len(a.checks) == 0 && len(cfg.Attempts.Checks) == 0 {
-		return usage("--attempts needs at least one --attempt-check command (or attempts.checks in the config file) to decide which attempt passes")
-	}
-	if len(a.checks) == 0 && flagWasSet(fs, "attempt-check-timeout") {
-		return usage("--attempt-check-timeout only applies to --attempt-check commands; set timeout_seconds on each attempts.checks entry instead")
-	}
-	if a.checkTimeout < 1 || a.checkTimeout > attempts.MaxCheckTimeout {
-		return usage("--attempt-check-timeout must be between 1 and %d seconds", attempts.MaxCheckTimeout)
-	}
-	if o.task == "" {
-		return usage("--attempts needs a task (-t)")
-	}
-	if o.task == "-" {
-		return usage("--attempts can't read the task from stdin; pass it with -t")
-	}
-	models := []string(a.models)
-	if len(models) == 0 {
-		// The model a single run would use: -m, else $AGENT_MODEL, else
-		// the config's model, else the built-in default.
-		spec := resolveModel(fs, o.modelName, cfg.Model)
-		models = make([]string, a.n)
-		for i := range models {
-			models[i] = spec
-		}
-	}
-	for i, m := range models {
-		if strings.HasPrefix(m, "-") {
-			return usage("--attempt-model %q (attempt %d) is not a model spec", m, i+1)
-		}
-	}
-	openaiAPI := cfg.OpenAIAPI
-	if flagWasSet(fs, "openai-api") {
-		openaiAPI = o.openaiAPI
-	}
-	if err := checkAttemptModels(models, cfg, openaiAPI); err != nil {
-		return usage("%v", err)
-	}
-
-	base := o.worktree.name
-	if base == "" {
-		base = generateWorktreeName(time.Now())
-	}
-	if err := validWorktreeName(base); err != nil {
-		return usage("%v", err)
-	}
-	if len(base) > 61 {
-		return usage("--worktree name %q is too long for --attempts (at most 61 characters; -a<N> is appended)", base)
-	}
-	top, err := preflightAttemptWorktrees(o.cwd, base, a.n)
+	plan, err := planAttempts(o, fs, cfg, false)
 	if err != nil {
 		return usage("%v", err)
 	}
+	models, base, top := plan.models, plan.base, plan.top
 	// Each attempt's child run would print the dirty-checkout warning;
 	// print it once here and drop it from the children's stderr.
 	dirty, _ := git("-C", top, "status", "--porcelain", "--", ".", ":(exclude).tinyagent")
@@ -155,7 +95,7 @@ func runAttempts(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
-	checks := attemptChecks(a, cfg.Attempts)
+	checks := plan.checks
 	shown := make([]string, len(models))
 	for i, m := range models {
 		shown[i] = m

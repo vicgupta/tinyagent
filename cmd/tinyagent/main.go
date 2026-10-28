@@ -269,7 +269,7 @@ func run() int {
 	if flagWasSet(fs, "eval") {
 		return runEval(&o, fs, os.Args[1:], os.Stderr)
 	}
-	if attemptsActive(fs) {
+	if attemptsActive(fs) && !o.check {
 		return runAttempts(&o, fs, os.Args[1:], os.Stdout, os.Stderr)
 	}
 	if o.acp {
