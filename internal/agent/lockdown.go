@@ -134,9 +134,10 @@ func (a *Agent) lockdownTaint(t *trajectory.Trajectory, call model.ToolCall, res
 // stopProcessesForLockdown stops every running background process and
 // returns their ids. Sandboxed processes are left running when commands
 // are confined: their network is denied or goes through the narrowed
-// proxy.
+// proxy. Under sandbox_network they had direct network until taint, so
+// they are stopped.
 func (a *Agent) stopProcessesForLockdown() []string {
-	if a.Lockdown.CommandsConfined() {
+	if !a.Lockdown.StopsProcessesAtTaint() {
 		return nil
 	}
 	var stopped []string

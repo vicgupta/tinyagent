@@ -14,7 +14,7 @@ func TestCheckLockdownSandboxedCommands(t *testing.T) {
 	for _, c := range []struct{ name, body, want string }{
 		{"denied", "sandbox: true\nuntrusted_content:\n  enabled: true\n", "after taint: commands sandboxed, network denied,"},
 		{"proxied", "sandbox: true\nsandbox_allowed_domains: [proxy.golang.org, github.com]\nuntrusted_content:\n  enabled: true\n  lockdown:\n    allowed_domains: [proxy.golang.org]\n", "after taint: commands sandboxed, network → 1 domain (proxy.golang.org),"},
-		{"sandbox_network", "sandbox: true\nsandbox_network: true\nuntrusted_content:\n  enabled: true\n", "after taint: commands refused,"},
+		{"sandbox_network", "sandbox: true\nsandbox_network: true\nuntrusted_content:\n  enabled: true\n", "after taint: commands sandboxed (direct network until taint), network denied,"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			code, stdout, stderr := runCLI(t, append(base, "--config", writeLockdownConfig(t, c.body))...)

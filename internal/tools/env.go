@@ -82,7 +82,8 @@ func (l Local) command(ctx context.Context, root string, cmd *exec.Cmd, argv ...
 		if l.CommandEnv != nil {
 			env = append([]string{}, l.CommandEnv.Vars...)
 		}
-		cmd.Env = append(append(env, "TMPDIR="+l.Sandbox.Tmp), l.Sandbox.proxyEnv...)
+		_, _, proxyEnv := l.Sandbox.netState()
+		cmd.Env = append(append(env, "TMPDIR="+l.Sandbox.Tmp), proxyEnv...)
 	}
 	cmd.Dir = root
 	setProcessGroup(cmd)

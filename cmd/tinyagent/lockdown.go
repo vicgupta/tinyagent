@@ -95,10 +95,15 @@ func startLockdown(a *agent.Agent, st *lockdown.State, stderr io.Writer, events 
 // confines their network: denied, or through the allowlist proxy, which
 // is narrowed at the first taint to the hosts in both
 // sandbox_allowed_domains and untrusted_content.lockdown.allowed_domains,
-// closing the connections opened before. Otherwise (no --sandbox, a
-// container, sandbox_network) commands stay refused after taint, and it
-// says so.
+// closing the connections opened before. Under sandbox_network, the first
+// taint takes the commands' direct network away instead (see
+// confineDirectLockdownCommands). Otherwise (no --sandbox, a container)
+// commands stay refused after taint, and it says so.
 func confineLockdownCommands(st *lockdown.State, sb *tools.Sandbox, stderr io.Writer) {
+	if sb != nil && sb.Network {
+		confineDirectLockdownCommands(st, sb, stderr)
+		return
+	}
 	if !sb.LockdownConfinable() {
 		fmt.Fprintln(stderr, "lockdown: commands will be refused after taint; run them under --sandbox without sandbox_network to keep them running with their network narrowed")
 		return

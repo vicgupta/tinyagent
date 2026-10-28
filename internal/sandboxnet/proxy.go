@@ -49,6 +49,9 @@ type Proxy struct {
 	// narrow is the untrusted-content lockdown restriction (see Narrow),
 	// guarded by mu.
 	narrow narrowState
+	// notAllowed is the reason given for a host outside rules; empty means
+	// ReasonNotAllowed (see NewLockdownProxy).
+	notAllowed string
 }
 
 // NewProxy returns a proxy for rules that serves on ln once Serve is called.
@@ -179,7 +182,7 @@ func closeWrite(c net.Conn) {
 func (p *Proxy) connect(ctx context.Context, host string, port int) (net.Conn, error) {
 	host = normalizeHost(host)
 	if !p.allowed(host, port) {
-		return nil, &deniedError{ReasonNotAllowed}
+		return nil, &deniedError{p.reasonNotAllowed()}
 	}
 	if !p.narrowAllows(host, port) {
 		return nil, &deniedError{ReasonLockdown}

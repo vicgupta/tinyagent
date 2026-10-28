@@ -31,6 +31,32 @@ type Sandbox struct {
 	proxy    *sandboxnet.Proxy
 	proxyDir string   // private directory holding the proxy's Unix socket (Linux)
 	proxyEnv []string // proxy variables added to every command's environment
+
+	// lockdown is the after-taint network of a sandbox_network sandbox,
+	// set by PrepareLockdownNetwork before the run starts. It is a pointer
+	// so that copies (workers) switch together.
+	lockdown *lockdownNetwork
+}
+
+// netState returns the network policy for a command started now: direct
+// network, the allowlist proxy (nil when none) and its environment
+// variables. Once the untrusted-content lockdown has taken a
+// sandbox_network sandbox's direct network away, that is the lockdown's.
+func (s *Sandbox) netState() (network bool, proxy *sandboxnet.Proxy, env []string) {
+	if ln := s.lockdown; ln != nil && ln.isSwitched() {
+		return false, ln.proxy, ln.env
+	}
+	return s.Network, s.proxy, s.proxyEnv
+}
+
+// proxyVars are the environment variables that point commands at the
+// allowlist proxy at url.
+func proxyVars(url string) []string {
+	var env []string
+	for _, k := range []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"} {
+		env = append(env, k+"="+url, strings.ToLower(k)+"="+url)
+	}
+	return append(env, "NO_PROXY=", "no_proxy=")
 }
 
 // NewSandbox checks that this host can enforce the policy and creates the
@@ -75,10 +101,7 @@ func NewSandbox(root string, extra []string, network bool, allowed []string) (*S
 		}
 		s.proxy = sandboxnet.NewProxy(rules, ln)
 		go s.proxy.Serve()
-		for _, k := range []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"} {
-			s.proxyEnv = append(s.proxyEnv, k+"="+url, strings.ToLower(k)+"="+url)
-		}
-		s.proxyEnv = append(s.proxyEnv, "NO_PROXY=", "no_proxy=")
+		s.proxyEnv = proxyVars(url)
 	}
 	return s, nil
 }
@@ -91,6 +114,9 @@ func (s *Sandbox) Cleanup() {
 	if s.proxy != nil {
 		s.proxy.Close()
 	}
+	if s.lockdown != nil && s.lockdown.proxy != nil {
+		s.lockdown.proxy.Close()
+	}
 	if s.proxyDir != "" {
 		os.RemoveAll(s.proxyDir)
 	}
@@ -102,10 +128,14 @@ func (s *Sandbox) Cleanup() {
 // TakeNetworkDenials returns the requests the allowlist proxy refused since
 // the last call.
 func (s *Sandbox) TakeNetworkDenials() []sandboxnet.Denial {
-	if s == nil || s.proxy == nil {
+	if s == nil {
 		return nil
 	}
-	return s.proxy.TakeDenials()
+	_, proxy, _ := s.netState()
+	if proxy == nil {
+		return nil
+	}
+	return proxy.TakeDenials()
 }
 
 // NetworkMode describes the network policy: denied, allowed, or allowlist
