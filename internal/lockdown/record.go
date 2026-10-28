@@ -27,8 +27,9 @@ func (s *State) WebFetchDomains() []string {
 	return append([]string(nil), s.webFetchDomains...)
 }
 
-// Info returns the lockdown config and current taint state for
-// run.started: names and host patterns only, never content.
+// Info returns the lockdown config, the after-taint command policy (see
+// CommandsInfo) and the current taint state for run.started: names and
+// host patterns only, never content.
 func (s *State) Info() map[string]any {
 	if s == nil {
 		return nil
@@ -42,6 +43,7 @@ func (s *State) Info() map[string]any {
 		"sources":                   s.EnabledSources(),
 		"web_fetch_allowed_domains": domains,
 		"tainted":                   s.Tainted(),
+		"commands":                  s.CommandsInfo(),
 	}
 }
 
