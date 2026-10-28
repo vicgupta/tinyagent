@@ -43,6 +43,11 @@ type UntrustedLockdown struct {
 	// network after taint. A bare * is rejected. Commands only keep
 	// running after taint under --sandbox without sandbox_network.
 	AllowedDomains []string `yaml:"allowed_domains,omitempty"`
+	// ContainerProxy lets container-environment commands reach
+	// AllowedDomains after taint through a lockdown proxy on an internal
+	// runtime network (off by default: they get no network at all).
+	// Requires AllowedDomains.
+	ContainerProxy bool `yaml:"container_proxy,omitempty"`
 }
 
 // Validate checks the lockdown allowlist syntax.
@@ -55,6 +60,9 @@ func (u UntrustedContent) Validate() error {
 	}
 	if _, err := sandboxnet.ParseRules(u.Lockdown.AllowedDomains); err != nil {
 		return fmt.Errorf("untrusted_content.lockdown.allowed_domains %v", err)
+	}
+	if u.Lockdown.ContainerProxy && len(u.Lockdown.AllowedDomains) == 0 {
+		return errors.New("untrusted_content.lockdown.container_proxy needs untrusted_content.lockdown.allowed_domains")
 	}
 	return nil
 }

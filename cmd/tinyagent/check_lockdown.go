@@ -42,6 +42,7 @@ func checkLockdown(fs *flag.FlagSet, l lockdownFlags, cfg config.AgentConfig) (s
 	if err := st.SetCommandAllowedDomains(cfg.UntrustedContent.Lockdown.AllowedDomains); err != nil {
 		return "", err
 	}
+	st.SetContainerProxy(cfg.UntrustedContent.Lockdown.ContainerProxy)
 	// Mirrors confineLockdownCommands: commands keep running after taint
 	// only under the local sandbox. With sandbox_network they lose their
 	// direct network at taint (if the host can deny it; the run says so at

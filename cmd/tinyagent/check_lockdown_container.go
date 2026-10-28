@@ -32,6 +32,11 @@ func checkContainerLockdown(st *lockdown.State, c config.Container) string {
 		st.SetCommandsInContainer(false)
 		return "; container network none (from container.run_args)"
 	}
+	if st.ContainerProxy() && len(st.CommandDomains()) > 0 {
+		st.ConfineCommands(true, nil)
+		st.SetCommandsInContainer(true)
+		return "; container network " + containerModeText(r) + "; container_proxy: an internal network and proxy are set up when the container starts"
+	}
 	st.ConfineCommands(false, nil)
 	st.SetCommandsInContainer(true)
 	return "; container network " + containerModeText(r)
