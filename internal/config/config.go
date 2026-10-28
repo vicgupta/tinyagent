@@ -895,6 +895,13 @@ type MCPServer struct {
 	Env                 []string `yaml:"env,omitempty"`
 	DiscoveryTimeoutSec int      `yaml:"discovery_timeout_seconds"`
 	CallTimeoutSec      int      `yaml:"call_timeout_seconds"`
+	// Untrusted false marks the server's results as trusted: with
+	// untrusted-content lockdown on they don't taint the run. Absent or
+	// true (the default) means they taint.
+	Untrusted *bool `yaml:"untrusted,omitempty"`
+	// LockdownAllowed keeps the server's tools and resources callable after
+	// lockdown taints the run (off by default: they are refused).
+	LockdownAllowed bool `yaml:"lockdown_allowed,omitempty"`
 	// SetEnv holds NAME=value pairs set for the server, and AllTools
 	// exposes every tool it lists. Only servers an ACP client supplies
 	// use them; a config file can't set either.

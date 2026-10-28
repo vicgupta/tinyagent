@@ -82,6 +82,7 @@ func setupLockdown(fs *flag.FlagSet, l lockdownFlags, cfg *config.AgentConfig, r
 		fmt.Fprintln(stderr, "error:", err)
 		return nil, 2
 	}
+	st.SetMCPServers(mcpLockdownPolicies(cfg.MCPServers))
 	if l.untrustedTask {
 		st.Taint(lockdown.Source{Source: lockdown.SourceUntrustedTask})
 	}
