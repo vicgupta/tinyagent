@@ -15,7 +15,7 @@ func TestLockdownUnknownKeyExits2(t *testing.T) {
 		args             []string
 	}{
 		{"top level", "untrusted_content:\n  enable: true\n", "untrusted_content: yaml: unmarshal errors:\n  field enable not found", []string{"-t", "x"}},
-		{"lockdown", "untrusted_content:\n  enabled: true\n  lockdown:\n    allowed_domains: [proxy.golang.org]\n", "field allowed_domains not found in type config.UntrustedLockdown", []string{"-t", "x"}},
+		{"lockdown", "untrusted_content:\n  enabled: true\n  lockdown:\n    allowed_domain: [proxy.golang.org]\n", "field allowed_domain not found in type config.UntrustedLockdown", []string{"-t", "x"}},
 		{"profile", "profiles:\n  ci:\n    untrusted_content:\n      enable: true\n", "profile ci", []string{"-t", "x", "--profile", "ci"}},
 		{"check", "untrusted_content:\n  enable: true\n", "untrusted_content: yaml: unmarshal errors:\n  field enable not found", []string{"--check"}},
 	} {

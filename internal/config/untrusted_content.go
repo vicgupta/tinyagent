@@ -36,6 +36,13 @@ type UntrustedLockdown struct {
 	// web_fetch.allowed_domains to be fetched at all. Empty (the default)
 	// refuses every web_fetch after taint. A bare * is rejected.
 	WebFetchAllowedDomains []string `yaml:"web_fetch_allowed_domains,omitempty"`
+	// AllowedDomains are the hosts sandboxed commands may still reach
+	// through the allowlist proxy after taint, in the
+	// sandbox_allowed_domains syntax; each must also be in
+	// sandbox_allowed_domains. Empty (the default) refuses all their
+	// network after taint. A bare * is rejected. Commands only keep
+	// running after taint under --sandbox without sandbox_network.
+	AllowedDomains []string `yaml:"allowed_domains,omitempty"`
 }
 
 // Validate checks the lockdown allowlist syntax.
@@ -45,6 +52,9 @@ func (u UntrustedContent) Validate() error {
 	}
 	if _, err := sandboxnet.ParseRules(u.Lockdown.WebFetchAllowedDomains); err != nil {
 		return fmt.Errorf("untrusted_content.lockdown.web_fetch_allowed_domains %v", err)
+	}
+	if _, err := sandboxnet.ParseRules(u.Lockdown.AllowedDomains); err != nil {
+		return fmt.Errorf("untrusted_content.lockdown.allowed_domains %v", err)
 	}
 	return nil
 }

@@ -39,6 +39,14 @@ func checkLockdown(fs *flag.FlagSet, l lockdownFlags, cfg config.AgentConfig) (s
 		return "", err
 	}
 	st.SetMCPServers(mcpLockdownPolicies(cfg.MCPServers))
+	if err := st.SetCommandAllowedDomains(cfg.UntrustedContent.Lockdown.AllowedDomains); err != nil {
+		return "", err
+	}
+	// Mirrors confineLockdownCommands: commands keep running after taint
+	// only under the local sandbox without sandbox_network.
+	if cfg.Sandbox && !cfg.SandboxNetwork && cfg.Environment != "container" {
+		st.ConfineCommands(len(cfg.SandboxAllowedDomains) > 0, nil)
+	}
 	line := "on (" + src + ") " + strings.TrimPrefix(st.Describe(), "lockdown: on ")
 	if domains := st.WebFetchDomains(); len(domains) > 0 {
 		line += "; web_fetch after taint: " + strings.Join(domains, ", ")

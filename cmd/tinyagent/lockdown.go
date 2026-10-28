@@ -10,6 +10,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/agent"
 	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/lockdown"
+	"github.com/vicgupta/tinyagent/internal/tools"
 )
 
 // lockdownFlags are the untrusted-content lockdown flags (#171).
@@ -83,6 +84,10 @@ func setupLockdown(fs *flag.FlagSet, l lockdownFlags, cfg *config.AgentConfig, r
 		return nil, 2
 	}
 	st.SetMCPServers(mcpLockdownPolicies(cfg.MCPServers))
+	if err := st.SetCommandAllowedDomains(cfg.UntrustedContent.Lockdown.AllowedDomains); err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return nil, 2
+	}
 	if l.untrustedTask {
 		st.Taint(lockdown.Source{Source: lockdown.SourceUntrustedTask})
 	}
@@ -96,7 +101,8 @@ func setupLockdown(fs *flag.FlagSet, l lockdownFlags, cfg *config.AgentConfig, r
 }
 
 // startLockdown attaches st to a (and its web_fetch, whose redirect hops
-// are then checked too), prints the startup line, and emits the taint
+// are then checked too), lets sandboxed commands keep running after taint
+// (see confineLockdownCommands), prints the startup line, and emits the taint
 // events of a run that starts tainted. It does nothing when st is nil.
 func startLockdown(a *agent.Agent, st *lockdown.State, stderr io.Writer, events *runEvents) {
 	if st == nil {
@@ -105,6 +111,9 @@ func startLockdown(a *agent.Agent, st *lockdown.State, stderr io.Writer, events 
 	a.Lockdown = st
 	if a.Tools != nil && a.Tools.WebFetch != nil {
 		a.Tools.WebFetch.Gate = st.WebFetchGate
+	}
+	if a.Tools != nil {
+		confineLockdownCommands(st, tools.CommandSandbox(a.Tools.Env), stderr)
 	}
 	fmt.Fprintln(stderr, st.Describe())
 	for _, s := range st.Sources() {
@@ -115,4 +124,31 @@ func startLockdown(a *agent.Agent, st *lockdown.State, stderr io.Writer, events 
 		}
 		events.emit("taint", s.Fields())
 	}
+}
+
+// confineLockdownCommands lets commands keep running after taint when sb
+// confines their network: denied, or through the allowlist proxy, which
+// is narrowed at the first taint to the hosts in both
+// sandbox_allowed_domains and untrusted_content.lockdown.allowed_domains,
+// closing the connections opened before. Otherwise (no --sandbox, a
+// container, sandbox_network) commands stay refused after taint, and it
+// says so.
+func confineLockdownCommands(st *lockdown.State, sb *tools.Sandbox, stderr io.Writer) {
+	if !sb.LockdownConfinable() {
+		fmt.Fprintln(stderr, "lockdown: commands will be refused after taint; run them under --sandbox without sandbox_network to keep them running with their network narrowed")
+		return
+	}
+	if !sb.Proxied() {
+		if len(st.CommandDomains()) > 0 {
+			fmt.Fprintln(stderr, "lockdown: note: untrusted_content.lockdown.allowed_domains has no effect: sandboxed commands have no network (sandbox_allowed_domains is empty)")
+		}
+		st.ConfineCommands(false, nil)
+		return
+	}
+	st.ConfineCommands(true, func(domains []string) {
+		if err := sb.NarrowNetwork(domains); err != nil {
+			// Validated at startup; never expected.
+			fmt.Fprintln(stderr, "lockdown: error narrowing the sandbox network:", err)
+		}
+	})
 }
