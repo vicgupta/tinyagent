@@ -60,6 +60,22 @@ inputs:
     description: JSON Schema file for a structured result (`--output-schema`).
     required: false
     default: ""
+  attempts:
+    description: Run the task up to N times (`--attempts`, 1-4), each in its own Git worktree, and keep the first attempt whose checks pass. Needs a checkout with commits, a task (not a review) and attempt-checks or attempts.checks in config. Empty runs once.
+    required: false
+    default: ""
+  attempt-models:
+    description: With attempts, one model spec per line, one per attempt (`--attempt-model`); replaces model.
+    required: false
+    default: ""
+  attempt-checks:
+    description: With attempts, one check command per line (`--attempt-check`, run with bash -c in each attempt's worktree); replaces attempts.checks from config.
+    required: false
+    default: ""
+  attempt-check-timeout:
+    description: With attempts, seconds before one check is killed (`--attempt-check-timeout`, 1-3600).
+    required: false
+    default: ""
   args:
     description: Extra tinyagent flags, one argv element per line. Lines are not shell-evaluated or split; blank lines are skipped.
     required: false
@@ -106,6 +122,15 @@ outputs:
   events:
     description: Path of the saved `--json` event stream under RUNNER_TEMP.
     value: ${{ steps.run.outputs.events }}
+  attempts-winner:
+    description: With attempts, the winning attempt's number; empty when none passed.
+    value: ${{ steps.run.outputs.attempts-winner }}
+  attempts-winner-branch:
+    description: With attempts, the winning attempt's branch (tinyagent/<name>-a<N>); empty when none passed.
+    value: ${{ steps.run.outputs.attempts-winner-branch }}
+  attempts-report:
+    description: With attempts, path of the attempts report JSON under RUNNER_TEMP.
+    value: ${{ steps.run.outputs.attempts-report }}
 
 runs:
   using: composite
@@ -135,6 +160,10 @@ runs:
         INPUT_UNTRUSTED_TASK: ${{ inputs.untrusted-task }}
         INPUT_OUTPUT_SCHEMA: ${{ inputs.output-schema }}
         INPUT_ARGS: ${{ inputs.args }}
+        INPUT_ATTEMPTS: ${{ inputs.attempts }}
+        INPUT_ATTEMPT_MODELS: ${{ inputs.attempt-models }}
+        INPUT_ATTEMPT_CHECKS: ${{ inputs.attempt-checks }}
+        INPUT_ATTEMPT_CHECK_TIMEOUT: ${{ inputs.attempt-check-timeout }}
         INPUT_JOB_SUMMARY: ${{ inputs.job-summary }}
         INPUT_FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
       run: '"$GITHUB_ACTION_PATH/action/run.sh"'

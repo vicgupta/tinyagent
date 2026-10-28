@@ -31,6 +31,12 @@ const starterConfig = `# tinyagent user config. Flags override these values. Ful
 #     web_fetch_allowed_domains: []  # web_fetch hosts still readable after taint
 #     allowed_domains: []            # hosts --sandbox commands still reach after taint (also in sandbox_allowed_domains)
 #     container_proxy: false         # container environment: reach allowed_domains through a proxy after taint
+# attempts:                   # best-of-N, used only with --attempts N (README "Best-of-N attempts")
+#   checks:                   # each must exit 0 in an attempt's worktree; --attempt-check replaces the list
+#     - command: go test ./...
+#       timeout_seconds: 600  # default 600, up to 3600
+#   stop_on_pass: true        # false runs all N attempts and compares them
+#   keep: all                 # non-winning worktrees to keep once one wins: all, failed or none
 `
 
 func runInitConfig(path string) int {
