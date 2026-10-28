@@ -181,6 +181,13 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 	if mem := checkMemory(fs, o, cfg.Memory, root); mem != "" {
 		add("memory", mem)
 	}
+	lock, err := checkLockdown(fs, o.lockdown, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if lock != "" {
+		add("lockdown", lock)
+	}
 	if policy != nil {
 		add("permissions", fmt.Sprintf("%d rules, default %s, non-interactive %s", policy.RuleCount(), policy.Summary().Default, policy.Summary().NonInteractive))
 	}
