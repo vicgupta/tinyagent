@@ -48,6 +48,14 @@ inputs:
     description: Pass `--sandbox` (OS-level confinement of commands). true or false.
     required: false
     default: "false"
+  lockdown:
+    description: Pass `--lockdown` (untrusted-content lockdown; once the run reads untrusted content, commands and MCP tools are refused). true or false; false passes nothing, so the config decides.
+    required: false
+    default: "false"
+  untrusted-task:
+    description: Pass `--untrusted-task` (the task is untrusted text such as an issue body, so the run starts tainted). Requires lockdown (the lockdown input or untrusted_content.enabled in config). true or false.
+    required: false
+    default: "false"
   output-schema:
     description: JSON Schema file for a structured result (`--output-schema`).
     required: false
@@ -123,6 +131,8 @@ runs:
         INPUT_REVIEW_COMMIT: ${{ inputs.review-commit }}
         INPUT_READ_ONLY: ${{ inputs.read-only }}
         INPUT_SANDBOX: ${{ inputs.sandbox }}
+        INPUT_LOCKDOWN: ${{ inputs.lockdown }}
+        INPUT_UNTRUSTED_TASK: ${{ inputs.untrusted-task }}
         INPUT_OUTPUT_SCHEMA: ${{ inputs.output-schema }}
         INPUT_ARGS: ${{ inputs.args }}
         INPUT_JOB_SUMMARY: ${{ inputs.job-summary }}

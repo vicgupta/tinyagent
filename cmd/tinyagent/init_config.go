@@ -25,6 +25,10 @@ const starterConfig = `# tinyagent user config. Flags override these values. Ful
 #   max_writes_per_run: 5
 #   max_entries: 50
 #   max_bytes: 8192           # cap on the Project memory prompt section (1-65536)
+# untrusted_content:          # lockdown: once a web_fetch or MCP result or a review diff enters the run,
+#   enabled: false            # refuse commands, MCP tools and other web_fetch hosts (same as --lockdown)
+#   lockdown:                 # sources and per-MCP-server untrusted/lockdown_allowed: README "Untrusted-content lockdown"
+#     web_fetch_allowed_domains: []  # web_fetch hosts still readable after taint
 `
 
 func runInitConfig(path string) int {
