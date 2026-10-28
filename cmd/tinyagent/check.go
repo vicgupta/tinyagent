@@ -22,7 +22,9 @@ import (
 // the same message. Key values are never printed, only whether the
 // variable is set.
 func runCheck(o *options, fs *flag.FlagSet, w io.Writer) int {
-	if o.task != "" || o.resume != "" || o.rewind != "" || o.worktree.on {
+	// With --attempts, --worktree=<name> names the attempts' worktrees,
+	// which --check only looks up.
+	if o.task != "" || o.resume != "" || o.rewind != "" || (o.worktree.on && !attemptsActive(fs)) {
 		fmt.Fprintln(os.Stderr, "error: --check makes no model request; it can't be combined with --task, --resume, --rewind or --worktree")
 		return 2
 	}
@@ -76,6 +78,12 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 		cfg.MaxOutputTokens = o.maxOutputTokens
 	}
 	spec := resolveModel(fs, o.modelName, cfg.Model)
+	specSource := modelSource(fs, cfg.Model)
+	if attemptsActive(fs) && len(o.attempts.models) > 0 {
+		// --attempt-model replaces -m: report and check attempt 1's model
+		// here; checkAttempts checks every attempt's.
+		spec, specSource = o.attempts.models[0], "attempt 1, from --attempt-model"
+	}
 	if flagWasSet(fs, "reasoning-effort") {
 		cfg.ReasoningEffort = o.reasoningEffort
 	}
@@ -135,7 +143,7 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 	if o.profile != "" {
 		add("profile", o.profile)
 	}
-	add("model", spec+" ("+modelSource(fs, cfg.Model)+")")
+	add("model", spec+" ("+specSource+")")
 	add("provider", providerStatus(spec, m))
 	switch {
 	case len(fallbacks) == 0 && o.noFallback:
@@ -187,6 +195,13 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 	}
 	if lock != "" {
 		add("lockdown", lock)
+	}
+	att, err := checkAttempts(fs, o, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if att != "" {
+		add("attempts", att)
 	}
 	if policy != nil {
 		add("permissions", fmt.Sprintf("%d rules, default %s, non-interactive %s", policy.RuleCount(), policy.Summary().Default, policy.Summary().NonInteractive))
