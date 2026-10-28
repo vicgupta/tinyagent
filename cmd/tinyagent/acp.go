@@ -21,6 +21,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/eventlog"
 	"github.com/vicgupta/tinyagent/internal/hooks"
+	"github.com/vicgupta/tinyagent/internal/lockdown"
 	"github.com/vicgupta/tinyagent/internal/mcptools"
 	"github.com/vicgupta/tinyagent/internal/memory"
 	"github.com/vicgupta/tinyagent/internal/model"
@@ -120,6 +121,8 @@ type acpSession struct {
 	otel                         *telemetry.Settings
 	notes                        []string // shown before the first turn
 	clientMCP                    bool     // client-supplied MCP servers were started
+	clientMCPAliases             []string // their tool-name prefixes
+	lockdown                     *lockdown.State
 	remember                     *memory.Writer
 	traj                         *trajectory.Trajectory
 	turn                         int
@@ -150,7 +153,7 @@ func newACPSession(ctx context.Context, o *options, fs *flag.FlagSet, id, cwd st
 		return nil, err
 	}
 	registerProviders(cfg)
-	if err := acpLockdownErr(fs, o.lockdown, cfg); err != nil {
+	if s.lockdown, err = acpSetupLockdown(fs, o.lockdown, &cfg); err != nil {
 		return nil, err
 	}
 	if s.hooks, err = hooks.New(cfg.Hooks, cfgPath); err != nil {
@@ -287,6 +290,7 @@ func newACPSession(ctx context.Context, o *options, fs *flag.FlagSet, id, cwd st
 	if s.mcp, err = mcptools.Start(ctx, root, mcpDefs, os.Stderr); err != nil {
 		return nil, err
 	}
+	startACPLockdown(s.lockdown, s.clientMCPAliases, s.env, s.webFetch, os.Stderr)
 
 	var onText func(string)
 	if !o.noStream {
@@ -363,6 +367,7 @@ func (s *acpSession) mcpServers(cfg config.AgentConfig, client []acp.MCPServer) 
 			def.SetEnv = append(def.SetEnv, e.Name+"="+e.Value)
 		}
 		out = append(out, def)
+		s.clientMCPAliases = append(s.clientMCPAliases, def.Alias)
 	}
 	s.clientMCP = true
 	return out, nil
@@ -487,6 +492,7 @@ func (s *acpSession) Prompt(ctx context.Context, p acp.Prompt, u *acp.Updates) (
 		Subagents:      s.subagents,
 		Workers:        s.workers,
 		TaskImages:     images,
+		Lockdown:       s.lockdown,
 	}
 	if prev != nil {
 		a.Resume, a.ResumeSource, a.FollowUp, a.Continue = prev, "acp session "+s.id, p.Text, true
@@ -509,6 +515,9 @@ func (s *acpSession) Prompt(ctx context.Context, p acp.Prompt, u *acp.Updates) (
 		warn(trWarn)
 	}
 	events.emit("acp.turn", map[string]any{"session_id": s.id, "turn": s.turn})
+	if s.turn == 1 {
+		emitStartTaints(s.lockdown, events)
+	}
 	if s.turn == 1 {
 		startOutputFiles(s.outputFiles, cfg.ToolOutputFiles.MaxRuns, warn)
 	}

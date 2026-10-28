@@ -6,8 +6,7 @@ import (
 )
 
 // SourceACPClientMCP is a result from an MCP server an ACP client supplied
-// to the session. ACP sessions don't support lockdown yet, so it is
-// accepted in untrusted_content.sources but nothing records it today.
+// to the session (see SetACPClientMCPServers).
 const SourceACPClientMCP = "acp_client_mcp"
 
 // ConfigurableSources are the taint sources untrusted_content.sources can
@@ -88,8 +87,8 @@ func (s *State) describeSources() string {
 	defer s.mu.Unlock()
 	var out []string
 	for _, src := range ConfigurableSources {
-		if src == SourceACPClientMCP {
-			// ACP sessions refuse lockdown today; listing it would mislead.
+		if src == SourceACPClientMCP && !s.acp {
+			// Only ACP sessions have client-supplied servers.
 			continue
 		}
 		if s.taintsFromLocked(src) {

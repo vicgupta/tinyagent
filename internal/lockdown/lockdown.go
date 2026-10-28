@@ -116,6 +116,10 @@ type State struct {
 	mcpServers map[string]MCPServerPolicy
 	// commands is the after-taint command policy (see ConfineCommands).
 	commands commandPolicy
+	// acp marks an ACP session; clientMCP holds the aliases of the MCP
+	// servers its client supplied (see SetACPClientMCPServers).
+	acp       bool
+	clientMCP map[string]bool
 }
 
 // New returns an untainted state whose web_fetch lockdown allowlist is

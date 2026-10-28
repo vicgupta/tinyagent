@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -164,31 +163,5 @@ func TestSetupLockdown(t *testing.T) {
 	}
 	if st, _ := setupLockdown(fs, o.lockdown, &cfg, true, true, io.Discard); st != nil {
 		t.Error("--lockdown=false didn't override the config")
-	}
-}
-
-func TestACPRefusesLockdown(t *testing.T) {
-	for _, args := range [][]string{{"--acp", "--lockdown"}, {"--acp", "--untrusted-task"}} {
-		_, requests := lockdownEnv(t)
-		var code int
-		stderr := captureStderr(t, func() {
-			code, _, _ = runWith(t, args...)
-		})
-		if code != 2 || requests.Load() != 0 || !strings.Contains(stderr, "isn't supported in --acp mode yet") {
-			t.Errorf("%v: exit %d, stderr %q", args, code, stderr)
-		}
-	}
-	o := &options{}
-	fs := newFlagSet(o)
-	cfg := config.Default()
-	cfg.UntrustedContent.Enabled = true
-	if err := acpLockdownErr(fs, o.lockdown, cfg); !errors.Is(err, errACPLockdown) {
-		t.Errorf("config-enabled lockdown in ACP: %v", err)
-	}
-	if err := fs.Parse([]string{"--lockdown=false"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := acpLockdownErr(fs, o.lockdown, cfg); err != nil {
-		t.Errorf("--lockdown=false in ACP: %v", err)
 	}
 }

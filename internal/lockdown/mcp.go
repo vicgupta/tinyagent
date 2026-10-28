@@ -33,17 +33,22 @@ func (s *State) SetMCPServers(servers []MCPServerPolicy) {
 	}
 }
 
-// MCPAliases returns the aliases of the servers SetMCPServers recorded, in
-// sorted order.
+// MCPAliases returns the aliases of the servers SetMCPServers and
+// SetACPClientMCPServers recorded, in sorted order.
 func (s *State) MCPAliases() []string {
 	if s == nil {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]string, 0, len(s.mcpServers))
+	out := make([]string, 0, len(s.mcpServers)+len(s.clientMCP))
 	for alias := range s.mcpServers {
 		out = append(out, alias)
+	}
+	for alias := range s.clientMCP {
+		if _, ok := s.mcpServers[alias]; !ok {
+			out = append(out, alias)
+		}
 	}
 	sort.Strings(out)
 	return out
