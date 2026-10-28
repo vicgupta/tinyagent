@@ -1,11 +1,9 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/vicgupta/tinyagent/internal/agent"
 	"github.com/vicgupta/tinyagent/internal/config"
@@ -22,39 +20,6 @@ type lockdownFlags struct {
 func registerLockdownFlags(fs *flag.FlagSet, l *lockdownFlags) {
 	fs.BoolVar(&l.enabled, "lockdown", false, "untrusted-content lockdown (overrides untrusted_content.enabled; --lockdown=false turns it off): once the run reads untrusted content (a web_fetch or MCP result, a review diff, --untrusted-task), commands and MCP tools are refused, and web_fetch outside untrusted_content.lockdown.web_fetch_allowed_domains")
 	fs.BoolVar(&l.untrustedTask, "untrusted-task", false, "treat the task text as untrusted (an issue body, a ticket): the run starts tainted; requires lockdown (--lockdown or untrusted_content.enabled), it does not turn it on")
-}
-
-// errACPLockdown is returned when lockdown is asked for in --acp mode,
-// which doesn't support it yet: it fails closed rather than running
-// sessions unrestricted.
-var errACPLockdown = errors.New("untrusted-content lockdown (--lockdown, --untrusted-task, untrusted_content.enabled) isn't supported in --acp mode yet")
-
-// acpLockdownErr reports whether lockdown would be on for an ACP session
-// with cfg.
-func acpLockdownErr(fs *flag.FlagSet, l lockdownFlags, cfg config.AgentConfig) error {
-	on := cfg.UntrustedContent.Enabled
-	if flagWasSet(fs, "lockdown") {
-		on = l.enabled
-	}
-	if on || l.untrustedTask {
-		return errACPLockdown
-	}
-	return nil
-}
-
-// checkACPLockdown refuses --acp up front when the flags or the config ask
-// for lockdown. A config that fails to load is left to the session, which
-// reports it.
-func checkACPLockdown(o *options, fs *flag.FlagSet) int {
-	cfg, err := config.LoadProfile(config.Find(o.configPath), o.profile)
-	if err != nil {
-		cfg = config.AgentConfig{}
-	}
-	if err := acpLockdownErr(fs, o.lockdown, cfg); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		return 2
-	}
-	return 0
 }
 
 // setupLockdown applies --lockdown to cfg and returns the run's lockdown
