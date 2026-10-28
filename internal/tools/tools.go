@@ -464,21 +464,11 @@ func PlanSpec() model.ToolSpec {
 }
 
 // markUntrusted marks the run's memory writes untrusted before a tool that
-// brings third-party content into context runs: web_fetch and external
-// (MCP) tools, whether or not the call succeeds.
+// brings third-party content into context runs (see UntrustedSource),
+// whether or not the call succeeds.
 func (e *Executor) markUntrusted(name string) {
-	if e.Remember == nil {
-		return
-	}
-	if name == WebFetchToolName && e.WebFetch != nil {
+	if e.Remember != nil && e.UntrustedSource(name) != "" {
 		e.Remember.MarkUntrusted()
-		return
-	}
-	for _, s := range e.ExternalSpecs {
-		if s.Function.Name == name {
-			e.Remember.MarkUntrusted()
-			return
-		}
 	}
 }
 
