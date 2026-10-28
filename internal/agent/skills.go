@@ -24,7 +24,7 @@ func skillInfos(s *skills.Set) []trajectory.SkillInfo {
 		return nil
 	}
 	for _, k := range s.Skills {
-		out = append(out, trajectory.SkillInfo{Name: k.Name, Scope: k.Scope, Path: k.Path})
+		out = append(out, trajectory.SkillInfo{Name: k.Name, Scope: k.Scope, Path: k.Path, Plugin: k.Plugin})
 	}
 	return out
 }

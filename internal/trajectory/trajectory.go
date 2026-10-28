@@ -382,6 +382,8 @@ type SkillInfo struct {
 	Name  string `json:"name"`
 	Scope string `json:"scope"`
 	Path  string `json:"path"`
+	// Plugin names the plugin a plugin-scope skill came from.
+	Plugin string `json:"plugin,omitempty"`
 }
 
 // ToolOutputFile records where one tool result's full text was saved.

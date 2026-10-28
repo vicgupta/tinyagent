@@ -205,6 +205,9 @@ func newACPSession(ctx context.Context, o *options, fs *flag.FlagSet, id, cwd st
 	if s.webFetch, err = newWebFetcher(fs, *o, &cfg); err != nil {
 		return nil, err
 	}
+	if err := checkPlugins(cfg, os.Stderr, o.verbose); err != nil {
+		return nil, err
+	}
 	if flagWasSet(fs, "lsp") {
 		cfg.LSP.Enabled = o.lsp
 	}
@@ -522,7 +525,7 @@ func (s *acpSession) Prompt(ctx context.Context, p acp.Prompt, u *acp.Updates) (
 		startOutputFiles(s.outputFiles, cfg.ToolOutputFiles.MaxRuns, warn)
 	}
 	if cfg.Skills {
-		loadSkills(a, s.root, warn)
+		loadSkills(a, s.root, pluginSkillSources(cfg), warn)
 	}
 	s.memoryTurn(a, prev, events, warn)
 	turn := newACPTurn(u, s, a, prev)
