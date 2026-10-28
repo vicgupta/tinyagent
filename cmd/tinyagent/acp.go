@@ -22,6 +22,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/eventlog"
 	"github.com/vicgupta/tinyagent/internal/hooks"
 	"github.com/vicgupta/tinyagent/internal/mcptools"
+	"github.com/vicgupta/tinyagent/internal/memory"
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/permissions"
 	"github.com/vicgupta/tinyagent/internal/telemetry"
@@ -115,6 +116,8 @@ type acpSession struct {
 	redactInfo                   *trajectory.RedactSecretsInfo
 	otel                         *telemetry.Settings
 	notes                        []string // shown before the first turn
+	clientMCP                    bool     // client-supplied MCP servers were started
+	remember                     *memory.Writer
 	traj                         *trajectory.Trajectory
 	turn                         int
 	textMu                       sync.Mutex
@@ -204,6 +207,9 @@ func newACPSession(ctx context.Context, o *options, fs *flag.FlagSet, id, cwd st
 	}
 	if on, set, _ := skillsFlag(fs, *o); set {
 		cfg.Skills = on
+	}
+	if flagWasSet(fs, "memory") {
+		cfg.Memory.Enabled = o.memory.enabled
 	}
 	// Snapshots are indexed by a trajectory file, which ACP sessions don't
 	// write.
@@ -352,6 +358,7 @@ func (s *acpSession) mcpServers(cfg config.AgentConfig, client []acp.MCPServer) 
 		}
 		out = append(out, def)
 	}
+	s.clientMCP = true
 	return out, nil
 }
 
@@ -502,6 +509,7 @@ func (s *acpSession) Prompt(ctx context.Context, p acp.Prompt, u *acp.Updates) (
 	if cfg.Skills {
 		loadSkills(a, s.root, warn)
 	}
+	s.memoryTurn(a, prev, events, warn)
 	turn := newACPTurn(u, s, a, prev)
 	logged := a.OnEvent
 	a.OnEvent = func(kind string, fields map[string]any) {
