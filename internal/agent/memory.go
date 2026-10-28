@@ -79,10 +79,11 @@ func RememberOffered(t *trajectory.Trajectory) bool {
 }
 
 // ResumeUntrusted reports whether a checkpoint's conversation already holds
-// untrusted external content (a review diff, a web_fetch result or an
-// external tool result), so a resumed run's memory writes stay pending.
+// untrusted external content (a review diff, a web_fetch result, an
+// external tool result, or a taint the lockdown recorded), so a resumed
+// run's memory writes stay pending.
 func ResumeUntrusted(t *trajectory.Trajectory) bool {
-	if t.Review != nil {
+	if t.Review != nil || t.Tainted {
 		return true
 	}
 	external := map[string]bool{tools.WebFetchToolName: true}

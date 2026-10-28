@@ -45,6 +45,9 @@ const (
 	attrHookDecision = "tinyagent.hook.decision"
 	attrSubagentID   = "tinyagent.subagent.id"
 
+	attrLockdownEnabled = "tinyagent.lockdown.enabled"
+	attrLockdownTainted = "tinyagent.lockdown.tainted"
+
 	attrSubagentKind      = "tinyagent.subagent.kind"
 	attrWorkerBranch      = "tinyagent.worker.branch"
 	attrWorkerBaseCommit  = "tinyagent.worker.base_commit"

@@ -1354,6 +1354,7 @@ func (a *Agent) saveFailed(t *trajectory.Trajectory, err error) *trajectory.Traj
 
 func (a *Agent) step(t *trajectory.Trajectory) error {
 	a.recordNetworkDenials(t)
+	a.recordLockdown(t)
 	if a.scopedOn() && a.view != nil {
 		t.ScopedAgentsMD = scopedDeliveredIn(t, a.view)
 	}
