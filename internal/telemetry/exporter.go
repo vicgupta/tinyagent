@@ -70,6 +70,8 @@ type Exporter struct {
 	failed    int
 	dropped   int
 	err       error
+	// tainted is set by the run's first taint event (#171).
+	tainted bool
 
 	queue  chan []*span
 	ctx    context.Context
@@ -184,6 +186,7 @@ func (e *Exporter) Emit(kind string, fields map[string]any) {
 	if id, ok := fields["subagent"].(string); ok && e.agents[id] != nil {
 		ag = e.agents[id]
 	}
+	e.lockdownEvent(kind, fields)
 	switch kind {
 	case "run.started":
 	case "model.request":
@@ -257,6 +260,9 @@ func (e *Exporter) toolSpan(parent *span, now time.Time, fields map[string]any) 
 	sp.set(attrOperation, opExecuteTool)
 	sp.set(attrToolName, name)
 	sp.set(attrToolCallID, str(fields["id"]))
+	if e.tainted {
+		sp.set(attrLockdownTainted, true)
+	}
 	return sp
 }
 
@@ -376,6 +382,7 @@ func (e *Exporter) endRoot(now time.Time, fields map[string]any) {
 		r.set(attrCacheWriteTokens, fields["cache_write_tokens"])
 		r.set(attrCostUSD, fields["cost_usd"])
 		r.set(attrDurationMS, fields["duration_ms"])
+		r.set(attrLockdownTainted, fields["tainted"])
 		if ErrorStatus(status) {
 			r.status = statusError
 			if r.statusMsg == "" {

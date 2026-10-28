@@ -155,6 +155,17 @@ type Trajectory struct {
 	// AdditionalDirs lists the directories outside Root the file tools could
 	// reach in this invocation, with their effective mode.
 	AdditionalDirs []AdditionalDir `json:"additional_dirs,omitempty"`
+
+	// LockdownEnabled records whether this invocation ran with the
+	// untrusted-content lockdown. Tainted is set once untrusted content
+	// entered the run's context and stays set across resumes and
+	// follow-ups; a tainted checkpoint can't be resumed without lockdown.
+	// TaintSources and LockdownDenials accumulate over the resume chain.
+	LockdownEnabled bool             `json:"lockdown_enabled,omitempty"`
+	Tainted         bool             `json:"tainted,omitempty"`
+	TaintSources    []TaintSource    `json:"taint_sources,omitempty"`
+	LockdownDenials []LockdownDenial `json:"lockdown_denials,omitempty"`
+
 	// SandboxNetworkDenials lists the requests the allowlist proxy refused.
 	SandboxNetworkDenials []NetworkDenial `json:"sandbox_network_denials,omitempty"`
 	ReadOnly              bool            `json:"read_only"`

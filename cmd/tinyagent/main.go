@@ -685,6 +685,7 @@ func run() int {
 		Worktree:       worktree,
 		Review:         reviewInfo,
 		TaskImages:     taskImages,
+		Lockdown:       lock,
 	}
 	if policy != nil && !o.jsonOutput {
 		a.PermissionApprover = terminalPermissionApprover
@@ -886,7 +887,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return loadConfigError(err)
 	}
 	registerProviders(cfg)
-	lock, code := setupLockdown(fs, o.lockdown, &cfg, false, agent.ResumeUntrusted(src), os.Stderr)
+	lock, code := setupResumeLockdown(fs, o.lockdown, &cfg, src, os.Stderr)
 	if code != 0 {
 		return code
 	}
@@ -1226,6 +1227,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		TaskImages:     taskImages,
 		Subagents:      subagents,
 		Workers:        workers,
+		Lockdown:       lock,
 	}
 	if policy != nil && !o.jsonOutput {
 		a.PermissionApprover = terminalPermissionApprover
@@ -1821,6 +1823,7 @@ func summaryLine(t *trajectory.Trajectory, elapsed time.Duration) string {
 	if n := len(t.Subagents); n > 0 {
 		s += fmt.Sprintf(", %d subagent runs (%d steps)", n, t.SubagentSteps)
 	}
+	s += lockdownSummary(t)
 	if t.ExitStatus == agent.StatusError {
 		s += ": " + t.Submission
 	}
@@ -2124,6 +2127,9 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	}
 	if a.Review != nil {
 		started["review"] = a.Review
+	}
+	if info := a.Lockdown.Info(); info != nil {
+		started["lockdown"] = info
 	}
 	if tr != nil {
 		s := tr.Settings()
@@ -2454,6 +2460,7 @@ func resultFields(t *trajectory.Trajectory, elapsed time.Duration) map[string]an
 	if t.StopReason != "" {
 		fields["stop_reason"] = t.StopReason
 	}
+	addLockdownResult(fields, t)
 	if q := t.PendingQuestion; t.ExitStatus == agent.StatusNeedsInput && q != nil {
 		question := map[string]any{"tool_call_id": q.ToolCallID, "question": q.Question}
 		if len(q.Options) > 0 {

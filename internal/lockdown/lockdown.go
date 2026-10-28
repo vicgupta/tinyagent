@@ -51,6 +51,9 @@ type Source struct {
 	Tool       string `json:"tool,omitempty"`
 	// Host is the web_fetch URL host (no scheme, path or query).
 	Host string `json:"host,omitempty"`
+	// Resumed marks a source restored from a checkpoint: it tainted an
+	// earlier invocation of the run.
+	Resumed bool `json:"resumed,omitempty"`
 }
 
 // Fields returns the taint event fields.
@@ -64,6 +67,9 @@ func (s Source) Fields() map[string]any {
 	}
 	if s.Host != "" {
 		f["host"] = s.Host
+	}
+	if s.Resumed {
+		f["resumed"] = true
 	}
 	return f
 }
@@ -103,6 +109,8 @@ type State struct {
 	// enabledSources are the configurable sources that taint; nil means
 	// all of them (see SetSources).
 	enabledSources map[string]bool
+	// webFetchDomains is the configured lockdown allowlist, for records.
+	webFetchDomains []string
 }
 
 // New returns an untainted state whose web_fetch lockdown allowlist is
@@ -112,7 +120,7 @@ func New(webFetchAllowed []string) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("untrusted_content.lockdown.web_fetch_allowed_domains %v", err)
 	}
-	return &State{webFetchRules: rules, webFetchCount: len(rules), seen: map[string]bool{}}, nil
+	return &State{webFetchRules: rules, webFetchCount: len(rules), webFetchDomains: append([]string(nil), webFetchAllowed...), seen: map[string]bool{}}, nil
 }
 
 // Tainted reports whether untrusted content has entered the run's context.

@@ -107,7 +107,11 @@ func startLockdown(a *agent.Agent, st *lockdown.State, stderr io.Writer, events 
 	}
 	fmt.Fprintln(stderr, st.Describe())
 	for _, s := range st.Sources() {
-		fmt.Fprintf(stderr, "lockdown: run starts tainted (%s)\n", s.Source)
+		if s.Resumed {
+			fmt.Fprintf(stderr, "lockdown: run starts tainted (%s, from the checkpoint)\n", s.Source)
+		} else {
+			fmt.Fprintf(stderr, "lockdown: run starts tainted (%s)\n", s.Source)
+		}
 		events.emit("taint", s.Fields())
 	}
 }
