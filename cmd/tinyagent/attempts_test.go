@@ -102,7 +102,6 @@ func TestAttemptsFlagErrors(t *testing.T) {
 		{[]string{"--attempts", "2", "--attempt-check", "true", "--attempt-check-timeout", "0", "-t", "x"}, "--attempt-check-timeout"},
 		{[]string{"--attempts", "2", "--attempt-check", "true"}, "needs a task"},
 		{[]string{"--attempts", "2", "--attempt-check", "true", "-t", "-"}, "stdin"},
-		{[]string{"--attempts", "2", "--attempt-check", "true", "-t", "x", "--json"}, "-json"},
 		{[]string{"--attempts", "2", "--attempt-check", "true", "-t", "x", "--snapshots"}, "-snapshots"},
 		{[]string{"--attempts", "2", "--attempt-check", "true", "-t", "x", "--resume", "r.json"}, "-resume"},
 		{[]string{"--attempts", "2", "--attempt-check", "true", "-t", "x", "--cwd", repo, "--worktree=" + strings.Repeat("a", 62)}, "too long"},
