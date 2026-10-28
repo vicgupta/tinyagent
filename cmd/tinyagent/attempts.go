@@ -110,15 +110,25 @@ func runAttempts(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.
 	}
 	models := []string(a.models)
 	if len(models) == 0 {
+		// The model a single run would use: -m, else $AGENT_MODEL, else
+		// the config's model, else the built-in default.
+		spec := resolveModel(fs, o.modelName, cfg.Model)
 		models = make([]string, a.n)
 		for i := range models {
-			models[i] = o.modelName
+			models[i] = spec
 		}
 	}
 	for i, m := range models {
 		if strings.HasPrefix(m, "-") {
 			return usage("--attempt-model %q (attempt %d) is not a model spec", m, i+1)
 		}
+	}
+	openaiAPI := cfg.OpenAIAPI
+	if flagWasSet(fs, "openai-api") {
+		openaiAPI = o.openaiAPI
+	}
+	if err := checkAttemptModels(models, cfg, openaiAPI); err != nil {
+		return usage("%v", err)
 	}
 
 	base := o.worktree.name
@@ -135,6 +145,9 @@ func runAttempts(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.
 	if err != nil {
 		return usage("%v", err)
 	}
+	// Each attempt's child run would print the dirty-checkout warning;
+	// print it once here and drop it from the children's stderr.
+	dirty, _ := git("-C", top, "status", "--porcelain", "--", ".", ":(exclude).tinyagent")
 	red, _ := newSecretRedactor(cfg, os.Environ(), io.Discard, false)
 
 	exe, err := os.Executable()
@@ -149,6 +162,9 @@ func runAttempts(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.
 		if m == "" {
 			shown[i] = "(default model)"
 		}
+	}
+	if dirty != "" {
+		fmt.Fprintln(stderr, dirtyWorktreeWarning+" (this applies to every attempt)")
 	}
 	fmt.Fprintf(stderr, "attempts: up to %d runs (%s), each in worktree %s-a<N>; this can cost up to %dx a single run\n",
 		a.n, strings.Join(shown, ", "), base, a.n)
@@ -173,7 +189,12 @@ func runAttempts(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.
 					break
 				}
 			}
-			return run(ctx, args, out, errw)
+			f := &lineDropper{w: errw, line: dirtyWorktreeWarning + "\n", atStart: true}
+			err := run(ctx, args, out, f)
+			if ferr := f.Flush(); err == nil {
+				err = ferr
+			}
+			return err
 		},
 	})
 	return code
