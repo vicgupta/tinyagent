@@ -100,6 +100,11 @@ type Options struct {
 	// Remove deletes one attempt's worktree and branch. Nil disables
 	// cleanup.
 	Remove func(a Attempt) error
+	// Events, when non-nil, receives JSONL events (--json): each child
+	// run's stdout events tagged with "attempt", plus attempt.started,
+	// attempt.check, attempt.result and one final attempts.result. The
+	// winner's stdout is then not replayed to Stdout.
+	Events io.Writer
 }
 
 // ExecAgent returns a RunAgent that runs exe as a child process. On context
@@ -208,12 +213,17 @@ func Run(ctx context.Context, o Options) (Report, int) {
 	rep := Report{SchemaVersion: SchemaVersion, Requested: len(o.Models), Attempts: []Attempt{},
 		StopOnPass: !o.RunAll, Keep: keep}
 	start := now()
+	var ev *eventWriter
+	if o.Events != nil {
+		ev = &eventWriter{out: o.Events}
+	}
 	trajDir := ""
 	if o.Output == "" {
 		d, err := os.MkdirTemp("", "tinyagent-attempts-")
 		if err != nil {
 			fmt.Fprintf(o.Stderr, "tinyagent: attempts: %v\n", err)
 			rep.StopReason = StopError
+			ev.emit(EventAttemptsResult, attemptsResultFields(rep, ""))
 			return rep, 1
 		}
 		trajDir = d
@@ -245,13 +255,14 @@ func Run(ctx context.Context, o Options) (Report, int) {
 		} else {
 			traj, _ = filepath.Abs(TrajectoryPath(o.Output, n))
 		}
-		a := runAttempt(ctx, o, n, m, traj, remCost, remTime, now)
+		a := runAttempt(ctx, o, ev, n, m, traj, remCost, remTime, now)
 		if trajDir != "" {
 			a.Trajectory = ""
 		}
 		rep.Attempts = append(rep.Attempts, a)
 		rep.TotalCostUSD += a.CostUSD
 		fmt.Fprintln(o.Stderr, attemptLine(a))
+		ev.emit(EventAttemptResult, attemptResultFields(a))
 		switch {
 		case a.Passed:
 			if rep.Winner == nil {
@@ -284,20 +295,28 @@ func Run(ctx context.Context, o Options) (Report, int) {
 	if rep.Winner != nil {
 		w := rep.Attempts[*rep.Winner-1]
 		fmt.Fprintf(o.Stderr, "winner: attempt %d (branch %s); review with: git -C %s diff HEAD\n", w.Attempt, w.Branch, w.Worktree)
-		if o.Stdout != nil {
+		if o.Stdout != nil && o.Events == nil {
 			io.WriteString(o.Stdout, w.stdout)
 		}
 	} else {
 		fmt.Fprintf(o.Stderr, "no attempt passed (%s); worktrees kept for inspection\n", rep.StopReason)
 	}
+	reportPath := ""
 	if o.Output != "" {
 		p := ReportPath(o.Output)
 		b, _ := json.MarshalIndent(rep, "", "  ")
 		if err := os.WriteFile(p, append(b, '\n'), 0o600); err != nil {
 			fmt.Fprintf(o.Stderr, "tinyagent: attempts: write %s: %v\n", p, err)
+			ev.emit(EventAttemptsResult, attemptsResultFields(rep, ""))
 			return rep, 1
 		}
 		fmt.Fprintf(o.Stderr, "attempts report: %s\n", p)
+		reportPath, _ = filepath.Abs(p)
+	}
+	ev.emit(EventAttemptsResult, attemptsResultFields(rep, reportPath))
+	if ev != nil && ev.err != nil {
+		fmt.Fprintf(o.Stderr, "tinyagent: attempts: write --json events: %v\n", ev.err)
+		return rep, 1
 	}
 	if rep.Winner != nil {
 		return rep, 0
@@ -335,7 +354,7 @@ func attemptLine(a Attempt) string {
 	return fmt.Sprintf("attempt %d  %s  %s  %s  $%.4f  %s", a.Attempt, a.Model, status, checks, a.CostUSD, wt)
 }
 
-func runAttempt(ctx context.Context, o Options, n int, m, traj string, remCost float64, remTime time.Duration, now func() time.Time) (a Attempt) {
+func runAttempt(ctx context.Context, o Options, ev *eventWriter, n int, m, traj string, remCost float64, remTime time.Duration, now func() time.Time) (a Attempt) {
 	a = Attempt{Attempt: n, Model: m, Trajectory: traj, Checks: []CheckResult{}}
 	t0 := now()
 	defer func() { a.WallTimeMS = now().Sub(t0).Milliseconds() }()
@@ -349,8 +368,20 @@ func runAttempt(ctx context.Context, o Options, n int, m, traj string, remCost f
 		args = append(args, "--time-limit", strconv.Itoa(int(math.Floor(remTime.Seconds()))))
 	}
 	fmt.Fprintf(o.Stderr, "attempt %d/%d: %s\n", n, len(o.Models), m)
+	ev.emit(EventAttemptStarted, attemptStartedFields(n, len(o.Models), m, o.BaseName+"-a"+strconv.Itoa(n)))
 	var out strings.Builder
-	runErr := o.RunAgent(ctx, args, &out, o.Stderr)
+	var childOut io.Writer = &out
+	var tag *tagWriter
+	if o.Events != nil {
+		tag = &tagWriter{out: o.Events, attempt: n}
+		childOut = tag
+	}
+	runErr := o.RunAgent(ctx, args, childOut, o.Stderr)
+	if tag != nil {
+		if err := tag.Flush(); err != nil && ev.err == nil {
+			ev.err = err
+		}
+	}
 	a.stdout = out.String()
 
 	b, err := os.ReadFile(traj)
@@ -380,7 +411,9 @@ func runAttempt(ctx context.Context, o Options, n int, m, traj string, remCost f
 	ok := ts.ExitStatus == "Submitted" || ts.ExitStatus == "Completed"
 	if !ok || ctx.Err() != nil || a.root == "" {
 		for _, c := range o.Checks {
-			a.Checks = append(a.Checks, CheckResult{Command: c.Command, ExitCode: -1, Skipped: true})
+			cr := CheckResult{Command: c.Command, ExitCode: -1, Skipped: true}
+			a.Checks = append(a.Checks, cr)
+			ev.emit(EventAttemptCheck, checkFields(n, cr, o.Redact))
 		}
 		if ok && a.root == "" && ctx.Err() == nil {
 			a.Error = "trajectory has no working directory"
@@ -391,6 +424,7 @@ func runAttempt(ctx context.Context, o Options, n int, m, traj string, remCost f
 	for _, c := range o.Checks {
 		cr := runCheck(ctx, a.root, c, o.Redact)
 		a.Checks = append(a.Checks, cr)
+		ev.emit(EventAttemptCheck, checkFields(n, cr, o.Redact))
 		if cr.ExitCode != 0 || cr.TimedOut {
 			pass = false
 		}

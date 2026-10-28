@@ -58,11 +58,11 @@ func attemptsActive(fs *flag.FlagSet) bool {
 }
 
 // attemptConflicts can't be combined with --attempts: each attempt is a
-// fresh run in its own worktree, and this release has no per-attempt
-// --json event stream. --check is listed for runs; with --attempts it
-// prints the plan instead (see checkAttempts).
+// fresh run in its own worktree. --check is listed for runs; with
+// --attempts it prints the plan instead (see checkAttempts). --json is
+// forwarded to every attempt, whose events are tagged with "attempt".
 var attemptConflicts = []string{"resume", "rewind", "to", "transcript", "acp", "review", "review-base",
-	"review-commit", "read-only", "ask-user", "snapshots", "eval", "workflow", "json", "check",
+	"review-commit", "read-only", "ask-user", "snapshots", "eval", "workflow", "check",
 	"list-profiles", "init-config", "update", "version", "follow-up"}
 
 // attemptOwn are flags --attempts consumes itself; every other flag set on
@@ -115,7 +115,12 @@ func runAttempts(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	run := attempts.ExecAgent(exe)
+	var events io.Writer
+	if o.jsonOutput {
+		events = stdout
+	}
 	_, code := attempts.Run(ctx, attempts.Options{
+		Events: events,
 		Models: models, Checks: checks, BaseName: base, Output: o.output,
 		CostLimit: o.costLimit, TimeLimit: time.Duration(o.timeLimit) * time.Second,
 		ExtraArgs: forwardArgs(fs, args, attemptOwn), Stderr: stderr, Stdout: stdout,

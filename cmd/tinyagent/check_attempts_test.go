@@ -93,7 +93,6 @@ func TestCheckAttemptsErrors(t *testing.T) {
 		{[]string{"--attempts", "2"}, "at least one --attempt-check"},
 		{[]string{"--attempts", "2", "--attempt-check", "true", "--attempt-model", "anthropic/claude-sonnet-4-5"}, "given 1 times"},
 		{[]string{"--attempts", "2", "--attempt-check", "true", "--attempt-check-timeout", "0"}, "--attempt-check-timeout"},
-		{[]string{"--attempts", "2", "--attempt-check", "true", "--json"}, "-json"},
 		{[]string{"--attempts", "2", "--attempt-check", "true", "--worktree=taken"}, "already exists"},
 		{[]string{"--attempts", "2", "--attempt-check", "true", "-t", "x"}, "--task"},
 		{[]string{"--attempts", "1", "--attempt-check", "true", "--cwd", empty}, "not inside a Git work tree"},
