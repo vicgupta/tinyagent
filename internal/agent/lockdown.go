@@ -67,6 +67,9 @@ func (a *Agent) lockdownRefuse(t *trajectory.Trajectory, call model.ToolCall) (t
 		}
 		host = h
 	}
+	if channel == lockdown.ChannelMCP && a.Lockdown.MCPCallAllowed(a.mcpServersOf(name, call.Function.Arguments)) {
+		return tools.Result{}, false
+	}
 	first, _ := a.Lockdown.First()
 	d := lockdown.Denial{Channel: channel, Tool: name, ToolCallID: call.ID, Step: t.Steps, Host: host}
 	a.Lockdown.Deny(d)
@@ -97,6 +100,9 @@ func (a *Agent) lockdownTaint(t *trajectory.Trajectory, call model.ToolCall, res
 		src.Source = lockdown.SourceWebFetch
 		src.Host, _, _ = webFetchURLHost(call.Function.Arguments)
 	case lockdown.ChannelMCP:
+		if !a.Lockdown.MCPCallTaints(a.mcpServersOf(call.Function.Name, call.Function.Arguments)) {
+			return
+		}
 		src.Source = lockdown.SourceMCP
 	default:
 		return

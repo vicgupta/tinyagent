@@ -111,6 +111,9 @@ type State struct {
 	enabledSources map[string]bool
 	// webFetchDomains is the configured lockdown allowlist, for records.
 	webFetchDomains []string
+	// mcpServers are the configured MCP servers' lockdown settings, by
+	// alias (see SetMCPServers).
+	mcpServers map[string]MCPServerPolicy
 }
 
 // New returns an untainted state whose web_fetch lockdown allowlist is
@@ -229,7 +232,7 @@ func (s *State) Describe() string {
 	if s == nil {
 		return ""
 	}
-	return fmt.Sprintf("lockdown: on (sources: %s; after taint: commands refused, web_fetch → %d domains, mcp tools refused)", s.describeSources(), s.webFetchCount)
+	return fmt.Sprintf("lockdown: on (sources: %s; after taint: commands refused, web_fetch → %d domains, %s)", s.describeSources(), s.webFetchCount, s.describeMCP())
 }
 
 // URLHostPort returns the host and port a web_fetch URL would connect to
@@ -272,7 +275,7 @@ func RefusalMessage(tool, channel string, first Source, host string) string {
 			detail = "; the url is not one lockdown can check"
 		}
 	case ChannelMCP:
-		detail = "; MCP tools are not callable after taint"
+		detail = "; MCP tools are not callable after taint unless their server is lockdown_allowed: true"
 	}
 	return fmt.Sprintf("error: lockdown: %s refused because %s%s. The rest of the run (file tools, edits, plans, submission) still works", tool, why, detail)
 }
