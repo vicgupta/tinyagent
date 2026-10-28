@@ -138,6 +138,10 @@ The `codex` provider uses your ChatGPT subscription instead of an API key. Sign 
 | `--review-base <ref>` | — | Review what the current branch adds on top of `<ref>` (`merge-base..HEAD`), read-only. See [Reviewing changes](#reviewing-changes) |
 | `--review-commit <rev>` | — | Review the changes introduced by one commit, read-only. See [Reviewing changes](#reviewing-changes) |
 | `--worktree[=name]` | off | Run in a new Git worktree at `<repo>/.tinyagent/worktrees/<name>` on branch `tinyagent/<name>`, created from `HEAD` of the repository containing `--cwd` and kept afterwards; the name is generated when omitted. Can't be combined with `--resume` or `--rewind`. See [Worktrees](#worktrees) |
+| `--attempts` | 1 | Run the task up to N times (1 to 4), each in its own worktree, and keep the first attempt whose checks pass. Needs `-t` and at least one `--attempt-check` (or `attempts.checks` in the config). See [Best-of-N attempts](#best-of-n-attempts) |
+| `--attempt-model` | `-m` | With `--attempts`: the model spec for the next attempt. Give it once per attempt or not at all; can't be combined with `-m` |
+| `--attempt-check` | | With `--attempts`: a shell command that must exit 0 in an attempt's worktree for it to pass (repeatable; replaces `attempts.checks` from the config) |
+| `--attempt-check-timeout` | 600 | With `--attempts`: seconds before one `--attempt-check` command is killed (1 to 3600) |
 | `--step-limit` | 0 (unlimited) | Max model calls |
 | `--cost-limit` | 0 (unlimited) | Max USD |
 | `--time-limit` | 0 (unlimited) | Max wall-clock seconds; overrides `wall_time_seconds` |
@@ -346,6 +350,29 @@ tinyagent --worktree -t "add tests for pkg/api" --cwd ~/src/project/pkg/api
 - **Keeping and cleaning up.** The worktree and branch are kept after every run, successful or not; tinyagent never commits, merges or pushes. Review it with `git -C <path> diff`, then remove it with `git worktree remove <path>` and `git branch -D tinyagent/<name>`.
 - **Sandbox and container.** Git metadata lives in the main repository's `.git` directory, outside the worktree. With `--sandbox` it isn't writable, so `git commit` inside the worktree fails unless you add that directory to `sandbox_writable_paths` (which also lets commands change hooks and config); with `--env container` it isn't mounted, so `git` commands in the container fail.
 - **Resuming and rewinding.** Trajectories and `run.started` record `worktree`. To resume, follow up or rewind, pass the worktree path as `--cwd` (without `--worktree`).
+
+### Best-of-N attempts
+
+`--attempts N` runs one task up to N times (at most 4), each in its own [worktree](#worktrees), grades every finished attempt with your check commands, and keeps a verified winner. It's experimental and still in progress (see [#172](https://github.com/vicgupta/tinyagent/issues/172)).
+
+```sh
+tinyagent --attempts 3 --attempt-check "go test ./..." -t "fix the flaky retry test" -o run.json
+tinyagent --attempts 2 --attempt-model openai/gpt-5 --attempt-model anthropic/claude-sonnet-4-5 \
+  --attempt-check "make lint" --attempt-check "go test ./..." --worktree=retry -t "fix the flaky retry test"
+```
+
+- **How attempts run.** Attempts run one after another. Attempt *i* is a separate tinyagent run in a new worktree `<repo>/.tinyagent/worktrees/<name>-a<i>` on branch `tinyagent/<name>-a<i>`, where `<name>` is `--worktree=<name>` (at most 61 characters) or a generated `run-...` name. Every other flag you pass, the task among them, is forwarded to each attempt. tinyagent never commits, merges or pushes an attempt.
+- **What counts as a pass.** An attempt passes when its run ends `Submitted` or `Completed` and every check exits 0 before its timeout. Checks run in order with `bash -c` in the attempt's working directory (the worktree path that matches `--cwd`); when the run didn't finish successfully its checks are skipped. The winner is the lowest-numbered passing attempt. By default tinyagent stops at the first pass; `attempts.stop_on_pass: false` runs all N attempts and compares them.
+- **Checks.** `--attempt-check` (repeatable) with `--attempt-check-timeout` replaces the config's `attempts.checks` list, whose entries each take a `command` and an optional `timeout_seconds` (default 600, up to 3600). At least one check is required. Checks run on the host with your permissions, not under `--sandbox`, `--env container` or `command_env`. The report keeps the last 8 KiB of each check's output, with known secrets redacted.
+- **Models.** Without `--attempt-model`, every attempt uses the model a single run would use (`-m`, then `$AGENT_MODEL`, then the config's `model:`). With it, give one `--attempt-model` per attempt. Every attempt's model, provider key and client are checked before the first attempt runs, and a problem exits 2 naming the attempt.
+- **Budgets.** `--cost-limit` and `--time-limit` cover the whole invocation: each attempt gets what is left, and no new attempt starts once either is used up (stop reason `budget exhausted`). Without limits, N attempts can cost up to N times a single run, and the setup line says so.
+- **Uncommitted changes.** Like `--worktree`, attempts start from the last commit. The dirty-checkout warning prints once for the invocation.
+- **Output.** Progress goes to stderr: `attempt i/N: <model>`, a summary line per attempt (status, checks, cost, worktree), then `winner: attempt i (branch ...)` with a `git diff` hint, or `no attempt passed (<reason>); worktrees kept for inspection`. The winner's stdout (its submission) is printed to stdout at the end.
+- **Trajectories and report.** With `-o run.json`, attempt *i*'s trajectory goes to `run.a<i>.json` and a report to `run.attempts.json`. The report (`schema_version` 1) has `attempts_requested`, `winner` (the attempt number or `null`), `winner_branch`, `stop_reason` (`passed`, `completed`, `exhausted`, `budget exhausted`, `interrupted` or `error`), `stop_on_pass`, `keep`, `total_cost_usd`, `total_wall_time_ms`, and one entry per attempt with its `model`, `status`, `passed`, steps, tokens, `cost_usd`, `wall_time_ms`, `worktree`, `branch`, `files_changed`, `trajectory`, `checks` (command, exit code, duration, `timed_out`, `skipped`, output), `error` and `removed`. Without `-o`, trajectories go to a temporary directory and no report is written.
+- **Keeping and cleaning up.** `attempts.keep` decides which non-winning worktrees and branches survive once an attempt wins: `all` (the default), `failed` (remove passing attempts that didn't win) or `none` (remove every non-winner). The winner is always kept, nothing is removed when no attempt wins, and tinyagent removes only the exact worktree and branch it created for that attempt.
+- **Config.** The `attempts:` section (see the [Config](#config) example) is read only from the user config, `-c` or a profile, never from the repository, and has no effect without `--attempts`. Unknown keys or invalid values exit 2.
+- **Checking the plan.** `tinyagent --check --attempts N ...` validates the plan the same way a real run would and prints an `attempts:` line with the run count, models, check count and timeouts (never the command text), `stop_on_pass`, `keep` and the worktree paths, without a model request.
+- **Exit status and limits.** The exit status is 0 when an attempt wins and 1 when none does (or the report can't be written). Setup problems exit 2 before any model request: an out-of-range `--attempts`, a wrong number of `--attempt-model` values or mixing them with `-m`, no checks, no `-t` task (or `-t -`, since the task can't come from stdin), a `--cwd` outside a Git repository with commits, an attempt worktree or branch that already exists, or a flag that can't be combined with `--attempts`: `--resume`, `--rewind`, `--to`, `--transcript`, `--acp`, review flags, `--read-only`, `--ask-user`, `--snapshots`, `--eval`, `--workflow`, `--json`, `--follow-up`, `--list-profiles`, `--init-config`, `--update` and `--version`.
 
 ### Resume an unfinished task
 
@@ -895,6 +922,12 @@ hooks:                       # omitted by default; see Tool hooks below
     - command: /usr/local/bin/verify-tests
       timeout_seconds: 300
   max_stop_continuations: 5     # default 5, range 1..50
+attempts:                    # omitted by default; only used with --attempts, see Best-of-N attempts below
+  checks:                    # replaced as a whole by --attempt-check
+    - command: go test ./...
+      timeout_seconds: 600   # default 600, range 1..3600
+  stop_on_pass: true         # default true; false runs all N attempts
+  keep: all                  # all (default), failed or none: which non-winning worktrees survive a win
 acp:                         # --acp editor mode; see Editor integration (ACP)
   client_mcp_servers: false  # start the MCP servers the editor sends with session/new
 profiles:                    # omitted by default; named overlays selected with --profile, see Profiles below
