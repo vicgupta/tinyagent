@@ -160,17 +160,17 @@ func TestTimeLimitForwarded(t *testing.T) {
 func TestCheckTimeoutAndRedaction(t *testing.T) {
 	skipNoBash(t)
 	dir := t.TempDir()
-	cr := runCheck(context.Background(), dir, Check{Command: "sleep 30", TimeoutSeconds: 1}, nil)
+	cr := runCheck(context.Background(), nil, dir, Check{Command: "sleep 30", TimeoutSeconds: 1}, nil)
 	if !cr.TimedOut || cr.ExitCode != -1 || cr.DurationMS > 15000 {
 		t.Fatalf("check = %+v", cr)
 	}
-	cr = runCheck(context.Background(), dir, Check{Command: "echo secret-123"}, func(s string) string {
+	cr = runCheck(context.Background(), nil, dir, Check{Command: "echo secret-123"}, func(s string) string {
 		return strings.ReplaceAll(s, "secret-123", "[REDACTED]")
 	})
 	if cr.Output != "[REDACTED]\n" {
 		t.Fatalf("output %q", cr.Output)
 	}
-	cr = runCheck(context.Background(), dir, Check{Command: "head -c 20000 /dev/zero | tr '\\0' x"}, nil)
+	cr = runCheck(context.Background(), nil, dir, Check{Command: "head -c 20000 /dev/zero | tr '\\0' x"}, nil)
 	if len(cr.Output) > MaxCheckOutput+len("…") || !strings.HasPrefix(cr.Output, "…") {
 		t.Fatalf("output not capped: %d bytes", len(cr.Output))
 	}

@@ -105,6 +105,18 @@ type Options struct {
 	// attempt.check, attempt.result and one final attempts.result. The
 	// winner's stdout is then not replayed to Stdout.
 	Events io.Writer
+	// CheckEnv, when non-nil, prepares where one attempt's checks run
+	// (the run's sandbox, container or command_env) for the attempt's
+	// working directory, and returns a release function. An error fails
+	// every check of that attempt (fail closed); nil runs checks on the
+	// host with tinyagent's environment.
+	CheckEnv func(ctx context.Context, root string) (CheckRunner, func(), error)
+}
+
+// CheckRunner builds an unstarted `bash -c command` in root. Cancelling ctx
+// must kill the command and everything it spawned.
+type CheckRunner interface {
+	Command(ctx context.Context, root, command string) *exec.Cmd
 }
 
 // ExecAgent returns a RunAgent that runs exe as a child process. On context
@@ -420,9 +432,30 @@ func runAttempt(ctx context.Context, o Options, ev *eventWriter, n int, m, traj 
 		}
 		return a
 	}
+	var runner CheckRunner
+	if o.CheckEnv != nil {
+		r, release, err := o.CheckEnv(ctx, a.root)
+		if err != nil {
+			msg := "check environment: " + err.Error()
+			if o.Redact != nil {
+				msg = o.Redact(msg)
+			}
+			for _, c := range o.Checks {
+				cr := CheckResult{Command: c.Command, ExitCode: -1, Output: capTail(msg)}
+				a.Checks = append(a.Checks, cr)
+				ev.emit(EventAttemptCheck, checkFields(n, cr, o.Redact))
+			}
+			a.Error = msg
+			return a
+		}
+		if release != nil {
+			defer release()
+		}
+		runner = r
+	}
 	pass := true
 	for _, c := range o.Checks {
-		cr := runCheck(ctx, a.root, c, o.Redact)
+		cr := runCheck(ctx, runner, a.root, c, o.Redact)
 		a.Checks = append(a.Checks, cr)
 		ev.emit(EventAttemptCheck, checkFields(n, cr, o.Redact))
 		if cr.ExitCode != 0 || cr.TimedOut {
@@ -480,7 +513,7 @@ func capTail(s string) string {
 	return "…" + s[len(s)-MaxCheckOutput:]
 }
 
-func runCheck(ctx context.Context, dir string, c Check, redact func(string) string) CheckResult {
+func runCheck(ctx context.Context, runner CheckRunner, dir string, c Check, redact func(string) string) CheckResult {
 	cr := CheckResult{Command: c.Command}
 	timeout := c.TimeoutSeconds
 	if timeout <= 0 {
@@ -489,10 +522,15 @@ func runCheck(ctx context.Context, dir string, c Check, redact func(string) stri
 	cctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 	var out tailBuffer
-	cmd := exec.CommandContext(cctx, "bash", "-c", c.Command)
-	cmd.Dir = dir
+	var cmd *exec.Cmd
+	if runner != nil {
+		cmd = runner.Command(cctx, dir, c.Command)
+	} else {
+		cmd = exec.CommandContext(cctx, "bash", "-c", c.Command)
+		cmd.Dir = dir
+		setProcessGroup(cmd)
+	}
 	cmd.Stdout, cmd.Stderr = &out, &out
-	setProcessGroup(cmd)
 	cmd.WaitDelay = 5 * time.Second
 	t0 := time.Now()
 	err := cmd.Run()
