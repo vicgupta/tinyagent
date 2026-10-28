@@ -205,7 +205,7 @@ func newACPSession(ctx context.Context, o *options, fs *flag.FlagSet, id, cwd st
 	if s.webFetch, err = newWebFetcher(fs, *o, &cfg); err != nil {
 		return nil, err
 	}
-	if err := checkPlugins(cfg, os.Stderr, o.verbose); err != nil {
+	if err := checkPlugins(&cfg, os.Stderr, o.verbose, true); err != nil {
 		return nil, err
 	}
 	if flagWasSet(fs, "lsp") {

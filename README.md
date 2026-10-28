@@ -590,10 +590,29 @@ plugins:
 - `path` must be absolute and an existing directory; the same directory listed twice (after resolving symlinks) is a config error, as are unknown keys. A profile's `plugins:` replaces the base list.
 - The manifest is validated (`$schema`, `name`, optional `version`). A plugin with an invalid or missing manifest is skipped with a warning; unknown manifest fields only warn. Two plugins with the same `name` are a config error (exit 2).
 - With `--skills`, skills under `<plugin>/skills/` join the catalog with the lowest precedence (see [Agent Skills](#agent-skills)). Skill folders or a `skills` directory that resolve outside the plugin root are skipped with a warning.
+- **MCP servers.** A plugin's `mcp.json` servers start only when listed under that plugin's `mcp_servers`, with an explicit allowlist, exactly like `mcp_servers` entries:
+
+  ```yaml
+  plugins:
+    - path: /home/me/plugins/review-kit
+      mcp_servers:
+        - server: validator        # key in the plugin's mcp.json
+          alias: reviewkit         # tools appear as reviewkit__<tool>
+          tools: [lint, explain]
+          resources: ["validator://rules/*"]   # optional
+          discovery_timeout_seconds: 15        # optional
+          call_timeout_seconds: 60             # optional
+  ```
+
+  - Only `stdio` servers run. `streamable-http` and `sse` entries are reported as unsupported and skipped. A `./` command must stay inside the plugin; other commands are bare names found on `PATH`, never run through a shell.
+  - The server's working directory is the plugin root unless `cwd` (`./...`, `${PLUGIN_ROOT}/...` or `${PLUGIN_DATA}/...`) says otherwise. `PLUGIN_ROOT` and `PLUGIN_DATA` are set for the server (a plugin can't override them) and expanded once in `args`, `env` values and `cwd`. `env` values from `mcp.json` are set as given, on top of the usual minimal MCP environment.
+  - `PLUGIN_DATA` is `<user config dir>/tinyagent/plugin-data/<name>` (for example `~/.config/tinyagent/plugin-data/review-kit`), created with mode 0700 before the first launch and kept between runs; delete it to reset the plugin's data.
+  - An invalid `mcp.json` disables only that plugin's MCP servers, and an invalid entry only that entry, with a warning. A listed server that is missing, invalid or unsupported, a rejected plugin with `mcp_servers`, an alias already used by another server, or more than 8 servers in total exits 2 before any model request.
+  - Plugin servers otherwise follow every `mcp_servers` rule: read-only runs and resumed runs don't start them, and lockdown, hooks and tool output handling apply.
 - `-v` prints each loaded plugin; warnings go to stderr and, with `--json`, as `warning` events.
 - Versions of tinyagent without plugin support reject the `plugins` key as unknown.
 
-**Trust:** a plugin is code and prompt input you chose to install. Only list plugins you trust, just as with skills.
+**Trust:** a plugin is code and prompt input you chose to install. Its MCP servers run with your permissions and are not sandboxed by `--sandbox`, like configured MCP servers. Only list plugins you trust.
 
 ### Skill workflows
 

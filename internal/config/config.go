@@ -912,6 +912,9 @@ type MCPServer struct {
 	// use them; a config file can't set either.
 	SetEnv   []string `yaml:"-"`
 	AllTools bool     `yaml:"-"`
+	// Dir, when set, is the server's working directory instead of --cwd.
+	// Only plugin servers (from a plugin's mcp.json) use it.
+	Dir string `yaml:"-"`
 }
 
 // Provider is one config-defined model provider. Secrets come only from the

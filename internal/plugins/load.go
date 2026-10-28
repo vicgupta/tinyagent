@@ -17,6 +17,7 @@ type Loaded struct {
 	Path     string // the configured path
 	Manifest *Manifest
 	Err      error
+	MCP      *MCPConfig // nil when the plugin was rejected
 }
 
 // Load loads every configured plugin in order. A rejected plugin is
@@ -33,6 +34,7 @@ func Load(cfg []config.Plugin) ([]Loaded, error) {
 				return nil, fmt.Errorf("plugins: %s and %s both have the name %q", prev, p.Path, m.Name)
 			}
 			byName[m.Name] = p.Path
+			l.MCP = LoadMCP(m.Root)
 		}
 		out = append(out, l)
 	}

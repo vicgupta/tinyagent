@@ -14,6 +14,20 @@ type Plugin struct {
 	// Path is the absolute path to the plugin root (the directory holding
 	// plugin.json).
 	Path string `yaml:"path"`
+	// MCPServers authorizes servers from the plugin's mcp.json. Servers not
+	// listed are never started.
+	MCPServers []PluginServer `yaml:"mcp_servers,omitempty"`
+}
+
+// PluginServer authorizes one mcp.json server of a plugin, with the same
+// alias, allowlist and timeout rules as an mcp_servers entry.
+type PluginServer struct {
+	Server              string   `yaml:"server"`
+	Alias               string   `yaml:"alias"`
+	Tools               []string `yaml:"tools"`
+	Resources           []string `yaml:"resources,omitempty"`
+	DiscoveryTimeoutSec int      `yaml:"discovery_timeout_seconds"`
+	CallTimeoutSec      int      `yaml:"call_timeout_seconds"`
 }
 
 // checkPlugins decodes the plugins node strictly, so an unknown key under
@@ -58,6 +72,24 @@ func validatePlugins(ps []Plugin) error {
 			return fmt.Errorf("%s %q duplicates plugins[%d].path", key, p.Path, j)
 		}
 		seen[clean] = i
+		servers := map[string]bool{}
+		for j, ps := range p.MCPServers {
+			key := fmt.Sprintf("plugins[%d].mcp_servers[%d]", i, j)
+			switch {
+			case ps.Server == "":
+				return fmt.Errorf("%s.server is required", key)
+			case servers[ps.Server]:
+				return fmt.Errorf("%s.server %q is listed twice", key, ps.Server)
+			case ps.Alias == "":
+				return fmt.Errorf("%s.alias is required", key)
+			case len(ps.Tools) == 0 && len(ps.Resources) == 0:
+				return fmt.Errorf("%s: a nonempty tools or resources allowlist is required", key)
+			}
+			if err := ValidateResourcePatterns(ps.Resources); err != nil {
+				return fmt.Errorf("%s: %w", key, err)
+			}
+			servers[ps.Server] = true
+		}
 	}
 	return nil
 }

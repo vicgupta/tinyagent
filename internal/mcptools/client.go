@@ -120,6 +120,9 @@ func (r *Registry) start(ctx context.Context, root string, def config.MCPServer,
 	env = append(env, def.SetEnv...)
 	cmd := exec.Command(def.Command, def.Args...)
 	cmd.Dir = root
+	if def.Dir != "" {
+		cmd.Dir = def.Dir
+	}
 	cmd.Env = env
 	cmd.Stderr = &limitedWriter{w: stderr, n: 32 << 10}
 	client := mcp.NewClient(&mcp.Implementation{Name: "tinyagent", Version: "1"}, nil)
