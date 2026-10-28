@@ -96,6 +96,7 @@ type options struct {
 	workflow, workflowName                           string
 	memory                                           memoryCmd
 	lockdown                                         lockdownFlags
+	attempts                                         attemptFlags
 }
 
 // newFlagSet defines the command-line flags, storing their values in o. Each
@@ -184,6 +185,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.workflowName, "workflow-name", "", "with --workflow: run this workflow or skill instead of routing by the task's intent")
 	registerMemoryFlags(fs, &o.memory)
 	registerLockdownFlags(fs, &o.lockdown)
+	registerAttemptFlags(fs, &o.attempts)
 	return fs
 }
 
@@ -266,6 +268,9 @@ func run() int {
 	}
 	if flagWasSet(fs, "eval") {
 		return runEval(&o, fs, os.Args[1:], os.Stderr)
+	}
+	if attemptsActive(fs) {
+		return runAttempts(&o, fs, os.Args[1:], os.Stdout, os.Stderr)
 	}
 	if o.acp {
 		return runACP(&o, fs, os.Stdin, os.Stdout)

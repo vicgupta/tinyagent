@@ -1,0 +1,210 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/vicgupta/tinyagent/internal/attempts"
+	"github.com/vicgupta/tinyagent/internal/config"
+)
+
+// attemptFlags are the best-of-N flags (--attempts and friends).
+type attemptFlags struct {
+	n            int
+	models       stringList
+	checks       stringList
+	checkTimeout int
+}
+
+// stringList is a repeatable string flag.
+type stringList []string
+
+func (l *stringList) String() string { return strings.Join(*l, ",") }
+func (l *stringList) Set(v string) error {
+	if strings.TrimSpace(v) == "" {
+		return errors.New("empty value")
+	}
+	*l = append(*l, v)
+	return nil
+}
+
+func registerAttemptFlags(fs *flag.FlagSet, a *attemptFlags) {
+	fs.IntVar(&a.n, "attempts", 1, "run the task up to N times (max 4), each in its own worktree, and keep the first attempt whose --attempt-check commands pass")
+	fs.Var(&a.models, "attempt-model", "with --attempts: model spec for the next attempt (repeat once per attempt; default: -m for every attempt)")
+	fs.Var(&a.checks, "attempt-check", "with --attempts: shell command that must exit 0 in an attempt's worktree for it to pass (repeatable; required)")
+	fs.IntVar(&a.checkTimeout, "attempt-check-timeout", attempts.DefaultCheckTimeout, "with --attempts: seconds before one --attempt-check command is killed (1-3600)")
+}
+
+// attemptsGroup lists the --attempts flags in --help --verbose.
+var attemptsGroup = struct {
+	name  string
+	flags [][3]string
+}{"Attempts", [][3]string{{"", "attempts", "n"}, {"", "attempt-model", "spec"}, {"", "attempt-check", "cmd"}, {"", "attempt-check-timeout", "seconds"}}}
+
+// attemptsActive reports whether any best-of-N flag was given.
+func attemptsActive(fs *flag.FlagSet) bool {
+	return flagWasSet(fs, "attempts", "attempt-model", "attempt-check", "attempt-check-timeout")
+}
+
+// attemptConflicts can't be combined with --attempts: each attempt is a
+// fresh run in its own worktree, and this release has no per-attempt
+// --json event stream or --check display.
+var attemptConflicts = []string{"resume", "rewind", "to", "transcript", "acp", "review", "review-base",
+	"review-commit", "read-only", "ask-user", "snapshots", "eval", "workflow", "json", "check",
+	"list-profiles", "init-config", "update", "version", "follow-up"}
+
+// attemptOwn are flags --attempts consumes itself; every other flag set on
+// the command line is forwarded to each attempt's child run.
+var attemptOwn = []string{"attempts", "attempt-model", "attempt-check", "attempt-check-timeout",
+	"m", "model", "o", "output", "worktree", "cost-limit", "time-limit"}
+
+func runAttempts(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.Writer) int {
+	a := o.attempts
+	usage := func(format string, v ...any) int {
+		fmt.Fprintf(fs.Output(), "error: "+format+"\n", v...)
+		return 2
+	}
+	for _, f := range attemptConflicts {
+		if fs.Lookup(f) != nil && flagWasSet(fs, f) {
+			return usage("--attempts can't be combined with -%s", dashName(f))
+		}
+	}
+	if a.n < 1 || a.n > attempts.MaxAttempts {
+		return usage("--attempts must be between 1 and %d", attempts.MaxAttempts)
+	}
+	if len(a.models) > 0 && len(a.models) != a.n {
+		return usage("--attempt-model was given %d times but --attempts is %d: give one per attempt, or none to use -m for every attempt", len(a.models), a.n)
+	}
+	if len(a.models) > 0 && flagWasSet(fs, "m", "model") {
+		return usage("use either -m or --attempt-model with --attempts, not both")
+	}
+	if len(a.checks) == 0 {
+		return usage("--attempts needs at least one --attempt-check command to decide which attempt passes (attempts.checks in the config file is not supported yet)")
+	}
+	if a.checkTimeout < 1 || a.checkTimeout > attempts.MaxCheckTimeout {
+		return usage("--attempt-check-timeout must be between 1 and %d seconds", attempts.MaxCheckTimeout)
+	}
+	if o.task == "" {
+		return usage("--attempts needs a task (-t)")
+	}
+	if o.task == "-" {
+		return usage("--attempts can't read the task from stdin; pass it with -t")
+	}
+	models := []string(a.models)
+	if len(models) == 0 {
+		models = make([]string, a.n)
+		for i := range models {
+			models[i] = o.modelName
+		}
+	}
+	for i, m := range models {
+		if strings.HasPrefix(m, "-") {
+			return usage("--attempt-model %q (attempt %d) is not a model spec", m, i+1)
+		}
+	}
+
+	base := o.worktree.name
+	if base == "" {
+		base = generateWorktreeName(time.Now())
+	}
+	if err := validWorktreeName(base); err != nil {
+		return usage("%v", err)
+	}
+	if len(base) > 61 {
+		return usage("--worktree name %q is too long for --attempts (at most 61 characters; -a<N> is appended)", base)
+	}
+	if err := preflightAttemptWorktrees(o.cwd, base, a.n); err != nil {
+		return usage("%v", err)
+	}
+
+	cfg, err := config.LoadProfile(config.Find(o.configPath), o.profile)
+	if err != nil {
+		return usage("%v", err)
+	}
+	red, _ := newSecretRedactor(cfg, os.Environ(), io.Discard, false)
+
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	checks := make([]attempts.Check, len(a.checks))
+	for i, c := range a.checks {
+		checks[i] = attempts.Check{Command: c, TimeoutSeconds: a.checkTimeout}
+	}
+	shown := make([]string, len(models))
+	for i, m := range models {
+		shown[i] = m
+		if m == "" {
+			shown[i] = "(default model)"
+		}
+	}
+	fmt.Fprintf(stderr, "attempts: up to %d runs (%s), each in worktree %s-a<N>; this can cost up to %dx a single run\n",
+		a.n, strings.Join(shown, ", "), base, a.n)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	run := attempts.ExecAgent(exe)
+	_, code := attempts.Run(ctx, attempts.Options{
+		Models: models, Checks: checks, BaseName: base, Output: o.output,
+		CostLimit: o.costLimit, TimeLimit: time.Duration(o.timeLimit) * time.Second,
+		ExtraArgs: forwardArgs(fs, args, attemptOwn), Stderr: stderr, Stdout: stdout,
+		Redact: red.Redact,
+		RunAgent: func(ctx context.Context, args []string, out, errw io.Writer) error {
+			// An empty model means the child's own default: drop "-m ''".
+			for i := 0; i+1 < len(args); i++ {
+				if args[i] == "-m" && args[i+1] == "" {
+					args = append(args[:i:i], args[i+2:]...)
+					break
+				}
+			}
+			return run(ctx, args, out, errw)
+		},
+	})
+	return code
+}
+
+// preflightAttemptWorktrees checks, before any attempt runs, that cwd is in
+// a Git repository with a commit and that every attempt's worktree path and
+// branch are free.
+func preflightAttemptWorktrees(cwd, base string, n int) error {
+	if _, err := exec.LookPath("git"); err != nil {
+		return errors.New("--attempts requires git on PATH")
+	}
+	root, err := canonicalRoot(cwd)
+	if err != nil {
+		return fmt.Errorf("--cwd %s: %w", cwd, err)
+	}
+	top, err := git("-C", root, "rev-parse", "--show-toplevel")
+	if err != nil || top == "" {
+		return fmt.Errorf("--attempts: --cwd %s is not inside a Git work tree", cwd)
+	}
+	if top, err = canonicalRoot(top); err != nil {
+		return fmt.Errorf("--attempts: %w", err)
+	}
+	if c, err := git("-C", top, "rev-parse", "--verify", "--quiet", "HEAD^{commit}"); err != nil || c == "" {
+		return fmt.Errorf("--attempts: the repository at %s has no commits", top)
+	}
+	for i := 1; i <= n; i++ {
+		name := base + "-a" + strconv.Itoa(i)
+		p := filepath.Join(top, worktreeDir, name)
+		if _, err := os.Lstat(p); err == nil {
+			return fmt.Errorf("--attempts: %s already exists; choose another --worktree name", p)
+		}
+		if _, err := git("-C", top, "rev-parse", "--verify", "--quiet", "refs/heads/"+worktreeBranchPrefix+name); err == nil {
+			return fmt.Errorf("--attempts: branch %s%s already exists; choose another --worktree name", worktreeBranchPrefix, name)
+		}
+	}
+	return nil
+}
