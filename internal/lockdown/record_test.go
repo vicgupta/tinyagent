@@ -17,7 +17,7 @@ func TestInfo(t *testing.T) {
 	if err := st.SetSources([]string{"web_fetch", "review"}); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]any{"enabled": true, "sources": []string{"web_fetch", "review"}, "web_fetch_allowed_domains": []string{"docs.example.com"}, "tainted": false}
+	want := map[string]any{"enabled": true, "sources": []string{"web_fetch", "review"}, "web_fetch_allowed_domains": []string{"docs.example.com"}, "tainted": false, "commands": map[string]any{"policy": "refused"}}
 	if got := st.Info(); !reflect.DeepEqual(got, want) {
 		t.Errorf("Info = %v, want %v", got, want)
 	}
