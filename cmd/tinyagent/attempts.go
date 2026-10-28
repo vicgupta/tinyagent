@@ -120,6 +120,11 @@ func runAttempts(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.
 		fmt.Fprintf(stderr, "attempts: checks run in the %s, like the attempts' commands\n", place)
 	}
 
+	link, err := startAttemptsLink(fs, *o, cfg, len(models), stderr)
+	if err != nil {
+		return usage("%v", err)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	run := attempts.ExecAgent(exe)
@@ -127,8 +132,9 @@ func runAttempts(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.
 	if o.jsonOutput {
 		events = stdout
 	}
-	_, code := attempts.Run(ctx, attempts.Options{
-		Events:   events,
+	rep, code := attempts.Run(ctx, attempts.Options{
+		Events:     events,
+		AttemptsID: link.id, TraceParent: link.traceParent(),
 		CheckEnv: attemptCheckEnv(fs, *o, cfg, stderr),
 		Models:   models, Checks: checks, BaseName: base, Output: o.output,
 		CostLimit: o.costLimit, TimeLimit: time.Duration(o.timeLimit) * time.Second,
@@ -144,13 +150,14 @@ func runAttempts(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.
 				}
 			}
 			f := &lineDropper{w: errw, line: dirtyWorktreeWarning + "\n", atStart: true}
-			err := run(ctx, args, out, f)
+			err := run(ctx, link.childArgs(args), out, f)
 			if ferr := f.Flush(); err == nil {
 				err = ferr
 			}
 			return err
 		},
 	})
+	link.finish(rep)
 	return code
 }
 

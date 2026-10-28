@@ -105,6 +105,13 @@ type Options struct {
 	// attempt.check, attempt.result and one final attempts.result. The
 	// winner's stdout is then not replayed to Stdout.
 	Events io.Writer
+	// AttemptsID, when set, links the children to this group: each child
+	// gets it (and its attempt number) in its environment, and it is
+	// recorded in the report and events.
+	AttemptsID string
+	// TraceParent, when set with AttemptsID, is passed to each child as
+	// TRACEPARENT so every attempt's spans share the parent's trace.
+	TraceParent string
 	// CheckEnv, when non-nil, prepares where one attempt's checks run
 	// (the run's sandbox, container or command_env) for the attempt's
 	// working directory, and returns a release function. An error fails
@@ -127,6 +134,9 @@ func ExecAgent(exe string) func(context.Context, []string, io.Writer, io.Writer)
 		cmd := exec.CommandContext(ctx, exe, args...)
 		cmd.Stdin = nil
 		cmd.Stdout, cmd.Stderr = stdout, stderr
+		if l, ok := LinkFromContext(ctx); ok {
+			cmd.Env = LinkEnv(os.Environ(), l)
+		}
 		cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
 		cmd.WaitDelay = 30 * time.Second
 		return cmd.Run()
@@ -170,6 +180,7 @@ type Attempt struct {
 // Report is the attempts report (<stem>.attempts.json).
 type Report struct {
 	SchemaVersion int       `json:"schema_version"`
+	AttemptsID    string    `json:"attempts_id,omitempty"`
 	Requested     int       `json:"attempts_requested"`
 	Winner        *int      `json:"winner"`
 	WinnerBranch  string    `json:"winner_branch,omitempty"`
@@ -223,7 +234,7 @@ func Run(ctx context.Context, o Options) (Report, int) {
 		keep = KeepAll
 	}
 	rep := Report{SchemaVersion: SchemaVersion, Requested: len(o.Models), Attempts: []Attempt{},
-		StopOnPass: !o.RunAll, Keep: keep}
+		StopOnPass: !o.RunAll, Keep: keep, AttemptsID: o.AttemptsID}
 	start := now()
 	var ev *eventWriter
 	if o.Events != nil {
@@ -369,6 +380,9 @@ func attemptLine(a Attempt) string {
 func runAttempt(ctx context.Context, o Options, ev *eventWriter, n int, m, traj string, remCost float64, remTime time.Duration, now func() time.Time) (a Attempt) {
 	a = Attempt{Attempt: n, Model: m, Trajectory: traj, Checks: []CheckResult{}}
 	t0 := now()
+	if o.AttemptsID != "" {
+		ctx = withLink(ctx, Link{ID: o.AttemptsID, Index: n, Count: len(o.Models), TraceParent: o.TraceParent})
+	}
 	defer func() { a.WallTimeMS = now().Sub(t0).Milliseconds() }()
 
 	args := append([]string{}, o.ExtraArgs...)
