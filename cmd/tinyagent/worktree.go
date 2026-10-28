@@ -230,7 +230,7 @@ func setupWorktree(root, name string, stderr io.Writer, verbose bool) (string, *
 		return "", nil, fmt.Errorf("--worktree: --cwd's subdirectory %s doesn't exist at HEAD (it may be untracked or empty)", rel)
 	}
 	if dirty != "" {
-		fmt.Fprintln(stderr, "warning: the main checkout has uncommitted changes; the worktree starts from HEAD without them")
+		fmt.Fprintln(stderr, dirtyWorktreeWarning)
 	}
 	fmt.Fprintf(stderr, "worktree: %s (branch %s from %s)\n", wtPath, branch, shortCommit(base))
 	if verbose {
