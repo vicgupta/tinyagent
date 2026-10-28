@@ -95,6 +95,7 @@ type options struct {
 	acp                                              bool
 	workflow, workflowName                           string
 	memory                                           memoryCmd
+	lockdown                                         lockdownFlags
 }
 
 // newFlagSet defines the command-line flags, storing their values in o. Each
@@ -182,6 +183,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.workflow, "workflow", "", "run the skill workflow in this YAML file on the task (-t): the router picks a workflow or skill by intent, and each stage runs automatically with the previous stage's output, gated by its success check")
 	fs.StringVar(&o.workflowName, "workflow-name", "", "with --workflow: run this workflow or skill instead of routing by the task's intent")
 	registerMemoryFlags(fs, &o.memory)
+	registerLockdownFlags(fs, &o.lockdown)
 	return fs
 }
 
@@ -446,6 +448,10 @@ func run() int {
 	}
 	if flagWasSet(fs, "memory") {
 		cfg.Memory.Enabled = o.memory.enabled
+	}
+	lock, code := setupLockdown(fs, o.lockdown, &cfg, review != nil, false, os.Stderr)
+	if code != 0 {
+		return code
 	}
 	if flagWasSet(fs, "snapshots") {
 		cfg.Snapshots.Enabled = o.snapshots
@@ -727,6 +733,7 @@ func run() int {
 		}
 	}
 
+	startLockdown(a, lock, os.Stderr, events)
 	start := time.Now()
 	t := a.Run(ctx, task)
 	elapsed := time.Since(start)
@@ -879,6 +886,10 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return loadConfigError(err)
 	}
 	registerProviders(cfg)
+	lock, code := setupLockdown(fs, o.lockdown, &cfg, false, agent.ResumeUntrusted(src), os.Stderr)
+	if code != 0 {
+		return code
+	}
 	taskImages, err := loadTaskImages(o.imagePaths, cfg.MaxImageBytes)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: resume:", err)
@@ -1270,6 +1281,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	}
 
 	start := time.Now()
+	startLockdown(a, lock, os.Stderr, events)
 	t := a.Run(ctx, src.Task)
 	elapsed := time.Since(start)
 	resume := ""

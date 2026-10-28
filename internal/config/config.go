@@ -175,6 +175,9 @@ type AgentConfig struct {
 	Snapshots Snapshots `yaml:"snapshots"`
 	// ACP configures the --acp editor mode.
 	ACP ACP `yaml:"acp"`
+	// UntrustedContent configures the opt-in untrusted-content lockdown
+	// (off by default; --lockdown overrides Enabled).
+	UntrustedContent UntrustedContent `yaml:"untrusted_content"`
 }
 
 // ACP configures the --acp editor mode.
@@ -1156,6 +1159,9 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.WebFetch.Validate(); err != nil {
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+	}
+	if err := cfg.UntrustedContent.Validate(); err != nil {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.LSP.Validate(); err != nil {

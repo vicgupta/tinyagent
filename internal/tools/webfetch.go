@@ -41,6 +41,10 @@ const (
 	WebFetchDeniedRedirects   = "too many redirects"
 )
 
+// WebFetchDeniedLockdown is the denied_reason of a hop the untrusted-content
+// lockdown Gate refused.
+const WebFetchDeniedLockdown = "host not in untrusted_content.lockdown.web_fetch_allowed_domains after taint"
+
 // WebFetchSpec returns the web_fetch definition.
 func WebFetchSpec() model.ToolSpec {
 	return spec(WebFetchToolName,
@@ -104,6 +108,10 @@ type WebFetcher struct {
 	// tests replace them.
 	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
 	Dial    func(ctx context.Context, network, addr string) (net.Conn, error)
+	// Gate, when set, is checked for every request hop after the
+	// allowlist (the untrusted-content lockdown sets it); an error
+	// refuses the hop before any connection.
+	Gate func(host string, port int) error
 
 	mu      sync.Mutex
 	records []WebFetchRecord
@@ -248,6 +256,11 @@ func (f *WebFetcher) get(ctx context.Context, u *url.URL) (*http.Response, error
 	}
 	if !f.allowed(host, port) {
 		return nil, &webFetchDenied{WebFetchDeniedHost, fmt.Sprintf("host %s (port %d) is not in web_fetch.allowed_domains", host, port)}
+	}
+	if f.Gate != nil {
+		if err := f.Gate(host, port); err != nil {
+			return nil, &webFetchDenied{WebFetchDeniedLockdown, err.Error()}
+		}
 	}
 	addr, err := f.pick(ctx, host, port)
 	if err != nil {

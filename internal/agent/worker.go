@@ -279,8 +279,10 @@ func (a *Agent) prepareWorker(t *trajectory.Trajectory, call model.ToolCall, id 
 		// The permission policy also governs a worker's own tool calls.
 		Policy:             a.Policy,
 		PermissionApprover: a.PermissionApprover,
-		subagentID:         id,
-		isWorker:           true,
+		// Lockdown is shared: after taint a worker's commands are refused too.
+		Lockdown:   a.Lockdown,
+		subagentID: id,
+		isWorker:   true,
 	}
 	if a.OnEvent != nil {
 		parent := a.OnEvent

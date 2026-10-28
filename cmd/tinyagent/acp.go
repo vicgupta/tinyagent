@@ -69,6 +69,9 @@ func runACP(o *options, fs *flag.FlagSet, in io.Reader, out io.Writer) int {
 		fmt.Fprintln(os.Stderr, "error: --no-agents-md and --scoped-agents-md can't be combined")
 		return 2
 	}
+	if code := checkACPLockdown(o, fs); code != 0 {
+		return code
+	}
 	defer func(f *os.File) { os.Stdout = f }(os.Stdout)
 	os.Stdout = os.Stderr
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -147,6 +150,9 @@ func newACPSession(ctx context.Context, o *options, fs *flag.FlagSet, id, cwd st
 		return nil, err
 	}
 	registerProviders(cfg)
+	if err := acpLockdownErr(fs, o.lockdown, cfg); err != nil {
+		return nil, err
+	}
 	if s.hooks, err = hooks.New(cfg.Hooks, cfgPath); err != nil {
 		return nil, err
 	}
