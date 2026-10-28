@@ -40,12 +40,13 @@ func (s *Sandbox) profile() string {
 	for _, f := range devFiles {
 		fmt.Fprintf(&b, "(allow file-write* (literal %s))\n", sbString(f))
 	}
-	if !s.Network {
+	network, proxy, _ := s.netState()
+	if !network {
 		b.WriteString("(deny network*)\n")
 	}
-	if s.proxy != nil {
+	if proxy != nil {
 		// Seatbelt matches only localhost or * as the remote host.
-		fmt.Fprintf(&b, "(allow network-outbound (remote ip \"localhost:%d\"))\n", s.proxy.Addr().(*net.TCPAddr).Port)
+		fmt.Fprintf(&b, "(allow network-outbound (remote ip \"localhost:%d\"))\n", proxy.Addr().(*net.TCPAddr).Port)
 	}
 	return b.String()
 }

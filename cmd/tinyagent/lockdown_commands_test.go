@@ -18,7 +18,6 @@ func TestConfineLockdownCommands(t *testing.T) {
 		stderr   string
 	}{
 		{"unsandboxed", nil, nil, false, "commands will be refused after taint"},
-		{"sandbox_network", &tools.Sandbox{Network: true}, nil, false, "commands will be refused after taint"},
 		{"network denied", &tools.Sandbox{}, nil, true, ""},
 		{"network denied with lockdown domains", &tools.Sandbox{}, []string{"proxy.golang.org"}, true, "allowed_domains has no effect"},
 	} {

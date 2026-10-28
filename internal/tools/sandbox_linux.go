@@ -150,16 +150,17 @@ func (s *Sandbox) listenProxy() (net.Listener, string, error) {
 // mode the helper starts in its own network namespace, which has only
 // loopback, and forwards proxyPort there to the proxy's Unix socket.
 func (s *Sandbox) wrap(ctx context.Context, argv []string) *exec.Cmd {
+	network, proxy, _ := s.netState()
 	mode := "net-deny"
-	if s.Network {
+	if network {
 		mode = "net-allow"
-	} else if s.proxy != nil {
-		mode = fmt.Sprintf("net-proxy=%d:%s", proxyPort, s.proxy.Addr().String())
+	} else if proxy != nil {
+		mode = fmt.Sprintf("net-proxy=%d:%s", proxyPort, proxy.Addr().String())
 	}
 	args := append([]string{SandboxHelperArg, mode}, s.Writable...)
 	args = append(append(args, "--"), argv...)
 	cmd := exec.CommandContext(ctx, helperPath(), args...)
-	if s.proxy != nil {
+	if proxy != nil {
 		cmd.SysProcAttr = namespaceAttr()
 	}
 	return cmd

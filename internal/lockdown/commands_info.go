@@ -30,9 +30,13 @@ func (s *State) CommandsInfo() map[string]any {
 	if !c.confined {
 		return map[string]any{"policy": CommandsRefused}
 	}
-	if !c.proxied {
-		return map[string]any{"policy": CommandsSandboxed, "network": CommandNetworkDenied}
+	info := map[string]any{"policy": CommandsSandboxed, "network": CommandNetworkDenied}
+	if c.proxied {
+		info["network"] = CommandNetworkProxy
+		info["allowed_domains"] = append([]string{}, c.domains...)
 	}
-	domains := append([]string{}, c.domains...)
-	return map[string]any{"policy": CommandsSandboxed, "network": CommandNetworkProxy, "allowed_domains": domains}
+	if c.direct {
+		info["network_before_taint"] = CommandNetworkDirect
+	}
+	return info
 }

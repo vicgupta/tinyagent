@@ -22,6 +22,9 @@ type commandPolicy struct {
 	proxied bool
 	// narrow restricts the proxy; it runs once, at the first taint.
 	narrow func()
+	// direct: commands have direct network (sandbox_network) until the
+	// first taint, when narrow takes it away. See SetCommandsDirectUntilTaint.
+	direct bool
 }
 
 // SetCommandAllowedDomains records untrusted_content.lockdown.allowed_domains,
@@ -102,15 +105,19 @@ func (s *State) describeCommands() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c := s.commands
+	sandboxed := "commands sandboxed"
+	if c.direct {
+		sandboxed += " (direct network until taint)"
+	}
 	switch {
 	case !c.confined:
 		return "commands refused"
 	case !c.proxied:
-		return "commands sandboxed, network denied"
+		return sandboxed + ", network denied"
 	case len(c.domains) == 1:
-		return "commands sandboxed, network → 1 domain (" + c.domains[0] + ")"
+		return sandboxed + ", network → 1 domain (" + c.domains[0] + ")"
 	case len(c.domains) > 1:
-		return fmt.Sprintf("commands sandboxed, network → %d domains (%s)", len(c.domains), strings.Join(c.domains, ", "))
+		return fmt.Sprintf("%s, network → %d domains (%s)", sandboxed, len(c.domains), strings.Join(c.domains, ", "))
 	}
-	return "commands sandboxed, network → 0 domains"
+	return sandboxed + ", network → 0 domains"
 }
