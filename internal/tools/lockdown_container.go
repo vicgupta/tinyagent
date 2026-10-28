@@ -22,6 +22,9 @@ type containerLockdown struct {
 	// err is set when removing the network failed; commands then fail
 	// closed instead of running with network.
 	err error
+	// proxy is the opt-in lockdown proxy the container joins after
+	// disconnecting (see lockdown_container_proxy.go), nil without one.
+	proxy *containerProxy
 }
 
 // lockdownInspectFormat prints the network mode, then the names of the
@@ -104,6 +107,9 @@ func (c *Container) RemoveLockdownNetwork(ctx context.Context) error {
 		return l.err
 	}
 	l.err = c.disconnect(ctx, l.networks)
+	if l.err == nil && l.proxy != nil {
+		l.err = c.connectProxy(ctx, l.proxy)
+	}
 	l.removed = l.err == nil
 	return l.err
 }
@@ -131,17 +137,19 @@ func (c *Container) disconnect(ctx context.Context, networks []string) error {
 }
 
 // lockdownErr waits for a running RemoveLockdownNetwork and returns the
-// error that makes commands fail closed, nil when they may run.
-func (c *Container) lockdownErr() error {
+// error that makes commands fail closed, nil when they may run, and the
+// lockdown proxy variables commands get once the container is on its
+// network.
+func (c *Container) lockdownErr() ([]string, error) {
 	if c.lockdown == nil {
-		return nil
+		return nil, nil
 	}
 	c.lockdown.mu.Lock()
 	defer c.lockdown.mu.Unlock()
 	if c.lockdown.err != nil {
-		return fmt.Errorf("lockdown: commands refused: the container's network could not be removed at taint: %v", c.lockdown.err)
+		return nil, fmt.Errorf("lockdown: commands refused: the container's network could not be removed at taint: %v", c.lockdown.err)
 	}
-	return nil
+	return c.lockdown.proxyEnvLocked(), nil
 }
 
 func firstNonEmpty(s ...string) string {

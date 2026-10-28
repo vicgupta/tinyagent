@@ -30,6 +30,7 @@ const starterConfig = `# tinyagent user config. Flags override these values. Ful
 #   lockdown:                 # sources and per-MCP-server untrusted/lockdown_allowed: README "Untrusted-content lockdown"
 #     web_fetch_allowed_domains: []  # web_fetch hosts still readable after taint
 #     allowed_domains: []            # hosts --sandbox commands still reach after taint (also in sandbox_allowed_domains)
+#     container_proxy: false         # container environment: reach allowed_domains through a proxy after taint
 `
 
 func runInitConfig(path string) int {

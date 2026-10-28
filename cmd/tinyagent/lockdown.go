@@ -53,6 +53,7 @@ func setupLockdown(fs *flag.FlagSet, l lockdownFlags, cfg *config.AgentConfig, r
 		fmt.Fprintln(stderr, "error:", err)
 		return nil, 2
 	}
+	st.SetContainerProxy(cfg.UntrustedContent.Lockdown.ContainerProxy)
 	if l.untrustedTask {
 		st.Taint(lockdown.Source{Source: lockdown.SourceUntrustedTask})
 	}

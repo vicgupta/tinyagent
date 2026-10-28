@@ -189,12 +189,17 @@ func (c *Container) Command(ctx context.Context, root, command string) *exec.Cmd
 // finds argv[0].
 func (c *Container) Exec(ctx context.Context, root string, argv []string) *exec.Cmd {
 	token := newToken()
-	args := append([]string{"exec", "-w", root, "-e", containerMarker + "=" + token, c.ID}, argv...)
+	proxyEnv, lockErr := c.lockdownErr()
+	args := []string{"exec", "-w", root, "-e", containerMarker + "=" + token}
+	for _, v := range proxyEnv {
+		args = append(args, "-e", v)
+	}
+	args = append(append(args, c.ID), argv...)
 	cmd := exec.CommandContext(ctx, c.Runtime, args...)
 	cmd.Dir = root
 	setProcessGroup(cmd)
-	if err := c.lockdownErr(); err != nil {
-		cmd.Err = err
+	if lockErr != nil {
+		cmd.Err = lockErr
 	}
 	hostCancel := cmd.Cancel
 	cmd.Cancel = func() error {
@@ -227,9 +232,9 @@ func (c *Container) Close() error {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, c.Runtime, "rm", "-f", c.ID).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("container: removing %s: %v: %s", c.ID, err, strings.TrimSpace(string(out)))
+		err = fmt.Errorf("container: removing %s: %v: %s", c.ID, err, strings.TrimSpace(string(out)))
 	}
-	return nil
+	return errors.Join(err, c.closeLockdownProxy())
 }
 
 // Describe is the one-line summary printed at startup.

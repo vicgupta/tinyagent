@@ -116,6 +116,9 @@ type State struct {
 	mcpServers map[string]MCPServerPolicy
 	// commands is the after-taint command policy (see ConfineCommands).
 	commands commandPolicy
+	// containerProxy is untrusted_content.lockdown.container_proxy (see
+	// SetContainerProxy).
+	containerProxy bool
 	// acp marks an ACP session; clientMCP holds the aliases of the MCP
 	// servers its client supplied (see SetACPClientMCPServers).
 	acp       bool
