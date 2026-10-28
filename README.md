@@ -354,7 +354,7 @@ tinyagent --worktree -t "add tests for pkg/api" --cwd ~/src/project/pkg/api
 
 ### Best-of-N attempts
 
-`--attempts N` runs one task up to N times (at most 4), each in its own [worktree](#worktrees), grades every finished attempt with your check commands, and keeps a verified winner. It's experimental and still in progress (see [#172](https://github.com/vicgupta/tinyagent/issues/172)).
+`--attempts N` runs one task up to N times (at most 4), each in its own [worktree](#worktrees), grades every finished attempt with your check commands, and keeps a verified winner. `tinyagent --init-config` writes a commented `attempts:` block to start from, and the [GitHub Action](#github-actions) takes the same settings as `attempts`, `attempt-models`, `attempt-checks` and `attempt-check-timeout` inputs.
 
 ```sh
 tinyagent --attempts 3 --attempt-check "go test ./..." -t "fix the flaky retry test" -o run.json
@@ -700,6 +700,25 @@ steps:
       job-summary: true
 ```
 
+**Best-of-N.** Run up to three attempts and keep the first whose checks pass; the winner's branch is left in the checkout's worktrees for a later step to push or open a PR from:
+
+```yaml
+  - id: agent
+    uses: vicgupta/tinyagent@v0.5.0
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    with:
+      model: anthropic/claude-sonnet-4-5
+      task: Fix the failing test in ./internal/parser.
+      attempts: 3
+      attempt-checks: |
+        go vet ./...
+        go test ./...
+  - run: git log -1 "$BRANCH"
+    env:
+      BRANCH: ${{ steps.agent.outputs.attempts-winner-branch }}
+```
+
 **Pinning.** Under a `vX.Y.Z` tag the action installs the tinyagent release with the same tag, so `@v0.5.0` runs tinyagent v0.5.0. Under any other ref (a branch or a commit SHA) set `version` (`vX.Y.Z`, or `latest` to opt into the newest release) or `tinyagent-path`, or the step fails. A tag can be moved; for a fixed action pin to the tag's full commit SHA and set `version`: `uses: vicgupta/tinyagent@<sha> # v0.5.0` with `version: v0.5.0`.
 
 **Read-only PR review with a findings schema.** Review flags imply `--read-only`, so the agent can't edit files or run commands:
@@ -729,9 +748,9 @@ jobs:
           FINDINGS: ${{ steps.review.outputs.structured-output }}
 ```
 
-**Inputs.** `task` or `task-file` (one is required unless `review-base` or `review-commit` is set; with a review it adds focus), `model` (`-m`), `profile`, `config` (`-c`), `working-directory` (`--cwd`, default the workspace), `review-base`, `review-commit`, `read-only`, `sandbox`, `lockdown` and `untrusted-task` (`true`/`false`, default `false`; `lockdown: false` passes nothing, so the config decides), `output-schema`, `args` (extra flags, one argv element per line, never shell-evaluated or split), `version`, `tinyagent-path` (use an existing binary instead of downloading), `job-summary` (default `false`) and `fail-on-error` (default `true`). The task reaches tinyagent on stdin (`-t -`) and every input through `env:`, so text like `$(...)` or backticks is never run by a shell.
+**Inputs.** `task` or `task-file` (one is required unless `review-base` or `review-commit` is set; with a review it adds focus), `model` (`-m`), `profile`, `config` (`-c`), `working-directory` (`--cwd`, default the workspace), `review-base`, `review-commit`, `read-only`, `sandbox`, `lockdown` and `untrusted-task` (`true`/`false`, default `false`; `lockdown: false` passes nothing, so the config decides), `output-schema`, `args` (extra flags, one argv element per line, never shell-evaluated or split), `version`, `tinyagent-path` (use an existing binary instead of downloading), `job-summary` (default `false`), `fail-on-error` (default `true`), and for [best-of-N](#best-of-n-attempts) `attempts` (`--attempts`), `attempt-models` and `attempt-checks` (one per line, each `--attempt-model`/`--attempt-check`) and `attempt-check-timeout`. The task reaches tinyagent on stdin (`-t -`) and every input through `env:`, so text like `$(...)` or backticks is never run by a shell. With `attempts`, which can't read the task from stdin, the task (at most 128 KiB) is passed as a single `-t` argument instead, still never shell-evaluated; `attempts` can't be combined with `review-base`, `review-commit` or `read-only`, and the `attempt-*` inputs need it.
 
-**Outputs.** `status`, `submission`, `structured-output` (compact JSON, set only for a `Submitted` run with `output-schema`), `steps` and `cost-usd`, all from the final [`result` event](#machine-readable-output); `exit-code` (always set once tinyagent ran); and `trajectory` and `events`, the paths of the `-o` file and the saved `--json` stream under `$RUNNER_TEMP`. They are not uploaded; add an artifact step if you want them. Each value is written to `$GITHUB_OUTPUT` behind a random delimiter, and the step fails instead of setting a value that contains it, so a submission can't forge other outputs. While tinyagent runs, workflow commands (`::add-mask::`, `::error::` ...) in its log output are disabled.
+**Outputs.** `status`, `submission`, `structured-output` (compact JSON, set only for a `Submitted` run with `output-schema`), `steps` and `cost-usd`, all from the final [`result` event](#machine-readable-output); `exit-code` (always set once tinyagent ran); and `trajectory` and `events`, the paths of the `-o` file and the saved `--json` stream under `$RUNNER_TEMP`. With `attempts`, `status`, `submission`, `structured-output`, `steps` and `trajectory` are the winning attempt's (empty when none passed), `cost-usd` is the total over all attempts, and `attempts-winner` (the attempt number), `attempts-winner-branch` and `attempts-report` (the `.attempts.json` report) are set. They are not uploaded; add an artifact step if you want them. Each value is written to `$GITHUB_OUTPUT` behind a random delimiter, and the step fails instead of setting a value that contains it, so a submission can't forge other outputs. While tinyagent runs, workflow commands (`::add-mask::`, `::error::` ...) in its log output are disabled.
 
 **Failing the step.** A non-zero [exit status](#exit-status) (1, 3 `OutputTruncated`, 4 `NeedsInput`) fails the step unless `fail-on-error: false`, in which case later steps can read `exit-code` and `status`. A usage error (exit 2), a bad input, or an install failure (unsupported runner, missing asset, checksum mismatch) always fails the step, before any model request.
 
