@@ -20,6 +20,8 @@ bool() { # bool <input name> <value>
 }
 bool read-only "$INPUT_READ_ONLY"
 bool sandbox "$INPUT_SANDBOX"
+bool lockdown "$INPUT_LOCKDOWN"
+bool untrusted-task "$INPUT_UNTRUSTED_TASK"
 bool job-summary "$INPUT_JOB_SUMMARY"
 bool fail-on-error "$INPUT_FAIL_ON_ERROR"
 command -v jq >/dev/null 2>&1 || usage "jq is required to read tinyagent's result; install it before this step"
@@ -42,6 +44,8 @@ args=(--json -o "$traj")
 [ -z "$INPUT_REVIEW_COMMIT" ] || args+=(--review-commit "$INPUT_REVIEW_COMMIT")
 [ "$INPUT_READ_ONLY" = false ] || args+=(--read-only)
 [ "$INPUT_SANDBOX" = false ] || args+=(--sandbox)
+[ "$INPUT_LOCKDOWN" = false ] || args+=(--lockdown)
+[ "$INPUT_UNTRUSTED_TASK" = false ] || args+=(--untrusted-task)
 [ -z "$INPUT_OUTPUT_SCHEMA" ] || args+=(--output-schema "$INPUT_OUTPUT_SCHEMA")
 while IFS= read -r line || [ -n "$line" ]; do
 	[ -z "$line" ] || args+=("$line")
