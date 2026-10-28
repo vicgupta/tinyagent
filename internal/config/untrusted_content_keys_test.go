@@ -13,7 +13,6 @@ func TestUntrustedContentUnknownKeysInvalid(t *testing.T) {
 	for _, c := range []struct{ body, want string }{
 		{"untrusted_content:\n  enable: true\n", "field enable not found"},
 		{"untrusted_content:\n  enabled: true\n  lockdown:\n    allowed_domain: [x.com]\n", "field allowed_domain not found"},
-		{"untrusted_content:\n  enabled: true\n  lockdown:\n    allowed_domains: [x.com]\n", "field allowed_domains not found"},
 		{"untrusted_content:\n  enabled: maybe\n", "untrusted_content"},
 		{"untrusted_content: true\n", "untrusted_content must be a mapping"},
 	} {

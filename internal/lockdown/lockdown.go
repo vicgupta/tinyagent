@@ -114,6 +114,8 @@ type State struct {
 	// mcpServers are the configured MCP servers' lockdown settings, by
 	// alias (see SetMCPServers).
 	mcpServers map[string]MCPServerPolicy
+	// commands is the after-taint command policy (see ConfineCommands).
+	commands commandPolicy
 }
 
 // New returns an untainted state whose web_fetch lockdown allowlist is
@@ -147,14 +149,19 @@ func (s *State) Taint(src Source) (added, first bool) {
 		return false, false
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if !s.taintsFromLocked(src.Source) || s.seen[src.key()] {
+		s.mu.Unlock()
 		return false, false
 	}
 	s.seen[src.key()] = true
 	s.sources = append(s.sources, src)
 	first = !s.notified
 	s.notified = true
+	narrow := s.takeNarrowLocked()
+	s.mu.Unlock()
+	if narrow != nil {
+		narrow()
+	}
 	return true, first
 }
 
@@ -232,7 +239,7 @@ func (s *State) Describe() string {
 	if s == nil {
 		return ""
 	}
-	return fmt.Sprintf("lockdown: on (sources: %s; after taint: commands refused, web_fetch → %d domains, %s)", s.describeSources(), s.webFetchCount, s.describeMCP())
+	return fmt.Sprintf("lockdown: on (sources: %s; after taint: %s, web_fetch → %d domains, %s)", s.describeSources(), s.describeCommands(), s.webFetchCount, s.describeMCP())
 }
 
 // URLHostPort returns the host and port a web_fetch URL would connect to
@@ -267,7 +274,7 @@ func RefusalMessage(tool, channel string, first Source, host string) string {
 	var detail string
 	switch channel {
 	case ChannelCommand:
-		detail = "; commands can't run after taint because tinyagent can't yet restrict their network"
+		detail = "; commands can't run after taint unless they are sandboxed with a network policy lockdown can narrow (--sandbox without sandbox_network)"
 	case ChannelWebFetch:
 		if host != "" {
 			detail = fmt.Sprintf("; host %s is not in untrusted_content.lockdown.web_fetch_allowed_domains", host)

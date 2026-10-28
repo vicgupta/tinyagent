@@ -39,7 +39,7 @@ func TestUntrustedContentInvalid(t *testing.T) {
 	// Unknown keys are rejected, so a typo can't silently leave lockdown off.
 	for _, body := range []string{
 		"untrusted_content:\n  enable: true\n",
-		"untrusted_content:\n  lockdown:\n    allowed_domains: [x.com]\n",
+		"untrusted_content:\n  lockdown:\n    allowed_domian: [x.com]\n",
 	} {
 		if _, _, err := loadYAML(t, body); err == nil {
 			t.Errorf("%q loaded", body)

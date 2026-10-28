@@ -59,6 +59,11 @@ func (a *Agent) lockdownRefuse(t *trajectory.Trajectory, call model.ToolCall) (t
 	if channel == "" {
 		return tools.Result{}, false
 	}
+	// Sandboxed commands keep running: their network is denied, or the
+	// allowlist proxy was narrowed to the lockdown list at taint.
+	if channel == lockdown.ChannelCommand && a.Lockdown.CommandsConfined() {
+		return tools.Result{}, false
+	}
 	host := ""
 	if channel == lockdown.ChannelWebFetch {
 		h, port, ok := webFetchURLHost(call.Function.Arguments)
@@ -88,8 +93,8 @@ func (a *Agent) lockdownRefuse(t *trajectory.Trajectory, call model.ToolCall) (t
 // lockdownTaint records the taint a finished call brings: any web_fetch or
 // MCP result, successful or not, since an error can carry the server's
 // text too. The first taint of the run appends lockdown.Notice to the
-// result and stops the background processes still running, whose network
-// lockdown can't restrict.
+// result and, unless commands are confined, stops the background processes
+// still running, whose network lockdown can't restrict.
 func (a *Agent) lockdownTaint(t *trajectory.Trajectory, call model.ToolCall, res *tools.Result) {
 	if a.Lockdown == nil {
 		return
@@ -126,8 +131,13 @@ func (a *Agent) lockdownTaint(t *trajectory.Trajectory, call model.ToolCall, res
 }
 
 // stopProcessesForLockdown stops every running background process and
-// returns their ids.
+// returns their ids. Sandboxed processes are left running when commands
+// are confined: their network is denied or goes through the narrowed
+// proxy.
 func (a *Agent) stopProcessesForLockdown() []string {
+	if a.Lockdown.CommandsConfined() {
+		return nil
+	}
 	var stopped []string
 	for _, p := range a.Tools.Processes() {
 		if !p.Running {

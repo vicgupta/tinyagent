@@ -122,7 +122,7 @@ func TestURLHostPort(t *testing.T) {
 func TestRefusalMessage(t *testing.T) {
 	first := Source{Source: SourceWebFetch, Step: 2}
 	for channel, want := range map[string]string{
-		ChannelCommand:  "can't yet restrict their network",
+		ChannelCommand:  "--sandbox without sandbox_network",
 		ChannelWebFetch: "host evil.example is not in untrusted_content.lockdown.web_fetch_allowed_domains",
 		ChannelMCP:      "MCP tools are not callable",
 	} {

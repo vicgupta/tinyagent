@@ -46,6 +46,9 @@ type Proxy struct {
 
 	mu      sync.Mutex
 	denials []Denial
+	// narrow is the untrusted-content lockdown restriction (see Narrow),
+	// guarded by mu.
+	narrow narrowState
 }
 
 // NewProxy returns a proxy for rules that serves on ln once Serve is called.
@@ -178,6 +181,9 @@ func (p *Proxy) connect(ctx context.Context, host string, port int) (net.Conn, e
 	if !p.allowed(host, port) {
 		return nil, &deniedError{ReasonNotAllowed}
 	}
+	if !p.narrowAllows(host, port) {
+		return nil, &deniedError{ReasonLockdown}
+	}
 	var addrs []netip.Addr
 	if a, err := netip.ParseAddr(host); err == nil {
 		addrs = []netip.Addr{a} // listed literally, since it matched
@@ -201,7 +207,7 @@ func (p *Proxy) connect(ctx context.Context, host string, port int) (net.Conn, e
 	for _, a := range addrs {
 		c, err := p.Dial(ctx, "tcp", net.JoinHostPort(a.Unmap().String(), strconv.Itoa(port)))
 		if err == nil {
-			return c, nil
+			return p.track(c, host, port)
 		}
 		lastErr = err
 	}
