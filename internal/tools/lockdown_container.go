@@ -72,9 +72,8 @@ func (c *Container) PrepareLockdownNetwork(ctx context.Context) (denied bool, er
 		return true, nil
 	}
 	switch {
-	case mode == "host", strings.HasPrefix(mode, "container:"), strings.HasPrefix(mode, "ns:"),
-		strings.HasPrefix(mode, "slirp4netns"), strings.HasPrefix(mode, "pasta"):
-		return false, fmt.Errorf("network mode %q can't be disconnected; use a bridge network or --network none in container.run_args", mode)
+	case lockdownModeUnsupported(mode):
+		return false, unsupportedModeErr(mode)
 	case len(networks) == 0:
 		return false, fmt.Errorf("network mode %q has no runtime network to disconnect", mode)
 	}
