@@ -436,6 +436,9 @@ func run() int {
 	if err != nil {
 		return configFail(err)
 	}
+	if err := checkPlugins(cfg, os.Stderr, o.verbose); err != nil {
+		return configFail(err)
+	}
 	if flagWasSet(fs, "lsp") {
 		cfg.LSP.Enabled = o.lsp
 	}
@@ -713,7 +716,7 @@ func run() int {
 	}
 	startOutputFiles(outputFiles, cfg.ToolOutputFiles.MaxRuns, warn)
 	if cfg.Skills {
-		loadSkills(a, root, warn)
+		loadSkills(a, root, pluginSkillSources(cfg), warn)
 	}
 	if cfg.Memory.Enabled {
 		loadMemory(a, cfg.Memory, root, warn)
@@ -994,6 +997,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if err != nil {
 		return configFail(err)
 	}
+	if err := checkPlugins(cfg, os.Stderr, o.verbose); err != nil {
+		return configFail(err)
+	}
 	if flagWasSet(fs, "lsp") && o.lsp != src.LSPEnabled {
 		fmt.Fprintln(os.Stderr, "error: resume: --lsp conflicts with the checkpoint's recorded lsp setting; start a fresh task")
 		return 2
@@ -1255,7 +1261,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	}
 	startOutputFiles(outputFiles, cfg.ToolOutputFiles.MaxRuns, warn)
 	if src.SkillsEnabled {
-		loadSkills(a, root, warn)
+		loadSkills(a, root, pluginSkillSources(cfg), warn)
 	}
 	emitResumeMemoryLoaded(events, src, root)
 	if agent.RememberOffered(src) {
@@ -2601,8 +2607,8 @@ func skillsFlag(fs *flag.FlagSet, o options) (on, set bool, err error) {
 
 // loadSkills discovers skills for a run rooted at root, reporting each
 // problem through warn and, with -v, one line per skill.
-func loadSkills(a *agent.Agent, root string, warn func(string)) {
-	set, warnings := skills.Discover(root, skills.UserDir())
+func loadSkills(a *agent.Agent, root string, plugins []skills.PluginSource, warn func(string)) {
+	set, warnings := skills.DiscoverWith(root, skills.UserDir(), plugins)
 	for _, w := range warnings {
 		warn(w)
 	}
@@ -2610,7 +2616,11 @@ func loadSkills(a *agent.Agent, root string, warn func(string)) {
 	a.Tools.Skills = set
 	if a.Verbose {
 		for _, k := range set.Skills {
-			fmt.Fprintf(a.Out, "loaded skill %s (%s) from %s\n", k.Name, k.Scope, k.Path)
+			scope := k.Scope
+			if k.Plugin != "" {
+				scope += " " + k.Plugin
+			}
+			fmt.Fprintf(a.Out, "loaded skill %s (%s) from %s\n", k.Name, scope, k.Path)
 		}
 	}
 }

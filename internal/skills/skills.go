@@ -43,6 +43,7 @@ const (
 const (
 	ScopeProject = "project"
 	ScopeUser    = "user"
+	ScopePlugin  = "plugin"
 )
 
 // ContentPrefix starts every successful instructions result.
@@ -52,7 +53,8 @@ const ContentPrefix = "<skill_content name=\""
 type Skill struct {
 	Name        string
 	Description string
-	Scope       string // ScopeProject or ScopeUser
+	Scope       string // ScopeProject, ScopeUser or ScopePlugin
+	Plugin      string // the plugin's name, for ScopePlugin
 	Dir         string // absolute skill directory
 	Path        string // absolute SKILL.md path
 }
@@ -136,15 +138,33 @@ func ProjectDirs(root string) []string {
 // warning and the affected skill is skipped (or loaded, for cosmetic name
 // problems).
 func Discover(root, userDir string) (*Set, []string) {
+	return DiscoverWith(root, userDir, nil)
+}
+
+// PluginSource is one plugin's skills/ directory. Root is the plugin's
+// filesystem-resolved root: the skills directory, each skill directory and
+// its SKILL.md must resolve inside it.
+type PluginSource struct {
+	Plugin string
+	Root   string
+	Dir    string
+}
+
+// DiscoverWith is Discover plus plugin skills, which rank below project and
+// user skills, in the order given.
+func DiscoverWith(root, userDir string, plugins []PluginSource) (*Set, []string) {
 	var warnings []string
 	warn := func(format string, a ...any) { warnings = append(warnings, fmt.Sprintf(format, a...)) }
-	type scan struct{ dir, scope string }
+	type scan struct{ dir, scope, plugin, root string }
 	var scans []scan
 	for _, d := range ProjectDirs(root) {
-		scans = append(scans, scan{d, ScopeProject})
+		scans = append(scans, scan{dir: d, scope: ScopeProject})
 	}
 	if userDir != "" {
-		scans = append(scans, scan{userDir, ScopeUser})
+		scans = append(scans, scan{dir: userDir, scope: ScopeUser})
+	}
+	for _, p := range plugins {
+		scans = append(scans, scan{dir: p.Dir, scope: ScopePlugin, plugin: p.Plugin, root: p.Root})
 	}
 	byName := map[string]int{}
 	var found []Skill
@@ -153,6 +173,16 @@ func Discover(root, userDir string) (*Set, []string) {
 		real, err := filepath.EvalSymlinks(sc.dir)
 		if err != nil {
 			continue // missing (or broken) scope directory
+		}
+		if sc.scope == ScopePlugin {
+			if !within(sc.root, real) {
+				warn("skills: plugin %s: %s resolves outside the plugin root; its skills are skipped", sc.plugin, sc.dir)
+				continue
+			}
+			if fi, err := os.Stat(real); err != nil || !fi.IsDir() {
+				warn("skills: plugin %s: %s is not a directory; its skills are skipped", sc.plugin, sc.dir)
+				continue
+			}
 		}
 		if seenDir[real] {
 			continue // e.g. $HOME is also a project directory
@@ -173,6 +203,15 @@ func Discover(root, userDir string) (*Set, []string) {
 			if fi, err := os.Stat(path); err != nil || !fi.Mode().IsRegular() {
 				continue
 			}
+			if sc.scope == ScopePlugin {
+				rdir, err1 := filepath.EvalSymlinks(dir)
+				rpath, err2 := filepath.EvalSymlinks(path)
+				if err1 != nil || err2 != nil || !within(sc.root, rdir) || !within(sc.root, rpath) {
+					warn("skills: plugin %s: skipping %s: it resolves outside the plugin root", sc.plugin, dir)
+					continue
+				}
+				dir, path = rdir, rpath
+			}
 			k, err := parse(path, e.Name())
 			if err != nil {
 				warn("skills: skipping %s: %v", path, err)
@@ -181,7 +220,7 @@ func Discover(root, userDir string) (*Set, []string) {
 			for _, p := range nameProblems(k.Name, e.Name()) {
 				warn("skills: %s: %s (loaded anyway)", path, p)
 			}
-			k.Scope, k.Dir, k.Path = sc.scope, dir, path
+			k.Scope, k.Dir, k.Path, k.Plugin = sc.scope, dir, path, sc.plugin
 			if i, ok := byName[k.Name]; ok {
 				warn("skills: skill %q at %s is shadowed by %s", k.Name, path, found[i].Path)
 				continue

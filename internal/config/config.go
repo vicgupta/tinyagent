@@ -109,6 +109,9 @@ type AgentConfig struct {
 
 	MCPServers []MCPServer `yaml:"mcp_servers,omitempty"`
 
+	// Plugins lists Agent Plugins package directories (README "Plugins").
+	Plugins []Plugin `yaml:"plugins,omitempty"`
+
 	// Providers are named model providers selectable as "<id>/<model>".
 	// They come only from the user config or -c.
 	Providers []Provider `yaml:"providers,omitempty"`
@@ -1062,6 +1065,7 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		// untrusted_content exits 2 like any other lockdown config error.
 		UntrustedContent yaml.Node `yaml:"untrusted_content"`
 		Attempts         yaml.Node `yaml:"attempts"`
+		Plugins          yaml.Node `yaml:"plugins"`
 	}
 	if yaml.Unmarshal(data, &probe) == nil {
 		for _, c := range []struct {
@@ -1108,6 +1112,11 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		}
 		if probe.UntrustedContent.Kind != 0 {
 			if err := checkUntrustedContent(&probe.UntrustedContent); err != nil {
+				return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+			}
+		}
+		if probe.Plugins.Kind != 0 {
+			if err := checkPlugins(&probe.Plugins); err != nil {
 				return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 			}
 		}
@@ -1197,6 +1206,9 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := validateMCPServers(cfg.MCPServers); err != nil {
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+	}
+	if err := validatePlugins(cfg.Plugins); err != nil {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if r := cfg.Container.Runtime; r != "" && r != "docker" && r != "podman" {

@@ -565,7 +565,8 @@ These commands accept only `--cwd` (and `--json` with `--memory-list`); combinin
 With `--skills` (or `skills: true`), tinyagent discovers [Agent Skills](https://agentskills.io): folders containing a `SKILL.md` with YAML frontmatter (`name` and `description`) and Markdown instructions, optionally with `scripts/`, `references/`, or `assets/`. Skills are off by default.
 
 - **Locations:** `.agents/skills/<name>/SKILL.md` in `--cwd` and each parent up to the repository root (same walk as AGENTS.md), then `~/.agents/skills/<name>/SKILL.md`. Symlinked skill folders are followed. `.claude/skills` is not scanned; symlink those skills into `.agents/skills` to use them.
-- **Precedence:** on a name clash the nearest project directory wins, and project skills beat user skills; each shadowed skill produces a warning naming both paths.
+- **Locations (plugins):** each configured [plugin](#plugins) contributes `<plugin>/skills/<name>/SKILL.md`.
+- **Precedence:** on a name clash the nearest project directory wins, project skills beat user skills, and user skills beat plugin skills (earlier plugins beat later ones); each shadowed skill produces a warning naming both paths.
 - **Validation:** a skill with no description or unparseable frontmatter is skipped with a warning. Name problems (wrong format, mismatch with its folder) only warn. A `SKILL.md` over 1 MiB is skipped.
 - **Progressive disclosure:** only the names and descriptions go into the system prompt (a "Skills" section, capped at 8,000 characters: descriptions are shortened first, then skills are omitted with a warning). The `skill` tool loads one skill's instructions (frontmatter stripped) wrapped in `<skill_content name="...">`, with its directory and up to 100 bundled file paths. `{"name": ..., "file": "references/x.md"}` reads one bundled text file (1 MiB cap; no absolute paths, `..`, or symlinks that leave the skill folder; binaries refused). Results also honor `max_output_chars`. Loading a skill that is still in context returns a short note instead of a second copy.
 - **Other tools are unchanged:** `read_file` and friends stay confined to `--cwd`, so user skills are reachable only through the `skill` tool. Run bundled scripts with `bash` as usual.
@@ -575,6 +576,24 @@ With `--skills` (or `skills: true`), tinyagent discovers [Agent Skills](https://
 - With no skills found, the prompt and tool list are exactly as without `--skills`. `-v` prints each loaded skill and its path; warnings go to stderr and, with `--json`, as `warning` events.
 
 **Trust:** skill instructions are prompt input. A project skill from a repository you don't trust can steer the agent like a malicious AGENTS.md, and bundled scripts run with your permissions if the agent invokes them. Skill text sent to the model goes to your model provider like any other prompt, and the trajectory records loaded skill content.
+
+### Plugins
+
+*Experimental.* tinyagent can load [Agent Plugins](https://agent-plugins.org): directories with a `plugin.json` manifest that bundle skills. List them in the config:
+
+```yaml
+skills: true
+plugins:
+  - path: /home/me/plugins/release-kit
+```
+
+- `path` must be absolute and an existing directory; the same directory listed twice (after resolving symlinks) is a config error, as are unknown keys. A profile's `plugins:` replaces the base list.
+- The manifest is validated (`$schema`, `name`, optional `version`). A plugin with an invalid or missing manifest is skipped with a warning; unknown manifest fields only warn. Two plugins with the same `name` are a config error (exit 2).
+- With `--skills`, skills under `<plugin>/skills/` join the catalog with the lowest precedence (see [Agent Skills](#agent-skills)). Skill folders or a `skills` directory that resolve outside the plugin root are skipped with a warning.
+- `-v` prints each loaded plugin; warnings go to stderr and, with `--json`, as `warning` events.
+- Versions of tinyagent without plugin support reject the `plugins` key as unknown.
+
+**Trust:** a plugin is code and prompt input you chose to install. Only list plugins you trust, just as with skills.
 
 ### Skill workflows
 
