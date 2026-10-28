@@ -1056,6 +1056,9 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		OTel            yaml.Node `yaml:"otel"`
 		Permissions     yaml.Node `yaml:"permissions"`
 		Memory          yaml.Node `yaml:"memory"`
+		// UntrustedContent is checked strictly here so a typo under
+		// untrusted_content exits 2 like any other lockdown config error.
+		UntrustedContent yaml.Node `yaml:"untrusted_content"`
 	}
 	if yaml.Unmarshal(data, &probe) == nil {
 		for _, c := range []struct {
@@ -1097,6 +1100,11 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		}
 		if probe.Permissions.Kind != 0 {
 			if err := checkStrict(&probe.Permissions, "permissions", &Permissions{}); err != nil {
+				return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+			}
+		}
+		if probe.UntrustedContent.Kind != 0 {
+			if err := checkUntrustedContent(&probe.UntrustedContent); err != nil {
 				return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 			}
 		}
