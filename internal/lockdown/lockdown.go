@@ -100,6 +100,9 @@ type State struct {
 	seen          map[string]bool
 	denials       []Denial
 	notified      bool
+	// enabledSources are the configurable sources that taint; nil means
+	// all of them (see SetSources).
+	enabledSources map[string]bool
 }
 
 // New returns an untainted state whose web_fetch lockdown allowlist is
@@ -123,7 +126,8 @@ func (s *State) Tainted() bool {
 }
 
 // Taint records src. added is false when the same source, tool and host
-// were already recorded. first is true only for the run's first taint, the
+// were already recorded, or when src's source is turned off in
+// untrusted_content.sources. first is true only for the run's first taint, the
 // one whose tool result carries Notice; a taint recorded before the run
 // starts (task, review, resume) has no result and uses it up, since every
 // refusal explains itself anyway.
@@ -133,7 +137,7 @@ func (s *State) Taint(src Source) (added, first bool) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.seen[src.key()] {
+	if !s.taintsFromLocked(src.Source) || s.seen[src.key()] {
 		return false, false
 	}
 	s.seen[src.key()] = true
@@ -217,7 +221,7 @@ func (s *State) Describe() string {
 	if s == nil {
 		return ""
 	}
-	return fmt.Sprintf("lockdown: on (sources: web_fetch, mcp, review, untrusted task; after taint: commands refused, web_fetch → %d domains, mcp tools refused)", s.webFetchCount)
+	return fmt.Sprintf("lockdown: on (sources: %s; after taint: commands refused, web_fetch → %d domains, mcp tools refused)", s.describeSources(), s.webFetchCount)
 }
 
 // URLHostPort returns the host and port a web_fetch URL would connect to

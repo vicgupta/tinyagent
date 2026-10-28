@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 
+	"github.com/vicgupta/tinyagent/internal/lockdown"
 	"github.com/vicgupta/tinyagent/internal/sandboxnet"
 )
 
@@ -17,6 +18,11 @@ type UntrustedContent struct {
 	// Enabled turns lockdown on (off by default; --lockdown and
 	// --lockdown=false override it).
 	Enabled bool `yaml:"enabled"`
+	// Sources chooses which sources taint the run: web_fetch, mcp, review
+	// and acp_client_mcp. Absent (the default) means all of them; an
+	// explicit empty list is rejected. --untrusted-task and a resumed
+	// untrusted checkpoint always taint.
+	Sources []string `yaml:"sources,omitempty"`
 	// Lockdown is what stays reachable after taint.
 	Lockdown UntrustedLockdown `yaml:"lockdown"`
 }
@@ -32,6 +38,9 @@ type UntrustedLockdown struct {
 
 // Validate checks the lockdown allowlist syntax.
 func (u UntrustedContent) Validate() error {
+	if _, err := lockdown.ParseSources(u.Sources); err != nil {
+		return err
+	}
 	if _, err := sandboxnet.ParseRules(u.Lockdown.WebFetchAllowedDomains); err != nil {
 		return fmt.Errorf("untrusted_content.lockdown.web_fetch_allowed_domains %v", err)
 	}
