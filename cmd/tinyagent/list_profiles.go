@@ -14,7 +14,7 @@ import (
 var listProfilesConflicts = []string{
 	"task", "t", "profile", "check", "review", "review-base", "review-commit",
 	"resume", "rewind", "to", "dry-run", "acp", "transcript", "completion",
-	"init-config", "update", "worktree",
+	"init-config", "update", "worktree", "list-plugins",
 }
 
 // runListProfiles implements --list-profiles: it prints the profile names in

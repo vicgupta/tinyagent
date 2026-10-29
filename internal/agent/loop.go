@@ -105,6 +105,8 @@ type Agent struct {
 	// SkillsEnabled records that skills discovery was on for this run; the
 	// discovered skills are Tools.Skills.
 	SkillsEnabled bool
+	// Plugins records the loaded plugins for trajectories and run.started.
+	Plugins []trajectory.PluginInfo
 	// Memory is the project memory loaded at run start (memory.enabled);
 	// nil means memory is off. Its section follows AGENTS.md.
 	Memory *ProjectMemory
@@ -439,6 +441,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			OutputSchemaDigest:    a.outputSchemaDigest(),
 			SkillsEnabled:         a.SkillsEnabled,
 			Skills:                skillInfos(a.Tools.Skills),
+			Plugins:               a.Plugins,
 			Worktree:              a.Worktree,
 			Review:                a.Review,
 			Messages: []model.Message{

@@ -326,6 +326,8 @@ type Trajectory struct {
 	SkillsEnabled bool `json:"skills_enabled,omitempty"`
 	// Skills is the discovered catalog (not the skill bodies).
 	Skills []SkillInfo `json:"skills,omitempty"`
+	// Plugins records the configured plugins that loaded (issue #173).
+	Plugins []PluginInfo `json:"plugins,omitempty"`
 	// SnapshotsEnabled records whether the last invocation took opt-in
 	// workspace snapshots (--snapshots). It is per invocation: a resume may
 	// turn snapshots on or off.
