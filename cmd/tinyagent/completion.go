@@ -43,14 +43,31 @@ func completionFlags(fs *flag.FlagSet) []string {
 }
 
 // bashCompletion returns a sourceable Bash script that completes flag names
-// from a fixed list, so pressing Tab never runs tinyagent. Words that don't
-// start with "-" get no candidates, and -o default falls back to filenames.
+// from a fixed list, so pressing Tab never runs tinyagent. After a flag in
+// completionValues (as "--flag value" or "--flag=value") it offers that
+// flag's values. Other words that don't start with "-" get no candidates,
+// and -o default falls back to filenames.
 func bashCompletion(fs *flag.FlagSet) string {
 	return `# Bash completion for tinyagent flags.
 # Load it with: source <(tinyagent --completion bash)
 _tinyagent() {
-    local cur=${COMP_WORDS[COMP_CWORD]}
+    local cur=${COMP_WORDS[COMP_CWORD]} prev= pre= values=
+    (( COMP_CWORD > 0 )) && prev=${COMP_WORDS[COMP_CWORD-1]}
     COMPREPLY=()
+    # --flag=value: by default Bash splits the word at "=" (COMP_WORDBREAKS).
+    if [[ $cur == = ]]; then
+        cur=
+    elif [[ $prev == = ]] && (( COMP_CWORD > 1 )); then
+        prev=${COMP_WORDS[COMP_CWORD-2]}
+    elif [[ $cur == -*=* ]]; then
+        prev=${cur%%=*} pre=${cur%%=*}= cur=${cur#*=}
+    fi
+    case $prev in
+` + completionCaseArms(false, "        ") + `    esac
+    if [[ -n $values ]]; then
+        COMPREPLY=($(compgen -P "$pre" -W "$values" -- "$cur"))
+        (( ${#COMPREPLY[@]} )) && return 0
+    fi
     [[ $cur == -* ]] || return 0
     local flags='` + strings.Join(completionFlags(fs), " ") + `'
     COMPREPLY=($(compgen -W "$flags" -- "$cur"))
@@ -61,8 +78,10 @@ complete -o default -F _tinyagent tinyagent
 
 // zshCompletion returns a sourceable Zsh script that registers flag-name
 // completion with compdef (no bashcompinit) from a fixed list, so pressing
-// Tab never runs tinyagent. Words that don't start with "-", and flag
-// prefixes that match nothing, fall back to filenames, like Bash's -o default.
+// Tab never runs tinyagent. After a flag in completionValues (as "--flag
+// value" or "--flag=value") it offers that flag's values. Words that don't
+// start with "-", and flag prefixes that match nothing, fall back to
+// filenames, like Bash's -o default.
 func zshCompletion(fs *flag.FlagSet) string {
 	return `#compdef tinyagent
 # Zsh completion for tinyagent flags.
@@ -72,7 +91,15 @@ if (( ! $+functions[compdef] )); then
     return 1
 fi
 _tinyagent() {
-    local -a flags
+    local -a flags values
+    local flag=${words[CURRENT-1]}
+    [[ $PREFIX == -*=* ]] && flag=${PREFIX%%=*}
+    case $flag in
+` + completionCaseArms(true, "        ") + `    esac
+    if (( $#values )); then
+        [[ $PREFIX == -*=* ]] && compset -P '*='
+        compadd -a values && return 0
+    fi
     flags=(` + strings.Join(completionFlags(fs), " ") + `)
     if [[ $PREFIX == -* ]] && compadd -a flags; then
         return 0
@@ -84,13 +111,20 @@ compdef _tinyagent tinyagent
 }
 
 // fishCompletion embeds the registered flags using Fish's native completion
-// command. Filename completion stays enabled; Tab never invokes tinyagent.
+// command. Flags in completionValues complete their values (-x: an argument
+// is required and only those values are offered). Filename completion stays
+// enabled elsewhere; Tab never invokes tinyagent.
 func fishCompletion(fs *flag.FlagSet) string {
 	var script strings.Builder
 	script.WriteString("# Fish completion for tinyagent flags.\n# Load it with: tinyagent --completion fish | source\n")
 	for _, name := range completionFlags(fs) {
 		if strings.HasPrefix(name, "--") {
-			fmt.Fprintf(&script, "complete -c tinyagent -l %s\n", strings.TrimPrefix(name, "--"))
+			long := strings.TrimPrefix(name, "--")
+			if vals, ok := completionValues[long]; ok {
+				fmt.Fprintf(&script, "complete -c tinyagent -l %s -x -a '%s'\n", long, strings.Join(vals, " "))
+				continue
+			}
+			fmt.Fprintf(&script, "complete -c tinyagent -l %s\n", long)
 		} else {
 			fmt.Fprintf(&script, "complete -c tinyagent -s %s\n", strings.TrimPrefix(name, "-"))
 		}

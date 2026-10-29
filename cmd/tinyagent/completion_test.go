@@ -316,6 +316,9 @@ func TestCompletionFishFlagsMatchFlagSet(t *testing.T) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+		if head, _, ok := strings.Cut(line, " -x -a '"); ok {
+			line = head // a value flag; TestCompletionValuesInScripts checks the values
+		}
 		fields := strings.Fields(line)
 		if len(fields) != 5 || fields[0] != "complete" || fields[1] != "-c" || fields[2] != "tinyagent" {
 			t.Fatalf("unexpected registration: %q", line)
