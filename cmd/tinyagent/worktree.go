@@ -188,12 +188,16 @@ func setupWorktree(root, name string, stderr io.Writer, verbose bool) (string, *
 		removeAll(created)
 		return "", nil, fmt.Errorf("--worktree: %w", err)
 	}
+	// unlock releases the setup lock; rollback releases it before removing
+	// the directory that holds it.
+	unlock := func() {}
 	rollback := func() {
 		os.RemoveAll(path)
 		git("-C", top, "worktree", "prune")
 		if _, err := git("-C", top, "show-ref", "--verify", "--quiet", "refs/heads/"+branch); err == nil {
 			git("-C", top, "branch", "-D", "--", branch)
 		}
+		unlock()
 		removeAll(created)
 	}
 	// Repository hooks (post-checkout) don't run during setup: an empty
@@ -204,9 +208,16 @@ func setupWorktree(root, name string, stderr io.Writer, verbose bool) (string, *
 		return "", nil, fmt.Errorf("--worktree: %w", err)
 	}
 	defer os.RemoveAll(noHooks)
+	if unlock, err = lockWorktrees(parent); err != nil {
+		unlock = func() {}
+		removeAll(created)
+		return "", nil, fmt.Errorf("--worktree: %w", err)
+	}
 	start := time.Now()
 	_, err = git("-C", top, "-c", "core.hooksPath="+noHooks, "worktree", "add", "--quiet", "-b", branch, "--", path, base)
 	if err == nil {
+		unlock()
+		unlock = func() {}
 		select {
 		case <-interrupted:
 			// The worktree is complete; the run itself is not started.

@@ -67,8 +67,9 @@ func TestCommandEnvTools(t *testing.T) {
 	// start_process gets the same environment as bash.
 	e := &Executor{Root: root, Env: none}
 	defer e.Close()
-	id, _ := startID(t, e, envBin+"; echo done")
-	var out string
+	// start_process returns the output of its first moment and never
+	// repeats it, so "done" may already be in it on a slow machine.
+	id, out := startID(t, e, envBin+"; echo done")
 	waitFor(t, func() bool {
 		out += runTool(t, e, "read_process", map[string]any{"id": id, "timeout": 200})
 		return strings.Contains(out, "done")
