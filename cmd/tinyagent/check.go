@@ -168,6 +168,13 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 	for _, s := range cfg.MCPServers {
 		add("mcp", fmt.Sprintf("%s: %d tools, %d resource patterns", s.Alias, len(s.Tools), len(s.Resources)))
 	}
+	pl, err := checkPluginsLine(cfg, os.Stderr)
+	if err != nil {
+		return nil, err
+	}
+	if pl != "" {
+		add("plugins", pl)
+	}
 	if flagWasSet(fs, "ask-user") {
 		cfg.AskUser.Enabled = o.askUser
 	}

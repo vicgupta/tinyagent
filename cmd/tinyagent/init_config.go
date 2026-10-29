@@ -37,6 +37,9 @@ const starterConfig = `# tinyagent user config. Flags override these values. Ful
 #       timeout_seconds: 600  # default 600, up to 3600
 #   stop_on_pass: true        # false runs all N attempts and compares them
 #   keep: all                 # non-winning worktrees to keep once one wins: all, failed or none
+# plugins: []                # Agent Plugins packages (README "Plugins"), e.g. - path: /abs/plugin-dir
+#                             # (holds plugin.json); its skills join with --skills, and only mcp.json servers
+#                             # listed under its mcp_servers start; inspect with --list-plugins
 `
 
 func runInitConfig(path string) int {
