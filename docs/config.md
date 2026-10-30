@@ -183,13 +183,9 @@ profiles:                    # omitted by default; named overlays selected with 
   review:
     model: openai/gpt-5-mini
     read_only: true
-```
-
 ### Verify before stop
 
-With `verify_on_stop.enabled` (or `--verify-on-stop`), a run that changed files does not finish on an unverified final answer. A successful `write_file`, `edit_file` or `apply_patch` call, or a `bash` command that is not a verification command, marks changes pending. A `bash` command counts as verification when it is one of `commands` (alone or followed by arguments) or matches one of `patterns`; when both lists are empty, common test and build commands count (`go test`, `go build`, `go vet`, `cargo test`, `npm test`, `make`, `pytest` and similar, at the start of the command or after `&&`, `;` or `||`). A verification that exits 0 clears the pending changes; one that fails leaves them pending, and the model sees its output as a normal tool result.
-
-When the model gives a final answer (with or without the completion marker) while changes are pending, it gets a fixed user message asking it to verify, naming the configured commands, and the run continues as normal steps, so step, cost and time limits still apply. Tool calls in a submitting message are not run and get an error result saying so. After `max_reprompts` re-prompts, or straight away when `bash` cannot run (denied by the permission policy, a hook or lockdown, or unavailable as in read-only mode), the run finishes with its normal status and is marked unverified: the summary line ends with `, unverified changes`, the `--json` result has `"unverified": true`, and the trajectory has `unverified: true`. `verify_reprompts` counts the re-prompts in both. The guard runs before stop hooks, does not apply to subagent runs or `--output-schema` runs, and keeps its state across `--resume`.
+`verify_on_stop` (or `--verify-on-stop`, `--verify-command`, `--max-verify-reprompts`) keeps a run that changed files from finishing until a test or build command has passed, re-prompting the model up to `max_reprompts` times and otherwise marking the run unverified. See [Verify before stop](verify.md#verify-before-stop) for the full rules.
 
 ### Profiles
 

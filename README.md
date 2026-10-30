@@ -106,7 +106,7 @@ tinyagent --read-only --cwd ~/src/project -t "Review error handling in pkg/api"
 cat review-task.md | tinyagent --read-only -t - -o review.json
 ```
 
-Subcommands are shortcuts for common flags: `tinyagent sandbox`, `tinyagent memory list`, `tinyagent planner --first`, `tinyagent plugins list`, `tinyagent tinygo status` (see [CLI reference](docs/subcommands.md)).
+Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview and `tinyagent --help --verbose` for every flag. Subcommands are shortcuts for common flags: `tinyagent sandbox`, `tinyagent memory list`, `tinyagent planner --first`, `tinyagent plugins list`, `tinyagent tinygo status` (see [CLI reference](docs/subcommands.md)); each one alone, such as `tinyagent sandbox`, prints its help.
 
 ## Features
 
@@ -115,6 +115,9 @@ Subcommands are shortcuts for common flags: `tinyagent sandbox`, `tinyagent memo
 - Streaming text, `--json` event output, structured output, SQLite event logs and OpenTelemetry.
 - Project memory across runs, with approval before entries become active.
 - A task planner that can require a plan before any change.
+- Run budgets: turn cap, cost limit and token limit (`--token-limit`), with an 80% warning to the model; delegates, workers and `--attempts` share the budget, and a run that hits it can be resumed.
+- Verify before stop (`--verify-on-stop`): a run that changed files isn't accepted until a test or build command passes; otherwise it is marked unverified.
+- Help everywhere: `tinyagent` or `tinyagent <subcommand>` alone at a terminal prints help; `--help --verbose` lists every flag by section.
 - Undo for file edits, workspace rewind, resume and follow-up runs.
 - Sandboxed commands with a network allowlist, permission rules, hooks, untrusted-content lockdown and file-access rules.
 - WebAssembly plugin modules run through Extism with permission checks, a version store, rollback and prune. Go source modules are built with TinyGo, an external dependency that tinyagent downloads on first use (pinned version, checksum-verified, cached locally, `tinyagent tinygo update` to update); TinyGo is never embedded in tinyagent.
@@ -128,7 +131,8 @@ Subcommands are shortcuts for common flags: `tinyagent sandbox`, `tinyagent memo
 | Config file, profiles, MCP and command tools | [docs/config.md](docs/config.md) |
 | Providers, ChatGPT subscription, reasoning and fallback | [docs/providers.md](docs/providers.md) |
 | `--json`, streaming, structured output, event log, OpenTelemetry | [docs/json-output.md](docs/json-output.md) |
-| Reviews, worktrees, best-of-N, resume, transcripts, follow-ups, asking for input | [docs/runs.md](docs/runs.md) |
+| Reviews, worktrees, best-of-N, resume, transcripts, follow-ups, asking for input, token and cost budgets | [docs/runs.md](docs/runs.md) |
+| Verify before stop (`--verify-on-stop`) | [docs/verify.md](docs/verify.md) |
 | `undo_file` and `--rewind` | [docs/undo.md](docs/undo.md) |
 | Project memory | [docs/memory.md](docs/memory.md) |
 | Planner (`update_plan`, `--plan-first`) | [docs/planner.md](docs/planner.md) |
