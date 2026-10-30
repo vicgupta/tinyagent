@@ -113,3 +113,52 @@ func TestSubcommandHelp(t *testing.T) {
 		}
 	}
 }
+
+// TestBareSubcommandPrintsHelp checks every registered subcommand typed
+// alone at a terminal prints exactly "<sub> --help" and exits the same way;
+// with stdin piped, subcommands with base flags keep their old result
+// (--task is required, exit 2); any action or option is unchanged.
+func TestBareSubcommandPrintsHelp(t *testing.T) {
+	t.Setenv("AGENT_MODEL", "")
+	defer func(f func() bool) { stdinIsTerminal = f }(stdinIsTerminal)
+	for _, s := range subcommands {
+		t.Run(s.name, func(t *testing.T) {
+			stdinIsTerminal = func() bool { return true }
+			wantCode, want, wantErr := runWith(t, s.name, "--help")
+			code, got, errOut := runWith(t, s.name)
+			if code != wantCode || got != want || errOut != wantErr {
+				t.Errorf("bare %s at a terminal: exit %d, stderr %q, stdout:\n%s\nwant exit %d and:\n%s", s.name, code, errOut, got, wantCode, want)
+			}
+			stdinIsTerminal = func() bool { return false }
+			code, got, _ = runWith(t, s.name)
+			if len(s.base) > 0 {
+				if code != 2 || got == want {
+					t.Errorf("bare %s with piped stdin: exit %d, want 2 without help", s.name, code)
+				}
+				// With a flag it runs as before: base flags plus that flag.
+				args, sh, err := expandSubcommand([]string{s.name, "-t", "x"})
+				if err != nil || sh != nil || !reflect.DeepEqual(args, append(append([]string{}, s.base...), "--t", "x")) {
+					t.Errorf("%s -t x expanded to %v, %v, %v", s.name, args, sh, err)
+				}
+			} else if code != wantCode || got != want {
+				t.Errorf("bare %s with piped stdin: exit %d, want its help (unchanged)", s.name, code)
+			}
+			for a, act := range s.actions {
+				if act.arg || act.arg2 {
+					continue
+				}
+				args, sh, err := expandSubcommand([]string{s.name, a})
+				if err != nil || sh != nil || !strings.Contains(strings.Join(args, " "), "--"+act.flag) {
+					t.Errorf("%s %s expanded to %v, %v, %v", s.name, a, args, sh, err)
+				}
+			}
+		})
+	}
+	// A task starting with a subcommand word is still a task.
+	stdinIsTerminal = func() bool { return true }
+	for _, args := range [][]string{{"-t", "memory leaks in the parser"}, {"memory", "leaks"}} {
+		if got, sh, _ := expandSubcommand(args); sh != nil || !reflect.DeepEqual(got, args) {
+			t.Errorf("%v rewritten to %v (help %v)", args, got, sh != nil)
+		}
+	}
+}
