@@ -113,7 +113,7 @@ type AgentConfig struct {
 
 	MCPServers []MCPServer `yaml:"mcp_servers,omitempty"`
 
-	// Plugins lists Agent Plugins package directories (README "Plugins").
+	// Plugins lists Agent Plugins package directories (docs/plugins.md).
 	Plugins []Plugin `yaml:"plugins,omitempty"`
 
 	// Providers are named model providers selectable as "<id>/<model>".
