@@ -28,6 +28,7 @@ type Updater struct {
 	Client  *http.Client
 	GOOS    string
 	GOARCH  string
+	Report  Reporter // progress; nil reports nothing
 }
 
 func New(current string) (*Updater, error) {
@@ -57,15 +58,26 @@ type release struct {
 }
 
 // Run installs the latest release if it is newer than Current and returns a
-// message describing what happened.
+// message describing what happened. Each step is reported to u.Report, and
+// an error is a *StepError naming the step that failed.
 func (u *Updater) Run(ctx context.Context) (string, error) {
+	r := u.Report
+	if r == nil {
+		r = nopReporter{}
+	}
+	fail := func(step string, err error) (string, error) { return "", &StepError{Step: step, Err: err} }
+
+	r.Step(StepCurrent, fmt.Sprintf("%s at %s", u.Current, u.ExePath))
+	r.Step(StepQuery, u.APIURL)
 	var rel release
 	if err := u.getJSON(ctx, u.APIURL, &rel); err != nil {
-		return "", fmt.Errorf("fetch latest release: %w", err)
+		return fail(StepQuery, err)
 	}
 	if !newer(rel.TagName, u.Current) {
+		r.Step(StepQuery, fmt.Sprintf("latest is %s; already up to date", rel.TagName))
 		return fmt.Sprintf("already up to date (%s)", u.Current), nil
 	}
+	r.Step(StepQuery, fmt.Sprintf("found %s (current %s)", rel.TagName, u.Current))
 
 	name := fmt.Sprintf("tinyagent-%s-%s", u.GOOS, u.GOARCH)
 	if u.GOOS == "windows" {
@@ -76,30 +88,41 @@ func (u *Updater) Run(ctx context.Context) (string, error) {
 		urls[a.Name] = a.URL
 	}
 	if urls[name] == "" {
-		return "", fmt.Errorf("release %s has no binary for %s/%s", rel.TagName, u.GOOS, u.GOARCH)
+		return fail(StepSelect, fmt.Errorf("release %s has no binary for %s/%s", rel.TagName, u.GOOS, u.GOARCH))
 	}
 	if urls["SHA256SUMS"] == "" {
-		return "", fmt.Errorf("release %s has no SHA256SUMS", rel.TagName)
+		return fail(StepSelect, fmt.Errorf("release %s has no SHA256SUMS", rel.TagName))
 	}
+	r.Step(StepSelect, fmt.Sprintf("%s for %s/%s", name, u.GOOS, u.GOARCH))
 
+	r.Step(StepChecksum, "SHA256SUMS")
 	sums, err := u.get(ctx, urls["SHA256SUMS"])
 	if err != nil {
-		return "", fmt.Errorf("download SHA256SUMS: %w", err)
+		return fail(StepChecksum, err)
 	}
 	want, err := checksumFor(sums, name)
 	if err != nil {
-		return "", err
+		return fail(StepChecksum, err)
 	}
-	bin, err := u.get(ctx, urls[name])
+
+	r.Step(StepDownload, urls[name])
+	bin, err := u.download(ctx, urls[name], name, r)
 	if err != nil {
-		return "", fmt.Errorf("download %s: %w", name, err)
+		return fail(StepDownload, err)
 	}
-	if got := sha256.Sum256(bin); hex.EncodeToString(got[:]) != want {
-		return "", fmt.Errorf("checksum mismatch for %s; not installing", name)
+	r.Step(StepDownload, fmt.Sprintf("received %s (%d bytes)", Size(int64(len(bin))), len(bin)))
+
+	got := sha256.Sum256(bin)
+	if hex.EncodeToString(got[:]) != want {
+		return fail(StepVerify, fmt.Errorf("checksum mismatch for %s; not installing", name))
 	}
+	r.Step(StepVerify, "sha256 "+want+" matches SHA256SUMS")
+
+	r.Step(StepInstall, "replacing "+u.ExePath)
 	if err := replace(u.ExePath, bin); err != nil {
-		return "", fmt.Errorf("install: %w", err)
+		return fail(StepInstall, err)
 	}
+	r.Step(StepDone, fmt.Sprintf("updated %s -> %s at %s", u.Current, rel.TagName, u.ExePath))
 	return fmt.Sprintf("updated %s -> %s (%s)", u.Current, rel.TagName, u.ExePath), nil
 }
 
@@ -184,6 +207,16 @@ func parse(v string) ([3]int, bool) {
 }
 
 func (u *Updater) get(ctx context.Context, url string) ([]byte, error) {
+	resp, err := u.open(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
+}
+
+// open GETs url and returns the response when the status is 200.
+func (u *Updater) open(ctx context.Context, url string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -193,11 +226,29 @@ func (u *Updater) get(ctx context.Context, url string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
 		return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
 	}
-	return io.ReadAll(resp.Body)
+	return resp, nil
+}
+
+// download GETs url and streams the body through the reporter's progress
+// writer as it arrives.
+func (u *Updater) download(ctx context.Context, url, name string, r Reporter) ([]byte, error) {
+	resp, err := u.open(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	w, finish := r.Download(name, resp.ContentLength)
+	var body io.Reader = resp.Body
+	if w != nil {
+		body = io.TeeReader(resp.Body, w)
+	}
+	data, err := io.ReadAll(body)
+	finish()
+	return data, err
 }
 
 func (u *Updater) getJSON(ctx context.Context, url string, out any) error {

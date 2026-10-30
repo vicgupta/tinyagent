@@ -2,7 +2,7 @@
 
 ### Machine-readable output
 
-`--json` makes stdout a UTF-8 JSONL event stream, with one complete JSON object and newline per event. It can be combined with `--no-stream`, `--read-only`, `--resume`, and `-o` (which still writes the trajectory JSON to its file). In this mode, streamed assistant text arrives as `assistant.delta` events while the model generates (unless `--no-stream`), live bash output is represented by events, and `--verbose` has no effect because tool calls and results are already events; the human summary and warnings remain on stderr. Setup failures before a run starts may leave stdout empty.
+`--json` makes stdout a UTF-8 JSONL event stream, with one complete JSON object and newline per event. It can be combined with `--no-stream`, `--read-only`, `--resume`, and `-o` (which still writes the trajectory JSON to its file). In this mode, streamed assistant text arrives as `assistant.delta` events while the model generates (unless `--no-stream`), live bash output is represented by events, and `--verbose` has no effect because tool calls and results are already events; the human summary and warnings remain on stderr. Setup failures before a run starts may leave stdout empty. With `--update`, stdout carries `update.step` and `update.result` events instead (see [Updating](subcommands.md#updating)).
 
 Every event has a `type`. Event names and fields in schema version 1 are:
 

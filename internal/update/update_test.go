@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -44,6 +45,7 @@ func fakeRelease(t *testing.T, tag string, bin []byte, sum string) *httptest.Ser
 				{"name":"tinyagent-linux-arm64","browser_download_url":"%s/bin"},
 				{"name":"SHA256SUMS","browser_download_url":"%s/sums"}]}`, tag, srv.URL, srv.URL)
 		case "/bin":
+			w.Header().Set("Content-Length", strconv.Itoa(len(bin)))
 			w.Write(bin)
 		case "/sums":
 			fmt.Fprintf(w, "%s  tinyagent-linux-amd64\n%s  tinyagent-linux-arm64\n", strings.Repeat("0", 64), sum)
