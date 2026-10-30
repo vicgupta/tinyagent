@@ -102,6 +102,7 @@ type options struct {
 	acp                                              bool
 	workflow, workflowName                           string
 	memory                                           memoryCmd
+	ratchet                                          ratchetFlags
 	lockdown                                         lockdownFlags
 	attempts                                         attemptFlags
 	verify                                           verifyFlags
@@ -202,6 +203,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.workflow, "workflow", "", "run the skill workflow in this YAML file on the task (-t): the router picks a workflow or skill by intent, and each stage runs automatically with the previous stage's output, gated by its success check")
 	fs.StringVar(&o.workflowName, "workflow-name", "", "with --workflow: run this workflow or skill instead of routing by the task's intent")
 	registerMemoryFlags(fs, &o.memory)
+	registerRatchetFlags(fs, &o.ratchet)
 	registerLockdownFlags(fs, &o.lockdown)
 	registerAttemptFlags(fs, &o.attempts)
 	return fs
@@ -271,6 +273,9 @@ func run() int {
 	}
 	if memoryCommandSet(fs) {
 		return runMemoryCommand(&o, fs, os.Stdout, os.Stderr)
+	}
+	if ratchetCommandSet(fs) {
+		return runRatchetCommand(&o, fs, os.Stdout, os.Stderr)
 	}
 	if o.acp {
 		if f := acpConflict(fs); f != "" {
@@ -612,6 +617,15 @@ func run() int {
 		return configFail(err)
 	}
 	fileAccess.AddDirs(extraDirs)
+	rules, err := loadRatchet(o.ratchet.off, root, &cfg)
+	if err != nil {
+		return configFail(err)
+	}
+	if rules != nil && rules.enforced > 0 {
+		if policy, err = permissions.New(cfg.Permissions); err != nil {
+			return configFail(err)
+		}
+	}
 	var reviewInfo *trajectory.ReviewInfo
 	if review != nil {
 		task, reviewInfo, err = collectReview(review, root, task, fileAccess, os.Stderr, o.verbose)
@@ -789,6 +803,7 @@ func run() int {
 		warn(trWarn)
 	}
 	startOutputFiles(outputFiles, cfg.ToolOutputFiles.MaxRuns, warn)
+	rules.start(a, events, warn)
 	if cfg.Skills {
 		loadSkills(a, root, pluginSkillSources(cfg), warn)
 	}

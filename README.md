@@ -106,7 +106,7 @@ tinyagent --read-only --cwd ~/src/project -t "Review error handling in pkg/api"
 cat review-task.md | tinyagent --read-only -t - -o review.json
 ```
 
-Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview and `tinyagent --help --verbose` for every flag. Subcommands are shortcuts for common flags: `tinyagent sandbox`, `tinyagent memory list`, `tinyagent planner --first`, `tinyagent plugins list`, `tinyagent tinygo status` (see [CLI reference](docs/subcommands.md)); each one alone, such as `tinyagent sandbox`, prints its help.
+Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview and `tinyagent --help --verbose` for every flag. Subcommands are shortcuts for common flags: `tinyagent sandbox`, `tinyagent memory list`, `tinyagent ratchet list`, `tinyagent planner --first`, `tinyagent plugins list`, `tinyagent tinygo status` (see [CLI reference](docs/subcommands.md)); each one alone, such as `tinyagent sandbox`, prints its help.
 
 ## Features
 
@@ -114,6 +114,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview and
 - Many providers: OpenAI, Anthropic, OpenRouter, Ollama, a ChatGPT subscription through Codex, and your own OpenAI-compatible endpoints.
 - Streaming text, `--json` event output, structured output, SQLite event logs and OpenTelemetry.
 - Project memory across runs, with approval before entries become active.
+- Project rules from agent failures (`tinyagent ratchet add`): each rule records its incident and an expiry or review condition, is added to the system prompt, and can be enforced as a permission deny rule; see [Project rules](docs/ratchet.md).
 - A task planner that can require a plan before any change.
 - Run budgets: turn cap, cost limit and token limit (`--token-limit`), with an 80% warning to the model; delegates, workers and `--attempts` share the budget, and a run that hits it can be resumed.
 - Verify before stop (`--verify-on-stop`): a run that changed files isn't accepted until a test or build command passes; otherwise it is marked unverified.
@@ -135,6 +136,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview and
 | Verify before stop (`--verify-on-stop`) | [docs/verify.md](docs/verify.md) |
 | `undo_file` and `--rewind` | [docs/undo.md](docs/undo.md) |
 | Project memory | [docs/memory.md](docs/memory.md) |
+| Project rules from agent failures (`ratchet`) | [docs/ratchet.md](docs/ratchet.md) |
 | Planner (`update_plan`, `--plan-first`) | [docs/planner.md](docs/planner.md) |
 | AGENTS.md, skills and skill workflows | [docs/project-context.md](docs/project-context.md) |
 | Plugins, WebAssembly modules, version store and TinyGo | [docs/plugins.md](docs/plugins.md) |

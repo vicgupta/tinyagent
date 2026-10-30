@@ -2,7 +2,7 @@
 
 ## Subcommands
 
-Five subcommands are shortcuts for existing flags. They rewrite the command line into those flags before parsing, so config, environment variables and precedence work the same either way, and every `--flag` form keeps working.
+Six subcommands are shortcuts for existing flags. They rewrite the command line into those flags before parsing, so config, environment variables and precedence work the same either way, and every `--flag` form keeps working.
 
 | Subcommand | Same as |
 |---|---|
@@ -12,6 +12,8 @@ Five subcommands are shortcuts for existing flags. They rewrite the command line
 | `tinyagent memory list` / `path` / `config` | `--memory-list` / `--memory-path` / `--memory-help` |
 | `tinyagent memory approve <id\|all>` | `--memory-approve <id\|all>` |
 | `tinyagent memory forget <id\|all> [--yes]` | `--memory-forget <id\|all> [--memory-yes]` |
+| `tinyagent ratchet add "<rule>" --incident "..." [--expires YYYY-MM-DD] [--review "..."] [--deny-tool t] [--deny-command c] [--deny-path p] [--deny-host h]` | `--ratchet-add "<rule>" --ratchet-incident "..." [--ratchet-expires ...] [--ratchet-review ...] [--ratchet-deny-tool ...] [--ratchet-deny-command ...] [--ratchet-deny-path ...] [--ratchet-deny-host ...]` |
+| `tinyagent ratchet list` / `path` / `remove <id>` | `--ratchet-list` / `--ratchet-path` / `--ratchet-remove <id>` |
 | `tinyagent planner [--first] [--file plan.md] -t "..."` | `--plan [--plan-first] [--plan-file plan.md]` |
 | `tinyagent plugins list` | `--list-plugins` |
 | `tinyagent plugins rollback <module> <sha256>` | `--plugins-rollback <module>@<sha256>` |
@@ -21,7 +23,8 @@ Five subcommands are shortcuts for existing flags. They rewrite the command line
 - Any other flag (`-t`, `-m`, `--cwd`, ...) can follow. `--` followed by words is the task: `tinyagent planner --first -- fix the bug`.
 - The first word counts as a subcommand only when it is exactly the name and is alone or followed by an option, `--`, a known action or `help`. So `tinyagent memory leaks in parser` is not a subcommand; it fails as before with "pass the task with -t". To start a task with one of these words, use `-t "memory ..."`.
 - An unknown option exits 2 with `unknown <sub> option --x (see tinyagent <sub> --help)`.
-- Help: `tinyagent <sub> --help`, `-h`, `tinyagent <sub> help` or `tinyagent help <sub>`. A bare `tinyagent <sub>` with nothing after it prints the same help. For `plugins` and `tinygo` that's always so; for `sandbox`, `memory` and `planner` it's so at an interactive terminal, and with stdin piped or redirected they still run with their flags (so without `-t` they exit 2 with `--task is required`, as before). Plain `tinyagent --help` (or `tinyagent` with no arguments at a terminal; with stdin piped and no arguments it still exits 2 with `--task is required`) shows the usage line and every subcommand (`sandbox`, `memory`, `planner`, `plugins`, `tinygo`) with a one-line description; `tinyagent --help --verbose` lists every flag, grouped into sections (task, model and provider, run control, verify before stop, attempts, review, output and logging, sandbox and permissions, context and tools, memory and planner, plugins and TinyGo, rewind, workflow and eval, setup and info).
+- Help: `tinyagent <sub> --help`, `-h`, `tinyagent <sub> help` or `tinyagent help <sub>`. A bare `tinyagent <sub>` with nothing after it prints the same help. For `ratchet`, `plugins` and `tinygo` that's always so; for `sandbox`, `memory` and `planner` it's so at an interactive terminal, and with stdin piped or redirected they still run with their flags (so without `-t` they exit 2 with `--task is required`, as before). Plain `tinyagent --help` (or `tinyagent` with no arguments at a terminal; with stdin piped and no arguments it still exits 2 with `--task is required`) shows the usage line and every subcommand (`sandbox`, `memory`, `ratchet`, `planner`, `plugins`, `tinygo`) with a one-line description; `tinyagent --help --verbose` lists every flag, grouped into sections (task, model and provider, run control, verify before stop, attempts, review, output and logging, sandbox and permissions, context and tools, project rules (ratchet), memory and planner, plugins and TinyGo, rewind, workflow and eval, setup and info).
+- `ratchet` records [project rules](ratchet.md) learned from agent failures.
 - `plugins rollback` and `plugins prune` manage the plugin module version store; see [Plugins](plugins.md#webassembly-plugin-modules).
 - `tinygo` manages the TinyGo compiler used to build Go plugin modules. **TinyGo is an external dependency, not part of tinyagent:** it is never embedded in the tinyagent binary or repository. tinyagent downloads a pinned TinyGo release on first use (or with `tinygo install`), verifies its SHA-256 checksum and caches it locally; `tinygo update` moves to the version pinned in the current build.
 
@@ -56,6 +59,18 @@ Five subcommands are shortcuts for existing flags. They rewrite the command line
 | `--memory-approve <id\|all>` | | Approve one pending project memory entry, or every pending entry, then exit |
 | `--memory-forget <id\|all>` | | Delete one project memory entry; `all` deletes every entry and requires `--memory-yes` |
 | `--memory-path` | | Print the project memory store path for `--cwd`, then exit |
+| `--ratchet-add <rule>` | | Record a [project rule](ratchet.md) in `<cwd>/.tinyagent/ratchet.toml`, then exit. Requires `--ratchet-incident`; without `--ratchet-expires` or `--ratchet-review` it expires in 90 days. Makes no model request and needs no credentials |
+| `--ratchet-incident <text>` | — | With `--ratchet-add`: the failure that led to the rule (required) |
+| `--ratchet-expires <YYYY-MM-DD>` | 90 days from today unless `--ratchet-review` | With `--ratchet-add`: from this date the rule is skipped and flagged as expired |
+| `--ratchet-review <text>` | — | With `--ratchet-add`: when to reconsider the rule; with it and no `--ratchet-expires` the rule has no expiry date |
+| `--ratchet-deny-tool <globs>` | by matcher | With `--ratchet-add`: enforce the rule as a permission deny rule for these tools (`\|`-separated globs); alone, denies those tools outright |
+| `--ratchet-deny-command <glob>` | — | With `--ratchet-add`: enforce the rule by denying shell commands matching this glob |
+| `--ratchet-deny-path <pattern>` | — | With `--ratchet-add`: enforce the rule by denying file edits to matching paths (`file_access` syntax) |
+| `--ratchet-deny-host <host>` | — | With `--ratchet-add`: enforce the rule by denying `web_fetch` to this host |
+| `--ratchet-list` | | Print the project rules with status (active or expired), incident and expiry or review condition, or a JSON array with `--json`, then exit |
+| `--ratchet-path` | | Print the project rules file path for `--cwd`, then exit |
+| `--ratchet-remove <id>` | | Delete the project rule with this id, then exit (exit 1 if there is none) |
+| `--no-ratchet` | off | Don't load `.tinyagent/ratchet.toml` for this run: no rules in the prompt and no enforced deny rules |
 | `--review` | off | Review the uncommitted changes (staged, unstaged and untracked) against `HEAD`: tinyagent collects the diff and runs a read-only review; `-t` adds focus instructions. See [Reviewing changes](runs.md#reviewing-changes) |
 | `--review-base <ref>` | — | Review what the current branch adds on top of `<ref>` (`merge-base..HEAD`), read-only. See [Reviewing changes](runs.md#reviewing-changes) |
 | `--review-commit <rev>` | — | Review the changes introduced by one commit, read-only. See [Reviewing changes](runs.md#reviewing-changes) |

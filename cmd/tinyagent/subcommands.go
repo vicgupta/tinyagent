@@ -66,6 +66,16 @@ var subcommands = []subcommand{
 		options: map[string]string{"list": "memory-list", "path": "memory-path", "approve": "memory-approve", "forget": "memory-forget", "yes": "memory-yes", "config-help": "memory-help"},
 	},
 	{
+		name: "ratchet", brief: "record project rules from agent failures: add|list|remove|path", summary: "record and manage project rules learned from agent failures, each with its incident and expiry (same as --ratchet-*)",
+		actions: map[string]subAction{
+			"add":    {flag: "ratchet-add", arg: true, desc: "record a rule with this text; needs --incident (--ratchet-add)"},
+			"list":   {flag: "ratchet-list", desc: "print every rule with its status, incident and expiry, then exit (--ratchet-list)"},
+			"remove": {flag: "ratchet-remove", arg: true, desc: "delete a rule by id (--ratchet-remove)"},
+			"path":   {flag: "ratchet-path", desc: "print the rules file path and exit (--ratchet-path)"},
+		},
+		options: map[string]string{"incident": "ratchet-incident", "expires": "ratchet-expires", "review": "ratchet-review", "deny-tool": "ratchet-deny-tool", "deny-command": "ratchet-deny-command", "deny-path": "ratchet-deny-path", "deny-host": "ratchet-deny-host"},
+	},
+	{
 		name: "planner", brief: "run a task with the update_plan planner (--first, --file)", summary: "run with the task planner (update_plan) on (same as --plan)",
 		base:    []string{"--plan"},
 		options: map[string]string{"first": "plan-first", "file": "plan-file"},
