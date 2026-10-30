@@ -2,7 +2,7 @@
 
 ## Subcommands
 
-Four subcommands are shortcuts for existing flags. They rewrite the command line into those flags before parsing, so config, environment variables and precedence work the same either way, and every `--flag` form keeps working.
+Five subcommands are shortcuts for existing flags. They rewrite the command line into those flags before parsing, so config, environment variables and precedence work the same either way, and every `--flag` form keeps working.
 
 | Subcommand | Same as |
 |---|---|
@@ -14,12 +14,16 @@ Four subcommands are shortcuts for existing flags. They rewrite the command line
 | `tinyagent memory forget <id\|all> [--yes]` | `--memory-forget <id\|all> [--memory-yes]` |
 | `tinyagent planner [--first] [--file plan.md] -t "..."` | `--plan [--plan-first] [--plan-file plan.md]` |
 | `tinyagent plugins list` | `--list-plugins` |
+| `tinyagent plugins rollback <module> <sha256>` | `--plugins-rollback <module>@<sha256>` |
+| `tinyagent plugins prune [--keep N]` | `--plugins-prune [--plugins-keep N]` |
+| `tinyagent tinygo install` / `update` / `status` | `--tinygo-install` / `--tinygo-update` / `--tinygo-status` |
 
 - Any other flag (`-t`, `-m`, `--cwd`, ...) can follow. `--` followed by words is the task: `tinyagent planner --first -- fix the bug`.
 - The first word counts as a subcommand only when it is exactly the name and is alone or followed by an option, `--`, a known action or `help`. So `tinyagent memory leaks in parser` is not a subcommand; it fails as before with "pass the task with -t". To start a task with one of these words, use `-t "memory ..."`.
 - An unknown option exits 2 with `unknown <sub> option --x (see tinyagent <sub> --help)`.
 - Help: `tinyagent <sub> --help`, `-h`, `tinyagent <sub> help` or `tinyagent help <sub>`. `tinyagent --help --verbose` lists every flag.
-- There is no WASM subcommand: the WebAssembly host is an internal library (see [Plugins](plugins.md#webassembly-code-plugins-experimental)).
+- `plugins rollback` and `plugins prune` manage the plugin module version store; see [Plugins](plugins.md#webassembly-plugin-modules).
+- `tinygo` manages the TinyGo compiler used to build Go plugin modules. **TinyGo is an external dependency, not part of tinyagent:** it is never embedded in the tinyagent binary or repository. tinyagent downloads a pinned TinyGo release on first use (or with `tinygo install`), verifies its SHA-256 checksum and caches it locally; `tinygo update` moves to the version pinned in the current build.
 
 ## Flags
 
@@ -40,6 +44,12 @@ Four subcommands are shortcuts for existing flags. They rewrite the command line
 | `--profile` | none | Apply one named profile from the config file's `profiles:` section over its base settings; see [Profiles](config.md#profiles) |
 | `--list-profiles` | | Print the profile names in the selected config file (`-c`) or the user config, sorted, one per line, then exit. Makes no model request and needs no credentials; see [Profiles](config.md#profiles) |
 | `--list-plugins` | | Print each configured plugin with its state, skills and `mcp.json` servers, then exit 0 (all load), 1 (a plugin is rejected or a configured server is invalid) or 2 (usage or config error). Makes no model request, needs no credentials and starts nothing; see [Plugins](plugins.md#plugins) |
+| `--plugins-rollback <module>@<sha256>` | | Point a stored plugin module at an older stored version, then exit; refused when that version needs wider permissions than the first load. See [Plugins](plugins.md#webassembly-plugin-modules) |
+| `--plugins-prune` | | Remove stored plugin module versions under `--cwd`'s `.tinyagent/modules`, keeping each module's current version and the `--plugins-keep` newest others, then exit |
+| `--plugins-keep <n>` | 5 | Versions besides current that `--plugins-prune` keeps per module |
+| `--tinygo-install` | | Download the pinned TinyGo release (an external project, not part of tinyagent) used to build Go plugin modules, verify its checksum and cache it, then exit |
+| `--tinygo-update` | | Install the TinyGo version pinned in this build if it isn't cached and remove other cached versions, then exit |
+| `--tinygo-status` | | Print the pinned and installed TinyGo versions, path and checksum state, then exit |
 | `--cwd` | `.` | Root directory; tools can't reach outside it |
 | `--memory` | off | Load this project's active [project memory](memory.md#project-memory) entries into the system prompt (overrides `memory.enabled`; `--memory=false` turns it off). `--resume` keeps the checkpoint's setting; a conflicting `--memory` exits 2 |
 | `--memory-list` | | Print the [project memory](memory.md#project-memory) entries for `--cwd` (pending first, then newest first), or a JSON array with `--json`, then exit. Makes no model request and needs no credentials |
@@ -71,6 +81,7 @@ Four subcommands are shortcuts for existing flags. They rewrite the command line
 | `--tool-output-files` | config `tool_output_files.enabled`, else off | Save the full text of tool results over `max_output_chars` to a per-run file the model can page with `read_file` and `grep`; `--tool-output-files=false` disables it. See [Tool output files](long-runs.md#tool-output-files) |
 | `--images` | config `images.enabled`, else off | Let vision-capable models see images: the `view_image` tool and MCP image pass-through; see [Images](long-runs.md#images) |
 | `--image <path>` | — | Attach a PNG, JPEG, GIF or WebP file to the task message (or a `--resume -t` follow-up). Repeatable, up to 10, each within `max_image_bytes`; needs `-t`; independent of `--images`. See [Attaching images to the task](long-runs.md#attaching-images-to-the-task) |
+| `--plan-first` | config `plan.require_first`, else off | Require a plan (`update_plan`) before the first workspace-changing tool call; implies `--plan`. See [Plan first](planner.md#plan-first) |
 | `--plan-file` | — | Mirror the current plan to this Markdown file after each checkpoint save (requires the plan tool) |
 | `--skills` | config `skills`, else off | Discover [Agent Skills](project-context.md#agent-skills) and offer the `skill` tool |
 | `--no-skills` | — | Disable skills even if the config enables them (`--no-skills=false` enables) |
@@ -83,6 +94,13 @@ Four subcommands are shortcuts for existing flags. They rewrite the command line
 | `--env` | config `environment`, else `local` | Where `bash`/`start_process` run: `local` (on the host) or `container` (Docker/Podman). See [Execution environments](sandbox.md#execution-environments) |
 | `--command-env` | config `command_env.inherit`, else `all` | Environment `bash`/`start_process` inherit: `all`, `core` or `none`. See [Command environment](sandbox.md#command-environment) |
 | `--redact-secrets` | config `redact_secrets.enabled`, else off | Mask known secret values as `[REDACTED]` in `bash`, process, MCP, `web_fetch` and hook output before the model sees it; `--redact-secrets=false` turns the config setting off. See [Redacting secrets from tool output](permissions.md#redacting-secrets-from-tool-output) |
+| `--workers` | config `subagents.workers.enabled`, else off | Add the `worker` and `apply_worker` tools: a worker subagent edits files in its own Git worktree on branch `tinyagent/<run>-w<n>`. See [Workers](long-runs.md#workers) |
+| `--workflow <file.yaml>` | | Run a skill workflow on the task. See [Skill workflows](project-context.md#skill-workflows) |
+| `--workflow-name <name>` | | With `--workflow`: run this workflow or skill instead of routing by intent |
+| `--eval <suite.yaml>` | | Run an eval suite and report pass rates; with `--dry-run`, print the trial matrix and a cost bound. See [eval-framework.md](eval-framework.md) |
+| `--eval-out <dir>` | | With `--eval`: directory for `results.jsonl`, `report.json`, `report.md` and trajectories |
+| `--eval-keep` | | With `--eval`: keep each trial's worktree |
+| `--eval-min-pass-rate <rate>` | | With `--eval`: exit 1 if any configuration's pass rate is below this (0-1) |
 | `-o, --output` | — | Trajectory JSON, rewritten after every step |
 | `--snapshots` | config `snapshots`, else off | Snapshot the workspace before every tool batch that can change files, so `--rewind` can restore it. Requires `-o`. See [Rewind workspace changes](undo.md#rewind-workspace-changes) |
 | `--rewind <trajectory>` | | Restore `--cwd` to a snapshot recorded in that trajectory, with `--to start\|<step>\|<snapshot-id>` (default `start`) and `--dry-run` to preview. Makes no model request |

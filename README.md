@@ -106,7 +106,7 @@ tinyagent --read-only --cwd ~/src/project -t "Review error handling in pkg/api"
 cat review-task.md | tinyagent --read-only -t - -o review.json
 ```
 
-Subcommands are shortcuts for common flags: `tinyagent sandbox`, `tinyagent memory list`, `tinyagent planner --first`, `tinyagent plugins list` (see [CLI reference](docs/subcommands.md)).
+Subcommands are shortcuts for common flags: `tinyagent sandbox`, `tinyagent memory list`, `tinyagent planner --first`, `tinyagent plugins list`, `tinyagent tinygo status` (see [CLI reference](docs/subcommands.md)).
 
 ## Features
 
@@ -117,6 +117,7 @@ Subcommands are shortcuts for common flags: `tinyagent sandbox`, `tinyagent memo
 - A task planner that can require a plan before any change.
 - Undo for file edits, workspace rewind, resume and follow-up runs.
 - Sandboxed commands with a network allowlist, permission rules, hooks, untrusted-content lockdown and file-access rules.
+- WebAssembly plugin modules run through Extism with permission checks, a version store, rollback and prune. Go source modules are built with TinyGo, an external dependency that tinyagent downloads on first use (pinned version, checksum-verified, cached locally, `tinyagent tinygo update` to update); TinyGo is never embedded in tinyagent.
 - AGENTS.md, Agent Skills, plugins, skill workflows, ACP editor integration and a GitHub Action.
 
 ## Documentation
@@ -132,7 +133,7 @@ Subcommands are shortcuts for common flags: `tinyagent sandbox`, `tinyagent memo
 | Project memory | [docs/memory.md](docs/memory.md) |
 | Planner (`update_plan`, `--plan-first`) | [docs/planner.md](docs/planner.md) |
 | AGENTS.md, skills and skill workflows | [docs/project-context.md](docs/project-context.md) |
-| Plugins, including experimental WebAssembly plugins | [docs/plugins.md](docs/plugins.md) |
+| Plugins, WebAssembly modules, version store and TinyGo | [docs/plugins.md](docs/plugins.md) |
 | Sandboxing, network allowlist, command environment, execution environments | [docs/sandbox.md](docs/sandbox.md) |
 | Permissions, hooks, lockdown, secret redaction, file access, extra directories | [docs/permissions.md](docs/permissions.md) |
 | Long runs, images, tool output files, apply_patch, subagents, workers, web fetch, LSP | [docs/long-runs.md](docs/long-runs.md) |
