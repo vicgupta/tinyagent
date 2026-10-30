@@ -181,6 +181,9 @@ func newACPSession(ctx context.Context, o *options, fs *flag.FlagSet, id, cwd st
 		cfg.ReadOnly = o.readOnly
 	}
 	applySandboxFlags(fs, &cfg, *o)
+	if err := applyVerifyFlags(fs, &cfg, o.verify); err != nil {
+		return nil, err
+	}
 	if flagWasSet(fs, "plan") {
 		cfg.Plan.Enabled = o.plan
 	}

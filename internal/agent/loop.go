@@ -193,6 +193,9 @@ type Agent struct {
 	// also end the parent: Interrupted, TimeLimitExceeded or
 	// CostLimitExceeded.
 	delegateStop string
+	// toolRefused is set by runTool when the last call was refused before
+	// it ran (lockdown, permission policy, pre_tool hook or the executor).
+	toolRefused bool
 }
 
 // Snapshotter captures the working directory.
@@ -592,6 +595,14 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			continue
 		}
 
+		if strings.Contains(msg.Content, SubmitMarker) || len(msg.ToolCalls) == 0 {
+			if done, again := a.verifyStop(t, v, msg); again || done != nil {
+				if done != nil {
+					return done
+				}
+				continue
+			}
+		}
 		if strings.Contains(msg.Content, SubmitMarker) {
 			sub := strings.TrimSpace(strings.Replace(msg.Content, SubmitMarker, "", 1))
 			if done := a.finishSuccess(ctx, t, v, msg, StatusSubmitted, sub, nil); done != nil {
@@ -680,6 +691,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 				a.recordMemorySaves()
 				a.recordLSPEvents()
 				out, images, isError = res.Text, res.Images, res.IsError
+				a.noteVerify(t, call, res)
 				switch stop := a.takeDelegateStop(); stop {
 				case StatusInterrupted, StatusTimeLimit:
 					// The delegate call stays pending; a resume closes it
@@ -897,13 +909,18 @@ func (a *Agent) maxFormatErrors() int {
 // tool authority. The permission policy runs first: a policy denial never
 // reaches hooks, and a policy allow still runs them.
 func (a *Agent) runTool(ctx context.Context, t *trajectory.Trajectory, call model.ToolCall) tools.Result {
+	a.toolRefused = false
 	if res, refused := a.lockdownRefuse(t, call); refused {
+		a.toolRefused = true
 		return res
 	}
 	if res, decided := a.permit(ctx, t, call); decided {
+		a.toolRefused = true
 		return res
 	}
-	if a.Hooks == nil || !a.Tools.Permits(call.Function.Name) {
+	permitted := a.Tools.Permits(call.Function.Name)
+	a.toolRefused = !permitted
+	if a.Hooks == nil || !permitted {
 		return a.lockdownExec(ctx, t, call)
 	}
 	in := hooks.Input{
@@ -914,6 +931,7 @@ func (a *Agent) runTool(ctx context.Context, t *trajectory.Trajectory, call mode
 	for _, r := range a.Hooks.Pre(ctx, in) {
 		a.hookRan(call, r)
 		if r.Denied {
+			a.toolRefused = true
 			return tools.Result{Text: tools.Truncate(fmt.Sprintf("error: denied by pre_tool hook %s: %s", r.Command, r.Reason), a.Tools.MaxOutputChars), IsError: true}
 		}
 	}

@@ -135,6 +135,9 @@ type AgentConfig struct {
 
 	// Plan configures the opt-in update_plan tool (off by default).
 	Plan Plan `yaml:"plan,omitempty"`
+	// VerifyOnStop configures the opt-in verify-before-stop guard (off by
+	// default).
+	VerifyOnStop VerifyOnStop `yaml:"verify_on_stop"`
 	// Images configures the opt-in view_image tool and MCP image
 	// pass-through (off by default).
 	Images Images `yaml:"images,omitempty"`
@@ -986,6 +989,7 @@ func Default() AgentConfig {
 		ToolOutputFiles:        ToolOutputFiles{Dir: DefaultToolOutputDir, MaxRuns: DefaultToolOutputMaxRuns},
 		Snapshots:              Snapshots{MaxFileBytes: DefaultSnapshotMaxFileBytes},
 		Memory:                 DefaultMemory(),
+		VerifyOnStop:           VerifyOnStop{MaxReprompts: DefaultVerifyMaxReprompts},
 	}
 }
 
@@ -1194,6 +1198,9 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.RedactSecrets.Validate(); err != nil {
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+	}
+	if err := cfg.VerifyOnStop.Validate(); err != nil {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.Memory.Validate(); err != nil {
