@@ -35,6 +35,10 @@ type AgentConfig struct {
 	// hosts (exact, "*.domain" or IP, optional ":port"), over HTTP and HTTPS
 	// through a filtering proxy. Empty keeps the network denied.
 	SandboxAllowedDomains []string `yaml:"sandbox_allowed_domains,omitempty"`
+	// TinyGo is an existing tinygo executable to build Go plugin modules
+	// with, instead of the pinned release TinyAgent downloads on first use.
+	// TinyGo is a separate project, never bundled with TinyAgent.
+	TinyGo string `yaml:"tinygo,omitempty"`
 	// Environment selects where bash and start_process commands run:
 	// "local" (the default, also "") or "container".
 	Environment string `yaml:"environment"`

@@ -361,64 +361,70 @@ const wantUsage = `Usage: tinyagent -t "<prompt>" [flags]    (or --task "<prompt
        tinyagent --transcript <trajectory.json>
        tinyagent --completion bash|zsh|fish
 
-  -h, --help                         show this help and exit
+  -h, --help                              show this help and exit
 Task:
-  -t, --task string                  task/prompt (required unless --resume or a review flag, where it adds focus instructions; with --resume of a finished run, the follow-up instruction; of a NeedsInput run, the answer); "-" reads it from stdin
-  -m, --model string                 provider/model; if unset, $AGENT_MODEL, then the config's model (default "openai/gpt-4o")
-      --reasoning-effort level       provider reasoning effort: none, minimal, low, medium, high, xhigh, or max
-      --fallback-model spec          provider/model to switch to when requests still fail with 429/5xx/network errors after retries (repeatable, tried in order; replaces fallback_models)
-      --no-fallback                  don't fall back to other models (clears fallback_models)
-      --openai-api api               openai provider transport: auto, responses, or chat
-  -c, --config path                  YAML config (default: user config if present, else built-in)
-      --profile name                 apply this named profile from the config file's profiles: section over its base settings
-      --cwd dir                      working directory (default ".")
-      --worktree [=name]             run in a new Git worktree on branch tinyagent/<name> from HEAD of the repo containing --cwd, kept afterwards (default name generated)
-      --resume path                  continue an unfinished run from a trajectory JSON checkpoint, a finished one with -t "<follow-up>", or answer a NeedsInput one with -t "<answer>"
-      --ask-user                     add the ask_user tool: the model may end the run with one question (status NeedsInput, exit 4), answered with --resume <trajectory> -t "<answer>"; requires -o (default off; config ask_user.enabled)
-      --acp                          serve the Agent Client Protocol on stdin/stdout for editors such as Zed and JetBrains IDEs (experimental): each session runs in the client's cwd with this config and flags; limits apply per prompt
+  -t, --task string                       task/prompt (required unless --resume or a review flag, where it adds focus instructions; with --resume of a finished run, the follow-up instruction; of a NeedsInput run, the answer); "-" reads it from stdin
+  -m, --model string                      provider/model; if unset, $AGENT_MODEL, then the config's model (default "openai/gpt-4o")
+      --reasoning-effort level            provider reasoning effort: none, minimal, low, medium, high, xhigh, or max
+      --fallback-model spec               provider/model to switch to when requests still fail with 429/5xx/network errors after retries (repeatable, tried in order; replaces fallback_models)
+      --no-fallback                       don't fall back to other models (clears fallback_models)
+      --openai-api api                    openai provider transport: auto, responses, or chat
+  -c, --config path                       YAML config (default: user config if present, else built-in)
+      --profile name                      apply this named profile from the config file's profiles: section over its base settings
+      --cwd dir                           working directory (default ".")
+      --worktree [=name]                  run in a new Git worktree on branch tinyagent/<name> from HEAD of the repo containing --cwd, kept afterwards (default name generated)
+      --resume path                       continue an unfinished run from a trajectory JSON checkpoint, a finished one with -t "<follow-up>", or answer a NeedsInput one with -t "<answer>"
+      --ask-user                          add the ask_user tool: the model may end the run with one question (status NeedsInput, exit 4), answered with --resume <trajectory> -t "<answer>"; requires -o (default off; config ask_user.enabled)
+      --acp                               serve the Agent Client Protocol on stdin/stdout for editors such as Zed and JetBrains IDEs (experimental): each session runs in the client's cwd with this config and flags; limits apply per prompt
 Review:
-      --review                       review the uncommitted changes (staged, unstaged and untracked) against HEAD: tinyagent collects the diff and runs a read-only review; -t adds focus instructions
-      --review-base ref              review what the current branch adds on top of this ref (merge-base..HEAD), read-only; -t adds focus instructions
-      --review-commit rev            review the changes introduced by this commit, read-only; -t adds focus instructions
+      --review                            review the uncommitted changes (staged, unstaged and untracked) against HEAD: tinyagent collects the diff and runs a read-only review; -t adds focus instructions
+      --review-base ref                   review what the current branch adds on top of this ref (merge-base..HEAD), read-only; -t adds focus instructions
+      --review-commit rev                 review the changes introduced by this commit, read-only; -t adds focus instructions
 Limits:
-      --step-limit n                 max model calls, 0 = unlimited
-      --cost-limit usd               max USD, 0 = unlimited
-      --time-limit sec               max wall-clock seconds, 0 = unlimited
-      --max-format-errors n          stop after this many consecutive steps of malformed tool calls (>= 1) (default 3)
-      --max-output-tokens n          per-request output-token budget sent to the provider, 0 = provider default (8192 for anthropic; config max_output_tokens)
-      --no-compact                   don't compact the history when it nears the context window
+      --step-limit n                      max model calls, 0 = unlimited
+      --cost-limit usd                    max USD, 0 = unlimited
+      --time-limit sec                    max wall-clock seconds, 0 = unlimited
+      --max-format-errors n               stop after this many consecutive steps of malformed tool calls (>= 1) (default 3)
+      --max-output-tokens n               per-request output-token budget sent to the provider, 0 = provider default (8192 for anthropic; config max_output_tokens)
+      --no-compact                        don't compact the history when it nears the context window
 Output:
-  -o, --output path                  write trajectory JSON
-  -v, --verbose                      print tool outputs
-      --no-stream                    wait for full responses instead of streaming
-      --json                         write run events as JSONL to stdout
-      --output-schema path           end the run with a JSON result validated against this JSON Schema file (printed to stdout)
-      --log-db [=path]               also log run events to SQLite (default .tinyagent/tinyagent.db under --cwd); --log-db=false turns config log_db off
-      --otel                         export the run as an OpenTelemetry trace over OTLP/HTTP (otel.endpoint, else OTEL_EXPORTER_OTLP_ENDPOINT, else localhost:4318); OTEL_* variables alone never turn it on (default off; config otel.enabled)
-      --no-agents-md                 don't add AGENTS.md (nearest, up to the repo root) to the system prompt
-      --scoped-agents-md             also deliver AGENTS.md files in directories below --cwd, appended to the first file tool result that touches a path there (default off; config scoped_agents_md)
-      --read-only                    allow only read_file, list_files, and grep; blocks edits and commands
-      --add-dir-read path            let the file tools (and a container) read this directory outside --cwd; repeatable; with --add-dir-write, replaces config additional_dirs
-      --add-dir-write path           let the file tools, --sandbox commands and a container read and write this directory outside --cwd; repeatable; with --add-dir-read, replaces config additional_dirs
-      --sandbox                      confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths
-      --sandbox-network              with --sandbox, allow commands to use the network
-      --sandbox-allow-domain host    with --sandbox, let commands reach only this host (name, *.domain or IP, optional :port) over HTTP(S) via a filtering proxy; repeatable, replaces sandbox_allowed_domains
-      --env name                     where bash and start_process run: local or container (default: config's environment, else local)
-      --command-env mode             environment bash and start_process inherit: all, core or none (default: config's command_env.inherit, else all)
-      --snapshots                    snapshot the workspace before every tool batch that can change files, for --rewind; requires -o (default off; config snapshots)
+  -o, --output path                       write trajectory JSON
+  -v, --verbose                           print tool outputs
+      --no-stream                         wait for full responses instead of streaming
+      --json                              write run events as JSONL to stdout
+      --output-schema path                end the run with a JSON result validated against this JSON Schema file (printed to stdout)
+      --log-db [=path]                    also log run events to SQLite (default .tinyagent/tinyagent.db under --cwd); --log-db=false turns config log_db off
+      --otel                              export the run as an OpenTelemetry trace over OTLP/HTTP (otel.endpoint, else OTEL_EXPORTER_OTLP_ENDPOINT, else localhost:4318); OTEL_* variables alone never turn it on (default off; config otel.enabled)
+      --no-agents-md                      don't add AGENTS.md (nearest, up to the repo root) to the system prompt
+      --scoped-agents-md                  also deliver AGENTS.md files in directories below --cwd, appended to the first file tool result that touches a path there (default off; config scoped_agents_md)
+      --read-only                         allow only read_file, list_files, and grep; blocks edits and commands
+      --add-dir-read path                 let the file tools (and a container) read this directory outside --cwd; repeatable; with --add-dir-write, replaces config additional_dirs
+      --add-dir-write path                let the file tools, --sandbox commands and a container read and write this directory outside --cwd; repeatable; with --add-dir-read, replaces config additional_dirs
+      --sandbox                           confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths
+      --sandbox-network                   with --sandbox, allow commands to use the network
+      --sandbox-allow-domain host         with --sandbox, let commands reach only this host (name, *.domain or IP, optional :port) over HTTP(S) via a filtering proxy; repeatable, replaces sandbox_allowed_domains
+      --env name                          where bash and start_process run: local or container (default: config's environment, else local)
+      --command-env mode                  environment bash and start_process inherit: all, core or none (default: config's command_env.inherit, else all)
+      --snapshots                         snapshot the workspace before every tool batch that can change files, for --rewind; requires -o (default off; config snapshots)
 Rewind:
-      --rewind path                  restore --cwd to a workspace snapshot recorded in this trajectory JSON (see --to and --dry-run)
-      --to target                    with --rewind: start (the baseline, the default), a step number (the state before that step's tool batch), or a snapshot id
-      --dry-run                      with --rewind: print what would change and write nothing
+      --rewind path                       restore --cwd to a workspace snapshot recorded in this trajectory JSON (see --to and --dry-run)
+      --to target                         with --rewind: start (the baseline, the default), a step number (the state before that step's tool batch), or a snapshot id
+      --dry-run                           with --rewind: print what would change and write nothing
 Other:
-  -V, --version                      print the version and exit
-      --update                       update to the latest release and exit
-      --check                        print the resolved config, model, provider key status, fallbacks, cwd and limits, then exit; makes no model request
-      --list-profiles                print the profile names in the selected config file (or the user config), sorted one per line, then exit; makes no model request
-      --list-plugins                 print each configured plugin, its skills and its mcp.json servers with their state, then exit 0 (all load), 1 (a plugin is rejected or a configured server is invalid) or 2 (usage or config error); makes no model request and starts nothing
-      --transcript path              print this trajectory JSON as a Markdown transcript (secrets redacted, long results truncated) and exit; makes no model request
-      --init-config                  write a commented starter config to the user config path (or -c), refusing to overwrite, and exit
-      --completion shell             print a flag-name completion script for this shell (bash, zsh or fish) and exit; load it with: source <(tinyagent --completion bash), or in zsh after compinit: source <(tinyagent --completion zsh), or in fish: tinyagent --completion fish | source; re-source it after --update
+  -V, --version                           print the version and exit
+      --update                            update to the latest release and exit
+      --check                             print the resolved config, model, provider key status, fallbacks, cwd and limits, then exit; makes no model request
+      --list-profiles                     print the profile names in the selected config file (or the user config), sorted one per line, then exit; makes no model request
+      --list-plugins                      print each configured plugin, its skills and its mcp.json servers with their state, then exit 0 (all load), 1 (a plugin is rejected or a configured server is invalid) or 2 (usage or config error); makes no model request and starts nothing
+      --plugins-prune                     remove stored plugin module versions under --cwd's .tinyagent/modules except each module's current one and the --plugins-keep newest others, then exit
+      --plugins-keep n                    versions besides current that --plugins-prune keeps per module (default 5)
+      --plugins-rollback module@sha256    point a stored plugin module at an older version, given as <module>@<sha256>, then exit; refused when that version needs wider permissions than the first load
+      --tinygo-install                    download the pinned TinyGo release (a separate project, not part of tinyagent) used to build Go plugin modules, verify its checksum and cache it, then exit; a verified cache is reused
+      --tinygo-update                     install the TinyGo version pinned in this build if it isn't cached and remove other cached versions, then exit
+      --tinygo-status                     print the pinned and installed TinyGo versions, path and checksum state, then exit
+      --transcript path                   print this trajectory JSON as a Markdown transcript (secrets redacted, long results truncated) and exit; makes no model request
+      --init-config                       write a commented starter config to the user config path (or -c), refusing to overwrite, and exit
+      --completion shell                  print a flag-name completion script for this shell (bash, zsh or fish) and exit; load it with: source <(tinyagent --completion bash), or in zsh after compinit: source <(tinyagent --completion zsh), or in fish: tinyagent --completion fish | source; re-source it after --update
 
 Examples:
   tinyagent -t "fix the failing test" -m anthropic/claude-sonnet-4

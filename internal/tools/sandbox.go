@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -156,6 +157,9 @@ func (s *Sandbox) NetworkMode() string {
 func (s *Sandbox) Describe() string {
 	return fmt.Sprintf("sandbox: %s; writable: %s; network: %s", s.Backend, strings.Join(s.Writable, ", "), s.NetworkMode())
 }
+
+// Command returns argv confined by the sandbox, like bash commands are.
+func (s *Sandbox) Command(ctx context.Context, argv []string) *exec.Cmd { return s.wrap(ctx, argv) }
 
 // bashPath resolves bash with tinyagent's own PATH, so the sandbox wrapper
 // finds it even when command_env withholds PATH from the command.

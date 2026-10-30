@@ -49,6 +49,10 @@ type DataModule struct {
 	Name  string
 	Kind  DataKind
 	Taint Tainter // optional; switches are refused once tainted
+	// Store, when set, keeps every version under StoreName; Set adds the
+	// version and makes it current.
+	Store     *ModuleStore
+	StoreName string
 
 	mu   sync.Mutex
 	cur  atomic.Pointer[DataVersion]
@@ -73,8 +77,57 @@ func (d *DataModule) Set(content []byte) (*DataVersion, error) {
 	if old := d.cur.Load(); old != nil && old.Hash == v.Hash {
 		return old, nil
 	}
+	if d.Store != nil {
+		if _, err := d.Store.Put(d.StoreName, d.ext(content), content, Permissions{}, nil); err != nil {
+			return nil, err
+		}
+		if err := d.Store.SetCurrent(d.StoreName, v.Hash); err != nil {
+			return nil, err
+		}
+	}
 	d.prev = d.cur.Swap(v)
 	return v, nil
+}
+
+func (d *DataModule) ext(content []byte) string {
+	if d.Kind != DataRetry {
+		return "md"
+	}
+	if t := bytes.TrimSpace(content); len(t) > 0 && t[0] == '{' {
+		return "json"
+	}
+	return "toml"
+}
+
+// LoadStored makes the store's verified current version active.
+func (d *DataModule) LoadStored() (*DataVersion, error) {
+	if d.Store == nil {
+		return nil, errors.New("data module has no store")
+	}
+	b, _, err := d.Store.ReadCurrent(d.StoreName)
+	if err != nil {
+		return nil, err
+	}
+	v, err := validateData(d.Kind, b)
+	if err != nil {
+		return nil, fmt.Errorf("data module %s: %w", d.Name, err)
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.prev = d.cur.Swap(v)
+	return v, nil
+}
+
+// RollbackTo moves the store's current pointer to an older hash and
+// activates it; refused after taint.
+func (d *DataModule) RollbackTo(hash string) (*DataVersion, error) {
+	if d.Store == nil {
+		return nil, errors.New("data module has no store")
+	}
+	if err := d.Store.Rollback(d.StoreName, hash, d.Taint); err != nil {
+		return nil, err
+	}
+	return d.LoadStored()
 }
 
 // SetFile is Set with content read from path.

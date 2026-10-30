@@ -38,7 +38,8 @@ type Manifest struct {
 	Name        string
 	Version     string
 	Description string
-	Root        string   // filesystem-resolved plugin root
+	Root        string // filesystem-resolved plugin root
+	Extensions  map[string]json.RawMessage
 	Warnings    []string // non-fatal problems (unknown fields, bad extensions)
 }
 
@@ -157,6 +158,8 @@ func parseManifest(root string, data []byte) (*Manifest, error) {
 		var obj map[string]json.RawMessage
 		if json.Unmarshal(v, &obj) != nil || obj == nil {
 			m.Warnings = append(m.Warnings, ManifestFile+": extensions is not an object; ignored")
+		} else {
+			m.Extensions = obj
 		}
 	}
 	var unknown []string
