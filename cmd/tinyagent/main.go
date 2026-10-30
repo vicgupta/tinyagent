@@ -94,6 +94,7 @@ type options struct {
 	pluginsPrune                                     bool
 	pluginsKeep                                      int
 	pluginsRollback                                  string
+	tinygoInstall, tinygoUpdate, tinygoStatus        bool
 	initConfig                                       bool
 	review                                           bool
 	reviewBase, reviewCommit                         string
@@ -188,6 +189,9 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.pluginsPrune, "plugins-prune", false, "remove stored plugin module versions under --cwd's .tinyagent/modules except each module's current one and the --plugins-keep newest others, then exit")
 	fs.IntVar(&o.pluginsKeep, "plugins-keep", plugins.DefaultKeep, "versions besides current that --plugins-prune keeps per module")
 	fs.StringVar(&o.pluginsRollback, "plugins-rollback", "", "point a stored plugin module at an older version, given as <module>@<sha256>, then exit; refused when that version needs wider permissions than the first load")
+	fs.BoolVar(&o.tinygoInstall, "tinygo-install", false, "download the pinned TinyGo release (a separate project, not part of tinyagent) used to build Go plugin modules, verify its checksum and cache it, then exit; a verified cache is reused")
+	fs.BoolVar(&o.tinygoUpdate, "tinygo-update", false, "install the TinyGo version pinned in this build if it isn't cached and remove other cached versions, then exit")
+	fs.BoolVar(&o.tinygoStatus, "tinygo-status", false, "print the pinned and installed TinyGo versions, path and checksum state, then exit")
 	fs.BoolVar(&o.listPlugins, "list-plugins", false, "print each configured plugin, its skills and its mcp.json servers with their state, then exit 0 (all load), 1 (a plugin is rejected or a configured server is invalid) or 2 (usage or config error); makes no model request and starts nothing")
 	fs.BoolVar(&o.acp, "acp", false, "serve the Agent Client Protocol on stdin/stdout for editors such as Zed and JetBrains IDEs (experimental): each session runs in the client's cwd with this config and flags; limits apply per prompt")
 	fs.StringVar(&o.completion, "completion", "", "print a flag-name completion script for this shell (bash, zsh or fish) and exit; load it with: source <(tinyagent --completion bash), or in zsh after compinit: source <(tinyagent --completion zsh), or in fish: tinyagent --completion fish | source; re-source it after --update")
@@ -243,6 +247,9 @@ func run() int {
 	}
 	if o.listPlugins {
 		return runListPlugins(&o, fs, os.Stdout)
+	}
+	if o.tinygoInstall || o.tinygoUpdate || o.tinygoStatus {
+		return runTinygo(&o, os.Stdout, os.Stderr)
 	}
 	if o.pluginsPrune || flagWasSet(fs, "plugins-rollback") {
 		return runPluginStore(&o, os.Stdout, os.Stderr)
@@ -1733,7 +1740,7 @@ var usageGroups = []struct {
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "otel", ""}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
-	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "list-profiles", ""}, {"", "list-plugins", ""}, {"", "plugins-prune", ""}, {"", "plugins-keep", "n"}, {"", "plugins-rollback", "module@sha256"}, {"", "transcript", "path"}, {"", "init-config", ""}, {"", "completion", "shell"}}},
+	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "list-profiles", ""}, {"", "list-plugins", ""}, {"", "plugins-prune", ""}, {"", "plugins-keep", "n"}, {"", "plugins-rollback", "module@sha256"}, {"", "tinygo-install", ""}, {"", "tinygo-update", ""}, {"", "tinygo-status", ""}, {"", "transcript", "path"}, {"", "init-config", ""}, {"", "completion", "shell"}}},
 }
 
 func printUsage(w io.Writer, fs *flag.FlagSet) {
