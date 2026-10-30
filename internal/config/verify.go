@@ -27,6 +27,13 @@ type VerifyOnStop struct {
 	// command matches any of them also verifies. When neither Commands nor
 	// Patterns is set, DefaultVerifyPatterns apply.
 	Patterns []string `yaml:"patterns,omitempty"`
+	// Checks are computational sensors: fast, deterministic bash commands
+	// (lint, type check, tests) that pass on exit 0. When the model gives a
+	// final answer with changes pending, the harness runs them itself, in
+	// the listed order (put the cheapest first), stopping at the first
+	// failure. Each also counts as a verification command when the model
+	// runs it. --verify-check replaces this list. Empty by default.
+	Checks []string `yaml:"checks,omitempty"`
 	// MaxReprompts caps how many times one run is sent back to verify
 	// (1 to MaxVerifyReprompts; default DefaultVerifyMaxReprompts). After
 	// the cap the run stops and is marked unverified.
@@ -51,6 +58,11 @@ func (v VerifyOnStop) Validate() error {
 	for _, c := range v.Commands {
 		if strings.TrimSpace(c) == "" {
 			return fmt.Errorf("verify_on_stop.commands: empty command")
+		}
+	}
+	for _, c := range v.Checks {
+		if strings.TrimSpace(c) == "" {
+			return fmt.Errorf("verify_on_stop.checks: empty command")
 		}
 	}
 	for _, p := range v.Patterns {
