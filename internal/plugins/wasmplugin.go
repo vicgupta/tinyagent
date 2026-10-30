@@ -161,6 +161,11 @@ type pooled struct {
 // swaps in a module whose file changed, under the permission list pinned at
 // first load.
 type WasmPool struct {
+	// Store, when set, keeps every version of each module; activation loads
+	// the version its current pointer names (verifying its hash), and a
+	// changed plugin file is added as a new version and made current.
+	Store *ModuleStore
+
 	mu      sync.Mutex
 	modules map[string]*pooled // plugin root + "\x00" + module name
 }
@@ -251,6 +256,11 @@ func (p *WasmPool) activate(ctx context.Context, m *Manifest, d WasmDecl, g Sess
 	if len(want.HostFuncs) > 0 {
 		return nil, fmt.Errorf("%w: host function %q is not offered by tinyagent", ErrPermission, want.HostFuncs[0])
 	}
+	if p.Store != nil {
+		if wasm, hash, want, err = p.fromStore(m, d, wasm, hash, want); err != nil {
+			return nil, err
+		}
+	}
 	wm := WasmManifest{Name: d.Name, Version: d.Version + "+" + hash[:12], Requires: want}
 	key := m.Root + "\x00" + d.Name
 	if e, ok := p.modules[key]; ok {
@@ -277,6 +287,35 @@ func (p *WasmPool) activate(ctx context.Context, m *Manifest, d WasmDecl, g Sess
 	}
 	p.modules[key] = &pooled{host: h, mod: mod, hash: hash}
 	return mod, nil
+}
+
+// fromStore adds the plugin's file to the store when it changed since the
+// last ingest (refusing permissions wider than the first load's), then
+// returns the verified current version and its permissions.
+func (p *WasmPool) fromStore(m *Manifest, d WasmDecl, wasm []byte, hash string, want Permissions) ([]byte, string, Permissions, error) {
+	sn := StoreName(m.Name, d.Name)
+	if p.Store.Source(sn) != hash {
+		if pin, err := p.Store.Pinned(sn); err == nil {
+			if err := want.subsetOf(pin); err != nil {
+				return nil, "", want, fmt.Errorf("new version widens the first load's permissions: %w", err)
+			}
+		}
+		decl, _ := json.Marshal(d)
+		if _, err := p.Store.Put(sn, "wasm", wasm, want, decl); err != nil {
+			return nil, "", want, err
+		}
+		if err := p.Store.SetCurrent(sn, hash); err != nil {
+			return nil, "", want, err
+		}
+		if err := p.Store.SetSource(sn, hash); err != nil {
+			return nil, "", want, err
+		}
+	}
+	b, meta, err := p.Store.ReadCurrent(sn)
+	if err != nil {
+		return nil, "", want, err
+	}
+	return b, meta.Hash, meta.Permissions, nil
 }
 
 // Close tears down every module.

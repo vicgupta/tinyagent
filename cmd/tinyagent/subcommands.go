@@ -37,6 +37,8 @@ type subcommand struct {
 type subAction struct {
 	flag string
 	arg  bool
+	// arg2 means the action takes two values, joined as "<a>@<b>".
+	arg2 bool
 	desc string
 	// withBase keeps the base flags (sandbox network still runs sandboxed).
 	withBase bool
@@ -68,7 +70,12 @@ var subcommands = []subcommand{
 	},
 	{
 		name: "plugins", summary: "inspect configured plugins (same as --list-plugins)",
-		actions: map[string]subAction{"list": {flag: "list-plugins", desc: "print each plugin, its skills and servers, then exit (--list-plugins)"}},
+		actions: map[string]subAction{
+			"list":     {flag: "list-plugins", desc: "print each plugin, its skills and servers, then exit (--list-plugins)"},
+			"prune":    {flag: "plugins-prune", desc: "keep only current + the newest --keep stored module versions (--plugins-prune)"},
+			"rollback": {flag: "plugins-rollback", arg2: true, desc: "point <module> at stored version <sha256> (--plugins-rollback <module>@<sha256>)"},
+		},
+		options: map[string]string{"keep": "plugins-keep"},
 	},
 }
 
@@ -120,7 +127,13 @@ func expandSubcommand(args []string) ([]string, *subHelp, error) {
 		}
 		if act, ok := s.actions[a]; ok && i == 0 {
 			action = !act.withBase
-			if act.arg {
+			if act.arg2 {
+				if i+2 >= len(rest) {
+					return nil, nil, fmt.Errorf("%s %s needs two values", s.name, a)
+				}
+				out = append(out, "--"+act.flag, rest[i+1]+"@"+rest[i+2])
+				i += 2
+			} else if act.arg {
 				if i+1 >= len(rest) {
 					return nil, nil, fmt.Errorf("%s %s needs a value", s.name, a)
 				}
@@ -209,6 +222,9 @@ func printSubcommandHelp(w io.Writer, s *subcommand) {
 			arg := ""
 			if a.arg {
 				arg = " <value>"
+			}
+			if a.arg2 {
+				arg = " <module> <sha256>"
 			}
 			fmt.Fprintf(w, "  %-22s %s\n", k+arg, a.desc)
 		}

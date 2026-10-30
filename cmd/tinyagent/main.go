@@ -25,6 +25,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/outschema"
 	"github.com/vicgupta/tinyagent/internal/permissions"
+	"github.com/vicgupta/tinyagent/internal/plugins"
 	"github.com/vicgupta/tinyagent/internal/sandboxnet"
 	"github.com/vicgupta/tinyagent/internal/skills"
 	"github.com/vicgupta/tinyagent/internal/telemetry"
@@ -90,6 +91,9 @@ type options struct {
 	completion                                       string
 	showHelp, showVersion, doUpdate, check           bool
 	listProfiles, listPlugins                        bool
+	pluginsPrune                                     bool
+	pluginsKeep                                      int
+	pluginsRollback                                  string
 	initConfig                                       bool
 	review                                           bool
 	reviewBase, reviewCommit                         string
@@ -181,6 +185,9 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.initConfig, "init-config", false, "write a commented starter config to the user config path (or -c), refusing to overwrite, and exit")
 	fs.BoolVar(&o.check, "check", false, "print the resolved config, model, provider key status, fallbacks, cwd and limits, then exit; makes no model request")
 	fs.BoolVar(&o.listProfiles, "list-profiles", false, "print the profile names in the selected config file (or the user config), sorted one per line, then exit; makes no model request")
+	fs.BoolVar(&o.pluginsPrune, "plugins-prune", false, "remove stored plugin module versions under --cwd's .tinyagent/modules except each module's current one and the --plugins-keep newest others, then exit")
+	fs.IntVar(&o.pluginsKeep, "plugins-keep", plugins.DefaultKeep, "versions besides current that --plugins-prune keeps per module")
+	fs.StringVar(&o.pluginsRollback, "plugins-rollback", "", "point a stored plugin module at an older version, given as <module>@<sha256>, then exit; refused when that version needs wider permissions than the first load")
 	fs.BoolVar(&o.listPlugins, "list-plugins", false, "print each configured plugin, its skills and its mcp.json servers with their state, then exit 0 (all load), 1 (a plugin is rejected or a configured server is invalid) or 2 (usage or config error); makes no model request and starts nothing")
 	fs.BoolVar(&o.acp, "acp", false, "serve the Agent Client Protocol on stdin/stdout for editors such as Zed and JetBrains IDEs (experimental): each session runs in the client's cwd with this config and flags; limits apply per prompt")
 	fs.StringVar(&o.completion, "completion", "", "print a flag-name completion script for this shell (bash, zsh or fish) and exit; load it with: source <(tinyagent --completion bash), or in zsh after compinit: source <(tinyagent --completion zsh), or in fish: tinyagent --completion fish | source; re-source it after --update")
@@ -236,6 +243,9 @@ func run() int {
 	}
 	if o.listPlugins {
 		return runListPlugins(&o, fs, os.Stdout)
+	}
+	if o.pluginsPrune || flagWasSet(fs, "plugins-rollback") {
+		return runPluginStore(&o, os.Stdout, os.Stderr)
 	}
 	if memoryCommandSet(fs) {
 		return runMemoryCommand(&o, fs, os.Stdout, os.Stderr)
@@ -1723,7 +1733,7 @@ var usageGroups = []struct {
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "otel", ""}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
-	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "list-profiles", ""}, {"", "list-plugins", ""}, {"", "transcript", "path"}, {"", "init-config", ""}, {"", "completion", "shell"}}},
+	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "list-profiles", ""}, {"", "list-plugins", ""}, {"", "plugins-prune", ""}, {"", "plugins-keep", "n"}, {"", "plugins-rollback", "module@sha256"}, {"", "transcript", "path"}, {"", "init-config", ""}, {"", "completion", "shell"}}},
 }
 
 func printUsage(w io.Writer, fs *flag.FlagSet) {
