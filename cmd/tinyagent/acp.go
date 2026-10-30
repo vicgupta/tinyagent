@@ -731,7 +731,7 @@ func toolKind(name string) string {
 	switch name {
 	case "read_file":
 		return "read"
-	case "write_file", "edit_file", "apply_patch":
+	case "write_file", "edit_file", "apply_patch", tools.UndoToolName:
 		return "edit"
 	case "grep", "list_files":
 		return "search"

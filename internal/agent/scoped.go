@@ -154,7 +154,7 @@ func (a *Agent) deliverScoped(t *trajectory.Trajectory, call model.ToolCall, res
 func (a *Agent) scopedOn() bool { return a.ScopedAgentsMD && !a.SkipAgentsMD }
 
 // writeTools are the built-in tools that write the files they touch.
-var writeTools = map[string]bool{"write_file": true, "edit_file": true, tools.ApplyPatchToolName: true}
+var writeTools = map[string]bool{"write_file": true, "edit_file": true, tools.ApplyPatchToolName: true, tools.UndoToolName: true}
 
 // scopedSkipped reports a scoped AGENTS.md that was not delivered, once per
 // file and reason per invocation, and reports whether this was the first

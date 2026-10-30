@@ -98,7 +98,13 @@ func TestApplyPatchAllOperations(t *testing.T) { // AC3
 		"c.go":  "package b\n\nconst X = 3\n",
 		"d.txt": "hello\nworld\n",
 	}
-	if got := snapshot(t, root); !sameFiles(got, want) {
+	got := snapshot(t, root)
+	for k := range got {
+		if strings.HasPrefix(k, ".tinyagent/") {
+			delete(got, k) // undo_file snapshots
+		}
+	}
+	if !sameFiles(got, want) {
 		t.Errorf("files = %q", got)
 	}
 }

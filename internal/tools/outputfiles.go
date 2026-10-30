@@ -269,7 +269,7 @@ func TruncateWithNotice(body, notice string, max int) (string, bool) {
 // their output feeds edits, and a placeholder written back would corrupt
 // files (file_access is the control for secret files).
 var unredactedTools = map[string]bool{
-	"read_file": true, "write_file": true, "edit_file": true, "list_files": true, "grep": true,
+	"read_file": true, "write_file": true, "edit_file": true, UndoToolName: true, "list_files": true, "grep": true,
 	ApplyPatchToolName: true, ViewImageToolName: true, LSPToolName: true, skills.ToolName: true,
 }
 

@@ -116,11 +116,18 @@ type scope struct {
 	fa       *FileAccess
 	extra    []ExtraDir
 	readOnly bool
+	// snapDir, when set, is the undo snapshot directory: each built-in
+	// write snapshots the file's current contents first (see snapshot).
+	snapDir string
 }
 
 // scope returns e's path scope for the built-in file tools.
 func (e *Executor) scope() *scope {
-	return &scope{fa: e.FileAccess, extra: e.ExtraDirs, readOnly: e.ReadOnly}
+	sc := &scope{fa: e.FileAccess, extra: e.ExtraDirs, readOnly: e.ReadOnly}
+	if !e.ReadOnly && e.Root != "" {
+		sc.snapDir = e.undoSnapDir()
+	}
+	return sc
 }
 
 func faScope(fa *FileAccess) *scope { return &scope{fa: fa} }
@@ -182,6 +189,15 @@ func (s *scope) checkWrite(full, name string) error {
 		}
 	}
 	return s.fa.CheckWrite(full, name)
+}
+
+// snapshot takes the undo snapshot of full just before a built-in file tool
+// changes it (after checkWrite passed). A nil scope snapshots nothing.
+func (s *scope) snapshot(full string) error {
+	if s == nil {
+		return nil
+	}
+	return undoSnapshot(s.snapDir, full)
 }
 
 // hidden reports whether a walk should hide full.

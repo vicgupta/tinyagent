@@ -40,5 +40,8 @@ func editFile(root, path, oldStr, newStr string, replaceAll bool, sc *scope) (in
 	if err != nil {
 		return 0, err
 	}
+	if err := sc.snapshot(full); err != nil {
+		return 0, err
+	}
 	return n, os.WriteFile(full, []byte(strings.ReplaceAll(content, oldStr, newStr)), fi.Mode().Perm())
 }
