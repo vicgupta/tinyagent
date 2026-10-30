@@ -59,9 +59,10 @@ type Check struct {
 
 // Limits are per-trial run limits passed to the child tinyagent.
 type Limits struct {
-	StepLimit int     `yaml:"step_limit"`
-	CostLimit float64 `yaml:"cost_limit"`
-	TimeLimit int     `yaml:"time_limit"` // seconds
+	StepLimit  int     `yaml:"step_limit"`
+	CostLimit  float64 `yaml:"cost_limit"`
+	TokenLimit int     `yaml:"token_limit"` // input+output tokens
+	TimeLimit  int     `yaml:"time_limit"`  // seconds
 }
 
 var idRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -175,7 +176,7 @@ func (s *Suite) validate(knownProfile func(string) bool) error {
 				c.TimeoutSeconds = DefaultCheckTimeout
 			}
 		}
-		if t.Limits.StepLimit < 0 || t.Limits.CostLimit < 0 || t.Limits.TimeLimit < 0 {
+		if t.Limits.StepLimit < 0 || t.Limits.CostLimit < 0 || t.Limits.TokenLimit < 0 || t.Limits.TimeLimit < 0 {
 			return fmt.Errorf("%s: limits must be >= 0", where)
 		}
 		if t.Repo == "" {

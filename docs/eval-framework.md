@@ -203,7 +203,7 @@ Strict keys: any unknown key, at any level, is an error. The suite is fully vali
 | `checks_on_limit` | bool | no | `true` | Run checks even when the trial ended on a limit. |
 | `output_schema` | path | no | — | JSON Schema for the final result (as `--output-schema`). |
 | `expected_json` | object | no | — | Expected-JSON assertions on the structured result. Key name and matching semantics are not fixed by the draft (**Recommendation:** subset match). |
-| `limits` | map | no | profile/config | Per-task limits. **Recommendation:** keys mirroring existing flags: `step_limit`, `cost_limit`, `time_limit`. |
+| `limits` | map | no | profile/config | Per-task limits. **Recommendation:** keys mirroring existing flags: `step_limit`, `cost_limit`, `token_limit`, `time_limit`. |
 
 ### Check
 

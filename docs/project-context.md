@@ -81,7 +81,7 @@ workflows:
         check_timeout: 600
 ```
 
-Settings in `defaults` or on a stage: `model`, `profile`, `step_limit`, `cost_limit`, `time_limit`, `retries`, and `check_timeout` (seconds). The defaults are 1 retry (at most 5), 50 steps, a 300 second check timeout, and otherwise your usual config. Flags you pass with `--workflow` (such as `--sandbox` or `-m`) are forwarded to every stage, and stage settings override them. Workflows are sequential and have at most 20 stages. A complete example is in [docs/workflows](workflows).
+Settings in `defaults` or on a stage: `model`, `profile`, `step_limit`, `cost_limit`, `token_limit`, `time_limit`, `retries`, and `check_timeout` (seconds). The defaults are 1 retry (at most 5), 50 steps, a 300 second check timeout, and otherwise your usual config. Flags you pass with `--workflow` (such as `--sandbox` or `-m`) are forwarded to every stage, and stage settings override them. Workflows are sequential and have at most 20 stages. A complete example is in [docs/workflows](workflows).
 
 **Routing.** `--workflow-name name` runs that workflow, or a single skill, directly. Otherwise the router matches the task against each workflow's intent and each skill's intent line. A clear best match runs. A tie or no match falls back to `default`, or exits 2 with an error suggesting `--workflow-name`, before any model call.
 

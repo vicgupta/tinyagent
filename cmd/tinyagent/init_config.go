@@ -12,6 +12,7 @@ const starterConfig = `# tinyagent user config. Flags override these values. Ful
 # model: openai/gpt-4o        # same <provider>/<model> syntax as -m
 # step_limit: 50
 # cost_limit: 2.0
+# token_limit: 0              # max input+output tokens, delegates and workers included (0 = unlimited)
 # wall_time_seconds: 1800
 # read_only: false
 # redact_secrets:             # mask known secret values in command, MCP, web_fetch and hook output

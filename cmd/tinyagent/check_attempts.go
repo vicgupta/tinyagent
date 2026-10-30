@@ -55,7 +55,7 @@ func checkAttempts(fs *flag.FlagSet, o *options, cfg config.AgentConfig) (string
 		name = "<generated>"
 	}
 	n := len(p.models)
-	return fmt.Sprintf("up to %d runs (%s; %s), %s (%s, timeout %s), stop_on_pass %t, keep %s, worktrees %s-a<N>; cost and time limits are shared by all attempts, which can cost up to %dx a single run",
+	return fmt.Sprintf("up to %d runs (%s; %s), %s (%s, timeout %s), stop_on_pass %t, keep %s, worktrees %s-a<N>; cost, token and time limits are shared by all attempts, which can cost up to %dx a single run",
 		n, strings.Join(shown, ", "), modelSrc,
 		countNoun(len(p.checks), "check"), checkSrc, strings.Join(timeouts, ", "),
 		cfg.Attempts.StopsOnPass(), cfg.Attempts.KeepMode(),

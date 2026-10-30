@@ -35,7 +35,7 @@ func TestCheckAttemptsPlan(t *testing.T) {
 	}
 	want := "up to 3 runs (anthropic/claude-sonnet-4-5, anthropic/claude-sonnet-4-5, anthropic/claude-sonnet-4-5; from -m), " +
 		"1 check (from --attempt-check, timeout 90s), stop_on_pass true, keep all, worktrees " +
-		filepath.Join(top, worktreeDir, "best") + "-a<N>; cost and time limits are shared by all attempts, which can cost up to 3x a single run"
+		filepath.Join(top, worktreeDir, "best") + "-a<N>; cost, token and time limits are shared by all attempts, which can cost up to 3x a single run"
 	if got := reportLine(t, stdout, "attempts"); got != want {
 		t.Errorf("attempts line\n got %q\nwant %q", got, want)
 	}
@@ -57,7 +57,7 @@ func TestCheckAttemptsPlan(t *testing.T) {
 	}
 	want = "up to 2 runs (anthropic/claude-sonnet-4-5, openai/gpt-4o; from --attempt-model), " +
 		"2 checks (from config, timeout 600s, 30s), stop_on_pass false, keep failed, worktrees " +
-		filepath.Join(top, worktreeDir, "<generated>") + "-a<N>; cost and time limits are shared by all attempts, which can cost up to 2x a single run"
+		filepath.Join(top, worktreeDir, "<generated>") + "-a<N>; cost, token and time limits are shared by all attempts, which can cost up to 2x a single run"
 	if got := reportLine(t, stdout, "attempts"); got != want {
 		t.Errorf("config attempts line\n got %q\nwant %q", got, want)
 	}
