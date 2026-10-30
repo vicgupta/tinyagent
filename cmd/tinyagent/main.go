@@ -212,7 +212,18 @@ func main() {
 	os.Exit(run())
 }
 
+// stdinIsTerminal reports whether stdin is an interactive terminal (not a
+// pipe, file or /dev/null). Tests replace it.
+var stdinIsTerminal = func() bool { return isTerminal(os.Stdin) }
+
 func run() int {
+	// Plain "tinyagent" typed at a terminal prints the same brief help as
+	// --help. With stdin piped or redirected it keeps the usage error (exit
+	// 2), so scripts see the same result as before.
+	if len(os.Args) == 1 && stdinIsTerminal() {
+		fmt.Fprint(helpOutput, helpBrief)
+		return 0
+	}
 	args, sh, serr := expandSubcommand(os.Args[1:])
 	if serr != nil {
 		fmt.Fprintln(flagOutput, "error:", serr)
