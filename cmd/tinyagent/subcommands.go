@@ -25,6 +25,8 @@ import (
 type subcommand struct {
 	name    string
 	summary string
+	// brief is the one-line description in the top-level --help.
+	brief string
 	// base flags are added when no action is given (e.g. sandbox -> --sandbox).
 	base []string
 	// actions are positional words mapped to a flag; arg is true when the
@@ -46,13 +48,13 @@ type subAction struct {
 
 var subcommands = []subcommand{
 	{
-		name: "sandbox", summary: "run with commands confined to --cwd (same as --sandbox)",
+		name: "sandbox", brief: "run a task with commands confined to --cwd", summary: "run with commands confined to --cwd (same as --sandbox)",
 		base:    []string{"--sandbox"},
 		actions: map[string]subAction{"network": {flag: "sandbox-network", withBase: true, desc: "also allow commands network access (--sandbox-network)"}},
 		options: map[string]string{"network": "sandbox-network", "allow-domain": "sandbox-allow-domain", "allowed-domains": "sandbox-allow-domain"},
 	},
 	{
-		name: "memory", summary: "run with project memory, or manage the memory store (same as --memory*)",
+		name: "memory", brief: "run with project memory, or list|path|approve|forget|config", summary: "run with project memory, or manage the memory store (same as --memory*)",
 		base: []string{"--memory"},
 		actions: map[string]subAction{
 			"list":    {flag: "memory-list", desc: "print the memory entries and exit (--memory-list)"},
@@ -64,12 +66,12 @@ var subcommands = []subcommand{
 		options: map[string]string{"list": "memory-list", "path": "memory-path", "approve": "memory-approve", "forget": "memory-forget", "yes": "memory-yes", "config-help": "memory-help"},
 	},
 	{
-		name: "planner", summary: "run with the task planner (update_plan) on (same as --plan)",
+		name: "planner", brief: "run a task with the update_plan planner (--first, --file)", summary: "run with the task planner (update_plan) on (same as --plan)",
 		base:    []string{"--plan"},
 		options: map[string]string{"first": "plan-first", "file": "plan-file"},
 	},
 	{
-		name: "plugins", summary: "inspect configured plugins (same as --list-plugins)",
+		name: "plugins", brief: "manage plugins: list|prune|rollback", summary: "inspect and manage plugins and stored plugin modules (same as --list-plugins and --plugins-*)",
 		actions: map[string]subAction{
 			"list":     {flag: "list-plugins", desc: "print each plugin, its skills and servers, then exit (--list-plugins)"},
 			"prune":    {flag: "plugins-prune", desc: "keep only current + the newest --keep stored module versions (--plugins-prune)"},
@@ -78,7 +80,7 @@ var subcommands = []subcommand{
 		options: map[string]string{"keep": "plugins-keep"},
 	},
 	{
-		name: "tinygo", summary: "manage the TinyGo compiler for Go plugin modules (a separate, downloaded project; same as --tinygo-*)",
+		name: "tinygo", brief: "manage the external TinyGo compiler: install|update|status", summary: "manage the TinyGo compiler for Go plugin modules (a separate, downloaded project; same as --tinygo-*)",
 		actions: map[string]subAction{
 			"install": {flag: "tinygo-install", desc: "download, verify and cache the pinned TinyGo release (--tinygo-install)"},
 			"update":  {flag: "tinygo-update", desc: "move to the TinyGo version pinned in this build, removing old ones (--tinygo-update)"},
@@ -219,12 +221,19 @@ func printSubcommandHelp(w io.Writer, s *subcommand) {
 	if len(s.actions) > 0 {
 		fmt.Fprint(w, " [action]")
 	}
-	fmt.Fprintf(w, " [options] [-t \"<prompt>\" | -- <prompt>]\n%s.\n", strings.ToUpper(s.summary[:1])+s.summary[1:])
+	if len(s.options) > 0 {
+		fmt.Fprint(w, " [options]")
+	}
+	if len(s.base) > 0 {
+		fmt.Fprint(w, " [-t \"<prompt>\" | -- <prompt>]")
+	}
+	fmt.Fprintf(w, "\n%s.\n", strings.ToUpper(s.summary[:1])+s.summary[1:])
 	if len(s.base) > 0 {
 		fmt.Fprintf(w, "Without an action it runs a task with %s.\n", strings.Join(s.base, " "))
 	}
 	if len(s.actions) > 0 {
 		fmt.Fprintln(w, "\nActions:")
+		var rows [][2]string
 		for _, k := range subKeys(s.actions) {
 			a := s.actions[k]
 			arg := ""
@@ -234,21 +243,29 @@ func printSubcommandHelp(w io.Writer, s *subcommand) {
 			if a.arg2 {
 				arg = " <module> <sha256>"
 			}
-			fmt.Fprintf(w, "  %-22s %s\n", k+arg, a.desc)
+			rows = append(rows, [2]string{k + arg, a.desc})
 		}
+		printRows(w, rows)
 	}
 	if len(s.options) > 0 {
 		fmt.Fprintln(w, "\nOptions:")
+		var rows [][2]string
 		for _, k := range subKeys(s.options) {
 			f := fs.Lookup(s.options[k])
 			arg := ""
 			if !isBoolFlag(f) {
 				arg = " <value>"
 			}
-			fmt.Fprintf(w, "  --%-20s same as --%s: %s\n", k+arg, s.options[k], f.Usage)
+			rows = append(rows, [2]string{"--" + k + arg, "same as --" + s.options[k] + ": " + f.Usage})
 		}
+		printRows(w, rows)
 	}
-	fmt.Fprintf(w, "\nAny other tinyagent flag (-t, -m, --cwd, ...) may follow. Every --flag form keeps working without the subcommand.\nA task starting with %q is passed with -t, e.g. tinyagent -t %q.\n", s.name, s.name+" ...")
+	if len(s.base) > 0 {
+		fmt.Fprintf(w, "\nAny other tinyagent flag (-t, -m, --cwd, ...) may follow.\nEvery --flag form keeps working without the subcommand.\nA task starting with %q is passed with -t, e.g. tinyagent -t %q.\n", s.name, s.name+" ...")
+	} else {
+		fmt.Fprintln(w, "\nEvery --flag form keeps working without the subcommand.")
+	}
+	fmt.Fprintln(w, "Full reference: docs/subcommands.md.")
 }
 
 func subKeys[V any](m map[string]V) []string {
@@ -258,4 +275,21 @@ func subKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(k)
 	return k
+}
+
+// printRows prints name/description rows with the descriptions in one
+// column, wrapped at helpWidth like --help --verbose.
+func printRows(w io.Writer, rows [][2]string) {
+	width := 0
+	for _, r := range rows {
+		width = max(width, len(r[0]))
+	}
+	col := width + 5
+	for _, r := range rows {
+		lines := wrapWords(r[1], max(helpWidth-col, 30))
+		fmt.Fprintf(w, "  %-*s%s\n", col-2, r[0], lines[0])
+		for _, l := range lines[1:] {
+			fmt.Fprintf(w, "%s%s\n", strings.Repeat(" ", col+2), l)
+		}
+	}
 }
