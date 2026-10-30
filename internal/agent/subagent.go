@@ -84,6 +84,13 @@ func (a *Agent) delegate(ctx context.Context, t *trajectory.Trajectory, call mod
 		}
 		cfg.CostLimit = left
 	}
+	if left, ok := a.tokensLeft(t); ok {
+		if left <= 0 {
+			a.delegateStop = StatusTokenLimit
+			return tools.Result{Text: fmt.Sprintf("error: delegate %s not started: the token limit is reached", id), IsError: true}
+		}
+		cfg.TokenLimit = left
+	}
 	out := io.Discard
 	if a.Verbose {
 		out = a.Out
@@ -172,7 +179,7 @@ func (a *Agent) delegate(ctx context.Context, t *trajectory.Trajectory, call mod
 		return res
 	}
 	switch ct.ExitStatus {
-	case StatusInterrupted, StatusTimeLimit, StatusCostLimit:
+	case StatusInterrupted, StatusTimeLimit, StatusCostLimit, StatusTokenLimit:
 		a.delegateStop = ct.ExitStatus
 	}
 	msg := fmt.Sprintf("error: delegate %s did not finish: %s", id, ct.ExitStatus)

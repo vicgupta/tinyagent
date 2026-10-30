@@ -521,6 +521,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		if status, ok := a.checkLimits(ctx, t); !ok {
 			return a.finish(t, status, "")
 		}
+		a.warnBudget(t, v)
 		if a.needsCompaction(t, v) {
 			if err := a.compact(ctx, t, v, "proactive"); err != nil {
 				return a.compactFailed(ctx, t, err)
@@ -648,7 +649,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			return a.saveFailed(t, err)
 		}
 		malformed := 0
-		costStop := false
+		limitStop := ""
 		batch := a.runWorkerBatch(ctx, t, msg.ToolCalls)
 		for _, call := range msg.ToolCalls {
 			a.event("tool.call", map[string]any{"id": call.ID, "name": call.Function.Name, "arguments": eventArguments(call.Function.Arguments)})
@@ -697,8 +698,8 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 					// The delegate call stays pending; a resume closes it
 					// as interrupted, like any call cut off mid-run.
 					return a.finish(t, stop, "")
-				case StatusCostLimit:
-					costStop = true
+				case StatusCostLimit, StatusTokenLimit:
+					limitStop = stop
 				}
 			}
 			fields := map[string]any{"id": call.ID, "name": call.Function.Name, "output": out, "is_error": isError}
@@ -720,8 +721,8 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			if err := a.step(t); err != nil {
 				return a.saveFailed(t, err)
 			}
-			if costStop {
-				return a.finish(t, StatusCostLimit, "")
+			if limitStop != "" {
+				return a.finish(t, limitStop, "")
 			}
 		}
 		if malformed == len(msg.ToolCalls) {
@@ -1326,6 +1327,9 @@ func (a *Agent) checkLimits(ctx context.Context, t *trajectory.Trajectory) (stri
 	}
 	if a.Config.CostLimit > 0 && t.Cost >= a.Config.CostLimit {
 		return StatusCostLimit, false
+	}
+	if left, ok := a.tokensLeft(t); ok && left <= 0 {
+		return StatusTokenLimit, false
 	}
 	return "", true
 }

@@ -151,7 +151,7 @@ cat next.md | tinyagent --resume fix.json -t - --cwd . -o next.json
 - A finished checkpoint requires a non-empty follow-up; `--resume finished.json` without `-t` exits 2 and says so. An unfinished checkpoint still refuses `-t` (exit 2): continue it with plain `--resume`.
 - Every other resume rule applies unchanged: the same model, root, system prompt, tools and loading mode, a distinct new `-o`, the unchanged source file, and every refusal before provider setup. Runs with `--output-schema` or MCP tools, runs continued by `stop` hooks, and `VerificationFailed` runs are not eligible.
 - The request is the saved history (or the rebuilt compacted view) followed by one user message: a notice that the previous invocation finished and the workspace may have changed, then the follow-up text. No historical tool call is re-executed. The trajectory's top-level `task` stays the original task; the follow-up text is recorded in that message.
-- Steps, cost, and tokens stay cumulative, so `--step-limit` and `--cost-limit` count the earlier runs too. If the ceiling is already used up, no request is made and the run ends `StepLimitExceeded` or `CostLimitExceeded`; raise the ceiling for the follow-up.
+- Steps, cost, and tokens stay cumulative, so `--step-limit`, `--cost-limit` and `--token-limit` count the earlier runs too. If the ceiling is already used up, no request is made and the run ends `StepLimitExceeded`, `CostLimitExceeded` or `TokenLimitExceeded`; raise the ceiling for the follow-up.
 - Follow-ups chain: a follow-up's finished result can take another follow-up, and a follow-up stopped by a limit continues with plain `--resume`. Each boundary is recorded in `resume` with `follow_up: true`, and in `--json` `run.started` carries `resumed: true` and `follow_up: true`.
 - Checkpoints with a follow-up boundary use the existing schema version; older tinyagent binaries refuse them with an unknown-field error rather than misreading them.
 - A `NeedsInput` run is answered the same way, but the answer is delivered differently; see [Asking for input](#asking-for-input).
@@ -177,3 +177,9 @@ tinyagent --resume run.json --cwd . -t "per API key" -o run-2.json
 - **Where it applies.** It is offered with `--read-only` and in review mode, never to [subagents](long-runs.md#subagents). `--ask-user` without `-o`, or with `--output-schema`, exits 2 before any request, since the question could never be answered. With it off, tools, prompts, trajectories, events and exit codes are unchanged; older tinyagent binaries refuse `NeedsInput` checkpoints rather than misreading them.
 
 The question is model-written text that can quote workspace files or fetched pages; treat it as untrusted if you forward it to other systems.
+
+## Token and cost budgets
+
+`--token-limit n` (config `token_limit`) caps the run's provider-reported input plus output tokens; prompt-cache tokens are part of input. `--cost-limit usd` (config `cost_limit`) caps its cost, computed from the same usage and the model's price (the built-in table, or `input_price_per_mtok` and `output_price_per_mtok`). Both are off (0) by default, and delegates and workers count against the parent's budget. A model with no known price can't be held to a cost limit: tinyagent warns once at start, and only the token limit is enforced.
+
+When a token or cost budget reaches 80%, the model gets one user message saying how much is used and asking it to wrap up; the JSON stream, log database and OpenTelemetry trace get a `budget.warning` event. At 100% the run stops cleanly with `TokenLimitExceeded` or `CostLimitExceeded` (exit 1), and the printed `--resume` command doubles the limit that was hit.

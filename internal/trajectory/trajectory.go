@@ -305,6 +305,9 @@ type Trajectory struct {
 	// QuestionsAsked counts the ask_user questions that ended a run, over
 	// the whole resume chain.
 	QuestionsAsked int `json:"questions_asked,omitempty"`
+	// BudgetWarned is true once the model was told a token or cost budget
+	// is nearly used up; it re-arms when usage drops under the threshold.
+	BudgetWarned bool `json:"budget_warned,omitempty"`
 	// PendingQuestion is the unanswered question of a NeedsInput run; its
 	// call is the only pending call. A resume delivers the answer as that
 	// call's result.

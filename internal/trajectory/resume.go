@@ -170,7 +170,7 @@ func Read(path string) (*Trajectory, error) {
 
 func unfinished(status string) bool {
 	switch status {
-	case "", "StepLimitExceeded", "CostLimitExceeded", "TimeLimitExceeded", "Interrupted", "Error", "RepeatedFormatError":
+	case "", "StepLimitExceeded", "CostLimitExceeded", "TokenLimitExceeded", "TimeLimitExceeded", "Interrupted", "Error", "RepeatedFormatError":
 		return true
 	}
 	return false

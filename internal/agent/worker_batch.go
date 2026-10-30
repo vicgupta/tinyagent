@@ -27,6 +27,10 @@ func (w *Workers) maxConcurrent() int {
 // run's cost limit.
 var errWorkersCostLimit = errors.New("the workers together reached the cost limit")
 
+// errWorkersTokenLimit cancels a batch whose workers together reached the
+// run's token limit.
+var errWorkersTokenLimit = errors.New("the workers together reached the token limit")
+
 // workerBatch holds the results of a response's worker calls that ran
 // concurrently, for the tool loop to record in call order.
 type workerBatch struct {
@@ -86,7 +90,7 @@ func (a *Agent) runWorkerBatch(ctx context.Context, t *trajectory.Trajectory, ca
 
 	bctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
-	gate := &costGate{spent: t.Cost, limit: a.Config.CostLimit, cancel: cancel}
+	gate := &costGate{spent: t.Cost, limit: a.Config.CostLimit, tokens: usedTokens(t), tokenLimit: a.Config.TokenLimit, cancel: cancel}
 
 	var jobs []*workerJob
 	for _, c := range batch {
@@ -136,7 +140,7 @@ func (a *Agent) runWorkerBatch(ctx context.Context, t *trajectory.Trajectory, ca
 			}
 			j.ct = j.child.Run(bctx, j.task)
 			switch j.ct.ExitStatus {
-			case StatusInterrupted, StatusTimeLimit, StatusCostLimit:
+			case StatusInterrupted, StatusTimeLimit, StatusCostLimit, StatusTokenLimit:
 				// A shared limit: stop the other workers too.
 				cancel(fmt.Errorf("worker %s stopped: %s", j.id, j.ct.ExitStatus))
 			}
@@ -145,9 +149,13 @@ func (a *Agent) runWorkerBatch(ctx context.Context, t *trajectory.Trajectory, ca
 	wg.Wait()
 
 	costHit := errors.Is(context.Cause(bctx), errWorkersCostLimit)
+	tokenHit := errors.Is(context.Cause(bctx), errWorkersTokenLimit)
 	for _, j := range jobs {
 		if costHit && j.ct.ExitStatus == StatusInterrupted {
 			j.ct.ExitStatus = StatusCostLimit
+		}
+		if tokenHit && j.ct.ExitStatus == StatusInterrupted {
+			j.ct.ExitStatus = StatusTokenLimit
 		}
 		res := a.finishWorker(t, j)
 		b.results[j.call.ID] = a.postWorkerHooks(ctx, t, j.call, res)
@@ -161,6 +169,8 @@ func (a *Agent) runWorkerBatch(ctx context.Context, t *trajectory.Trajectory, ca
 		b.stop = s
 	} else if costHit {
 		b.stop = StatusCostLimit
+	} else if tokenHit {
+		b.stop = StatusTokenLimit
 	}
 	a.event("workers.batch", map[string]any{"workers": len(jobs), "max_concurrent": a.Workers.maxConcurrent(), "stop": b.stop})
 	return b
@@ -216,14 +226,21 @@ type costGate struct {
 	spent  float64
 	limit  float64
 	cancel context.CancelCauseFunc
+	// tokens and tokenLimit track input plus output tokens the same way.
+	tokens     int
+	tokenLimit int
 }
 
-func (g *costGate) add(usd float64) {
+func (g *costGate) add(c model.Cost) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.spent += usd
+	g.spent += c.USD
+	g.tokens += c.InputTokens + c.OutputTokens
 	if g.limit > 0 && g.spent >= g.limit {
 		g.cancel(errWorkersCostLimit)
+	}
+	if g.tokenLimit > 0 && g.tokens >= g.tokenLimit {
+		g.cancel(errWorkersTokenLimit)
 	}
 }
 
@@ -235,7 +252,7 @@ type gatedModel struct {
 
 func (m *gatedModel) Query(ctx context.Context, msgs []model.Message, specs []model.ToolSpec) (model.Message, model.Cost, error) {
 	msg, cost, err := m.Model.Query(ctx, msgs, specs)
-	m.gate.add(cost.USD)
+	m.gate.add(cost)
 	return msg, cost, err
 }
 

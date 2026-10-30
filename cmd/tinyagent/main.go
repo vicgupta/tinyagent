@@ -72,6 +72,7 @@ type options struct {
 	redactSecrets                                    bool
 	stepLimit, timeLimit, maxFormatErrors            int
 	maxOutputTokens                                  int
+	tokenLimit                                       int
 	costLimit                                        float64
 	verbose, noStream, noAgentsMD, noCompact         bool
 	readOnly, sandbox, sandboxNetwork                bool
@@ -128,6 +129,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.Var(&o.worktree, "worktree", "run in a new Git worktree on branch tinyagent/<name> from HEAD of the repo containing --cwd, kept afterwards (default name generated)")
 	fs.IntVar(&o.stepLimit, "step-limit", 0, "max model calls, 0 = unlimited")
 	fs.Float64Var(&o.costLimit, "cost-limit", 0, "max USD, 0 = unlimited")
+	fs.IntVar(&o.tokenLimit, "token-limit", 0, "max input+output tokens, delegates and workers included, 0 = unlimited")
 	fs.IntVar(&o.timeLimit, "time-limit", 0, "max wall-clock seconds, 0 = unlimited")
 	fs.IntVar(&o.maxFormatErrors, "max-format-errors", config.DefaultMaxFormatErrors, "stop after this many consecutive steps of malformed tool calls (>= 1)")
 	fs.IntVar(&o.maxOutputTokens, "max-output-tokens", 0, "per-request output-token budget sent to the provider, 0 = provider default (8192 for anthropic; config max_output_tokens)")
@@ -1756,7 +1758,7 @@ var usageGroups = []struct {
 	{"", [][3]string{{"h", "help", ""}}},
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "profile", "name"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}, {"", "ask-user", ""}, {"", "acp", ""}}},
 	{"Review", [][3]string{{"", "review", ""}, {"", "review-base", "ref"}, {"", "review-commit", "rev"}}},
-	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
+	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "token-limit", "n"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "otel", ""}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "list-profiles", ""}, {"", "list-plugins", ""}, {"", "plugins-prune", ""}, {"", "plugins-keep", "n"}, {"", "plugins-rollback", "module@sha256"}, {"", "tinygo-install", ""}, {"", "tinygo-update", ""}, {"", "tinygo-status", ""}, {"", "transcript", "path"}, {"", "init-config", ""}, {"", "completion", "shell"}}},
@@ -1852,6 +1854,10 @@ func resumeCommand(t *trajectory.Trajectory, output, root string, cfg config.Age
 	case agent.StatusCostLimit:
 		if cfg.CostLimit > 0 {
 			limit = " --cost-limit " + strconv.FormatFloat(2*cfg.CostLimit, 'f', -1, 64)
+		}
+	case agent.StatusTokenLimit:
+		if cfg.TokenLimit > 0 {
+			limit = " --token-limit " + strconv.Itoa(2*cfg.TokenLimit)
 		}
 	case agent.StatusTimeLimit:
 		if cfg.WallTimeSec > 0 {
@@ -1996,6 +2002,8 @@ func validateLimits(o options) string {
 		return "--step-limit must be >= 0 (0 = unlimited)"
 	case !(o.costLimit >= 0) || math.IsInf(o.costLimit, 1):
 		return "--cost-limit must be finite and >= 0 (0 = unlimited)"
+	case o.tokenLimit < 0:
+		return "--token-limit must be >= 0 (0 = unlimited)"
 	case o.timeLimit < 0:
 		return "--time-limit must be >= 0"
 	case o.maxFormatErrors < 1:
@@ -2017,6 +2025,12 @@ func applyFlagOverrides(fs *flag.FlagSet, cfg *config.AgentConfig, stepLimit int
 			cfg.CostLimit = costLimit
 		case "time-limit":
 			cfg.WallTimeSec = timeLimit
+		case "token-limit":
+			if g, ok := f.Value.(flag.Getter); ok {
+				if n, ok := g.Get().(int); ok {
+					cfg.TokenLimit = n
+				}
+			}
 		}
 	})
 }
