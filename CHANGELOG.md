@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## [v0.10.0] - 2026-10-30
+
+### Features
+
+- Verify before stop (#235): an opt-in guard (`--verify-on-stop`, `--verify-command`, `--max-verify-reprompts`, `verify_on_stop` config) that re-prompts the model to run a verification command before finishing on an unverified code change. Runs that still end unverified are marked in the summary line (`, unverified changes`), the `--json` result, trajectories and `verify.reprompt`/`verify.unverified` events. Off by default.
+
+### Changes
+
+- Cleaner CLI help (#240): `tinyagent --help` shows the usage line and every subcommand with a one-line description, now including `tinygo` (previously missing), plus pointers to `--help --verbose` and `docs/subcommands.md`. `--help --verbose` groups flags into sections (model and provider, run control, output and logging, sandbox and permissions, memory and planner, plugins and TinyGo, and more), and subcommand help has aligned, wrapped columns. Tests check that help covers every subcommand and registered flag. TinyGo remains an external dependency, shipped separately by the TinyGo project and downloaded on demand; it is not part of tinyagent.
+
 ## [v0.9.0] - 2026-10-30
 
 ### Features
