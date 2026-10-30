@@ -123,6 +123,8 @@ type acpSession struct {
 	clientMCP                    bool     // client-supplied MCP servers were started
 	clientMCPAliases             []string // their tool-name prefixes
 	lockdown                     *lockdown.State
+	extSpecs                     []model.ToolSpec // MCP plus plugin wasm tools
+	extCall                      func(ctx context.Context, name, raw string) (string, bool, bool)
 	remember                     *memory.Writer
 	traj                         *trajectory.Trajectory
 	turn                         int
@@ -294,6 +296,9 @@ func newACPSession(ctx context.Context, o *options, fs *flag.FlagSet, id, cwd st
 	}
 	s.env, s.closeEnv = env, closeEnv
 	if s.mcp, err = mcptools.Start(ctx, root, mcpDefs, os.Stderr); err != nil {
+		return nil, err
+	}
+	if s.extSpecs, s.extCall, err = externalTools(s.mcp, startWasmTools(ctx, cfg, root, s.fileAccess, s.lockdown, os.Stderr)); err != nil {
 		return nil, err
 	}
 	startACPLockdown(s.lockdown, s.clientMCPAliases, s.env, s.webFetch, os.Stderr)
@@ -468,8 +473,8 @@ func (s *acpSession) Prompt(ctx context.Context, p acp.Prompt, u *acp.Updates) (
 			BashTimeout:        time.Duration(cfg.BashTimeoutSec) * time.Second,
 			MaxOutputChars:     cfg.MaxOutputChars,
 			MaxProcesses:       cfg.MaxBackgroundProcesses,
-			ExternalSpecs:      s.mcp.Specs,
-			ExternalCall:       s.mcp.Call,
+			ExternalSpecs:      s.extSpecs,
+			ExternalCall:       s.extCall,
 			Plan:               cfg.Plan.Enabled,
 			Images:             cfg.Images.Enabled,
 			ApplyPatch:         cfg.ApplyPatch,

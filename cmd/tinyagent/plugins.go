@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 
 	"github.com/vicgupta/tinyagent/internal/config"
+	"github.com/vicgupta/tinyagent/internal/lockdown"
 	"github.com/vicgupta/tinyagent/internal/mcptools"
+	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/plugins"
 	"github.com/vicgupta/tinyagent/internal/skills"
+	"github.com/vicgupta/tinyagent/internal/tools"
 )
 
 // checkPlugins loads the configured plugins before a run starts, writing a
@@ -81,4 +85,71 @@ func pluginSkillSources(cfg config.AgentConfig) []skills.PluginSource {
 		return nil
 	}
 	return plugins.SkillSources(ls)
+}
+
+// wasmPool holds the process's plugin WebAssembly modules. Each activation
+// (a run, or an ACP session) reloads them: an unchanged module is reused
+// and a changed file is swapped in under its pinned permissions.
+var wasmPool plugins.WasmPool
+
+// startWasmTools loads the authorized WebAssembly code modules of the
+// configured plugins through the Extism sandbox, with a grant derived from
+// the session: no host functions, paths only inside root and allowed by
+// file_access, hosts only from sandbox_allowed_domains. A refused module is
+// reported on w and the others still load. Read-only runs load none.
+func startWasmTools(ctx context.Context, cfg config.AgentConfig, root string, fa *tools.FileAccess, lock *lockdown.State, w io.Writer) *plugins.WasmTools {
+	any := false
+	for _, p := range cfg.Plugins {
+		any = any || len(p.WasmModules) > 0
+	}
+	if !any {
+		return nil
+	}
+	if cfg.ReadOnly {
+		fmt.Fprintln(w, "read-only mode: plugin wasm modules are not loaded")
+		return nil
+	}
+	ls, err := plugins.Load(cfg.Plugins)
+	if err != nil {
+		return nil
+	}
+	g := plugins.SessionGrant{
+		Root:  root,
+		Hosts: cfg.SandboxAllowedDomains,
+		CheckPath: func(abs string, write bool) error {
+			if write {
+				return fa.CheckWrite(abs, abs)
+			}
+			return fa.CheckRead(abs, abs)
+		},
+	}
+	if lock != nil {
+		g.Taint = lock
+	}
+	return wasmPool.Activate(ctx, ls, cfg.Plugins, g, w)
+}
+
+// externalTools merges the MCP catalog with the plugin WebAssembly tools.
+func externalTools(mcp *mcptools.Registry, wt *plugins.WasmTools) ([]model.ToolSpec, func(context.Context, string, string) (string, bool, bool), error) {
+	if wt == nil || len(wt.Specs) == 0 {
+		return mcp.Specs, mcp.Call, nil
+	}
+	specs := append([]model.ToolSpec{}, mcp.Specs...)
+	seen := map[string]bool{}
+	for _, s := range specs {
+		seen[s.Function.Name] = true
+	}
+	for _, s := range wt.Specs {
+		if seen[s.Function.Name] {
+			return nil, nil, fmt.Errorf("plugin wasm tool %q collides with an MCP tool", s.Function.Name)
+		}
+		specs = append(specs, s)
+	}
+	call := func(ctx context.Context, name, raw string) (string, bool, bool) {
+		if out, isErr, ok := wt.Call(ctx, name, raw); ok {
+			return out, isErr, ok
+		}
+		return mcp.Call(ctx, name, raw)
+	}
+	return specs, call, nil
 }
