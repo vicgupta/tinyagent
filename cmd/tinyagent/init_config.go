@@ -20,11 +20,18 @@ const starterConfig = `# tinyagent user config. Flags override these values. Ful
 #   enabled: false            # answer with: --resume run.json -t "<answer>"
 #   max_questions: 3          # per run, across resumes (1-20)
 # memory:                     # project memory: notes runs save for later runs (same as --memory)
-#   enabled: false            # load active entries and offer the remember tool
+#   enabled: false            # load active entries; offer remember, memory_search, memory_list
 #   approval: pending         # pending (approve with --memory-approve) or auto
 #   max_writes_per_run: 5
 #   max_entries: 50
 #   max_bytes: 8192           # cap on the Project memory prompt section (1-65536)
+#   backend: markdown         # markdown (./memory/<id>.md) or sqlite (./memory/memory.sqlite)
+#   path: ./memory            # markdown folder, relative to --cwd
+#   sqlite_path: ./memory/memory.sqlite
+#   max_entry_size: 500       # characters per entry (1-4000)
+#   default_tags: []          # tags added to every new entry
+#   import_legacy: true       # copy the old per-project JSON store in once
+#   # memory.toml and TINYAGENT_MEMORY_* override these: tinyagent --memory-help
 # untrusted_content:          # lockdown: once a web_fetch or MCP result or a review diff enters the run,
 #   enabled: false            # refuse commands, MCP tools and other web_fetch hosts (same as --lockdown)
 #   lockdown:                 # sources and per-MCP-server untrusted/lockdown_allowed: README "Untrusted-content lockdown"

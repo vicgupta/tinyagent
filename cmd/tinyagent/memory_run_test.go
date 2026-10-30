@@ -118,7 +118,7 @@ func TestMemoryRunOffIsUnchanged(t *testing.T) {
 	if body() != off {
 		t.Error("memory on with an empty store changed the request")
 	}
-	// Outside read-only, memory on adds only the remember tool.
+	// Outside read-only, memory on adds remember, memory_search and memory_list.
 	if code, stderr := runMemoryTask(t, cwd, "--memory"); code != 0 {
 		t.Fatalf("exit %d, stderr %q", code, stderr)
 	}
@@ -127,9 +127,6 @@ func TestMemoryRunOffIsUnchanged(t *testing.T) {
 	}
 	if _, err := os.Stat(store); !os.IsNotExist(err) {
 		t.Errorf("store was created (err %v)", err)
-	}
-	if _, err := os.Stat(filepath.Dir(store)); !os.IsNotExist(err) {
-		t.Errorf("store directory was created (err %v)", err)
 	}
 }
 

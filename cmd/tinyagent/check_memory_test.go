@@ -32,7 +32,7 @@ func TestCheckMemoryStatus(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("--memory: exit %d", code)
 	}
-	if got, want := reportLine(t, stdout, "memory"), "on, approval pending (from --memory), 0 active, 0 pending: "+store; got != want {
+	if got, want := reportLine(t, stdout, "memory"), "on, markdown backend, approval pending (from --memory), 0 active, 0 pending: "+store; got != want {
 		t.Errorf("empty store line %q, want %q", got, want)
 	}
 	if _, err := os.Stat(store); !os.IsNotExist(err) {
@@ -49,7 +49,7 @@ func TestCheckMemoryStatus(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("config: exit %d", code)
 	}
-	if got, want := reportLine(t, stdout, "memory"), "on, approval auto (from config), 2 active, 1 pending: "+store; got != want {
+	if got, want := reportLine(t, stdout, "memory"), "on, markdown backend, approval auto (from config), 2 active, 1 pending: "+store; got != want {
 		t.Errorf("config line %q, want %q", got, want)
 	}
 	if strings.Contains(stdout, "three") {
@@ -61,7 +61,7 @@ func TestCheckMemoryStatus(t *testing.T) {
 		t.Errorf("--memory=false: exit %d\n%s", code, stdout)
 	}
 
-	if err := os.WriteFile(store, []byte("{not json"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(store, "a1.md"), []byte("no front matter"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	code, stdout, _ = runCLI(t, append(base, "--memory")...)

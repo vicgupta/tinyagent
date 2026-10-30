@@ -29,6 +29,8 @@ type Writer struct {
 	// always masked, whether or not it is set.
 	Redactor *eventlog.Redactor
 	Source   Source
+	// Tags are added to every entry this writer saves (memory.default_tags).
+	Tags []string
 
 	mu        sync.Mutex
 	writes    int
@@ -116,13 +118,20 @@ func (w *Writer) source() Source {
 }
 
 // Add saves a new entry.
-func (w *Writer) Add(text string) (Result, error) {
+func (w *Writer) Add(text string) (Result, error) { return w.AddTagged(text, nil) }
+
+func (w *Writer) tags(extra []string) []string {
+	return NormalizeTags(append(append([]string(nil), w.Tags...), extra...))
+}
+
+// AddTagged saves a new entry with tags on top of the writer's Tags.
+func (w *Writer) AddTagged(text string, tags []string) (Result, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if err := w.begin(); err != nil {
 		return Result{}, err
 	}
-	text, err := normalizeText(text)
+	text, err := normalizeText(text, w.Limits.MaxTextLen)
 	if err != nil {
 		return Result{}, err
 	}
@@ -135,7 +144,7 @@ func (w *Writer) Add(text string) (Result, error) {
 		}
 		now := w.now()
 		id = newID(entries)
-		return append(entries, Entry{ID: id, Text: text, Status: status, CreatedAt: now, UpdatedAt: now, Source: w.source()}), nil
+		return append(entries, Entry{ID: id, Text: text, Status: status, CreatedAt: now, UpdatedAt: now, Source: w.source(), Tags: w.tags(tags)}), nil
 	})
 	if err != nil {
 		return Result{}, err
@@ -157,7 +166,7 @@ func (w *Writer) Replace(id, text string) (Result, error) {
 	if !w.known[id] {
 		return Result{}, fmt.Errorf("memory entry %s wasn't loaded at the start of this run or added in it; only those can be replaced", id)
 	}
-	text, err := normalizeText(text)
+	text, err := normalizeText(text, w.Limits.MaxTextLen)
 	if err != nil {
 		return Result{}, err
 	}
@@ -173,7 +182,7 @@ func (w *Writer) Replace(id, text string) (Result, error) {
 		if status == StatusPending && entries[i].Status == StatusActive {
 			nid := newID(entries)
 			res.ID = nid
-			return append(entries, Entry{ID: nid, Text: text, Status: StatusPending, CreatedAt: now, UpdatedAt: now, Source: w.source(), Replaces: id}), nil
+			return append(entries, Entry{ID: nid, Text: text, Status: StatusPending, CreatedAt: now, UpdatedAt: now, Source: w.source(), Tags: w.tags(entries[i].Tags), Replaces: id}), nil
 		}
 		if status == StatusActive && entries[i].Status == StatusPending && countActive(entries) >= w.maxEntries() {
 			return nil, fmt.Errorf("memory is full: max_entries is %d active entries; forget or replace one first", w.maxEntries())

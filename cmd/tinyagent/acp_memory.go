@@ -32,7 +32,8 @@ func (s *acpSession) memoryTurn(a *agent.Agent, prev *trajectory.Trajectory, eve
 			s.remember.MarkUntrusted()
 		}
 	} else {
-		emitResumeMemoryLoaded(events, prev, s.root)
+		emitResumeMemoryLoaded(events, prev, s.cfg.Memory, s.root)
 	}
 	a.Tools.Remember = s.remember
+	a.Tools.MemoryTools = s.remember != nil
 }

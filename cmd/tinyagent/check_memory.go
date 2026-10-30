@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"strings"
 
 	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/memory"
@@ -16,6 +17,12 @@ import (
 // and continues without memory.
 func checkMemory(fs *flag.FlagSet, o *options, cfg config.Memory, root string) string {
 	src := "from config"
+	if len(memorySource.Env) > 0 {
+		src = "from config and " + strings.Join(memorySource.Env, ", ")
+	}
+	if memorySource.File != "" {
+		src += ", memory.toml " + memorySource.File
+	}
 	if flagWasSet(fs, "memory") {
 		cfg.Enabled = o.memory.enabled
 		src = "from --memory"
@@ -26,10 +33,17 @@ func checkMemory(fs *flag.FlagSet, o *options, cfg config.Memory, root string) s
 		}
 		return ""
 	}
-	head := fmt.Sprintf("on, approval %s (%s)", cfg.Approval, src)
-	path, err := memory.StorePath("", root)
+	head := fmt.Sprintf("on, %s backend, approval %s (%s)", cfg.Backend, cfg.Approval, src)
+	path, err := memoryStorePath(cfg, root)
 	if err != nil {
 		return fmt.Sprintf("%s, store unavailable: %v", head, err)
+	}
+	if !memory.Exists(path) && cfg.ImportLegacy {
+		if legacy := legacyMemoryPath(root); legacy != "" {
+			if old, err := memory.Load(legacy); err == nil && len(old) > 0 {
+				head += fmt.Sprintf(", %d legacy %s will be imported from %s on the next run", len(old), plural(len(old), "entry", "entries"), legacy)
+			}
+		}
 	}
 	entries, err := memory.Load(path)
 	if err != nil {

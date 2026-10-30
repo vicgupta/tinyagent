@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/memory"
 )
 
@@ -22,15 +23,16 @@ type memoryCmd struct {
 	approve string
 	forget  string
 	yes     bool
+	help    bool
 	// enabled is --memory: load project memory into this run.
 	enabled bool
 }
 
 // memoryCommandFlags are the management flags; exactly one may be set.
-var memoryCommandFlags = []string{"memory-list", "memory-path", "memory-approve", "memory-forget"}
+var memoryCommandFlags = []string{"memory-list", "memory-path", "memory-approve", "memory-forget", "memory-help"}
 
 // memoryAllowedFlags are the only other flags a management command accepts.
-var memoryAllowedFlags = map[string]bool{"cwd": true, "json": true, "memory-yes": true}
+var memoryAllowedFlags = map[string]bool{"cwd": true, "json": true, "memory-yes": true, "config": true, "c": true, "profile": true}
 
 // registerMemoryFlags adds the management flags to fs.
 func registerMemoryFlags(fs *flag.FlagSet, m *memoryCmd) {
@@ -38,6 +40,7 @@ func registerMemoryFlags(fs *flag.FlagSet, m *memoryCmd) {
 	fs.BoolVar(&m.path, "memory-path", false, "print the project memory store path for --cwd and exit")
 	fs.StringVar(&m.approve, "memory-approve", "", "approve the pending project memory entry with this id, or all pending entries, and exit")
 	fs.StringVar(&m.forget, "memory-forget", "", "delete the project memory entry with this id, or all entries (all requires --memory-yes), and exit")
+	fs.BoolVar(&m.help, "memory-help", false, "print every memory.toml key with its type, default, description and TINYAGENT_MEMORY_* variable, and exit")
 	fs.BoolVar(&m.yes, "memory-yes", false, "with --memory-forget all: confirm deleting every entry")
 	fs.BoolVar(&m.enabled, "memory", false, "load this project's active memory entries into the system prompt (overrides memory.enabled; --memory=false turns it off); a resume keeps the checkpoint's setting")
 }
@@ -90,6 +93,10 @@ func runMemoryCommand(o *options, fs *flag.FlagSet, stdout, stderr io.Writer) in
 		return 2
 	}
 	m := o.memory
+	if m.help {
+		fmt.Fprint(stdout, config.MemoryHelp())
+		return 0
+	}
 	if m.yes && !(flagWasSet(fs, "memory-forget") && m.forget == "all") {
 		fmt.Fprintln(stderr, "error: --memory-yes applies only to --memory-forget all")
 		return 2
@@ -110,7 +117,26 @@ func runMemoryCommand(o *options, fs *flag.FlagSet, stdout, stderr io.Writer) in
 		fmt.Fprintf(stderr, "error: --cwd %q is not a directory\n", o.cwd)
 		return 2
 	}
-	path, err := memory.StorePath("", o.cwd)
+	cfg, err := config.LoadProfile(config.Find(o.configPath), o.profile)
+	if err == nil {
+		err = applyMemoryConfig(&cfg, o.cwd, stderr)
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 2
+	}
+	root, err := canonicalRoot(o.cwd)
+	if err != nil {
+		fmt.Fprintln(stderr, "error: memory:", err)
+		return 1
+	}
+	var path string
+	if m.path {
+		// --memory-path only prints; it never imports.
+		path, err = memoryStorePath(cfg.Memory, root)
+	} else {
+		path, err = openMemoryStore(cfg.Memory, root, func(s string) { fmt.Fprintln(stderr, "note:", s) })
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, "error: memory:", err)
 		return 1

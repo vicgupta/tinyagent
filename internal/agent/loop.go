@@ -206,6 +206,7 @@ var readOnlyTools = map[string]bool{
 	"read_file": true, "list_files": true, "grep": true, "read_process": true,
 	tools.PlanToolName: true, tools.ViewImageToolName: true, "skill": true, SubmitToolName: true,
 	tools.DelegateToolName: true, tools.AskUserToolName: true,
+	tools.MemorySearchToolName: true, tools.MemoryListToolName: true,
 	// A worker changes only its own worktree; apply_worker is mutating.
 	tools.WorkerToolName: true,
 }
