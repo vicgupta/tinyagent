@@ -67,6 +67,9 @@ type AgentConfig struct {
 	StepLimit    int     `yaml:"step_limit"`
 	CostLimit    float64 `yaml:"cost_limit"`
 	WallTimeSec  int     `yaml:"wall_time_seconds"`
+	// TokenLimit caps the run's provider-reported input plus output
+	// tokens, delegates and workers included; 0 (the default) = unlimited.
+	TokenLimit int `yaml:"token_limit"`
 	// MaxFormatErrors ends the run after this many consecutive steps whose
 	// tool calls are all malformed. Must be >= 1; default 3.
 	MaxFormatErrors int `yaml:"max_format_errors"`

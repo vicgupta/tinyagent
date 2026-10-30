@@ -267,7 +267,7 @@ func runTrial(ctx context.Context, o Options, tr Trial) (rec Record) {
 	switch ts.ExitStatus {
 	case "Submitted", "Completed":
 		rec.Outcome = OutcomePassed
-	case "StepLimitExceeded", "CostLimitExceeded", "TimeLimitExceeded":
+	case "StepLimitExceeded", "CostLimitExceeded", "TokenLimitExceeded", "TimeLimitExceeded":
 		rec.Outcome = OutcomeLimit
 		if !tr.Task.checksOnLimit() {
 			return rec

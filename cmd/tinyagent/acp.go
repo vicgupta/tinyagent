@@ -453,6 +453,9 @@ func (s *acpSession) Prompt(ctx context.Context, p acp.Prompt, u *acp.Updates) (
 		if cfg.CostLimit > 0 {
 			cfg.CostLimit += prev.Cost
 		}
+		if cfg.TokenLimit > 0 {
+			cfg.TokenLimit += prev.InputTokens + prev.OutputTokens
+		}
 	}
 	if s.turn == 1 {
 		for _, n := range s.notes {

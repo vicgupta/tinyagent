@@ -210,6 +210,13 @@ func (a *Agent) prepareWorker(t *trajectory.Trajectory, call model.ToolCall, id 
 		}
 		cfg.CostLimit = left
 	}
+	if left, ok := a.tokensLeft(t); ok {
+		if left <= 0 {
+			a.delegateStop = StatusTokenLimit
+			return nil, toolErr("worker %s not started: the token limit is reached", id), false
+		}
+		cfg.TokenLimit = left
+	}
 	only := a.workerTools()
 	if len(only) == 0 {
 		return nil, toolErr("worker %s not started: none of the configured worker tools are available in this run", id), false
@@ -396,7 +403,7 @@ func (a *Agent) finishWorker(t *trajectory.Trajectory, j *workerJob) tools.Resul
 		return res
 	}
 	switch ct.ExitStatus {
-	case StatusInterrupted, StatusTimeLimit, StatusCostLimit:
+	case StatusInterrupted, StatusTimeLimit, StatusCostLimit, StatusTokenLimit:
 		a.delegateStop = ct.ExitStatus
 	}
 	msg := fmt.Sprintf("error: worker %s did not finish: %s", id, ct.ExitStatus)

@@ -52,6 +52,7 @@ additional_dirs:           # omitted by default (only --cwd); see Additional dir
   - {path: /home/me/src/shared-lib, mode: read}
 step_limit: 50
 cost_limit: 2.0
+token_limit: 0            # max input+output tokens per run, delegates and workers included; 0 = unlimited
 wall_time_seconds: 1800
 max_format_errors: 3      # consecutive malformed-call steps before RepeatedFormatError (>= 1)
 bash_timeout_seconds: 120

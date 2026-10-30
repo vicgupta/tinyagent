@@ -383,6 +383,7 @@ Review:
 Limits:
       --step-limit n                      max model calls, 0 = unlimited
       --cost-limit usd                    max USD, 0 = unlimited
+      --token-limit n                     max input+output tokens, delegates and workers included, 0 = unlimited
       --time-limit sec                    max wall-clock seconds, 0 = unlimited
       --max-format-errors n               stop after this many consecutive steps of malformed tool calls (>= 1) (default 3)
       --max-output-tokens n               per-request output-token budget sent to the provider, 0 = provider default (8192 for anthropic; config max_output_tokens)
