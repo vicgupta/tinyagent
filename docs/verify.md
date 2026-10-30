@@ -12,6 +12,7 @@ tinyagent --verify-on-stop --verify-command "go test ./..." --max-verify-repromp
 | `--verify-on-stop` | `verify_on_stop.enabled` | off | Turn the guard on (`--verify-on-stop=false` turns it off) |
 | `--verify-command <cmd>` | `verify_on_stop.commands` | common test/build commands | A `bash` command that counts as verification; repeatable, replaces the config list |
 | `--verify-check <cmd>` | `verify_on_stop.checks` | none | A computational check tinyagent runs itself before the run may finish, in order; repeatable, replaces the config list. See [Computational checks](#computational-checks) |
+| `--verify-review` | `verify_on_stop.review` | off | After every check passes, ask the model once to review the run's changes; report only. Needs at least one check. See [Inferential review](#inferential-review) |
 | | `verify_on_stop.patterns` | none | Regular expressions; a matching `bash` command counts as verification |
 | `--max-verify-reprompts <n>` | `verify_on_stop.max_reprompts` | 2 | How many times the model is sent back before the run is marked unverified (1 to 10) |
 
@@ -48,12 +49,30 @@ When the model gives a final answer while changes are pending, tinyagent runs th
 
 Each check also counts as a verification command when the model runs it, so a model that ran the checks itself after its edits isn't sent back. Configuring checks (like `commands`) replaces the built-in test and build patterns. The checks run only when changes are pending and the guard is on, so with `checks` empty, or `verify_on_stop` off, behaviour is unchanged. Checks never run for subagent or `--output-schema` runs. Each check that runs emits a `verify.check` event in `--json`.
 
-The inferential tier, running the existing [review](runs.md#reviewing-changes) once at the end after every check passes, is not wired into verify-on-stop yet; for now, run `tinyagent --review` after the run.
+### Inferential review
+
+`verify_on_stop.review` (or `--verify-review`) adds the inferential tier, run last: once every computational check has passed at stop, tinyagent sends the model one extra request, without tools, asking it to review the file changes the run made, in the spirit of [`--review`](runs.md#reviewing-changes). The order is always cheap checks first, review last, and the review runs at most once per stop that passes the checks.
+
+```yaml
+verify_on_stop:
+  enabled: true
+  checks: [go vet ./..., go test ./...]
+  review: true
+```
+
+```bash
+tinyagent --verify-on-stop --verify-check "go test ./..." --verify-review -t "..."
+```
+
+- **What the reviewer sees:** the task and the run's `write_file`, `edit_file` and `apply_patch` calls with their arguments and the start of each result, in order (capped at 100,000 characters). It does not read the repository or a Git diff, so changes made through `bash` are not included.
+- **Report only:** findings are written to stderr, emitted as a `verify.review` event and kept in the trajectory as `verify_review`. They never send the model back, never mark the run unverified and never change its status; act on them with `--resume` or a follow-up run. A failed review request is reported (`verify.review` with `error`) and the run finishes normally.
+- **Cost:** the request counts toward the run's tokens and cost.
+- **When it runs:** only with the guard on, at least one check configured (a config with `review` and no `checks` is rejected), changes pending at stop and every check passing. It never runs for subagent or `--output-schema` runs. Off by default.
 
 ## Where it shows up
 
 - **Summary line:** ends with `, unverified changes`.
-- **`--json`:** `verify.check` (`index`, `command`, `passed`) for each computational check, `verify.reprompt` (`reprompt`, `max_reprompts`) each time the model is sent back, `verify.unverified` (`reason`, `reprompts`) when the run ends unverified, and the `result` event's `unverified` and `verify_reprompts` fields; see [JSON output](json-output.md#machine-readable-output).
-- **Trajectory (`-o`):** `unverified: true` and `verify_reprompts`.
+- **`--json`:** `verify.check` (`index`, `command`, `passed`) for each computational check, `verify.review` (`findings`, or `error`) when the [inferential review](#inferential-review) ran, `verify.reprompt` (`reprompt`, `max_reprompts`) each time the model is sent back, `verify.unverified` (`reason`, `reprompts`) when the run ends unverified, and the `result` event's `unverified` and `verify_reprompts` fields; see [JSON output](json-output.md#machine-readable-output).
+- **Trajectory (`-o`):** `unverified: true`, `verify_reprompts`, and `verify_review` (the review findings, when it ran).
 
 The config block is shown in the [example config](config.md#config).

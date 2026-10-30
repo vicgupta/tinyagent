@@ -171,6 +171,7 @@ verify_on_stop:              # off by default; see Verify before stop below
   commands: [go test ./...]  # --verify-command (repeatable) replaces this list
   patterns: []               # Go regexps; built-in test/build patterns when commands, checks and patterns are all empty
   checks: []                 # --verify-check (repeatable) replaces this list; computational checks run in order at stop, cheapest first
+  review: false              # --verify-review; after every check passes, one model review of the changes (report only; needs checks)
   max_reprompts: 2           # --max-verify-reprompts; default 2, range 1..10
 attempts:                    # omitted by default; only used with --attempts, see Best-of-N attempts below
   checks:                    # replaced as a whole by --attempt-check
@@ -186,7 +187,7 @@ profiles:                    # omitted by default; named overlays selected with 
     read_only: true
 ### Verify before stop
 
-`verify_on_stop` (or `--verify-on-stop`, `--verify-command`, `--verify-check`, `--max-verify-reprompts`) keeps a run that changed files from finishing until a test or build command has passed, re-prompting the model up to `max_reprompts` times and otherwise marking the run unverified. `verify_on_stop.checks` lists computational checks (lint, type check, tests) that tinyagent runs itself, in order, when the model finishes with unverified changes; see [Computational checks](verify.md#computational-checks). See [Verify before stop](verify.md#verify-before-stop) for the full rules.
+`verify_on_stop` (or `--verify-on-stop`, `--verify-command`, `--verify-check`, `--max-verify-reprompts`) keeps a run that changed files from finishing until a test or build command has passed, re-prompting the model up to `max_reprompts` times and otherwise marking the run unverified. `verify_on_stop.checks` lists computational checks (lint, type check, tests) that tinyagent runs itself, in order, when the model finishes with unverified changes; see [Computational checks](verify.md#computational-checks). `verify_on_stop.review` (or `--verify-review`) then asks the model once to review the changes, report only; see [Inferential review](verify.md#inferential-review). See [Verify before stop](verify.md#verify-before-stop) for the full rules.
 
 ### Profiles
 

@@ -30,6 +30,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 | `budget.warning` | `step`, `usage` (what was used, as text), `tokens`, `token_limit`, `cost_usd`, `cost_limit`; once per run when a token or cost budget reaches 80% (see [Token and cost budgets](runs.md#token-and-cost-budgets)) |
 | `verify.reprompt` | `reprompt`, `max_reprompts`; the model gave a final answer with unverified changes and was sent back to verify (see [Verify before stop](verify.md#verify-before-stop)) |
 | `verify.check` | `index` (1-based position in `verify_on_stop.checks`), `command`, `passed`; one per [computational check](verify.md#computational-checks) tinyagent runs when the model finishes with unverified changes, emitted before any `verify.reprompt` |
+| `verify.review` | `findings` (the review text), or `error` when the request failed; the [inferential review](verify.md#inferential-review) that runs once after every computational check passed, report only |
 | `verify.unverified` | `reason`, `reprompts`; the run finishes with unverified changes |
 | `memory.saved` | `op` (`add`, `replace` or `forget`), `id`, `status` (`active`, `pending` or `forgotten`), `redacted`, `untrusted_context`; one per successful `remember` write, emitted before its `tool.result`. Never includes entry text |
 | `lsp.server` | `name`, `state` (`started`, `unavailable`, `crashed` or `stopped`), `reason` (for `unavailable` and `crashed`); one per language-server state change (see [Language servers (LSP)](long-runs.md#language-servers-lsp)) |

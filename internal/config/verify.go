@@ -34,6 +34,13 @@ type VerifyOnStop struct {
 	// failure. Each also counts as a verification command when the model
 	// runs it. --verify-check replaces this list. Empty by default.
 	Checks []string `yaml:"checks,omitempty"`
+	// Review turns on the inferential tier: after every check in Checks
+	// passes at stop, the model is asked once, without tools, to review
+	// the changes the run made. Its findings are reported only (event,
+	// stderr and trajectory); they never re-prompt the model or change the
+	// run's status. Requires at least one check. --verify-review overrides
+	// it. Off by default.
+	Review bool `yaml:"review,omitempty"`
 	// MaxReprompts caps how many times one run is sent back to verify
 	// (1 to MaxVerifyReprompts; default DefaultVerifyMaxReprompts). After
 	// the cap the run stops and is marked unverified.
@@ -64,6 +71,9 @@ func (v VerifyOnStop) Validate() error {
 		if strings.TrimSpace(c) == "" {
 			return fmt.Errorf("verify_on_stop.checks: empty command")
 		}
+	}
+	if v.Review && len(v.Checks) == 0 {
+		return fmt.Errorf("verify_on_stop.review needs at least one verify_on_stop.checks entry: the review runs only after every computational check passes")
 	}
 	for _, p := range v.Patterns {
 		if _, err := regexp.Compile(p); err != nil {

@@ -259,6 +259,9 @@ type Trajectory struct {
 	VerifyBlocked   bool `json:"verify_blocked,omitempty"`
 	VerifyReprompts int  `json:"verify_reprompts,omitempty"`
 	Unverified      bool `json:"unverified,omitempty"`
+	// VerifyReview holds the findings of the inferential review
+	// (verify_on_stop.review), when it ran.
+	VerifyReview string `json:"verify_review,omitempty"`
 	// Resume records the checkpoint this run continued, when it did.
 	Resume *ResumeInfo `json:"resume,omitempty"`
 
