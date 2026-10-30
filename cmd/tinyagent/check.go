@@ -62,6 +62,9 @@ func (h checkHint) Error() string { return h.err.Error() }
 func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 	cfgPath := config.Find(o.configPath)
 	cfg, err := config.LoadProfile(cfgPath, o.profile)
+	if err == nil {
+		err = applyMemoryConfig(&cfg, o.cwd, io.Discard)
+	}
 	if err != nil {
 		return nil, err
 	}

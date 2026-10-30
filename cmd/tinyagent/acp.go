@@ -149,6 +149,9 @@ func newACPSession(ctx context.Context, o *options, fs *flag.FlagSet, id, cwd st
 	}()
 	cfgPath := config.Find(o.configPath)
 	cfg, err := config.LoadProfile(cfgPath, o.profile)
+	if err == nil {
+		err = applyMemoryConfig(&cfg, o.cwd, os.Stderr)
+	}
 	if err != nil {
 		return nil, err
 	}

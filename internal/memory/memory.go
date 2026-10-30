@@ -1,8 +1,9 @@
 // Package memory is tinyagent's cross-run project memory store: short,
 // redacted notes that a run saves about a project and later runs load into
-// their system prompt. Each project has one JSON file outside the
-// repository, keyed by the repository's Git common directory so every
-// worktree of a repository shares it. Entries carry provenance and may be
+// their system prompt. A store is either a folder of markdown files (one
+// <id>.md per entry, the default ./memory) or one SQLite database (see
+// backend.go); the legacy per-project JSON file is still read so it can be
+// imported. Entries carry provenance and may be
 // held as pending until a person approves them; pending entries are never
 // rendered into a prompt.
 //
@@ -61,6 +62,9 @@ type Entry struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Source    Source    `json:"source"`
+	// Tags are short lowercase labels (memory.default_tags plus any the
+	// model gave); memory_search can filter by them.
+	Tags []string `json:"tags,omitempty"`
 	// Replaces is set on a pending entry that, once approved, replaces the
 	// active entry with this id.
 	Replaces string `json:"replaces,omitempty"`
@@ -70,6 +74,9 @@ type Entry struct {
 type Limits struct {
 	MaxWritesPerRun int
 	MaxEntries      int
+	// MaxTextLen is the longest entry text in characters; 0 means
+	// MaxTextLen (the package default).
+	MaxTextLen int
 }
 
 // DefaultLimits returns the default per-run and store limits.
@@ -86,13 +93,16 @@ var ErrNotFound = errors.New("no memory entry with that id")
 // normalizeText collapses all whitespace runs, including newlines, to single
 // spaces so every entry is one paragraph, and enforces the length limit.
 // Over-long text is rejected, never truncated.
-func normalizeText(s string) (string, error) {
+func normalizeText(s string, max int) (string, error) {
+	if max <= 0 {
+		max = MaxTextLen
+	}
 	s = strings.Join(strings.Fields(s), " ")
 	if s == "" {
 		return "", errors.New("memory text is empty")
 	}
-	if n := utf8.RuneCountInString(s); n > MaxTextLen {
-		return "", fmt.Errorf("memory text is %d characters; the limit is %d (shorten it; nothing was saved)", n, MaxTextLen)
+	if n := utf8.RuneCountInString(s); n > max {
+		return "", fmt.Errorf("memory text is %d characters; the limit is %d (shorten it; nothing was saved)", n, max)
 	}
 	return s, nil
 }
@@ -144,5 +154,33 @@ func Active(entries []Entry) []Entry {
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].UpdatedAt.After(out[j].UpdatedAt) })
+	return out
+}
+
+// NormalizeTags lowercases, trims and de-duplicates tags, dropping empty
+// ones. Tags may hold letters, digits and . _ - / : only; anything else
+// becomes "-", so a tag is always one comma-free word.
+func NormalizeTags(tags []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, t := range tags {
+		t = strings.ToLower(strings.TrimSpace(t))
+		t = strings.Map(func(r rune) rune {
+			switch {
+			case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '_', r == '-', r == '/', r == ':':
+				return r
+			}
+			if r > 127 && !strings.ContainsRune(" ,\t\n\r", r) {
+				return r
+			}
+			return '-'
+		}, t)
+		t = strings.Trim(t, "-")
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
 	return out
 }

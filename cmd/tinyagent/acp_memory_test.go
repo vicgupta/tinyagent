@@ -17,10 +17,8 @@ import (
 func acpMemoryStore(t *testing.T, root string) string {
 	t.Helper()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	store, err := memory.StorePath("", root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	isolateMemoryConfig(t)
+	store := testStorePath(t, root)
 	at := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	seedMemory(t, store,
 		testEntry("act1", memory.StatusActive, "acp-active-note: run make test-fast", at),

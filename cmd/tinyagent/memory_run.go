@@ -20,7 +20,7 @@ import (
 func loadMemory(a *agent.Agent, cfg config.Memory, root string, warn func(string)) {
 	pm := &agent.ProjectMemory{}
 	a.Memory = pm
-	path, err := memory.StorePath("", root)
+	path, err := openMemoryStore(cfg, root, warn)
 	if err != nil {
 		warn(fmt.Sprintf("project memory: %v; continuing without memory", err))
 		return
@@ -64,9 +64,11 @@ func memoryWriter(a *agent.Agent, cfg config.Memory) *memory.Writer {
 			snapshot = append(snapshot, memory.Entry{ID: l.ID})
 		}
 	}
-	limits := memory.Limits{MaxWritesPerRun: cfg.MaxWritesPerRun, MaxEntries: cfg.MaxEntries}
+	limits := memory.Limits{MaxWritesPerRun: cfg.MaxWritesPerRun, MaxEntries: cfg.MaxEntries, MaxTextLen: cfg.MaxEntrySize}
 	src := memory.Source{Model: a.ModelName, Version: currentVersion()}
-	return memory.NewWriter(path, cfg.Approval, limits, a.Tools.Redactor, src, snapshot)
+	w := memory.NewWriter(path, cfg.Approval, limits, a.Tools.Redactor, src, snapshot)
+	w.Tags = cfg.DefaultTags
+	return w
 }
 
 // resumeMemoryWriter returns the remember tool's writer for a resumed run
@@ -74,7 +76,7 @@ func memoryWriter(a *agent.Agent, cfg config.Memory) *memory.Writer {
 // the checkpoint's snapshot, and writes stay pending when the conversation
 // already holds untrusted content.
 func resumeMemoryWriter(src *trajectory.Trajectory, cfg config.Memory, root, modelName string, red *eventlog.Redactor, warn func(string)) *memory.Writer {
-	path, err := memory.StorePath("", root)
+	path, err := memoryStorePath(cfg, root)
 	if err != nil {
 		warn(fmt.Sprintf("project memory: %v; remember calls will fail", err))
 		path = ""
@@ -83,19 +85,21 @@ func resumeMemoryWriter(src *trajectory.Trajectory, cfg config.Memory, root, mod
 	for _, l := range src.Memory {
 		snapshot = append(snapshot, memory.Entry{ID: l.ID})
 	}
-	limits := memory.Limits{MaxWritesPerRun: cfg.MaxWritesPerRun, MaxEntries: cfg.MaxEntries}
+	limits := memory.Limits{MaxWritesPerRun: cfg.MaxWritesPerRun, MaxEntries: cfg.MaxEntries, MaxTextLen: cfg.MaxEntrySize}
 	srcInfo := memory.Source{Model: modelName, Version: currentVersion(), UntrustedContext: agent.ResumeUntrusted(src)}
-	return memory.NewWriter(path, cfg.Approval, limits, red, srcInfo, snapshot)
+	w := memory.NewWriter(path, cfg.Approval, limits, red, srcInfo, snapshot)
+	w.Tags = cfg.DefaultTags
+	return w
 }
 
 // emitResumeMemoryLoaded emits memory.loaded for a resumed or follow-up
 // run whose checkpoint ran with memory on. The event describes the replayed
 // checkpoint snapshot; the store is never read, only its path resolved.
-func emitResumeMemoryLoaded(events *runEvents, src *trajectory.Trajectory, root string) {
+func emitResumeMemoryLoaded(events *runEvents, src *trajectory.Trajectory, cfg config.Memory, root string) {
 	if !src.MemoryEnabled {
 		return
 	}
-	path, err := memory.StorePath("", root)
+	path, err := memoryStorePath(cfg, root)
 	if err != nil {
 		path = ""
 	}

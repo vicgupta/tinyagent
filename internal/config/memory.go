@@ -21,6 +21,25 @@ type Memory struct {
 	// MaxBytes caps the Project memory section added to the system
 	// prompt (default 8 KiB); the newest entries that fit are loaded.
 	MaxBytes int `yaml:"max_bytes"`
+
+	// The fields below are normally set in memory.toml or TINYAGENT_MEMORY_*
+	// (see memory_toml.go); the yaml keys accept the same values.
+
+	// Backend selects the store: markdown (default; one <id>.md per entry
+	// in Path) or sqlite (one database at SQLitePath).
+	Backend string `yaml:"backend"`
+	// Path is the markdown folder; relative paths resolve against --cwd
+	// (default ./memory).
+	Path string `yaml:"path"`
+	// SQLitePath is the SQLite database (default ./memory/memory.sqlite).
+	SQLitePath string `yaml:"sqlite_path"`
+	// MaxEntrySize caps one entry's text, in characters (default 500).
+	MaxEntrySize int `yaml:"max_entry_size"`
+	// DefaultTags are added to every new entry.
+	DefaultTags []string `yaml:"default_tags"`
+	// ImportLegacy copies the old per-project JSON store into a new,
+	// not-yet-existing store once (default true; the JSON file is kept).
+	ImportLegacy bool `yaml:"import_legacy"`
 }
 
 // Memory defaults and limits.
@@ -32,6 +51,11 @@ const (
 	// MaxMemoryMaxBytes bounds memory.max_bytes so the section can't crowd
 	// out the task (64 KiB, twice the AGENTS.md cap).
 	MaxMemoryMaxBytes = 64 << 10
+	// DefaultMemoryMaxEntrySize and MaxMemoryEntrySize bound one entry's
+	// text in characters.
+	DefaultMemoryMaxEntrySize = 500
+	MaxMemoryEntrySize        = 4000
+	DefaultMemoryBackend      = "markdown"
 )
 
 // DefaultMemory returns the memory defaults: off, pending approval.
@@ -41,6 +65,9 @@ func DefaultMemory() Memory {
 		MaxWritesPerRun: DefaultMemoryMaxWritesPerRun,
 		MaxEntries:      DefaultMemoryMaxEntries,
 		MaxBytes:        DefaultMemoryMaxBytes,
+		Backend:         DefaultMemoryBackend,
+		MaxEntrySize:    DefaultMemoryMaxEntrySize,
+		ImportLegacy:    true,
 	}
 }
 
@@ -57,6 +84,12 @@ func (m Memory) Validate() error {
 	}
 	if m.MaxBytes < 1 || m.MaxBytes > MaxMemoryMaxBytes {
 		return fmt.Errorf("memory.max_bytes must be a whole number from 1 to %d, got %d", MaxMemoryMaxBytes, m.MaxBytes)
+	}
+	if m.Backend != "markdown" && m.Backend != "sqlite" {
+		return fmt.Errorf("memory.backend %q must be markdown or sqlite", m.Backend)
+	}
+	if m.MaxEntrySize < 1 || m.MaxEntrySize > MaxMemoryEntrySize {
+		return fmt.Errorf("memory.max_entry_size must be a whole number from 1 to %d, got %d", MaxMemoryEntrySize, m.MaxEntrySize)
 	}
 	return nil
 }

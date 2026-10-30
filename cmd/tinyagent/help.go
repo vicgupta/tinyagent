@@ -49,7 +49,7 @@ var workflowGroup = struct {
 var memoryGroup = struct {
 	name  string
 	flags [][3]string
-}{"Memory", [][3]string{{"", "memory", ""}, {"", "memory-approve", "id|all"}, {"", "memory-forget", "id|all"}, {"", "memory-list", ""}, {"", "memory-path", ""}, {"", "memory-yes", ""}}}
+}{"Memory", [][3]string{{"", "memory", ""}, {"", "memory-approve", "id|all"}, {"", "memory-forget", "id|all"}, {"", "memory-help", ""}, {"", "memory-list", ""}, {"", "memory-path", ""}, {"", "memory-yes", ""}}}
 
 // verboseGroups is usageGroups with toolsGroup before Output, and evalGroup,
 // workflowGroup, attemptsGroup and memoryGroup after Rewind.

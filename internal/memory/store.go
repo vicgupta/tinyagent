@@ -30,9 +30,9 @@ func (e *CorruptError) Error() string {
 
 func (e *CorruptError) Unwrap() error { return e.Err }
 
-// Load reads the store at path. A missing file is an empty store. A file
-// that can't be parsed returns a *CorruptError.
-func Load(path string) ([]Entry, error) {
+// loadJSON reads the legacy JSON store at path. A missing file is an empty
+// store. A file that can't be parsed returns a *CorruptError.
+func loadJSON(path string) ([]Entry, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -55,20 +55,17 @@ func Load(path string) ([]Entry, error) {
 	return f.Entries, nil
 }
 
-// Update re-reads the store at path under an exclusive lock, applies fn and
-// writes the result atomically, so concurrent writers never lose each
-// other's changes. If fn returns an error nothing is written. A corrupt
-// store is left byte-identical and its *CorruptError is returned.
-func Update(path string, fn func([]Entry) ([]Entry, error)) error {
+// updateJSON is Update for a legacy JSON store.
+func updateJSON(path string, fn func([]Entry) ([]Entry, error)) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	unlock, err := lock(path)
+	unlock, err := lock(path + ".lock")
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	entries, err := Load(path)
+	entries, err := loadJSON(path)
 	if err != nil {
 		return err
 	}
@@ -90,6 +87,12 @@ func writeAtomic(path string, entries []Entry) error {
 		return err
 	}
 	data = append(data, '\n')
+	return writeFileAtomic(path, data)
+}
+
+// writeFileAtomic writes data to a temp file in path's directory with mode
+// 0600, syncs it and renames it over path.
+func writeFileAtomic(path string, data []byte) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".memory-*.tmp")
 	if err != nil {
 		return err
@@ -128,11 +131,11 @@ var (
 	lockPoll  = 10 * time.Millisecond
 )
 
-// lock takes an exclusive lock on path by creating path+".lock". A lock
-// file older than lockStale is treated as left behind by a crashed process
-// and removed. It works the same on every platform and needs no cgo.
-func lock(path string) (func(), error) {
-	lp := path + ".lock"
+// lock takes an exclusive lock by creating the file lp. A lock file older
+// than lockStale is treated as left behind by a crashed process and
+// removed. It works the same on every platform and needs no cgo.
+func lock(lp string) (func(), error) {
+	path := lp
 	deadline := time.Now().Add(lockWait)
 	for {
 		f, err := os.OpenFile(lp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
@@ -149,7 +152,7 @@ func lock(path string) (func(), error) {
 			continue
 		}
 		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("memory store %s is locked by another process (remove %s if no tinyagent is running)", path, lp)
+			return nil, fmt.Errorf("memory store is locked by another process (lock file %s; remove it if no tinyagent is running)", path)
 		}
 		time.Sleep(lockPoll)
 	}
@@ -221,7 +224,7 @@ func Forget(path, id string) error {
 // ForgetAll removes every entry and returns how many there were. A missing
 // store stays missing.
 func ForgetAll(path string) (int, error) {
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+	if !Exists(path) {
 		return 0, nil
 	}
 	n := 0

@@ -131,6 +131,9 @@ func ValidateResume(t *trajectory.Trajectory, cfg config.AgentConfig, root strin
 	names := toolNames(builtinSpecs(t.ReadOnly, t.PlanEnabled, t.ImagesEnabled, t.ApplyPatchEnabled, t.SubagentsEnabled, t.WebFetchEnabled, t.LSPEnabled, t.AskUserEnabled))
 	if RememberOffered(t) {
 		names = append(names, tools.RememberToolName)
+		if MemoryToolsOffered(t) {
+			names = append(names, tools.MemorySearchToolName, tools.MemoryListToolName)
+		}
 	}
 	var set *skills.Set
 	if t.SkillsEnabled {

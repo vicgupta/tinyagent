@@ -15,22 +15,30 @@ import (
 // the current run's prompt.
 const RememberToolName = "remember"
 
-// RememberSpec describes the remember tool.
-func RememberSpec() model.ToolSpec {
+// RememberSpec describes the remember tool with the default entry size.
+func RememberSpec() model.ToolSpec { return RememberSpecFor(memory.MaxTextLen) }
+
+// RememberSpecFor describes the remember tool for entries of at most max
+// characters (memory.toml max_entry_size).
+func RememberSpecFor(max int) model.ToolSpec {
+	if max <= 0 {
+		max = memory.MaxTextLen
+	}
 	return model.ToolSpec{
 		Type: "function",
 		Function: model.FunctionSpec{
 			Name: RememberToolName,
 			Description: "Save, replace or forget a short, durable note about this project for FUTURE runs (a build quirk, the test command " +
 				"that works, a convention reviewers enforce). Notes never appear in this run's prompt. Keep each note to one fact, " +
-				fmt.Sprintf("at most %d characters, with no secrets. ", memory.MaxTextLen) +
+				fmt.Sprintf("at most %d characters, with no secrets. ", max) +
 				"replace and forget accept only ids shown in the Project memory section or added earlier in this run. " +
 				"A note may be held as pending until a person approves it.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"op":   map[string]any{"type": "string", "enum": []string{"add", "replace", "forget"}, "description": "add a new note, replace an existing note's text, or forget a note"},
-					"text": map[string]any{"type": "string", "description": fmt.Sprintf("the note, at most %d characters (add and replace)", memory.MaxTextLen)},
+					"text": map[string]any{"type": "string", "description": fmt.Sprintf("the note, at most %d characters (add and replace)", max)},
+					"tags": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "optional short labels for memory_search (add only), e.g. [\"build\"]"},
 					"id":   map[string]any{"type": "string", "description": "the note's id (replace and forget)"},
 				},
 				"required": []string{"op"},
@@ -42,9 +50,10 @@ func RememberSpec() model.ToolSpec {
 // remember runs one remember call against w.
 func (e *Executor) remember(raw string) (string, error) {
 	var a struct {
-		Op   string `json:"op"`
-		Text string `json:"text"`
-		ID   string `json:"id"`
+		Op   string   `json:"op"`
+		Text string   `json:"text"`
+		ID   string   `json:"id"`
+		Tags []string `json:"tags"`
 	}
 	if err := json.Unmarshal([]byte(raw), &a); err != nil {
 		return "", errors.New(`remember arguments must be {"op": "add"|"replace"|"forget", "text": string, "id": string}`)
@@ -63,13 +72,19 @@ func (e *Executor) remember(raw string) (string, error) {
 		if id != "" {
 			return "", errors.New("remember add takes text only; use replace to change an existing note")
 		}
-		res, err = w.Add(a.Text)
+		res, err = w.AddTagged(a.Text, a.Tags)
 	case "replace":
+		if len(a.Tags) > 0 {
+			return "", errors.New("remember replace keeps the note's tags; pass tags only with add")
+		}
 		if id == "" {
 			return "", errors.New("remember replace needs the id of the note to replace")
 		}
 		res, err = w.Replace(id, a.Text)
 	case "forget":
+		if len(a.Tags) > 0 {
+			return "", errors.New("remember forget takes only an id")
+		}
 		if id == "" {
 			return "", errors.New("remember forget needs the id of the note to forget")
 		}

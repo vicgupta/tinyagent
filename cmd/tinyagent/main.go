@@ -372,6 +372,9 @@ func run() int {
 
 	cfgPath := config.Find(o.configPath)
 	cfg, err := config.LoadProfile(cfgPath, o.profile)
+	if err == nil {
+		err = applyMemoryConfig(&cfg, o.cwd, os.Stderr)
+	}
 	if err != nil {
 		return loadConfigError(err)
 	}
@@ -727,6 +730,7 @@ func run() int {
 		loadMemory(a, cfg.Memory, root, warn)
 		events.emit("memory.loaded", agent.MemoryLoadedFields(a.Memory))
 		a.Tools.Remember = memoryWriter(a, cfg.Memory)
+		a.Tools.MemoryTools = a.Tools.Remember != nil
 	}
 	if o.output != "" {
 		a.OnStep = func(t *trajectory.Trajectory) error {
@@ -896,6 +900,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 
 	cfgPath := config.Find(o.configPath)
 	cfg, err := config.LoadProfile(cfgPath, o.profile)
+	if err == nil {
+		err = applyMemoryConfig(&cfg, o.cwd, os.Stderr)
+	}
 	if err != nil {
 		return loadConfigError(err)
 	}
@@ -1270,9 +1277,10 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		loadSkills(a, root, pluginSkillSources(cfg), warn)
 	}
 	resumePlugins(src, a.Plugins, warn)
-	emitResumeMemoryLoaded(events, src, root)
+	emitResumeMemoryLoaded(events, src, cfg.Memory, root)
 	if agent.RememberOffered(src) {
 		a.Tools.Remember = resumeMemoryWriter(src, cfg.Memory, root, modelName, a.Tools.Redactor, warn)
+		a.Tools.MemoryTools = agent.MemoryToolsOffered(src)
 	}
 	initial := true
 	a.OnStep = func(t *trajectory.Trajectory) error {

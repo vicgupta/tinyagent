@@ -111,6 +111,10 @@ type Executor struct {
 	// (memory.enabled). Once a web_fetch or external (MCP) tool runs, its
 	// later writes are saved pending as untrusted. nil leaves it off.
 	Remember *memory.Writer
+	// MemoryTools offers the read-only memory_search and memory_list tools
+	// next to remember (never in read-only mode); they read Remember's
+	// store.
+	MemoryTools bool
 
 	procs registry
 }
@@ -414,7 +418,10 @@ func (e *Executor) catalog() []model.ToolSpec {
 		out = append(out, AskUserSpec())
 	}
 	if e.Remember != nil && !e.ReadOnly {
-		out = append(out, RememberSpec())
+		out = append(out, RememberSpecFor(e.Remember.Limits.MaxTextLen))
+		if e.MemoryTools {
+			out = append(out, MemorySearchSpec(), MemoryListSpec())
+		}
 	}
 	if e.Skills.Len() > 0 {
 		out = append(out, e.Skills.Spec())
@@ -515,6 +522,9 @@ func (e *Executor) run(ctx context.Context, name, raw string, edited *[]string) 
 	}
 	if name == RememberToolName && e.Remember != nil {
 		return e.remember(raw)
+	}
+	if (name == MemorySearchToolName || name == MemoryListToolName) && e.Remember != nil && e.MemoryTools {
+		return e.memoryRead(name, raw)
 	}
 	if skillTool {
 		return e.Skills.Load(a.Name, a.File)

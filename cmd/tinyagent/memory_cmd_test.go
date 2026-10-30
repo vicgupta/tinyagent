@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/memory"
 )
 
@@ -19,12 +20,31 @@ func memoryEnv(t *testing.T) (cwd, store string) {
 	for _, k := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "GEMINI_API_KEY", "AGENT_MODEL"} {
 		t.Setenv(k, "")
 	}
+	isolateMemoryConfig(t)
 	cwd = t.TempDir()
-	p, err := memory.StorePath("", cwd)
+	return cwd, testStorePath(t, cwd)
+}
+
+// isolateMemoryConfig keeps a user memory.toml and TINYAGENT_MEMORY_*
+// variables from leaking into a test.
+func isolateMemoryConfig(t *testing.T) {
+	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	for _, k := range config.MemoryKeys {
+		t.Setenv(k.EnvVar(), "")
+	}
+	t.Setenv("TINYAGENT_MEMORY_CONFIG", "")
+}
+
+// testStorePath is the default (markdown) store for cwd.
+func testStorePath(t *testing.T, cwd string) string {
+	t.Helper()
+	root, err := canonicalRoot(cwd)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return cwd, p
+	return filepath.Join(root, "memory")
 }
 
 func seedMemory(t *testing.T, store string, entries ...memory.Entry) {
@@ -62,8 +82,8 @@ func TestMemoryPath(t *testing.T) {
 	if code != 0 || strings.TrimSpace(out) != store || errOut != "" {
 		t.Fatalf("exit %d, stdout %q, stderr %q; want %q", code, out, errOut, store)
 	}
-	if strings.HasPrefix(store, cwd) {
-		t.Errorf("store %s is inside --cwd", store)
+	if filepath.Base(store) != "memory" {
+		t.Errorf("default store %s is not ./memory", store)
 	}
 	if _, err := os.Stat(store); !os.IsNotExist(err) {
 		t.Errorf("--memory-path created the store: %v", err)
@@ -179,10 +199,10 @@ func TestMemoryApproveAndForget(t *testing.T) {
 
 func TestMemoryCorruptStore(t *testing.T) {
 	cwd, store := memoryEnv(t)
-	if err := os.MkdirAll(filepath.Dir(store), 0o700); err != nil {
+	if err := os.MkdirAll(store, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(store, []byte("{not json"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(store, "maaaa.md"), []byte("---\nid: [broken\n---\ntext\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{
@@ -193,7 +213,7 @@ func TestMemoryCorruptStore(t *testing.T) {
 			t.Errorf("%v on corrupt store: exit %d, %q", args, code, errOut)
 		}
 	}
-	if b, _ := os.ReadFile(store); string(b) != "{not json" {
+	if b, _ := os.ReadFile(filepath.Join(store, "maaaa.md")); string(b) != "---\nid: [broken\n---\ntext\n" {
 		t.Errorf("corrupt store changed: %q", b)
 	}
 }

@@ -78,6 +78,21 @@ func RememberOffered(t *trajectory.Trajectory) bool {
 	return false
 }
 
+// MemoryToolsOffered reports whether a resumed checkpoint offered the
+// read-only memory_search and memory_list tools (checkpoints from before
+// they existed resume without them).
+func MemoryToolsOffered(t *trajectory.Trajectory) bool {
+	if !RememberOffered(t) {
+		return false
+	}
+	for _, name := range t.Tools {
+		if name == tools.MemorySearchToolName {
+			return true
+		}
+	}
+	return false
+}
+
 // ResumeUntrusted reports whether a checkpoint's conversation already holds
 // untrusted external content (a review diff, a web_fetch result, an
 // external tool result, or a taint the lockdown recorded), so a resumed
