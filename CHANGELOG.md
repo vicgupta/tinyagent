@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [v0.10.2] - 2026-10-30
+
+### Changes
+
+- A bare subcommand (`tinyagent sandbox`, `memory`, `planner`, `plugins`, `tinygo`) at an interactive terminal now prints the same help as `tinyagent <sub> --help` and exits 0 (#244), for every registered subcommand. Previously `sandbox`, `memory` and `planner` failed with `error: --task is required`. With stdin piped or redirected they keep the old behavior, so scripts are unaffected; actions, flags and prompts that start with a subcommand word are unchanged.
+
 ## [v0.10.1] - 2026-10-30
 
 ### Changes
