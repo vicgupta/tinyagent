@@ -149,11 +149,11 @@ func (in *instance) release() {
 // WasmModule is a swappable code module. Calls go to the current instance;
 // Swap replaces it without blocking calls already running.
 type WasmModule struct {
-	host    *WasmHost
-	name    string
-	pinned  Permissions // recorded at first load; never widened
-	cur     atomic.Pointer[instance]
-	swapMu  sync.Mutex
+	host   *WasmHost
+	name   string
+	pinned Permissions // recorded at first load; never widened
+	cur    atomic.Pointer[instance]
+	swapMu sync.Mutex
 }
 
 // WasmHost loads code modules for one caller.
