@@ -34,6 +34,7 @@ type Settings struct {
 	Profile      string   `yaml:"profile" json:"profile,omitempty"`
 	StepLimit    *int     `yaml:"step_limit" json:"step_limit,omitempty"`
 	CostLimit    *float64 `yaml:"cost_limit" json:"cost_limit,omitempty"`
+	TokenLimit   *int     `yaml:"token_limit" json:"token_limit,omitempty"`
 	TimeLimit    *int     `yaml:"time_limit" json:"time_limit,omitempty"`
 	Retries      *int     `yaml:"retries" json:"retries,omitempty"`
 	CheckTimeout *int     `yaml:"check_timeout" json:"check_timeout,omitempty"`
@@ -52,6 +53,7 @@ type Stage struct {
 	Profile      string            `json:"profile,omitempty"`
 	StepLimit    int               `json:"step_limit"`
 	CostLimit    float64           `json:"cost_limit,omitempty"`
+	TokenLimit   int               `json:"token_limit,omitempty"`
 	TimeLimit    int               `json:"time_limit,omitempty"`
 	Inputs       map[string]string `json:"inputs,omitempty"`
 }
@@ -220,6 +222,9 @@ func apply(st *Stage, s Settings) {
 	if s.CostLimit != nil {
 		st.CostLimit = *s.CostLimit
 	}
+	if s.TokenLimit != nil {
+		st.TokenLimit = *s.TokenLimit
+	}
 	if s.TimeLimit != nil {
 		st.TimeLimit = *s.TimeLimit
 	}
@@ -237,6 +242,8 @@ func checkSettings(where string, s Settings) error {
 		return fmt.Errorf("%s: step_limit must be >= 0", where)
 	case s.CostLimit != nil && *s.CostLimit < 0:
 		return fmt.Errorf("%s: cost_limit must be >= 0", where)
+	case s.TokenLimit != nil && *s.TokenLimit < 0:
+		return fmt.Errorf("%s: token_limit must be >= 0", where)
 	case s.TimeLimit != nil && *s.TimeLimit < 0:
 		return fmt.Errorf("%s: time_limit must be >= 0", where)
 	case s.Retries != nil && (*s.Retries < 0 || *s.Retries > MaxRetries):

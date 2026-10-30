@@ -224,6 +224,9 @@ func runAttempt(ctx context.Context, o Options, st Stage, idx, n int, input stri
 	if st.CostLimit > 0 {
 		args = append(args, "--cost-limit", strconv.FormatFloat(st.CostLimit, 'g', -1, 64))
 	}
+	if st.TokenLimit > 0 {
+		args = append(args, "--token-limit", strconv.Itoa(st.TokenLimit))
+	}
 	if st.TimeLimit > 0 {
 		args = append(args, "--time-limit", strconv.Itoa(st.TimeLimit))
 	}

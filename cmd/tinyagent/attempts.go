@@ -68,7 +68,7 @@ var attemptConflicts = []string{"resume", "rewind", "to", "transcript", "acp", "
 // attemptOwn are flags --attempts consumes itself; every other flag set on
 // the command line is forwarded to each attempt's child run.
 var attemptOwn = []string{"attempts", "attempt-model", "attempt-check", "attempt-check-timeout",
-	"m", "model", "o", "output", "worktree", "cost-limit", "time-limit"}
+	"m", "model", "o", "output", "worktree", "cost-limit", "token-limit", "time-limit"}
 
 func runAttempts(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.Writer) int {
 	a := o.attempts
@@ -137,7 +137,7 @@ func runAttempts(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.
 		AttemptsID: link.id, TraceParent: link.traceParent(),
 		CheckEnv: attemptCheckEnv(fs, *o, cfg, stderr),
 		Models:   models, Checks: checks, BaseName: base, Output: o.output,
-		CostLimit: o.costLimit, TimeLimit: time.Duration(o.timeLimit) * time.Second,
+		CostLimit: o.costLimit, TokenLimit: o.tokenLimit, TimeLimit: time.Duration(o.timeLimit) * time.Second,
 		ExtraArgs: forwardArgs(fs, args, attemptOwn), Stderr: stderr, Stdout: stdout,
 		Redact: red.Redact, RunAll: !cfg.Attempts.StopsOnPass(), Keep: cfg.Attempts.KeepMode(),
 		Remove: func(at attempts.Attempt) error { return removeAttemptWorktree(top, base, at) },

@@ -228,6 +228,9 @@ func runTrial(ctx context.Context, o Options, tr Trial) (rec Record) {
 	if l.CostLimit > 0 {
 		args = append(args, "--cost-limit", strconv.FormatFloat(l.CostLimit, 'g', -1, 64))
 	}
+	if l.TokenLimit > 0 {
+		args = append(args, "--token-limit", strconv.Itoa(l.TokenLimit))
+	}
 	if l.TimeLimit > 0 {
 		args = append(args, "--time-limit", strconv.Itoa(l.TimeLimit))
 	}

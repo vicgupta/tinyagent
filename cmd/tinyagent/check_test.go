@@ -71,7 +71,7 @@ func TestCheckValidSetupExits0WithoutRequestOrSecret(t *testing.T) {
 	if got := reportLine(t, stdout, "cwd"); got != root+" (from --cwd)" {
 		t.Errorf("cwd line %q, want %q", got, root+" (from --cwd)")
 	}
-	if got := reportLine(t, stdout, "limits"); got != "steps unlimited, cost unlimited, time unlimited" {
+	if got := reportLine(t, stdout, "limits"); got != "steps unlimited, cost unlimited, tokens unlimited, time unlimited" {
 		t.Errorf("limits line %q", got)
 	}
 	if !strings.HasSuffix(stdout, "\nok\n") {
@@ -98,7 +98,7 @@ func TestCheckSourceLabels(t *testing.T) {
 	if got := reportLine(t, stdout, "config"); got != cfg+" (from -c)" {
 		t.Errorf("config line %q", got)
 	}
-	if got := reportLine(t, stdout, "limits"); got != "steps 40 (from config), cost $2.50 (from config), time 90s (from --time-limit)" {
+	if got := reportLine(t, stdout, "limits"); got != "steps 40 (from config), cost $2.50 (from config), tokens unlimited, time 90s (from --time-limit)" {
 		t.Errorf("limits line %q", got)
 	}
 	if got := reportLine(t, stdout, "cwd"); !strings.HasSuffix(got, " (default)") {

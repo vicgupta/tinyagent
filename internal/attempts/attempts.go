@@ -76,8 +76,10 @@ type Options struct {
 	// and the report to <stem>.attempts<ext>. Empty means trajectories go to
 	// a temporary directory and no report file is written.
 	Output    string
-	CostLimit float64       // invocation-wide USD budget; 0 = none
-	TimeLimit time.Duration // invocation-wide wall-clock budget; 0 = none
+	CostLimit float64 // invocation-wide USD budget; 0 = none
+	// TokenLimit is the invocation-wide input+output token budget; 0 = none.
+	TokenLimit int
+	TimeLimit  time.Duration // invocation-wide wall-clock budget; 0 = none
 	// ExtraArgs are forwarded to every child run (the task among them).
 	ExtraArgs []string
 	Stderr    io.Writer
@@ -256,6 +258,13 @@ func Run(ctx context.Context, o Options) (Report, int) {
 		n := i + 1
 		var remCost float64
 		var remTime time.Duration
+		remTokens := 0
+		if o.TokenLimit > 0 {
+			if remTokens = o.TokenLimit - usedTokens(rep.Attempts); remTokens <= 0 {
+				rep.StopReason = StopBudget
+				break
+			}
+		}
 		if o.CostLimit > 0 {
 			if remCost = o.CostLimit - rep.TotalCostUSD; remCost <= 0 {
 				rep.StopReason = StopBudget
@@ -278,7 +287,7 @@ func Run(ctx context.Context, o Options) (Report, int) {
 		} else {
 			traj, _ = filepath.Abs(TrajectoryPath(o.Output, n))
 		}
-		a := runAttempt(ctx, o, ev, n, m, traj, remCost, remTime, now)
+		a := runAttempt(ctx, o, ev, n, m, traj, remCost, remTokens, remTime, now)
 		if trajDir != "" {
 			a.Trajectory = ""
 		}
@@ -297,7 +306,8 @@ func Run(ctx context.Context, o Options) (Report, int) {
 			}
 		case a.Status == "Interrupted" || ctx.Err() != nil:
 			rep.StopReason = StopInterrupt
-		case a.Status == "CostLimitExceeded" && o.CostLimit > 0, a.Status == "TimeLimitExceeded" && o.TimeLimit > 0:
+		case a.Status == "CostLimitExceeded" && o.CostLimit > 0, a.Status == "TimeLimitExceeded" && o.TimeLimit > 0,
+			a.Status == "TokenLimitExceeded" && o.TokenLimit > 0:
 			rep.StopReason = StopBudget
 		case a.Error != "" && a.Status == "":
 			rep.StopReason = StopError
@@ -377,7 +387,7 @@ func attemptLine(a Attempt) string {
 	return fmt.Sprintf("attempt %d  %s  %s  %s  $%.4f  %s", a.Attempt, a.Model, status, checks, a.CostUSD, wt)
 }
 
-func runAttempt(ctx context.Context, o Options, ev *eventWriter, n int, m, traj string, remCost float64, remTime time.Duration, now func() time.Time) (a Attempt) {
+func runAttempt(ctx context.Context, o Options, ev *eventWriter, n int, m, traj string, remCost float64, remTokens int, remTime time.Duration, now func() time.Time) (a Attempt) {
 	a = Attempt{Attempt: n, Model: m, Trajectory: traj, Checks: []CheckResult{}}
 	t0 := now()
 	if o.AttemptsID != "" {
@@ -389,6 +399,9 @@ func runAttempt(ctx context.Context, o Options, ev *eventWriter, n int, m, traj 
 	args = append(args, "-m", m, "--worktree="+o.BaseName+"-a"+strconv.Itoa(n), "-o", traj)
 	if remCost > 0 {
 		args = append(args, "--cost-limit", strconv.FormatFloat(remCost, 'g', -1, 64))
+	}
+	if remTokens > 0 {
+		args = append(args, "--token-limit", strconv.Itoa(remTokens))
 	}
 	if remTime > 0 {
 		args = append(args, "--time-limit", strconv.Itoa(int(math.Floor(remTime.Seconds()))))
@@ -621,4 +634,14 @@ func RemoveWorktree(repoRoot, path, branch string) error {
 		return nil
 	}
 	return run("branch", "-D", branch)
+}
+
+// usedTokens sums the provider-reported input and output tokens of the
+// attempts run so far.
+func usedTokens(as []Attempt) int {
+	n := 0
+	for _, a := range as {
+		n += a.InputTokens + a.OutputTokens
+	}
+	return n
 }

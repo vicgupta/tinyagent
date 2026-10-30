@@ -166,6 +166,7 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 	add("limits", strings.Join([]string{
 		"steps " + limitText(fs, "step-limit", cfg.StepLimit > 0, fmt.Sprint(cfg.StepLimit)),
 		"cost " + limitText(fs, "cost-limit", cfg.CostLimit > 0, formatCost(cfg.CostLimit)),
+		"tokens " + limitText(fs, "token-limit", cfg.TokenLimit > 0, fmt.Sprint(cfg.TokenLimit)),
 		"time " + limitText(fs, "time-limit", cfg.WallTimeSec > 0, fmt.Sprintf("%ds", cfg.WallTimeSec)),
 	}, ", "))
 	for _, s := range cfg.MCPServers {
