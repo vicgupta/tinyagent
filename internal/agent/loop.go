@@ -110,6 +110,9 @@ type Agent struct {
 	// Memory is the project memory loaded at run start (memory.enabled);
 	// nil means memory is off. Its section follows AGENTS.md.
 	Memory *ProjectMemory
+	// Ratchet is the Project rules section (issue #249) placed after the
+	// project memory section; "" adds nothing.
+	Ratchet string
 	// NoCompact turns off context compaction: the full history is always
 	// sent, and a context-overflow error ends the run.
 	NoCompact bool
@@ -1211,6 +1214,9 @@ func (a *Agent) systemPrompt() string {
 		system += section
 	}
 	system += memorySection(a.Memory)
+	if a.Ratchet != "" {
+		system += "\n\n" + a.Ratchet
+	}
 	system += a.Tools.Skills.Catalog()
 	system += tools.ExtraDirsNotice(effectiveDirs(a.Tools.ExtraDirs, a.Tools.ReadOnly))
 	if a.Tools.ReadOnly {
