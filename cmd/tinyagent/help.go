@@ -9,12 +9,39 @@ import (
 	"strings"
 )
 
-// helpBrief is the default --help output (issue #164): usage, one sentence,
-// and a pointer to the detailed view.
-const helpBrief = `Usage: tinyagent -t "<prompt>" [flags]
+// helpIntro is the usage line and one-sentence description that start
+// every top-level --help view.
+const helpIntro = `Usage: tinyagent [subcommand] -t "<prompt>" [flags]
 Runs an AI coding agent on a task in --cwd, using tools to read, edit and run code.
-Run tinyagent --help --verbose for all options, or tinyagent help sandbox|memory|planner|plugins.
 `
+
+// helpFooter points at the detailed views and the full reference.
+const helpFooter = `Run tinyagent <subcommand> --help for its actions and options,
+tinyagent --help --verbose for every flag, or see docs/subcommands.md.
+`
+
+// helpBrief is the default --help output: usage, one sentence, every
+// subcommand with a one-line description (built from subcommands, so none
+// can be left out), and pointers to the detailed views.
+var helpBrief = helpHeader + "\n" + helpFooter
+
+// helpHeader is helpIntro plus the Subcommands section; --help --verbose
+// prints it before the flag sections and helpFooter after them.
+var helpHeader = buildHelpHeader()
+
+func buildHelpHeader() string {
+	var b strings.Builder
+	b.WriteString(helpIntro)
+	b.WriteString("\nSubcommands:\n")
+	width := 0
+	for _, s := range subcommands {
+		width = max(width, len(s.name))
+	}
+	for _, s := range subcommands {
+		fmt.Fprintf(&b, "  %-*s   %s\n", width, s.name, s.brief)
+	}
+	return b.String()
+}
 
 // helpWidth is the column at which verbose descriptions wrap.
 const helpWidth = 100
@@ -26,52 +53,34 @@ const (
 	truncatedListLines  = 5
 )
 
-// toolsGroup lists the tool and feature flags that usageGroups leaves out,
-// so --help --verbose shows every flag.
-var toolsGroup = struct {
+type flagGroup = struct {
 	name  string
 	flags [][3]string
-}{"Tools", [][3]string{{"", "apply-patch", ""}, {"", "image", "path"}, {"", "images", ""}, {"", "lockdown", ""}, {"", "lsp", ""}, {"", "no-skills", ""}, {"", "plan", ""}, {"", "plan-file", "path"}, {"", "plan-first", ""}, {"", "redact-secrets", ""}, {"", "skills", ""}, {"", "subagents", ""}, {"", "tool-output-files", ""}, {"", "untrusted-task", ""}, {"", "web-fetch", ""}, {"", "web-fetch-allow-domain", "host"}, {"", "workers", ""}}}
-
-// evalGroup lists the --eval flags; --dry-run is shared with Rewind.
-var evalGroup = struct {
-	name  string
-	flags [][3]string
-}{"Eval", [][3]string{{"", "eval", "suite.yaml"}, {"", "eval-out", "dir"}, {"", "eval-keep", ""}, {"", "eval-min-pass-rate", "rate"}}}
-
-// workflowGroup lists the --workflow flags.
-var workflowGroup = struct {
-	name  string
-	flags [][3]string
-}{"Workflow", [][3]string{{"", "workflow", "file.yaml"}, {"", "workflow-name", "name"}}}
-
-// memoryGroup lists the project memory management flags.
-var memoryGroup = struct {
-	name  string
-	flags [][3]string
-}{"Memory", [][3]string{{"", "memory", ""}, {"", "memory-approve", "id|all"}, {"", "memory-forget", "id|all"}, {"", "memory-help", ""}, {"", "memory-list", ""}, {"", "memory-path", ""}, {"", "memory-yes", ""}}}
-
-// verboseGroups is usageGroups with toolsGroup before Output, and evalGroup,
-// workflowGroup, attemptsGroup, verifyGroup and memoryGroup after Rewind.
-func verboseGroups() []struct {
-	name  string
-	flags [][3]string
-} {
-	var gs []struct {
-		name  string
-		flags [][3]string
-	}
-	for _, g := range usageGroups {
-		if g.name == "Output" {
-			gs = append(gs, toolsGroup)
-		}
-		gs = append(gs, g)
-		if g.name == "Rewind" {
-			gs = append(gs, evalGroup, workflowGroup, attemptsGroup, verifyGroup, memoryGroup)
-		}
-	}
-	return gs
 }
+
+// helpGroups lays out --help --verbose: each flag's shorthand, long name and
+// value placeholder, by section. Help text and defaults come from the
+// FlagSet. TestVerboseHelp checks that every registered flag is listed.
+var helpGroups = []flagGroup{
+	{"", [][3]string{{"h", "help", ""}}},
+	{"Task", [][3]string{{"t", "task", "string"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}, {"", "ask-user", ""}, {"", "acp", ""}, {"", "image", "path"}, {"", "images", ""}, {"", "untrusted-task", ""}}},
+	{"Model and provider", [][3]string{{"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "profile", "name"}}},
+	{"Run control", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}, {"", "subagents", ""}, {"", "workers", ""}}},
+	{"Verify before stop", verifyGroup.flags},
+	{"Attempts (best of N)", attemptsGroup.flags},
+	{"Review", [][3]string{{"", "review", ""}, {"", "review-base", "ref"}, {"", "review-commit", "rev"}}},
+	{"Output and logging", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "otel", ""}, {"", "tool-output-files", ""}, {"", "redact-secrets", ""}, {"", "transcript", "path"}}},
+	{"Sandbox and permissions", [][3]string{{"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "lockdown", ""}, {"", "web-fetch", ""}, {"", "web-fetch-allow-domain", "host"}}},
+	{"Context and tools", [][3]string{{"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "skills", ""}, {"", "no-skills", ""}, {"", "apply-patch", ""}, {"", "lsp", ""}, {"", "snapshots", ""}}},
+	{"Memory and planner", [][3]string{{"", "memory", ""}, {"", "memory-approve", "id|all"}, {"", "memory-forget", "id|all"}, {"", "memory-help", ""}, {"", "memory-list", ""}, {"", "memory-path", ""}, {"", "memory-yes", ""}, {"", "plan", ""}, {"", "plan-file", "path"}, {"", "plan-first", ""}}},
+	{"Plugins and TinyGo", [][3]string{{"", "list-plugins", ""}, {"", "plugins-prune", ""}, {"", "plugins-keep", "n"}, {"", "plugins-rollback", "module@sha256"}, {"", "tinygo-install", ""}, {"", "tinygo-update", ""}, {"", "tinygo-status", ""}}},
+	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
+	{"Workflow and eval", [][3]string{{"", "workflow", "file.yaml"}, {"", "workflow-name", "name"}, {"", "eval", "suite.yaml"}, {"", "eval-out", "dir"}, {"", "eval-keep", ""}, {"", "eval-min-pass-rate", "rate"}}},
+	{"Setup and info", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "list-profiles", ""}, {"", "init-config", ""}, {"", "completion", "shell"}}},
+}
+
+// verboseGroups returns the --help --verbose sections.
+func verboseGroups() []flagGroup { return helpGroups }
 
 // printHelp writes --help: the short brief, or with verbose (--help
 // --verbose / -h -v) the grouped per-option view.
@@ -109,7 +118,7 @@ func printVerboseHelp(w io.Writer, fs *flag.FlagSet) {
 		}
 		return s
 	}
-	fmt.Fprint(w, helpBrief)
+	fmt.Fprint(w, helpHeader)
 	for _, g := range verboseGroups() {
 		flags := append([][3]string{}, g.flags...)
 		sort.Slice(flags, func(i, j int) bool { return flags[i][1] < flags[j][1] })
@@ -139,6 +148,8 @@ func printVerboseHelp(w io.Writer, fs *flag.FlagSet) {
 			}
 		}
 	}
+	fmt.Fprintln(w)
+	fmt.Fprint(w, helpFooter)
 }
 
 // wrapWords splits s into lines of at most width characters at spaces

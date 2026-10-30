@@ -92,6 +92,9 @@ func TestSubcommandHelp(t *testing.T) {
 	for _, s := range subcommands {
 		for _, args := range [][]string{{s.name, "--help"}, {s.name, "-h"}, {s.name, "help"}, {"help", s.name}} {
 			code, out, _ := runWith(t, args...)
+			if !strings.Contains(out, "docs/subcommands.md") {
+				t.Errorf("%s help has no docs pointer", s.name)
+			}
 			if code != 0 || !strings.HasPrefix(out, "Usage: tinyagent "+s.name) {
 				t.Errorf("%v: exit %d, %q", args, code, out)
 			}

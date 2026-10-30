@@ -9,8 +9,9 @@ import (
 	"testing"
 )
 
-// TestDefaultHelpIsBrief enforces issue #164's limits on plain --help: at
-// most 3 lines and about 200 characters, excluding the command name.
+// TestDefaultHelpIsBrief checks plain --help stays short and scannable: a
+// usage line first, a Subcommands section, and pointers to --help --verbose
+// and docs/subcommands.md last.
 func TestDefaultHelpIsBrief(t *testing.T) {
 	t.Setenv("AGENT_MODEL", "")
 	for _, args := range [][]string{{"--help"}, {"-h"}} {
@@ -19,14 +20,86 @@ func TestDefaultHelpIsBrief(t *testing.T) {
 			t.Fatalf("%v exit = %d", args, code)
 		}
 		lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
-		if len(lines) > 3 {
-			t.Errorf("%v: %d lines, want <= 3:\n%s", args, len(lines), got)
+		if len(lines) > 15 {
+			t.Errorf("%v: %d lines, want <= 15:\n%s", args, len(lines), got)
 		}
-		if n := len(strings.ReplaceAll(strings.Join(lines, ""), "tinyagent", "")); n > 200 {
-			t.Errorf("%v: %d characters excluding the command name, want <= 200", args, n)
+		for _, l := range lines {
+			if len(l) > helpWidth {
+				t.Errorf("%v: line longer than %d: %q", args, helpWidth, l)
+			}
 		}
-		if !strings.HasPrefix(lines[0], "Usage: tinyagent") || !strings.Contains(lines[len(lines)-1], "--help --verbose") {
-			t.Errorf("%v: want usage first and a pointer to --help --verbose last:\n%s", args, got)
+		if !strings.HasPrefix(lines[0], "Usage: tinyagent") || !strings.Contains(got, "\nSubcommands:\n") {
+			t.Errorf("%v: want usage first and a Subcommands section:\n%s", args, got)
+		}
+		if tail := strings.Join(lines[len(lines)-2:], " "); !strings.Contains(tail, "--help --verbose") || !strings.Contains(tail, "docs/subcommands.md") {
+			t.Errorf("%v: want pointers to --help --verbose and docs/subcommands.md last:\n%s", args, got)
+		}
+	}
+}
+
+// TestHelpListsEverySubcommand checks --help names every registered
+// subcommand (including tinygo) on its own line with a description, and no
+// subcommand that doesn't exist.
+func TestHelpListsEverySubcommand(t *testing.T) {
+	_, got, _ := runWith(t, "--help")
+	sec := got[strings.Index(got, "Subcommands:\n")+len("Subcommands:\n"):]
+	sec = sec[:strings.Index(sec, "\n\n")]
+	var listed []string
+	for _, l := range strings.Split(sec, "\n") {
+		f := strings.Fields(l)
+		if len(f) < 2 {
+			t.Errorf("subcommand line without a description: %q", l)
+			continue
+		}
+		listed = append(listed, f[0])
+		if findSubcommand(f[0]) == nil {
+			t.Errorf("--help lists unknown subcommand %q", f[0])
+		}
+	}
+	var want []string
+	for _, s := range subcommands {
+		want = append(want, s.name)
+	}
+	if !reflect.DeepEqual(listed, want) {
+		t.Errorf("--help subcommands = %v, want %v", listed, want)
+	}
+	for _, name := range []string{"sandbox", "memory", "planner", "plugins", "tinygo"} {
+		if findSubcommand(name) == nil {
+			t.Errorf("subcommand %q not registered", name)
+		}
+	}
+}
+
+// TestHelpGroupsNameRealFlags checks every flag named in a help section is
+// registered and listed once, so help never describes a flag that doesn't
+// exist.
+func TestHelpGroupsNameRealFlags(t *testing.T) {
+	fs := newFlagSet(&options{})
+	seen := map[string]bool{}
+	for _, g := range verboseGroups() {
+		for _, f := range g.flags {
+			if fs.Lookup(f[1]) == nil {
+				t.Errorf("group %q lists --%s, which isn't a flag", g.name, f[1])
+			}
+			if f[0] != "" && fs.Lookup(f[0]) == nil {
+				t.Errorf("group %q lists -%s, which isn't a flag", g.name, f[0])
+			}
+			if seen[f[1]] {
+				t.Errorf("--%s listed twice", f[1])
+			}
+			seen[f[1]] = true
+		}
+	}
+	for _, s := range subcommands {
+		for name, a := range s.actions {
+			if fs.Lookup(a.flag) == nil {
+				t.Errorf("%s %s maps to missing flag --%s", s.name, name, a.flag)
+			}
+		}
+		for name, fl := range s.options {
+			if fs.Lookup(fl) == nil {
+				t.Errorf("%s --%s maps to missing flag --%s", s.name, name, fl)
+			}
 		}
 	}
 }
@@ -40,13 +113,13 @@ func TestVerboseHelp(t *testing.T) {
 	if _, short, _ := runWith(t, "-h", "-v"); short != got {
 		t.Errorf("-h -v differs from --help --verbose")
 	}
-	if !strings.HasPrefix(got, helpBrief+"\n") {
-		t.Errorf("verbose help doesn't start with the brief and one blank line:\n%s", got)
+	if !strings.HasPrefix(got, helpHeader+"\n") || !strings.HasSuffix(got, "\n\n"+helpFooter) {
+		t.Errorf("verbose help doesn't start with the header and end with the footer:\n%s", got)
 	}
 	if strings.Contains(got, "\n\n\n") {
 		t.Error("more than one blank line between sections")
 	}
-	body := strings.TrimPrefix(got, helpBrief+"\n")
+	body := strings.TrimSuffix(strings.TrimPrefix(got, helpHeader+"\n"), "\n"+helpFooter)
 	groups := verboseGroups()
 	blocks := strings.Split(strings.TrimSuffix(body, "\n"), "\n\n")
 	if len(blocks) != len(groups) {
