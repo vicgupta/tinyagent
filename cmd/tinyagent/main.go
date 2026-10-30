@@ -200,6 +200,16 @@ func main() {
 }
 
 func run() int {
+	args, sh, serr := expandSubcommand(os.Args[1:])
+	if serr != nil {
+		fmt.Fprintln(flagOutput, "error:", serr)
+		return 2
+	}
+	if sh != nil {
+		printSubcommandHelp(helpOutput, sh.sub)
+		return 0
+	}
+	os.Args = append([]string{os.Args[0]}, args...)
 	var o options
 	fs := newFlagSet(&o)
 	// Parse quietly so an unknown flag gets a one-line error instead of the
