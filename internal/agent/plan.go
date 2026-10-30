@@ -41,6 +41,9 @@ func (a *Agent) updatePlan(t *trajectory.Trajectory, call model.ToolCall) (strin
 	diff := planDiff(old, in.Items)
 	t.PlanHistory = append(t.PlanHistory, trajectory.PlanChange{Step: t.Steps, Version: version, Diff: diff})
 	a.event("plan.updated", map[string]any{"step": t.Steps, "version": version, "items": in.Items, "note": in.Note, "diff": diff})
+	if a.Out != nil {
+		fmt.Fprintf(a.Out, "plan updated:\n%s\n", renderPlan(t.Plan))
+	}
 	return renderPlan(t.Plan), false
 }
 
@@ -56,7 +59,7 @@ func renderPlan(p *trajectory.Plan) string {
 		sb.WriteString("(empty)\n")
 	}
 	for _, it := range p.Items {
-		mark := map[string]string{"pending": "[ ]", "in_progress": "[>]", "done": "[x]", "blocked": "[!]"}[it.Status]
+		mark := map[string]string{"pending": "[ ]", "in_progress": "[>]", "done": "[x]", "blocked": "[!]", "failed": "[-]"}[it.Status]
 		fmt.Fprintf(&sb, "%s %s: %s (%s)\n", mark, it.ID, it.Text, it.Status)
 	}
 	if p.Note != "" {
@@ -107,7 +110,7 @@ func (a *Agent) withPlan(t *trajectory.Trajectory, v *view) []model.Message {
 	if len(v.idx) > 2 && v.idx[2] == -1 {
 		at = 2
 	}
-	out[at].Content += "\n\n" + renderPlan(t.Plan)
+	out[at].Content += "\n\n" + a.planBlock(t)
 	return out
 }
 
@@ -116,5 +119,33 @@ func (a *Agent) planChars(t *trajectory.Trajectory) int {
 	if !a.Tools.Plan {
 		return 0
 	}
-	return len(renderPlan(t.Plan)) + 2
+	return len(a.planBlock(t)) + 2
+}
+
+// planRequiredHint replaces "No plan yet" when plan.require_first is on.
+const planRequiredHint = "\nNo plan yet. Before changing anything, call update_plan with the ordered steps for this task; then work through them in order, keeping each step's status current."
+
+// planBlock is the pinned plan block for this run.
+func (a *Agent) planBlock(t *trajectory.Trajectory) string {
+	if t.Plan == nil && a.planFirst() {
+		return planHeader + planRequiredHint
+	}
+	return renderPlan(t.Plan)
+}
+
+// planFirst reports whether a plan must exist before the first
+// workspace-changing tool call (plan.require_first, --plan-first).
+func (a *Agent) planFirst() bool {
+	return a.Tools != nil && a.Tools.Plan && a.Config.Plan.RequireFirst
+}
+
+// planGate returns the error result for a call that must wait for a plan,
+// or "" when the call may run: read-only tools, ask_user and submitting
+// never wait, so trivial or read-only tasks aren't burdened.
+func (a *Agent) planGate(t *trajectory.Trajectory, call model.ToolCall) string {
+	if !a.planFirst() || (t.Plan != nil && len(t.Plan.Items) > 0) || readOnlyTools[call.Function.Name] {
+		return ""
+	}
+	a.event("plan.required", map[string]any{"step": t.Steps, "name": call.Function.Name})
+	return fmt.Sprintf("error: plan required: call update_plan with the ordered steps for this task before running %s (plan.require_first is on). Nothing was run.", call.Function.Name)
 }

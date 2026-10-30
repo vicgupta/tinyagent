@@ -48,6 +48,7 @@ type options struct {
 	task, modelName, configPath, cwd, output, resume string
 	outputSchema                                     string
 	planFile                                         string
+	planFirst                                        bool
 	plan                                             bool
 	images                                           bool
 	imagePaths                                       imageList
@@ -139,6 +140,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.Var(&o.sandboxAllowDomains, "sandbox-allow-domain", "with --sandbox, let commands reach only this host (name, *.domain or IP, optional :port) over HTTP(S) via a filtering proxy; repeatable, replaces sandbox_allowed_domains")
 	fs.Var(&o.addDirRead, "add-dir-read", "let the file tools (and a container) read this directory outside --cwd; repeatable; with --add-dir-write, replaces config additional_dirs")
 	fs.Var(&o.addDirWrite, "add-dir-write", "let the file tools, --sandbox commands and a container read and write this directory outside --cwd; repeatable; with --add-dir-read, replaces config additional_dirs")
+	fs.BoolVar(&o.planFirst, "plan-first", false, "require a plan (update_plan) before the first workspace-changing tool call; implies --plan (default off; config plan.require_first)")
 	fs.BoolVar(&o.plan, "plan", false, "enable the update_plan tool: a task plan saved in the checkpoint and pinned in every request (default off; config plan.enabled)")
 	fs.BoolVar(&o.toolOutputFiles, "tool-output-files", false, "save the full text of over-limit tool results under .tinyagent/tool-output so the model can page it with read_file and grep (default off; config tool_output_files.enabled)")
 	fs.BoolVar(&o.applyPatch, "apply-patch", false, "add the apply_patch tool: multi-file, multi-hunk edits in the *** Begin Patch format, checked before any write (default off; config apply_patch)")
@@ -413,6 +415,15 @@ func run() int {
 	applySandboxFlags(fs, &cfg, o)
 	if flagWasSet(fs, "plan") {
 		cfg.Plan.Enabled = o.plan
+	}
+	if flagWasSet(fs, "plan-first") {
+		cfg.Plan.RequireFirst = o.planFirst
+	}
+	if cfg.Plan.RequireFirst && flagWasSet(fs, "plan") && !o.plan {
+		return fail(errors.New("--plan-first needs the plan tool; drop --plan=false"))
+	}
+	if cfg.Plan.RequireFirst {
+		cfg.Plan.Enabled = true
 	}
 	if o.planFile != "" && !cfg.Plan.Enabled {
 		return fail(errors.New("--plan-file requires the plan tool; pass --plan or set plan.enabled: true"))
@@ -2532,7 +2543,7 @@ func writePlanFile(path string, p *trajectory.Plan) error {
 	} else {
 		fmt.Fprintf(&sb, "Version %d, updated at step %d.\n\n", p.Version, p.UpdatedStep)
 		for _, it := range p.Items {
-			box := map[string]string{"pending": "[ ]", "in_progress": "[ ] (in progress)", "done": "[x]", "blocked": "[ ] (blocked)"}[it.Status]
+			box := map[string]string{"pending": "[ ]", "in_progress": "[ ] (in progress)", "done": "[x]", "blocked": "[ ] (blocked)", "failed": "[ ] (failed)"}[it.Status]
 			fmt.Fprintf(&sb, "- %s %s: %s\n", box, it.ID, it.Text)
 		}
 		if p.Note != "" {

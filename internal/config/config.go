@@ -389,6 +389,11 @@ const (
 // Plan configures the persistent plan tool.
 type Plan struct {
 	Enabled bool `yaml:"enabled"`
+	// RequireFirst makes the agent record a plan with update_plan before
+	// its first workspace-changing tool call (off by default so one-shot
+	// questions and read-only lookups aren't slowed down; --plan-first
+	// turns it and the plan tool on).
+	RequireFirst bool `yaml:"require_first"`
 }
 
 // LogDB configures the opt-in SQLite event log. It is off unless Enabled

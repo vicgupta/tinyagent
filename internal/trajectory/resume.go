@@ -484,11 +484,11 @@ func ValidatePlanItems(items []PlanItem, note string) error {
 			return fmt.Errorf("plan item %q needs text of 1 to %d characters", it.ID, MaxPlanItemText)
 		}
 		switch it.Status {
-		case "pending", "done", "blocked":
+		case "pending", "done", "blocked", "failed":
 		case "in_progress":
 			active++
 		default:
-			return fmt.Errorf("plan item %q has invalid status %q (want pending, in_progress, done, or blocked)", it.ID, it.Status)
+			return fmt.Errorf("plan item %q has invalid status %q (want pending, in_progress, done, blocked, or failed)", it.ID, it.Status)
 		}
 	}
 	if active > 1 {

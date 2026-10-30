@@ -445,7 +445,8 @@ func PlanSpec() model.ToolSpec {
 		Function: model.FunctionSpec{
 			Name: PlanToolName,
 			Description: "Replace your whole task plan. The plan is saved with the checkpoint and shown to you every step, " +
-				"even after context compaction. Keep at most one item in_progress. Returns the rendered plan.",
+				"even after context compaction. Work through the items in order: mark the current one in_progress, then done (or failed/blocked), " +
+				"and call again to revise the steps when the approach changes. Keep at most one item in_progress. Returns the rendered plan.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -457,7 +458,7 @@ func PlanSpec() model.ToolSpec {
 							"properties": map[string]any{
 								"id":     map[string]any{"type": "string", "description": "Stable item id"},
 								"text":   map[string]any{"type": "string", "description": "What to do (at most 500 characters)"},
-								"status": map[string]any{"type": "string", "enum": []string{"pending", "in_progress", "done", "blocked"}},
+								"status": map[string]any{"type": "string", "enum": []string{"pending", "in_progress", "done", "blocked", "failed"}},
 							},
 							"required": []string{"id", "text", "status"},
 						},

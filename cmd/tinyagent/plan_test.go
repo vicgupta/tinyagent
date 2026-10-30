@@ -66,3 +66,18 @@ func TestCheckpointSavedEventAndPlanExport(t *testing.T) {
 		t.Fatalf("plan file %q %v", b, err)
 	}
 }
+
+func TestPlanFirstFlagConflictsWithPlanFalse(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfg, []byte("model: openai/gpt-4o\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code := 0
+	stderr := captureStderr(t, func() {
+		code, _, _ = runWith(t, "-t", "x", "--cwd", dir, "-c", cfg, "--plan-first", "--plan=false")
+	})
+	if code == 0 || !strings.Contains(stderr, "--plan-first needs the plan tool") {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+}
