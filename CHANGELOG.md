@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## [v0.10.3] - 2026-10-30
+
+### Features
+
+- Token budget (#246, part of #236): `--token-limit n` / config `token_limit` caps provider-reported input+output tokens for the whole run. At the limit the run stops cleanly with the new status `TokenLimitExceeded` (exit 1, resumable; the printed `--resume` command doubles the limit). Delegates and workers get only the tokens left in the parent's budget, and a worker batch shares one token gate. Off by default (0 = unlimited).
+- 80% budget warning (#246): when a token or cost budget reaches 80%, one "Budget notice" user message is added before the next request and a `budget.warning` event goes to the JSON stream, log DB and OTel trace.
+- Token limit everywhere (#247, closes #236): `--check` shows the token limit on the limits line, `--init-config` includes a commented `token_limit: 0`, `--eval` suite tasks accept `limits.token_limit`, and `--workflow` accepts `token_limit` in `defaults` and per stage.
+
+### Changes
+
+- **Behavior change for `--attempts` (#247):** `--token-limit` is now one budget shared by all attempts, like `--cost-limit` and `--time-limit`. Each attempt gets the tokens left, no new attempt starts once the budget is spent, and an attempt ending `TokenLimitExceeded` stops the run with `budget exhausted`. Previously each attempt got the full limit.
+- The turn cap (`--step-limit`) stays off by default. A top-level `--token-limit` with `--eval` is still a per-trial cap.
+
 ## [v0.10.2] - 2026-10-30
 
 ### Changes
