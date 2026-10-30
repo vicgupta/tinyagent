@@ -133,7 +133,18 @@ func (o *OpenAIResponses) Query(ctx context.Context, messages []Message, tools [
 			return Message{}, Cost{}, perr
 		}
 		defer resp.Body.Close()
-		msg, usage, err = readResponsesStream(resp.Body, o.OnText, "openai")
+		if jsonInsteadOfStream(resp) {
+			var obj responsesObject
+			if err := decodeBody(resp.Body, &obj); err != nil {
+				return Message{}, Cost{}, err
+			}
+			msg, usage, err = parseResponsesObject(obj, "openai")
+			if err == nil && msg.Content != "" {
+				o.OnText(msg.Content)
+			}
+		} else {
+			msg, usage, err = readResponsesStream(resp.Body, o.OnText, "openai")
+		}
 		if err != nil && ctx.Err() != nil {
 			err = ctx.Err()
 		}
