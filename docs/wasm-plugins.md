@@ -166,5 +166,5 @@ downloaded then.
    and run `sha256sum` on each (cross-check with the release's checksums).
 3. Update `Version` and `Checksums` in `internal/tinygo/toolchain.go`.
 4. Run `go test ./internal/tinygo ./cmd/tinyagent` with the new TinyGo
-   installed (`tinyagent tinygo update`) so the integration test runs; CI
-   installs the pinned version the same way.
+   installed (`tinyagent tinygo update`) so the integration test runs (it
+   skips without TinyGo; `TINYAGENT_REQUIRE_TINYGO=1` makes that a failure).
