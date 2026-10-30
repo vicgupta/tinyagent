@@ -46,6 +46,20 @@ tinyagent --update
 
 This replaces the binary in place with the latest release, after checking its checksum. If it's installed in a directory you can't write to, run it with `sudo`.
 
+Each step is printed to stderr as it happens, and the download shows a `#` progress bar when stderr is a terminal:
+
+```text
+update: current version: v0.10.3 at /usr/local/bin/tinyagent
+update: query latest release: https://api.github.com/repos/vicgupta/tinyagent/releases/latest
+update: query latest release: found v0.10.4 (current v0.10.3)
+update: select asset: tinyagent-linux-amd64 for linux/amd64
+update: download checksums: SHA256SUMS
+update: download binary: https://github.com/vicgupta/tinyagent/releases/download/v0.10.4/tinyagent-linux-amd64
+  [####################....................]  50%  4.5 MiB / 9.0 MiB
+```
+
+It ends with the received size, the verified SHA-256, the install step and `update: done: updated v0.10.3 -> v0.10.4 at <path>`. If a step fails, the error names it: `error: update failed at verify checksum: ...`. See [`--update`](docs/subcommands.md#updating) for the details.
+
 ### Shell completion (Bash, Zsh and Fish)
 
 `tinyagent --completion bash`, `tinyagent --completion zsh` and `tinyagent --completion fish` print a script that completes flag names (`--sandbox-<Tab>`, `--tool-out<Tab>`, short aliases such as `-t`). After `--env`, `--command-env`, `--reasoning-effort`, `--openai-api` and `--completion` (as `--flag <Tab>` or `--flag=<Tab>`) they also complete that flag's fixed values, so `--env <Tab>` offers `local` and `container`. Other flag values, such as models and profiles, are not completed; those words fall back to filenames.
@@ -120,6 +134,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview and
 - Run budgets: turn cap, cost limit and token limit (`--token-limit`), with an 80% warning to the model; delegates, workers and `--attempts` share the budget, and a run that hits it can be resumed.
 - Verify before stop (`--verify-on-stop`): a run that changed files isn't accepted until a test or build command passes; otherwise it is marked unverified. Optional computational checks (`--verify-check`, e.g. lint, type check, tests) run in order, cheapest first, before the run may finish; see [Computational checks](docs/verify.md#computational-checks). An optional inferential review (`--verify-review`) runs last, once every check passes, and reports the model's findings; see [Inferential review](docs/verify.md#inferential-review).
 - Help everywhere: `tinyagent` or `tinyagent <subcommand>` alone at a terminal prints help; `--help --verbose` lists every flag by section.
+- `tinyagent --update`: checksum-verified self-update with step-by-step progress and a `#` download bar.
 - Undo for file edits, workspace rewind, resume and follow-up runs.
 - Sandboxed commands with a network allowlist, permission rules, hooks, untrusted-content lockdown and file-access rules.
 - WebAssembly plugin modules run through Extism with permission checks, a version store, rollback and prune. Go source modules are built with TinyGo, an external dependency that tinyagent downloads on first use (pinned version, checksum-verified, cached locally, `tinyagent tinygo update` to update); TinyGo is never embedded in tinyagent.

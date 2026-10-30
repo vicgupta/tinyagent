@@ -351,12 +351,7 @@ func run() int {
 		if err != nil {
 			return fail(err)
 		}
-		msg, err := u.Run(context.Background())
-		if err != nil {
-			return fail(err)
-		}
-		fmt.Println(msg)
-		return 0
+		return runUpdate(u, o.jsonOutput, os.Stdout, os.Stderr, isTerminal(os.Stderr))
 	}
 	if o.check {
 		return runCheck(&o, fs, os.Stdout)

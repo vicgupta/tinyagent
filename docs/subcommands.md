@@ -136,9 +136,17 @@ Six subcommands are shortcuts for existing flags. They rewrite the command line 
 | `--no-agents-md` | off | Don't append the nearest `AGENTS.md` (at or above `<cwd>`, up to the repo root; capped at 32KB) to the system prompt |
 | `--scoped-agents-md` | off | Also deliver `AGENTS.md` files in directories below `<cwd>`, appended to the first file tool result that touches a path there; see [Project instructions](project-context.md#project-instructions-agentsmd). Can't be combined with `--no-agents-md` |
 | `-V, --version` | | Print the version and exit |
-| `--update` | | Replace this binary with the latest GitHub release (checksum-verified) and exit |
+| `--update` | | Replace this binary with the latest GitHub release (checksum-verified) and exit, printing each step to stderr; see [Updating](#updating) |
 | `--check` | | Print the resolved config file, model, provider key status, fallbacks, cwd and limits (and `ask_user` when it is on or set by flag, and the [project memory](memory.md#project-memory) approval policy, store path and active/pending entry counts when memory is on or `--memory` is passed, a `lockdown:` line when [lockdown](permissions.md#untrusted-content-lockdown) is on or `--lockdown` is passed, and an `attempts:` line when `--attempts` flags are passed or the config has an `attempts:` section: the validated best-of-N plan with each attempt's model, the check count and timeouts (never the commands), `stop_on_pass`, `keep` and the worktree paths), then exit without a model request (exit 2 on a setup error) |
 | `--completion bash\|zsh\|fish` | | Print a Bash, Zsh or Fish flag-name completion script and exit (`source <(tinyagent --completion bash)`; for Zsh, after `compinit`; for Fish, `tinyagent --completion fish \| source`); see [Shell completion](../README.md#shell-completion-bash-zsh-and-fish) |
+
+## Updating
+
+`tinyagent --update` prints one `update: <step>: <detail>` line on stderr per step: `current version` (version and binary path), `query latest release` (the API URL, then `found vX` or `latest is vX; already up to date`), `select asset` (`tinyagent-<os>-<arch>`), `download checksums` (`SHA256SUMS`), `download binary` (the URL, then the received size), `verify checksum` (the SHA-256 that matched), `install` (the path being replaced) and `done`. The final message (`updated vA -> vB (<path>)` or `already up to date (vA)`) goes to stdout, exit 0.
+
+- **Download bar.** When stderr is a terminal, the binary download draws a `#` bar: with a known `Content-Length`, one redrawn line `  [####....]  42%  3.8 MiB / 9.0 MiB`; without one, one `#` per 256 KiB received, then the total. When stderr isn't a terminal (piped, CI logs), only the plain step lines are printed, with no carriage returns.
+- **Failures** exit 1 and name the step: `error: update failed at <step>: <reason>`, for example `update failed at verify checksum: checksum mismatch for tinyagent-linux-amd64; not installing`. The binary is replaced only after the checksum matches.
+- **`--json`.** Steps become JSONL events on stdout, `{"type":"update.step","step":"...","detail":"..."}`, followed by `{"type":"update.result","status":"ok"|"error","message":"..."}`; no bar is drawn and stderr only gets the error line on failure.
 
 ## Exit status
 
