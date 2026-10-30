@@ -30,7 +30,6 @@ func TestApplyVerifyCheckFlag(t *testing.T) {
 		t.Errorf("unset flag changed the checks: %v, %v", cfg.VerifyOnStop.Checks, err)
 	}
 
-
 	var o3 options
 	fs = newFlagSet(&o3)
 	if err := fs.Parse([]string{"--verify-check", " "}); err == nil {
