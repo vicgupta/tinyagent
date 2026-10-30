@@ -298,3 +298,31 @@ func TestSearchAndRecent(t *testing.T) {
 		t.Errorf("Recent = %s", got)
 	}
 }
+
+func TestMarkdownRefusesSymlinks(t *testing.T) {
+	root := t.TempDir()
+	real := filepath.Join(root, "real")
+	if err := os.MkdirAll(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "memory")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skip("symlinks unsupported:", err)
+	}
+	if _, err := Load(link); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("Load through symlinked folder: %v", err)
+	}
+	if err := Update(link, func(es []Entry) ([]Entry, error) { return es, nil }); err == nil {
+		t.Errorf("Update through symlinked folder succeeded")
+	}
+	dir := filepath.Join(root, "m2")
+	os.MkdirAll(dir, 0o700)
+	target := filepath.Join(root, "secret.md")
+	os.WriteFile(target, []byte("x"), 0o600)
+	if err := os.Symlink(target, filepath.Join(dir, "abc.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("Load with symlinked entry: %v", err)
+	}
+}

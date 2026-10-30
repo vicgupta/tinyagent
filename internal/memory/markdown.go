@@ -106,6 +106,9 @@ func UnmarshalMarkdown(data []byte) (Entry, error) {
 // subfolders are ignored. A file that can't be parsed, or whose id doesn't
 // match its name, makes the whole store corrupt.
 func loadDir(dir string) ([]Entry, error) {
+	if err := noSymlink(dir); err != nil {
+		return nil, err
+	}
 	des, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -120,6 +123,9 @@ func loadDir(dir string) ([]Entry, error) {
 			continue
 		}
 		p := filepath.Join(dir, name)
+		if de.Type()&os.ModeSymlink != 0 {
+			return nil, &CorruptError{Path: p, Err: errors.New("memory entry is a symlink; refusing to follow it")}
+		}
 		data, err := os.ReadFile(p)
 		if err != nil {
 			return nil, err
@@ -151,6 +157,9 @@ func sortStored(es []Entry) {
 // updateDir is Update for a markdown folder: changed and new entries are
 // written atomically (temp file + rename), removed entries' files deleted.
 func updateDir(dir string, fn func([]Entry) ([]Entry, error)) error {
+	if err := noSymlink(dir); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -191,6 +200,19 @@ func updateDir(dir string, fn func([]Entry) ([]Entry, error)) error {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+// noSymlink refuses a memory folder that is a symlink, so a committed or
+// planted link can't redirect reads and writes outside the project.
+func noSymlink(dir string) error {
+	fi, err := os.Lstat(dir)
+	if err != nil {
+		return nil
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("memory folder %s is a symlink; refusing to follow it", dir)
 	}
 	return nil
 }
