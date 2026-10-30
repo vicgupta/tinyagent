@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## [v0.9.0] - 2026-10-30
+
+### Features
+
+- Project memory (#170): `--memory` loads approved notes into the prompt and offers `remember`, `memory_search` and `memory_list`; markdown or SQLite backends, `memory.toml`, approval before entries go live, `--memory-list/-path/-approve/-forget/-help`, and ACP support. Notes are shown to the model as data, not instructions, and symlinked memory folders are refused. Off by default.
+- Task planner: `--plan-first` (`plan.require_first`) requires an `update_plan` before any workspace-changing tool call; plan steps can be `failed`, and plan updates print to stdout.
+- Streaming: assistant text streams as `assistant.delta` events in `--json` mode; servers that ignore streaming and return plain JSON are handled.
+- `undo_file` tool: restores a file's state from before the session's first `write_file`/`edit_file`/`apply_patch` change.
+- Subcommands as shortcuts for existing flags: `tinyagent sandbox`, `memory`, `planner`, `plugins` and `tinygo`, with `tinyagent help <subcommand>`. Every flag form still works.
+- Untrusted-content lockdown (#171): `--lockdown` and `--untrusted-task`, configurable taint sources, per-MCP-server settings, and narrowed command and container network after taint.
+- Best-of-N attempts (#172): `--attempts`, `--attempt-model`, `--attempt-check` and the `attempts` config, with events, `--check` output and GitHub Action support.
+- Agent Plugins (#173): validated `plugin.json` manifests, the `plugins` config key, plugin skills and MCP servers, and `--list-plugins`.
+- WebAssembly plugin modules: plugins can ship modules that run through Extism under deny-by-default permissions, exposed as `<plugin>__<export>` tools. Every version is kept in an append-only store with `tinyagent plugins rollback` and `tinyagent plugins prune`.
+- Go source plugin modules built with TinyGo. **TinyGo is an external dependency, shipped separately by the TinyGo project and not part of tinyagent;** it is never embedded in the tinyagent binary or repository. tinyagent downloads a pinned TinyGo version on first use (or with `tinyagent tinygo install`), verifies its checksum, caches it locally and updates it with `tinyagent tinygo update`.
+
+### Changes
+
+- The README is now a short overview; the full reference lives in `docs/`.
+- Shell completion completes fixed flag values (#180). Flaky worktree and command-env tests were fixed.
+
 ## [v0.8.0] - 2026-10-27
 
 ### Features
