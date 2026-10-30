@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [v0.10.1] - 2026-10-30
+
+### Changes
+
+- Plain `tinyagent` with no arguments at an interactive terminal now prints the same brief help as `tinyagent --help` and exits 0 (#242), instead of `error: --task is required` and the full flag list. With stdin piped or redirected it still exits 2 with that error, so scripts and CI are unaffected.
+
 ## [v0.10.0] - 2026-10-30
 
 ### Features
