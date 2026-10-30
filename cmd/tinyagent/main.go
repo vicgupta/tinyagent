@@ -625,7 +625,11 @@ func run() int {
 		return configFail(err)
 	}
 	defer mcpRegistry.Close()
-	if err := checkCommandToolNames(cmdTools, mcpRegistry.Specs); err != nil {
+	extSpecs, extCall, err := externalTools(mcpRegistry, startWasmTools(ctx, cfg, root, fileAccess, lock, os.Stderr))
+	if err != nil {
+		return configFail(err)
+	}
+	if err := checkCommandToolNames(cmdTools, extSpecs); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
 	}
@@ -691,8 +695,8 @@ func run() int {
 			Stream:             streamTo(jsonStream(o.jsonOutput), progress),
 			CommandTools:       cmdTools,
 			CommandLog:         commandLog(o.verbose),
-			ExternalSpecs:      mcpRegistry.Specs,
-			ExternalCall:       mcpRegistry.Call,
+			ExternalSpecs:      extSpecs,
+			ExternalCall:       extCall,
 			Plan:               cfg.Plan.Enabled,
 			Images:             cfg.Images.Enabled,
 			ApplyPatch:         cfg.ApplyPatch,

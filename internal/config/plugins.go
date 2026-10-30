@@ -17,6 +17,10 @@ type Plugin struct {
 	// MCPServers authorizes servers from the plugin's mcp.json. Servers not
 	// listed are never started.
 	MCPServers []PluginServer `yaml:"mcp_servers,omitempty"`
+	// WasmModules authorizes WebAssembly code modules declared in the
+	// plugin's plugin.json (extensions.tinyagent.wasm_modules), by name.
+	// Modules not listed are never loaded.
+	WasmModules []string `yaml:"wasm_modules,omitempty"`
 }
 
 // PluginServer authorizes one mcp.json server of a plugin, with the same
