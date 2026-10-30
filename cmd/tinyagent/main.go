@@ -103,6 +103,7 @@ type options struct {
 	memory                                           memoryCmd
 	lockdown                                         lockdownFlags
 	attempts                                         attemptFlags
+	verify                                           verifyFlags
 }
 
 // newFlagSet defines the command-line flags, storing their values in o. Each
@@ -146,6 +147,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.Var(&o.addDirRead, "add-dir-read", "let the file tools (and a container) read this directory outside --cwd; repeatable; with --add-dir-write, replaces config additional_dirs")
 	fs.Var(&o.addDirWrite, "add-dir-write", "let the file tools, --sandbox commands and a container read and write this directory outside --cwd; repeatable; with --add-dir-read, replaces config additional_dirs")
 	fs.BoolVar(&o.planFirst, "plan-first", false, "require a plan (update_plan) before the first workspace-changing tool call; implies --plan (default off; config plan.require_first)")
+	registerVerifyFlags(fs, &o.verify)
 	fs.BoolVar(&o.plan, "plan", false, "enable the update_plan tool: a task plan saved in the checkpoint and pinned in every request (default off; config plan.enabled)")
 	fs.BoolVar(&o.toolOutputFiles, "tool-output-files", false, "save the full text of over-limit tool results under .tinyagent/tool-output so the model can page it with read_file and grep (default off; config tool_output_files.enabled)")
 	fs.BoolVar(&o.applyPatch, "apply-patch", false, "add the apply_patch tool: multi-file, multi-hunk edits in the *** Begin Patch format, checked before any write (default off; config apply_patch)")
@@ -440,6 +442,9 @@ func run() int {
 		cfg.ReadOnly = true
 	}
 	applySandboxFlags(fs, &cfg, o)
+	if err := applyVerifyFlags(fs, &cfg, o.verify); err != nil {
+		return fail(err)
+	}
 	if flagWasSet(fs, "plan") {
 		cfg.Plan.Enabled = o.plan
 	}
@@ -1095,6 +1100,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return fail(errors.New("--plan-file requires the plan tool, and this checkpoint was recorded without it"))
 	}
 	applySandboxFlags(fs, &cfg, *o)
+	if err := applyVerifyFlags(fs, &cfg, o.verify); err != nil {
+		return fail(err)
+	}
 	if msg := envConflict(cfg); msg != "" {
 		fmt.Fprintln(os.Stderr, "error: "+msg)
 		return 2
@@ -1904,6 +1912,9 @@ func summaryLine(t *trajectory.Trajectory, elapsed time.Duration) string {
 		s += fmt.Sprintf(", %d subagent runs (%d steps)", n, t.SubagentSteps)
 	}
 	s += lockdownSummary(t)
+	if t.Unverified {
+		s += ", unverified changes"
+	}
 	if t.ExitStatus == agent.StatusError {
 		s += ": " + t.Submission
 	}
@@ -2550,6 +2561,12 @@ func resultFields(t *trajectory.Trajectory, elapsed time.Duration) map[string]an
 	}
 	if t.StopContinuations > 0 {
 		fields["stop_continuations"] = t.StopContinuations
+	}
+	if t.Unverified {
+		fields["unverified"] = true
+	}
+	if t.VerifyReprompts > 0 {
+		fields["verify_reprompts"] = t.VerifyReprompts
 	}
 	if len(t.Subagents) > 0 {
 		fields["subagents"] = len(t.Subagents)

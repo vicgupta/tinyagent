@@ -250,6 +250,15 @@ type Trajectory struct {
 	// feedback of a VerificationFailed run.
 	StopContinuations int    `json:"stop_continuations,omitempty"`
 	StopReason        string `json:"stop_reason,omitempty"`
+	// Verify-on-stop guard state (verify_on_stop): VerifyPending means
+	// files may have changed since the last successful verification,
+	// VerifyBlocked that the last bash call was refused, VerifyReprompts
+	// counts the times the model was sent back to verify, and Unverified
+	// marks a run that finished with unverified changes.
+	VerifyPending   bool `json:"verify_pending,omitempty"`
+	VerifyBlocked   bool `json:"verify_blocked,omitempty"`
+	VerifyReprompts int  `json:"verify_reprompts,omitempty"`
+	Unverified      bool `json:"unverified,omitempty"`
 	// Resume records the checkpoint this run continued, when it did.
 	Resume *ResumeInfo `json:"resume,omitempty"`
 

@@ -52,7 +52,7 @@ var memoryGroup = struct {
 }{"Memory", [][3]string{{"", "memory", ""}, {"", "memory-approve", "id|all"}, {"", "memory-forget", "id|all"}, {"", "memory-help", ""}, {"", "memory-list", ""}, {"", "memory-path", ""}, {"", "memory-yes", ""}}}
 
 // verboseGroups is usageGroups with toolsGroup before Output, and evalGroup,
-// workflowGroup, attemptsGroup and memoryGroup after Rewind.
+// workflowGroup, attemptsGroup, verifyGroup and memoryGroup after Rewind.
 func verboseGroups() []struct {
 	name  string
 	flags [][3]string
@@ -67,7 +67,7 @@ func verboseGroups() []struct {
 		}
 		gs = append(gs, g)
 		if g.name == "Rewind" {
-			gs = append(gs, evalGroup, workflowGroup, attemptsGroup, memoryGroup)
+			gs = append(gs, evalGroup, workflowGroup, attemptsGroup, verifyGroup, memoryGroup)
 		}
 	}
 	return gs
