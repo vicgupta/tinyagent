@@ -77,6 +77,14 @@ var subcommands = []subcommand{
 		},
 		options: map[string]string{"keep": "plugins-keep"},
 	},
+	{
+		name: "tinygo", summary: "manage the TinyGo compiler for Go plugin modules (a separate, downloaded project; same as --tinygo-*)",
+		actions: map[string]subAction{
+			"install": {flag: "tinygo-install", desc: "download, verify and cache the pinned TinyGo release (--tinygo-install)"},
+			"update":  {flag: "tinygo-update", desc: "move to the TinyGo version pinned in this build, removing old ones (--tinygo-update)"},
+			"status":  {flag: "tinygo-status", desc: "print pinned and installed versions, path and checksum state (--tinygo-status)"},
+		},
+	},
 }
 
 func findSubcommand(name string) *subcommand {

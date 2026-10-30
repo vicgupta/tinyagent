@@ -30,6 +30,7 @@ import (
 
 	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/model"
+	"github.com/vicgupta/tinyagent/internal/tinygo"
 )
 
 // MaxWasmBytes caps a module file's size.
@@ -48,6 +49,12 @@ type WasmDecl struct {
 	Version  string       `json:"version"`
 	Exports  []WasmExport `json:"exports"`
 	Requires Permissions  `json:"requires"`
+	// Source and Lang declare a module built from Go source by TinyAgent
+	// (with TinyGo, an external, separately downloaded tool) instead of a
+	// prebuilt file: Source is a directory relative to the plugin root and
+	// Lang must be "go".
+	Source string `json:"source,omitempty"`
+	Lang   string `json:"lang,omitempty"`
 }
 
 // WasmDecls returns the modules a plugin declares.
@@ -68,7 +75,11 @@ func WasmDecls(m *Manifest) ([]WasmDecl, error) {
 			return nil, fmt.Errorf("%s: wasm module name %q is invalid or repeated", ManifestFile, d.Name)
 		}
 		seen[d.Name] = true
-		if d.File == "" || filepath.IsAbs(d.File) {
+		if d.Source != "" {
+			if d.Lang != "go" || filepath.IsAbs(d.Source) || d.File != "" {
+				return nil, fmt.Errorf("%s: wasm module %s: source needs lang \"go\", a relative path and no file", ManifestFile, d.Name)
+			}
+		} else if d.File == "" || filepath.IsAbs(d.File) {
 			return nil, fmt.Errorf("%s: wasm module %s: file must be a relative path", ManifestFile, d.Name)
 		}
 		for _, e := range d.Exports {
@@ -165,6 +176,9 @@ type WasmPool struct {
 	// the version its current pointer names (verifying its hash), and a
 	// changed plugin file is added as a new version and made current.
 	Store *ModuleStore
+	// Compile builds Go source files into a module (TinyGo under the OS
+	// sandbox). Modules declared with source need it and Store.
+	Compile func(ctx context.Context, files map[string][]byte) ([]byte, error)
 
 	mu      sync.Mutex
 	modules map[string]*pooled // plugin root + "\x00" + module name
@@ -235,35 +249,30 @@ func (p *WasmPool) activate(ctx context.Context, m *Manifest, d WasmDecl, g Sess
 	if g.Taint != nil && g.Taint.Tainted() {
 		return nil, ErrTainted
 	}
-	path, err := ResolveInside(m.Root, filepath.Join(m.Root, d.File))
-	if err != nil {
+	want, grant := g.resolve(m.Name, d.Requires)
+	if len(want.HostFuncs) > 0 {
+		return nil, fmt.Errorf("%w: host function %q is not offered by tinyagent", ErrPermission, want.HostFuncs[0])
+	}
+	if err := want.subsetOf(grant); err != nil {
 		return nil, err
 	}
-	fi, err := os.Stat(path)
-	if err != nil {
-		return nil, err
-	}
-	if !fi.Mode().IsRegular() || fi.Size() > MaxWasmBytes {
-		return nil, fmt.Errorf("%s is not a regular file of at most %d bytes", d.File, MaxWasmBytes)
-	}
-	wasm, err := os.ReadFile(path)
+	wasm, key, err := p.moduleBytes(ctx, m, d)
 	if err != nil {
 		return nil, err
 	}
 	sum := sha256.Sum256(wasm)
 	hash := hex.EncodeToString(sum[:])
-	want, grant := g.resolve(m.Name, d.Requires)
-	if len(want.HostFuncs) > 0 {
-		return nil, fmt.Errorf("%w: host function %q is not offered by tinyagent", ErrPermission, want.HostFuncs[0])
+	if key == "" {
+		key = hash
 	}
 	if p.Store != nil {
-		if wasm, hash, want, err = p.fromStore(m, d, wasm, hash, want); err != nil {
+		if wasm, hash, want, err = p.fromStore(m, d, wasm, key, want); err != nil {
 			return nil, err
 		}
 	}
 	wm := WasmManifest{Name: d.Name, Version: d.Version + "+" + hash[:12], Requires: want}
-	key := m.Root + "\x00" + d.Name
-	if e, ok := p.modules[key]; ok {
+	pk := m.Root + "\x00" + d.Name
+	if e, ok := p.modules[pk]; ok {
 		// Re-activation: the session's grant may be narrower now.
 		if err := e.mod.Permissions().subsetOf(grant); err != nil {
 			return nil, err
@@ -285,16 +294,67 @@ func (p *WasmPool) activate(ctx context.Context, m *Manifest, d WasmDecl, g Sess
 	if err != nil {
 		return nil, err
 	}
-	p.modules[key] = &pooled{host: h, mod: mod, hash: hash}
+	p.modules[pk] = &pooled{host: h, mod: mod, hash: hash}
 	return mod, nil
+}
+
+// moduleBytes returns a module's WebAssembly and, for Go source modules,
+// the source hash that identifies it. Go source is only built when it
+// changed since the store last ingested it; otherwise wasm is nil and the
+// store's current version is used.
+func (p *WasmPool) moduleBytes(ctx context.Context, m *Manifest, d WasmDecl) ([]byte, string, error) {
+	if d.Source != "" {
+		dir, err := ResolveInside(m.Root, filepath.Join(m.Root, d.Source))
+		if err != nil {
+			return nil, "", err
+		}
+		if p.Store == nil || p.Compile == nil {
+			return nil, "", errors.New("go source modules need the module store and the TinyGo compiler")
+		}
+		files, key, err := tinygo.Sources(dir)
+		if err != nil {
+			return nil, "", err
+		}
+		if p.Store.Source(StoreName(m.Name, d.Name)) == key {
+			if _, _, err := p.Store.ReadCurrent(StoreName(m.Name, d.Name)); err == nil {
+				return nil, key, nil
+			}
+		}
+		wasm, err := p.Compile(ctx, files)
+		if err != nil {
+			return nil, "", err
+		}
+		if len(wasm) > MaxWasmBytes {
+			return nil, "", fmt.Errorf("built module is larger than %d bytes", MaxWasmBytes)
+		}
+		return wasm, key, nil
+	}
+	path, err := ResolveInside(m.Root, filepath.Join(m.Root, d.File))
+	if err != nil {
+		return nil, "", err
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, "", err
+	}
+	if !fi.Mode().IsRegular() || fi.Size() > MaxWasmBytes {
+		return nil, "", fmt.Errorf("%s is not a regular file of at most %d bytes", d.File, MaxWasmBytes)
+	}
+	wasm, err := os.ReadFile(path)
+	return wasm, "", err
 }
 
 // fromStore adds the plugin's file to the store when it changed since the
 // last ingest (refusing permissions wider than the first load's), then
 // returns the verified current version and its permissions.
-func (p *WasmPool) fromStore(m *Manifest, d WasmDecl, wasm []byte, hash string, want Permissions) ([]byte, string, Permissions, error) {
+func (p *WasmPool) fromStore(m *Manifest, d WasmDecl, wasm []byte, key string, want Permissions) ([]byte, string, Permissions, error) {
 	sn := StoreName(m.Name, d.Name)
-	if p.Store.Source(sn) != hash {
+	if p.Store.Source(sn) != key {
+		if wasm == nil {
+			return nil, "", want, errors.New("internal: module source changed but was not built")
+		}
+		sum := sha256.Sum256(wasm)
+		hash := hex.EncodeToString(sum[:])
 		if pin, err := p.Store.Pinned(sn); err == nil {
 			if err := want.subsetOf(pin); err != nil {
 				return nil, "", want, fmt.Errorf("new version widens the first load's permissions: %w", err)
@@ -307,7 +367,7 @@ func (p *WasmPool) fromStore(m *Manifest, d WasmDecl, wasm []byte, hash string, 
 		if err := p.Store.SetCurrent(sn, hash); err != nil {
 			return nil, "", want, err
 		}
-		if err := p.Store.SetSource(sn, hash); err != nil {
+		if err := p.Store.SetSource(sn, key); err != nil {
 			return nil, "", want, err
 		}
 	}

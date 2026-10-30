@@ -419,6 +419,9 @@ Other:
       --plugins-prune                     remove stored plugin module versions under --cwd's .tinyagent/modules except each module's current one and the --plugins-keep newest others, then exit
       --plugins-keep n                    versions besides current that --plugins-prune keeps per module (default 5)
       --plugins-rollback module@sha256    point a stored plugin module at an older version, given as <module>@<sha256>, then exit; refused when that version needs wider permissions than the first load
+      --tinygo-install                    download the pinned TinyGo release (a separate project, not part of tinyagent) used to build Go plugin modules, verify its checksum and cache it, then exit; a verified cache is reused
+      --tinygo-update                     install the TinyGo version pinned in this build if it isn't cached and remove other cached versions, then exit
+      --tinygo-status                     print the pinned and installed TinyGo versions, path and checksum state, then exit
       --transcript path                   print this trajectory JSON as a Markdown transcript (secrets redacted, long results truncated) and exit; makes no model request
       --init-config                       write a commented starter config to the user config path (or -c), refusing to overwrite, and exit
       --completion shell                  print a flag-name completion script for this shell (bash, zsh or fish) and exit; load it with: source <(tinyagent --completion bash), or in zsh after compinit: source <(tinyagent --completion zsh), or in fish: tinyagent --completion fish | source; re-source it after --update

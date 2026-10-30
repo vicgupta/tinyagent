@@ -96,3 +96,75 @@ permissions than the first load, when the target fails its hash check, and,
 inside a run, once the run is tainted. Prune keeps each module's current
 version and the newest `--keep` others (default 5); current is never
 removed.
+
+## Go source modules and the TinyGo toolchain
+
+**TinyGo is an external dependency, not part of TinyAgent.** TinyAgent
+never embeds TinyGo in its binary (no `go:embed`, no bundled archives) and
+the repository never contains it. TinyAgent downloads the official TinyGo
+release separately, on first use or with `tinyagent tinygo install`, and
+verifies it against a SHA-256 pinned in the source before extracting it.
+
+A module can be declared as Go source instead of a prebuilt `.wasm`:
+
+```json
+{"name": "text", "source": "go/text", "lang": "go", "version": "1",
+ "exports": [{"name": "upper", "description": "Uppercase the input"}],
+ "requires": {"wasi": true}}
+```
+
+`source` is a directory relative to the plugin root (no `file`). Its
+top-level `.go` files (no tests, no `go.mod`, standard library only) form a
+`package main` with no `main` function; each export is a
+`//go:wasmexport <name>` function returning `int32` (0 for success).
+TinyAgent adds a small shim providing `input() []byte` (the call's argument
+JSON) and `output([]byte)` (the result):
+
+```go
+package main
+
+import "bytes"
+
+//go:wasmexport upper
+func upper() int32 {
+	output(bytes.ToUpper(input()))
+	return 0
+}
+```
+
+TinyGo's `wasip1` runtime imports WASI, so declare `"wasi": true`.
+
+When the plugin loads, TinyAgent runs `tinygo build -target=wasip1
+-buildmode=c-shared -no-debug -opt=z` in a temporary directory under the OS
+sandbox (Landlock/Seatbelt) with writes confined to that directory and the
+network denied (`GOPROXY=off`). It refuses to build where the sandbox is
+unavailable and after the session is tainted. The result goes through the
+version store (above) and the usual permission check; an unchanged source
+reuses the stored build (and a rollback) instead of recompiling. TinyGo
+itself calls `go`, so a Go toolchain must be on `PATH`.
+
+### Managing TinyGo
+
+- `tinyagent tinygo install` (`--tinygo-install`) downloads the pinned
+  release into `os.UserCacheDir()/tinyagent/toolchains/tinygo-<version>/`,
+  verifies its checksum (a mismatch is refused and leaves nothing cached)
+  and extracts it safely (no path traversal or escaping links). With a
+  verified copy cached it says so and downloads nothing.
+- `tinyagent tinygo update` (`--tinygo-update`) installs the version pinned
+  in this TinyAgent build if needed and removes other cached versions.
+- `tinyagent tinygo status` (`--tinygo-status`) prints the pinned version
+  and checksum, whether it is installed and verified, and the path in use.
+
+To use your own TinyGo instead, set the `tinygo` config key or the
+`TINYAGENT_TINYGO` environment variable to its executable; nothing is
+downloaded then.
+
+### Bumping the pinned TinyGo version
+
+1. Pick a release on <https://github.com/tinygo-org/tinygo/releases>.
+2. Download `tinygo<ver>.<os>-<arch>.tar.gz` for linux/darwin × amd64/arm64
+   and run `sha256sum` on each (cross-check with the release's checksums).
+3. Update `Version` and `Checksums` in `internal/tinygo/toolchain.go`.
+4. Run `go test ./internal/tinygo ./cmd/tinyagent` with the new TinyGo
+   installed (`tinyagent tinygo update`) so the integration test runs (it
+   skips without TinyGo; `TINYAGENT_REQUIRE_TINYGO=1` makes that a failure).

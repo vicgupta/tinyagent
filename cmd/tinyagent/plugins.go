@@ -127,6 +127,7 @@ func startWasmTools(ctx context.Context, cfg config.AgentConfig, root string, fa
 		g.Taint = lock
 	}
 	wasmPool.Store = moduleStore(root)
+	wasmPool.Compile = goModuleCompiler(cfg.TinyGo, w)
 	return wasmPool.Activate(ctx, ls, cfg.Plugins, g, w)
 }
 
