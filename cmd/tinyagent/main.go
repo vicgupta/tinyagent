@@ -624,7 +624,12 @@ func run() int {
 	}
 
 	var onText func(string)
-	if !o.noStream && !o.jsonOutput {
+	deltas := &textDeltas{}
+	switch {
+	case o.noStream:
+	case o.jsonOutput:
+		onText = deltas.write
+	default:
 		onText = func(s string) { io.WriteString(progress, s) }
 	}
 	if openaiAPI != "" && o.verbose {
@@ -722,6 +727,7 @@ func run() int {
 	tr, trWarn := startOTel(otelCfg, cfg, a, task, false, o.verbose)
 	a.Plugins = pluginRecords(cfg, root, !cfg.ReadOnly)
 	events = startEvents(os.Stdout, o.jsonOutput, a, false, stop, db, tr)
+	deltas.events = events
 	if events.err != nil {
 		events.close()
 		return 1
@@ -1137,7 +1143,12 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	defer closeEnv()
 
 	var onText func(string)
-	if !o.noStream && !o.jsonOutput {
+	deltas := &textDeltas{}
+	switch {
+	case o.noStream:
+	case o.jsonOutput:
+		onText = deltas.write
+	default:
 		onText = func(s string) { os.Stdout.WriteString(s) }
 	}
 	// The recorded transport is kept: the checkpoint's reasoning items only
@@ -1272,6 +1283,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	tr, trWarn := startOTel(otelCfg, cfg, a, a.FollowUp, true, o.verbose)
 	a.Plugins = pluginRecords(cfg, root, false)
 	events = startEvents(os.Stdout, o.jsonOutput, a, true, stop, db, tr)
+	deltas.events = events
 	if events.err != nil {
 		events.close()
 		return 1
@@ -2036,6 +2048,23 @@ func (e *runEvents) emit(kind string, fields map[string]any) {
 		e.err = e.json.Err()
 	}
 }
+
+// delta writes one streamed assistant text chunk as an assistant.delta
+// event. It goes to the --json stream only, not the log or trace exporter,
+// which keep the complete assistant.message.
+func (e *runEvents) delta(text string) {
+	if e == nil || e.json == nil || e.err != nil || text == "" {
+		return
+	}
+	e.json.Emit("assistant.delta", map[string]any{"text": text})
+	e.err = e.json.Err()
+}
+
+// textDeltas is the model's text callback in --json mode. The model is built
+// before the event stream starts, so events is set once it exists.
+type textDeltas struct{ events *runEvents }
+
+func (d *textDeltas) write(text string) { d.events.delta(text) }
 
 // warn reports a log-db or trace export problem on stderr and, with --json,
 // as a warning event. It is not sent to the database or exporter.

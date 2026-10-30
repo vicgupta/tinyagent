@@ -116,7 +116,12 @@ type Executor struct {
 	// store.
 	MemoryTools bool
 
+	// UndoSession names this run's undo snapshot directory under
+	// .tinyagent/undo. Empty generates one on first use.
+	UndoSession string
+
 	procs registry
+	undo  undoState
 }
 
 // outputSkip is the directory recursive walks skip: the saved-output
@@ -167,6 +172,8 @@ func Specs(readOnly ...bool) []model.ToolSpec {
 			props{"path": "File path", "content": "Full file content"}, "path", "content"),
 		spec("edit_file", "Replace exactly one occurrence of old_str with new_str in a file. Fails if old_str occurs zero or multiple times; include more context to make it unique, or set replace_all to replace every occurrence.",
 			props{"path": "File path", "old_str": "Exact text to replace", "new_str": "Replacement text", "replace_all": "Optional: replace every occurrence instead of exactly one"}, "path", "old_str", "new_str"),
+		spec(UndoToolName, "Restore a file to its contents before this session's first write_file, edit_file or apply_patch change to it (a file created this session is deleted). One snapshot per file per session; changes made via bash or other processes are not recorded.",
+			props{"path": "File path"}, "path"),
 		spec("list_files", "List directory entries. With a glob pattern (e.g. *.go, or a pattern containing /), search recursively and return matching file paths.",
 			props{"path": "Directory (default .)", "pattern": "Optional glob pattern"}),
 		spec("grep", "Search files recursively for a Go regular expression (default), or literal text with fixed_strings: true. Returns file:line: content; context_lines optionally adds surrounding lines.",
@@ -341,7 +348,7 @@ func (e *Executor) RunResult(ctx context.Context, call model.ToolCall) Result {
 func (e *Executor) touched(name string, a args) []string {
 	var paths []string
 	switch name {
-	case "read_file", "write_file", "edit_file", ViewImageToolName:
+	case "read_file", "write_file", "edit_file", UndoToolName, ViewImageToolName:
 		paths = []string{a.Path}
 	case LSPToolName:
 		if e.LSP == nil {
@@ -570,6 +577,12 @@ func (e *Executor) run(ctx context.Context, name, raw string, edited *[]string) 
 		out, written, err := applyPatchFiles(e.Root, a.Input, e.scope())
 		if err == nil && edited != nil {
 			*edited = append(*edited, written...)
+		}
+		return out, err
+	case UndoToolName:
+		out, err := e.undoFile(a.Path)
+		if err == nil {
+			e.noteEdited(edited, a.Path)
 		}
 		return out, err
 	case "list_files":

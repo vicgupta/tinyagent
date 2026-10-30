@@ -520,7 +520,7 @@ func TestExecutorRun(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "x.txt")); err != nil {
 		t.Error(err)
 	}
-	if n := len(Specs()); n != 9 {
+	if n := len(Specs()); n != 10 {
 		t.Errorf("Specs() has %d tools", n)
 	}
 }

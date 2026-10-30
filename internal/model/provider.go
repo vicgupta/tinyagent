@@ -253,6 +253,47 @@ func (e *httpError) Error() string {
 }
 
 // postJSON sends body to url and decodes the response into out.
+// jsonInsteadOfStream reports whether a response to a streaming request is a
+// plain JSON body, as from servers that ignore "stream": true, and replaces
+// resp.Body with a reader that still yields the whole body. Callers then
+// decode it as a non-streamed response. An SSE body starts with a field
+// name or comment, never "{".
+func jsonInsteadOfStream(resp *http.Response) bool {
+	ct, _, _ := strings.Cut(resp.Header.Get("Content-Type"), ";")
+	if strings.EqualFold(strings.TrimSpace(ct), "text/event-stream") {
+		return false
+	}
+	br := bufio.NewReader(resp.Body)
+	resp.Body = struct {
+		io.Reader
+		io.Closer
+	}{br, resp.Body}
+	for {
+		b, err := br.Peek(1)
+		if err != nil {
+			return false
+		}
+		switch b[0] {
+		case ' ', '\t', '\r', '\n':
+			br.ReadByte()
+		default:
+			return b[0] == '{'
+		}
+	}
+}
+
+// decodeBody decodes a whole JSON response body into out.
+func decodeBody(r io.Reader, out any) error {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(data, out); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+	return nil
+}
+
 func postJSON(ctx context.Context, url string, headers map[string]string, body, out any) error {
 	resp, err := post(ctx, url, headers, body)
 	if err != nil {

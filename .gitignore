@@ -1,3 +1,4 @@
 /tinyagent
 /dist/
 *.tmp
+/.tinyagent/
