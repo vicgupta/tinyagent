@@ -18,6 +18,9 @@ func writeFile(root, path, content string, sc *scope) error {
 	if err := sc.checkWrite(full, path); err != nil {
 		return err
 	}
+	if err := sc.snapshot(full); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		return err
 	}

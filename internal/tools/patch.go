@@ -380,7 +380,15 @@ func plural(n int) string {
 	return "s"
 }
 
-func (c fileChange) write() error {
+func (c fileChange) write(sc *scope) error {
+	if err := sc.snapshot(c.full); err != nil {
+		return err
+	}
+	if c.dest != "" {
+		if err := sc.snapshot(c.dest); err != nil {
+			return err
+		}
+	}
 	switch c.op.kind {
 	case "delete":
 		return os.Remove(c.full)
@@ -438,7 +446,7 @@ func applyPatchFiles(root, input string, sc *scope) (string, []string, error) {
 	var sb strings.Builder
 	sb.WriteString("ok")
 	for i, c := range changes {
-		if err := c.write(); err != nil {
+		if err := c.write(sc); err != nil {
 			var applied, pending []string
 			for _, d := range changes[:i] {
 				applied = append(applied, d.summary)

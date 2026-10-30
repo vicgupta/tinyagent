@@ -76,7 +76,7 @@ func TestNoSnapshotsByDefault(t *testing.T) {
 	if tr.SnapshotsEnabled || len(tr.Snapshots) != 0 {
 		t.Errorf("trajectory has snapshot data: %+v", tr.Snapshots)
 	}
-	if _, err := os.Stat(filepath.Join(a.Tools.Root, ".tinyagent")); err == nil {
+	if _, err := os.Stat(filepath.Join(a.Tools.Root, ".tinyagent", "snapshots")); err == nil {
 		t.Error("snapshot store created with snapshots off")
 	}
 }

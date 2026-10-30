@@ -625,7 +625,7 @@ func (r PermissionRule) validate(i int) error {
 
 // fileFamilyTools are the built-in tools a path matcher applies to.
 var fileFamilyTools = map[string]bool{
-	"read_file": true, "write_file": true, "edit_file": true, "apply_patch": true,
+	"read_file": true, "write_file": true, "edit_file": true, "apply_patch": true, "undo_file": true,
 	"list_files": true, "grep": true, "view_image": true,
 }
 
