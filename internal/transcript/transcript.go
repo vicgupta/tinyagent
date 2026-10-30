@@ -397,6 +397,8 @@ func (r *renderer) plan() {
 			mark = "~"
 		case "blocked":
 			mark = "!"
+		case "failed":
+			mark = "-"
 		}
 		fmt.Fprintf(&b, "[%s] %s. %s (%s)\n", mark, it.ID, it.Text, it.Status)
 	}

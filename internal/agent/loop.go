@@ -668,6 +668,8 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 				}
 			} else if call.Function.Name == tools.PlanToolName && a.Tools.Plan {
 				out, isError = a.updatePlan(t, call)
+			} else if gate := a.planGate(t, call); gate != "" {
+				out, isError = gate, true
 			} else {
 				if r, ok := a.batched(batch, call); ok {
 					res = r
