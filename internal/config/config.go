@@ -174,6 +174,9 @@ type AgentConfig struct {
 	// Memory configures opt-in cross-run project memory (off by default;
 	// --memory overrides Enabled). It comes only from the user config or -c.
 	Memory Memory `yaml:"memory"`
+	// Handoff configures the opt-in session handoff file (off by default;
+	// --handoff overrides Enabled). It comes only from the user config or -c.
+	Handoff Handoff `yaml:"handoff"`
 	// LogDB is the opt-in SQLite event log.
 	LogDB LogDB `yaml:"log_db"`
 	// OTel is the opt-in OpenTelemetry (OTLP/HTTP) trace export.
@@ -992,6 +995,7 @@ func Default() AgentConfig {
 		ToolOutputFiles:        ToolOutputFiles{Dir: DefaultToolOutputDir, MaxRuns: DefaultToolOutputMaxRuns},
 		Snapshots:              Snapshots{MaxFileBytes: DefaultSnapshotMaxFileBytes},
 		Memory:                 DefaultMemory(),
+		Handoff:                DefaultHandoff(),
 		VerifyOnStop:           VerifyOnStop{MaxReprompts: DefaultVerifyMaxReprompts},
 	}
 }
@@ -1080,6 +1084,7 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		OTel            yaml.Node `yaml:"otel"`
 		Permissions     yaml.Node `yaml:"permissions"`
 		Memory          yaml.Node `yaml:"memory"`
+		Handoff         yaml.Node `yaml:"handoff"`
 		// UntrustedContent is checked strictly here so a typo under
 		// untrusted_content exits 2 like any other lockdown config error.
 		UntrustedContent yaml.Node `yaml:"untrusted_content"`
@@ -1121,6 +1126,11 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		}
 		if probe.Memory.Kind != 0 {
 			if err := checkStrict(&probe.Memory, "memory", &Memory{}); err != nil {
+				return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+			}
+		}
+		if probe.Handoff.Kind != 0 {
+			if err := checkStrict(&probe.Handoff, "handoff", &Handoff{}); err != nil {
 				return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 			}
 		}
@@ -1207,6 +1217,9 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.Memory.Validate(); err != nil {
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+	}
+	if err := cfg.Handoff.Validate(); err != nil {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.OTel.Validate(); err != nil {

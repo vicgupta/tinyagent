@@ -55,6 +55,7 @@ Six subcommands are shortcuts for existing flags. They rewrite the command line 
 | `--tinygo-status` | | Print the pinned and installed TinyGo versions, path and checksum state, then exit |
 | `--cwd` | `.` | Root directory; tools can't reach outside it |
 | `--memory` | off | Load this project's active [project memory](memory.md#project-memory) entries into the system prompt (overrides `memory.enabled`; `--memory=false` turns it off). `--resume` keeps the checkpoint's setting; a conflicting `--memory` exits 2 |
+| `--handoff` | off | [Session handoff](long-runs.md#session-handoff): load the handoff file (`handoff.path`, default `.tinyagent/handoff.md`) into the first message as data, run `handoff.startup_command` if set, and rewrite the file with the task, status and final answer when the run ends (overrides `handoff.enabled`; `--handoff=false` turns it off). Fresh runs only; a read-only run loads the file but doesn't run the startup command or rewrite the file |
 | `--memory-list` | | Print the [project memory](memory.md#project-memory) entries for `--cwd` (pending first, then newest first), or a JSON array with `--json`, then exit. Makes no model request and needs no credentials |
 | `--memory-approve <id\|all>` | | Approve one pending project memory entry, or every pending entry, then exit |
 | `--memory-forget <id\|all>` | | Delete one project memory entry; `all` deletes every entry and requires `--memory-yes` |

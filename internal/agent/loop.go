@@ -113,6 +113,9 @@ type Agent struct {
 	// Ratchet is the Project rules section (issue #249) placed after the
 	// project memory section; "" adds nothing.
 	Ratchet string
+	// TaskPreamble is placed before the task in a fresh run's first user
+	// message (the session handoff, issue #251); t.Task stays the task.
+	TaskPreamble string
 	// NoCompact turns off context compaction: the full history is always
 	// sent, and a context-overflow error ends the run.
 	NoCompact bool
@@ -453,7 +456,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			Review:                a.Review,
 			Messages: []model.Message{
 				{Role: "system", Content: system},
-				{Role: "user", Content: task + model.AttachmentLabels(a.TaskImages), Images: a.TaskImages},
+				{Role: "user", Content: a.TaskPreamble + task + model.AttachmentLabels(a.TaskImages), Images: a.TaskImages},
 			},
 		}
 		if a.scopedOn() {

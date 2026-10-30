@@ -74,6 +74,13 @@ memory:                   # project memory; see Project memory (user config or -
   max_writes_per_run: 5   # entries one run may add, replace or forget; >= 1
   max_entries: 50         # active entries kept per project; >= 1
   max_bytes: 8192         # cap on the Project memory prompt section; 1 to 65536
+handoff:                  # session handoff file; see Session handoff (user config or -c only)
+  enabled: false          # read the file at start and rewrite it at the end (same as --handoff)
+  path: .tinyagent/handoff.md  # relative to --cwd; must stay inside it
+  max_bytes: 16384        # bytes of the file loaded into the first message; >= 1
+  startup_command: ""     # optional shell command run in --cwd before the first turn
+  startup_timeout_seconds: 120  # bound on the startup command; >= 1
+  startup_max_output: 8192      # bytes of startup output (the tail) given to the model; >= 1
 subagents:
   enabled: false          # offer the delegate tool (same as --subagents)
   model: ""               # child model, e.g. openai/gpt-5-mini; empty uses the parent model

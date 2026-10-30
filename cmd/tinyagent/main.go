@@ -102,6 +102,7 @@ type options struct {
 	acp                                              bool
 	workflow, workflowName                           string
 	memory                                           memoryCmd
+	handoff                                          bool
 	ratchet                                          ratchetFlags
 	lockdown                                         lockdownFlags
 	attempts                                         attemptFlags
@@ -203,6 +204,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.workflow, "workflow", "", "run the skill workflow in this YAML file on the task (-t): the router picks a workflow or skill by intent, and each stage runs automatically with the previous stage's output, gated by its success check")
 	fs.StringVar(&o.workflowName, "workflow-name", "", "with --workflow: run this workflow or skill instead of routing by the task's intent")
 	registerMemoryFlags(fs, &o.memory)
+	registerHandoffFlags(fs, &o.handoff)
 	registerRatchetFlags(fs, &o.ratchet)
 	registerLockdownFlags(fs, &o.lockdown)
 	registerAttemptFlags(fs, &o.attempts)
@@ -525,6 +527,9 @@ func run() int {
 	if flagWasSet(fs, "memory") {
 		cfg.Memory.Enabled = o.memory.enabled
 	}
+	if flagWasSet(fs, "handoff") {
+		cfg.Handoff.Enabled = o.handoff
+	}
 	lock, code := setupLockdown(fs, o.lockdown, &cfg, review != nil, false, os.Stderr)
 	if code != 0 {
 		return code
@@ -813,6 +818,7 @@ func run() int {
 		a.Tools.Remember = memoryWriter(a, cfg.Memory)
 		a.Tools.MemoryTools = a.Tools.Remember != nil
 	}
+	handoffState := startHandoff(ctx, cfg, root, a, events, warn)
 	if o.output != "" {
 		a.OnStep = func(t *trajectory.Trajectory) error {
 			if err := t.Save(o.output); err != nil {
@@ -840,6 +846,7 @@ func run() int {
 	if !o.jsonOutput {
 		resume = resumeCommand(t, o.output, root, cfg)
 	}
+	handoffState.finish(t, o.modelName, o.output, events, warn)
 	reportSummary(os.Stderr, o.modelName, t, elapsed, resume)
 	if worktree != nil {
 		fmt.Fprintf(os.Stderr, "worktree kept: %s (branch %s)\n", worktree.Path, worktree.Branch)

@@ -114,6 +114,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview and
 - Many providers: OpenAI, Anthropic, OpenRouter, Ollama, a ChatGPT subscription through Codex, and your own OpenAI-compatible endpoints.
 - Streaming text, `--json` event output, structured output, SQLite event logs and OpenTelemetry.
 - Project memory across runs, with approval before entries become active.
+- Session handoff for long-running work (`--handoff`): each run leaves `.tinyagent/handoff.md` with what it did and what's next, the next fresh run reads it as data, and an optional startup command runs before the first turn; see [Session handoff](docs/long-runs.md#session-handoff).
 - Project rules from agent failures (`tinyagent ratchet add`): each rule records its incident and an expiry or review condition, is added to the system prompt, and can be enforced as a permission deny rule; see [Project rules](docs/ratchet.md).
 - A task planner that can require a plan before any change.
 - Run budgets: turn cap, cost limit and token limit (`--token-limit`), with an 80% warning to the model; delegates, workers and `--attempts` share the budget, and a run that hits it can be resumed.
@@ -142,7 +143,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview and
 | Plugins, WebAssembly modules, version store and TinyGo | [docs/plugins.md](docs/plugins.md) |
 | Sandboxing, network allowlist, command environment, execution environments | [docs/sandbox.md](docs/sandbox.md) |
 | Permissions, hooks, lockdown, secret redaction, file access, extra directories | [docs/permissions.md](docs/permissions.md) |
-| Long runs, images, tool output files, apply_patch, subagents, workers, web fetch, LSP | [docs/long-runs.md](docs/long-runs.md) |
+| Long runs, session handoff, images, tool output files, apply_patch, subagents, workers, web fetch, LSP | [docs/long-runs.md](docs/long-runs.md) |
 | Editor integration (ACP) and GitHub Actions | [docs/integrations.md](docs/integrations.md) |
 | Built-in tool notes | [docs/tools.md](docs/tools.md) |
 | Malformed tool calls, output truncation, troubleshooting | [docs/troubleshooting.md](docs/troubleshooting.md) |
