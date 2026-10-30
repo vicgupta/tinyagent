@@ -8,7 +8,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/config"
 )
 
-const starterConfig = `# tinyagent user config. Flags override these values. Full reference: README "Config".
+const starterConfig = `# tinyagent user config. Flags override these values. Full reference: docs/config.md.
 # model: openai/gpt-4o        # same <provider>/<model> syntax as -m
 # step_limit: 50
 # cost_limit: 2.0
@@ -34,17 +34,17 @@ const starterConfig = `# tinyagent user config. Flags override these values. Ful
 #   # memory.toml and TINYAGENT_MEMORY_* override these: tinyagent --memory-help
 # untrusted_content:          # lockdown: once a web_fetch or MCP result or a review diff enters the run,
 #   enabled: false            # refuse commands, MCP tools and other web_fetch hosts (same as --lockdown)
-#   lockdown:                 # sources and per-MCP-server untrusted/lockdown_allowed: README "Untrusted-content lockdown"
+#   lockdown:                 # sources and per-MCP-server untrusted/lockdown_allowed: docs/permissions.md "Untrusted-content lockdown"
 #     web_fetch_allowed_domains: []  # web_fetch hosts still readable after taint
 #     allowed_domains: []            # hosts --sandbox commands still reach after taint (also in sandbox_allowed_domains)
 #     container_proxy: false         # container environment: reach allowed_domains through a proxy after taint
-# attempts:                   # best-of-N, used only with --attempts N (README "Best-of-N attempts")
+# attempts:                   # best-of-N, used only with --attempts N (docs/runs.md "Best-of-N attempts")
 #   checks:                   # each must exit 0 in an attempt's worktree; --attempt-check replaces the list
 #     - command: go test ./...
 #       timeout_seconds: 600  # default 600, up to 3600
 #   stop_on_pass: true        # false runs all N attempts and compares them
 #   keep: all                 # non-winning worktrees to keep once one wins: all, failed or none
-# plugins: []                # Agent Plugins packages (README "Plugins"), e.g. - path: /abs/plugin-dir
+# plugins: []                # Agent Plugins packages (docs/plugins.md), e.g. - path: /abs/plugin-dir
 #                             # (holds plugin.json); its skills join with --skills, and only mcp.json servers
 #                             # listed under its mcp_servers start; inspect with --list-plugins
 `

@@ -94,7 +94,7 @@ embed/prompts/        system prompt templates
 - Add or update the price and context-window tables so `--cost-limit` and
   compaction keep working. Unknown models cost $0, which silently defeats
   `--cost-limit`.
-- Update the flags/usage and troubleshooting tables in `README.md` if the change
+- Update the flag tables in `docs/subcommands.md` and the troubleshooting table in `docs/troubleshooting.md` if the change
   is user-visible (new provider, new hint, new env var).
 - Add a `hint:` for common setup failures, matching the existing troubleshooting
   table. Hints name environment variables without printing their values.
@@ -108,7 +108,7 @@ Before opening a PR, confirm:
 - [ ] `go build ./...`, `go vet ./...`, `go test -count=1 ./...` pass.
 - [ ] `GOOS=linux go build ./... && GOOS=linux go vet ./...` pass if build-tagged
       files changed.
-- [ ] `README.md` updated for any user-visible change (flag, config key, env var,
+- [ ] `README.md` or `docs/` updated for any user-visible change (flag, config key, env var,
       provider, hint).
 - [ ] Tests cover the new behavior, including any golden-output expectations.
 
