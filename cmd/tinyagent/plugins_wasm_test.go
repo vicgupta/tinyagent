@@ -17,7 +17,9 @@ import (
 func echoWasm() []byte {
 	sec := func(id byte, b ...byte) []byte { return append([]byte{id, byte(len(b))}, b...) }
 	str := func(s string) []byte { return append([]byte{byte(len(s))}, s...) }
-	imp := func(name string, typ byte) []byte { return append(append(str("extism:host/env"), str(name)...), 0x00, typ) }
+	imp := func(name string, typ byte) []byte {
+		return append(append(str("extism:host/env"), str(name)...), 0x00, typ)
+	}
 	out := []byte{0x00, 0x61, 0x73, 0x6d, 1, 0, 0, 0}
 	out = append(out, sec(1, 3, 0x60, 0, 1, 0x7e, 0x60, 2, 0x7e, 0x7e, 0, 0x60, 0, 1, 0x7f)...)
 	imps := []byte{3}
