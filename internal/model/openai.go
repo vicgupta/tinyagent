@@ -189,6 +189,20 @@ func (o *OpenAI) stream(ctx context.Context, url string, headers map[string]stri
 		return Message{}, openAIUsage{}, "", err
 	}
 	defer resp.Body.Close()
+	if jsonInsteadOfStream(resp) {
+		var r openAIResponse
+		if err := decodeBody(resp.Body, &r); err != nil {
+			return Message{}, openAIUsage{}, "", err
+		}
+		if len(r.Choices) == 0 {
+			return Message{}, openAIUsage{}, "", fmt.Errorf("openai: response has no choices")
+		}
+		c := r.Choices[0]
+		if c.Message.Content != "" {
+			o.OnText(c.Message.Content)
+		}
+		return Message{Content: c.Message.Content, ToolCalls: c.Message.ToolCalls}, r.Usage, c.FinishReason, nil
+	}
 
 	var (
 		text   strings.Builder

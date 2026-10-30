@@ -262,6 +262,18 @@ func (a *Anthropic) stream(ctx context.Context, url string, headers map[string]s
 		return anthropicResponse{}, err
 	}
 	defer resp.Body.Close()
+	if jsonInsteadOfStream(resp) {
+		var out anthropicResponse
+		if err := decodeBody(resp.Body, &out); err != nil {
+			return anthropicResponse{}, err
+		}
+		for _, b := range out.Content {
+			if b.Type == "text" && b.Text != "" {
+				a.OnText(b.Text)
+			}
+		}
+		return out, nil
+	}
 
 	var out anthropicResponse
 	var partial []strings.Builder // tool_use input JSON, by block index
