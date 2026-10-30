@@ -82,6 +82,9 @@ func (a *Agent) verifyStop(ctx context.Context, t *trajectory.Trajectory, v *vie
 	}
 	failed, ok := a.runVerifyChecks(ctx, t)
 	if !ok {
+		if !t.Unverified && !t.VerifyPending {
+			a.runVerifyReview(ctx, t)
+		}
 		return nil, false
 	}
 	if t.VerifyReprompts >= a.maxVerifyReprompts() {
