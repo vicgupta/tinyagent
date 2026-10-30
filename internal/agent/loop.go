@@ -600,7 +600,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		}
 
 		if strings.Contains(msg.Content, SubmitMarker) || len(msg.ToolCalls) == 0 {
-			if done, again := a.verifyStop(t, v, msg); again || done != nil {
+			if done, again := a.verifyStop(ctx, t, v, msg); again || done != nil {
 				if done != nil {
 					return done
 				}

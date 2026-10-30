@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -66,7 +67,7 @@ func (a *Agent) noteVerify(t *trajectory.Trajectory, call model.ToolCall, res to
 // model was sent back to verify, so the loop must continue; a non-nil done
 // is the final trajectory after a failed save. Otherwise the run may finish,
 // with t.Unverified set when changes are still unverified.
-func (a *Agent) verifyStop(t *trajectory.Trajectory, v *view, msg model.Message) (done *trajectory.Trajectory, again bool) {
+func (a *Agent) verifyStop(ctx context.Context, t *trajectory.Trajectory, v *view, msg model.Message) (done *trajectory.Trajectory, again bool) {
 	if !a.verifyOn() || a.subagentID != "" {
 		return nil, false
 	}
@@ -78,7 +79,12 @@ func (a *Agent) verifyStop(t *trajectory.Trajectory, v *view, msg model.Message)
 	case t.VerifyBlocked || a.Tools.ReadOnly || !a.Tools.Permits("bash"):
 		a.markUnverified(t, "verification commands cannot run (bash is refused or unavailable)")
 		return nil, false
-	case t.VerifyReprompts >= a.maxVerifyReprompts():
+	}
+	failed, ok := a.runVerifyChecks(ctx, t)
+	if !ok {
+		return nil, false
+	}
+	if t.VerifyReprompts >= a.maxVerifyReprompts() {
 		a.markUnverified(t, fmt.Sprintf("still unverified after %d verify re-prompts", t.VerifyReprompts))
 		return nil, false
 	}
@@ -93,7 +99,7 @@ func (a *Agent) verifyStop(t *trajectory.Trajectory, v *view, msg model.Message)
 	if a.Verbose && a.Err != nil {
 		fmt.Fprintf(a.Err, "verify: unverified changes; asking the model to verify (%d/%d)\n", t.VerifyReprompts, a.maxVerifyReprompts())
 	}
-	t.Messages = append(t.Messages, model.Message{Role: "user", Content: fmt.Sprintf(verifyNotice, verifyHint(a.Config.VerifyOnStop))})
+	t.Messages = append(t.Messages, model.Message{Role: "user", Content: fmt.Sprintf(verifyNotice, verifyHint(a.Config.VerifyOnStop)) + failed})
 	v.add(t, t.Messages[len(t.Messages)-1])
 	if err := a.step(t); err != nil {
 		return a.saveFailed(t, err), false
@@ -112,11 +118,12 @@ func (a *Agent) markUnverified(t *trajectory.Trajectory, reason string) {
 
 // verifyHint names the configured verify commands for the notice.
 func verifyHint(c config.VerifyOnStop) string {
-	if len(c.Commands) == 0 {
+	all := append(append([]string(nil), c.Checks...), c.Commands...)
+	if len(all) == 0 {
 		return ""
 	}
-	q := make([]string, len(c.Commands))
-	for i, cmd := range c.Commands {
+	q := make([]string, len(all))
+	for i, cmd := range all {
 		q[i] = "`" + strings.TrimSpace(cmd) + "`"
 	}
 	return " (configured: " + strings.Join(q, ", ") + ")"
@@ -143,14 +150,14 @@ func isVerifyCommand(c config.VerifyOnStop, cmd string) bool {
 	if cmd == "" {
 		return false
 	}
-	for _, want := range c.Commands {
+	for _, want := range append(append([]string(nil), c.Checks...), c.Commands...) {
 		want = strings.TrimSpace(want)
 		if want != "" && (cmd == want || strings.HasPrefix(cmd, want+" ")) {
 			return true
 		}
 	}
 	patterns := c.Patterns
-	if len(c.Commands) == 0 && len(patterns) == 0 {
+	if len(c.Commands) == 0 && len(c.Checks) == 0 && len(patterns) == 0 {
 		patterns = config.DefaultVerifyPatterns
 	}
 	for _, p := range patterns {
