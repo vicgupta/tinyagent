@@ -13,7 +13,7 @@ import (
 // and a pointer to the detailed view.
 const helpBrief = `Usage: tinyagent -t "<prompt>" [flags]
 Runs an AI coding agent on a task in --cwd, using tools to read, edit and run code.
-Run tinyagent --help --verbose for all options.
+Run tinyagent --help --verbose for all options, or tinyagent help sandbox|memory|planner|plugins.
 `
 
 // helpWidth is the column at which verbose descriptions wrap.
