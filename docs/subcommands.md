@@ -39,7 +39,7 @@ Five subcommands are shortcuts for existing flags. They rewrite the command line
 | `--fallback-model <spec>` | config `fallback_models`, else none | Model to switch to when the current one keeps failing with `429`, `5xx` or network errors after retries; repeatable, tried in order, at most 3, and replaces `fallback_models`; see [Model fallback](providers.md#model-fallback) |
 | `--no-fallback` | off | Don't fall back to other models (clears `fallback_models`); conflicts with `--fallback-model` |
 | `--openai-api` | config `openai_api`, else `auto` | Transport for the `openai` provider: `auto`, `responses`, or `chat`; see [OpenAI transport](providers.md#openai-transport) |
-| `--init-config` | | Write a commented starter config to the user config path (or `-c PATH`), refuse overwrites, and exit |
+| `--init-config` | | Write a commented starter config (including `token_limit` and `verify_on_stop`) to the user config path (or `-c PATH`), refuse overwrites, and exit |
 | `-c, --config` | user config, else built-in | YAML config file; see [Config](config.md#config) |
 | `--profile` | none | Apply one named profile from the config file's `profiles:` section over its base settings; see [Profiles](config.md#profiles) |
 | `--list-profiles` | | Print the profile names in the selected config file (`-c`) or the user config, sorted, one per line, then exit. Makes no model request and needs no credentials; see [Profiles](config.md#profiles) |
@@ -65,8 +65,12 @@ Five subcommands are shortcuts for existing flags. They rewrite the command line
 | `--attempt-check` | | With `--attempts`: a shell command that must exit 0 in an attempt's worktree for it to pass (repeatable; replaces `attempts.checks` from the config) |
 | `--attempt-check-timeout` | 600 | With `--attempts`: seconds before one `--attempt-check` command is killed (1 to 3600) |
 | `--step-limit` | 0 (unlimited) | Max model calls |
-| `--cost-limit` | 0 (unlimited) | Max USD |
+| `--cost-limit` | 0 (unlimited) | Max USD; one warning at 80%. See [Token and cost budgets](runs.md#token-and-cost-budgets) |
+| `--token-limit` | config `token_limit`, else 0 (unlimited) | Max provider-reported input+output tokens for the run, delegates and workers included; at 100% the run stops with `TokenLimitExceeded` (resumable), with one warning at 80%. With `--attempts`, shared by all attempts. See [Token and cost budgets](runs.md#token-and-cost-budgets) |
 | `--time-limit` | 0 (unlimited) | Max wall-clock seconds; overrides `wall_time_seconds` |
+| `--verify-on-stop` | config `verify_on_stop.enabled`, else off | Don't accept a final answer while files changed since the last successful test/build command: send the model back to verify, up to `--max-verify-reprompts` times, then mark the run unverified. See [Verify before stop](verify.md#verify-before-stop) |
+| `--verify-command <cmd>` | config `verify_on_stop.commands`, else common test/build commands | A `bash` command that counts as verification for `--verify-on-stop`; repeatable, replaces the config list |
+| `--max-verify-reprompts <n>` | config `verify_on_stop.max_reprompts`, else 2 | With `--verify-on-stop`, how many times to send the model back before stopping unverified (1 to 10) |
 | `--max-format-errors` | config `max_format_errors`, else 3 | Stop with `RepeatedFormatError` after this many consecutive steps whose tool calls are all malformed; must be >= 1. See [Malformed tool calls](troubleshooting.md#malformed-tool-calls) |
 | `--max-output-tokens` | config `max_output_tokens`, else 0 | Per-request output-token budget sent to the provider; 0 keeps the provider default (8192 `max_tokens` on Anthropic). Not supported by `codex`. Unrelated to `max_output_chars`, which caps tool output. See [Output truncation](troubleshooting.md#output-truncation) |
 | `--no-compact` | off | Never compact the history; see [Long runs](long-runs.md#long-runs) |
