@@ -126,6 +126,7 @@ func startWasmTools(ctx context.Context, cfg config.AgentConfig, root string, fa
 	if lock != nil {
 		g.Taint = lock
 	}
+	wasmPool.Store = moduleStore(root)
 	return wasmPool.Activate(ctx, ls, cfg.Plugins, g, w)
 }
 
