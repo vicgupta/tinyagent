@@ -120,6 +120,13 @@ func expandSubcommand(args []string) ([]string, *subHelp, error) {
 		return args, nil, nil
 	}
 	rest := args[1:]
+	// A bare subcommand typed at a terminal prints its help, like
+	// "tinyagent <sub> --help" and like plain "tinyagent" (#242). With stdin
+	// piped or redirected, one with base flags keeps running them (a
+	// missing -t still fails as before), so scripts see no change.
+	if len(rest) == 0 && (len(s.base) == 0 || stdinIsTerminal()) {
+		return nil, &subHelp{s}, nil
+	}
 	if len(rest) > 0 {
 		first := rest[0]
 		_, isAction := s.actions[first]
