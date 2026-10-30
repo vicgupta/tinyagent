@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 	"reflect"
 	"sort"
 	"strings"
@@ -233,6 +234,48 @@ func TestVerboseWithoutHelpUnchanged(t *testing.T) {
 		}
 		if strings.Contains(out, helpBrief) {
 			t.Errorf("%s printed help", v)
+		}
+	}
+}
+
+// TestNoArgsPrintsBriefHelp checks plain "tinyagent" at a terminal prints
+// exactly the --help output and exits 0, while with stdin piped it still
+// fails with "--task is required" (exit 2) as before.
+func TestNoArgsPrintsBriefHelp(t *testing.T) {
+	t.Setenv("AGENT_MODEL", "")
+	defer func(f func() bool) { stdinIsTerminal = f }(stdinIsTerminal)
+	stdinIsTerminal = func() bool { return true }
+	code, got, errOut := runWith(t)
+	_, want, _ := runWith(t, "--help")
+	if code != 0 || got != want || errOut != "" {
+		t.Errorf("no args at a terminal: exit %d, stderr %q, stdout:\n%s\nwant --help output:\n%s", code, errOut, got, want)
+	}
+	// Any argument keeps the normal path.
+	if code, out, _ := runWith(t, "--cwd", "."); code != 2 || out == want {
+		t.Errorf("--cwd alone: exit %d, want 2 without help on stdout", code)
+	}
+	stdinIsTerminal = func() bool { return false }
+	if code, out, _ := runWith(t); code != 2 || out != "" {
+		t.Errorf("no args with piped stdin: exit %d, stdout %q; want exit 2 and no help", code, out)
+	}
+}
+
+// TestIsTerminalFalseForNonTTY checks a pipe and /dev/null (a character
+// device, but not a terminal) don't count as a terminal.
+func TestIsTerminalFalseForNonTTY(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	if isTerminal(r) {
+		t.Error("pipe reported as a terminal")
+	}
+	if f, err := os.Open(os.DevNull); err == nil {
+		defer f.Close()
+		if isTerminal(f) {
+			t.Error(os.DevNull + " reported as a terminal")
 		}
 	}
 }
