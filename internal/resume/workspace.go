@@ -72,7 +72,7 @@ func Selection(t *trajectory.Trajectory, set *skills.Set) tools.Selection {
 // discoverSkills is the skills lookup Check uses when the request does not
 // supply one.
 func discoverSkills(root string) *skills.Set {
-	set, _ := skills.Discover(root, skills.UserDir())
+	set, _ := skills.Discover(root)
 	return set
 }
 
