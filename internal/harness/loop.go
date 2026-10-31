@@ -21,7 +21,16 @@ const (
 	StatusPassed      = "Passed"
 	StatusFailed      = "Failed"
 	StatusInterrupted = "Interrupted"
+	// StatusBlocked means a stage ran out of retries because its success
+	// check kept failing on its merits (a check command exited non-zero, the
+	// model reported SUCCESS CHECK: FAIL, behavior cases failed): the task
+	// as specified can't be satisfied without a human. StatusFailed is kept
+	// for transient or infrastructure failures.
+	StatusBlocked = "Blocked"
 )
+
+// ExitBlocked is the process exit code for StatusBlocked.
+const ExitBlocked = 5
 
 // MaxCheckOutput caps a check command's recorded output, and MaxFeedback
 // the failure reason handed to a retry.
@@ -73,6 +82,9 @@ type Check struct {
 	Output   string   `json:"output,omitempty"`
 	// Skipped is set when a behavior stage found no behavioral criteria.
 	Skipped bool `json:"skipped,omitempty"`
+	// NoVerdict is set when a model-checked stage's output had no
+	// SUCCESS CHECK line.
+	NoVerdict bool `json:"no_verdict,omitempty"`
 	// Evidence is each behavior case's observed output.
 	Evidence []BehaviorResult `json:"evidence,omitempty"`
 }
@@ -118,6 +130,8 @@ func (r *Result) ExitCode() int {
 		return 0
 	case StatusInterrupted:
 		return 130
+	case StatusBlocked:
+		return ExitBlocked
 	}
 	return 1
 }
@@ -172,6 +186,9 @@ func Run(ctx context.Context, o Options) *Result {
 		}
 		if !passed {
 			res.Status, res.FailedStage, res.Reason = StatusFailed, st.Skill.Name, last.Check.Reason
+			if Unsatisfiable(last.Check) {
+				res.Status = StatusBlocked
+			}
 			break
 		}
 		prev, prevName = last.Output, st.Skill.Name
@@ -184,8 +201,32 @@ func Run(ctx context.Context, o Options) *Result {
 	if res.FailedStage != "" {
 		f["failed_stage"], f["reason"] = res.FailedStage, res.Reason
 	}
+	if res.Status == StatusBlocked {
+		f["blocked"] = true
+	}
 	emit("workflow.finished", f)
 	return res
+}
+
+// Unsatisfiable reports whether a failed check failed on its merits, so a
+// stage that keeps failing it is blocked rather than failed: a check command
+// that ran and exited non-zero, a model verdict of SUCCESS CHECK: FAIL, or
+// behavior cases that ran and failed. A run error or limit hit, a missing
+// verdict line, a check command that timed out or couldn't start, and an
+// invalid behavior file are transient.
+func Unsatisfiable(c Check) bool {
+	if c.Passed {
+		return false
+	}
+	switch c.Method {
+	case "command":
+		return !c.TimedOut && c.ExitCode > 0
+	case "model":
+		return !c.NoVerdict
+	case "behavior":
+		return len(c.Evidence) > 0
+	}
+	return false
 }
 
 func stageNames(p *Pipeline) []string {
@@ -344,6 +385,7 @@ func modelVerdict(out string) Check {
 	m := reVerdict.FindAllStringSubmatch(out, -1)
 	if len(m) == 0 {
 		c.Reason = "the stage output has no SUCCESS CHECK: PASS or FAIL line"
+		c.NoVerdict = true
 		return c
 	}
 	last := m[len(m)-1]
