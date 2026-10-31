@@ -1142,42 +1142,16 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		fmt.Fprintln(os.Stderr, "error: resume:", err)
 		return 2
 	}
-	if flagWasSet(fs, "read-only") && o.readOnly != src.ReadOnly {
-		return fail(errors.New("resume: --read-only conflicts with the checkpoint's recorded mode; start a fresh task"))
+	if code := checkResumeFlags(fs, *o, src); code != 0 {
+		return code
 	}
 	cfg.ReadOnly = src.ReadOnly
-	if flagWasSet(fs, "plan") && o.plan != src.PlanEnabled {
-		return fail(errors.New("resume: --plan conflicts with the checkpoint's recorded plan setting; start a fresh task"))
-	}
 	cfg.Plan.Enabled = src.PlanEnabled
-	if flagWasSet(fs, "images") && o.images != src.ImagesEnabled {
-		return fail(errors.New("resume: --images conflicts with the checkpoint's recorded images setting; start a fresh task"))
-	}
 	cfg.Images.Enabled = src.ImagesEnabled
-	if flagWasSet(fs, "apply-patch") && o.applyPatch != src.ApplyPatchEnabled {
-		fmt.Fprintln(os.Stderr, "error: resume: --apply-patch conflicts with the checkpoint's recorded apply_patch setting; start a fresh task")
-		return 2
-	}
 	cfg.ApplyPatch = src.ApplyPatchEnabled
-	if flagWasSet(fs, "subagents") && o.subagents != src.SubagentsEnabled {
-		fmt.Fprintln(os.Stderr, "error: resume: --subagents conflicts with the checkpoint's recorded subagents setting; start a fresh task")
-		return 2
-	}
 	cfg.Subagents.Enabled = src.SubagentsEnabled
-	if flagWasSet(fs, "workers") && o.workers != src.WorkersEnabled {
-		fmt.Fprintln(os.Stderr, "error: resume: --workers conflicts with the checkpoint's recorded workers setting; start a fresh task")
-		return 2
-	}
 	setWorkers(&cfg, src.WorkersEnabled)
-	if flagWasSet(fs, "ask-user") && o.askUser != src.AskUserEnabled {
-		fmt.Fprintln(os.Stderr, "error: resume: --ask-user conflicts with the checkpoint's recorded ask_user setting; start a fresh task")
-		return 2
-	}
 	cfg.AskUser.Enabled = src.AskUserEnabled
-	if flagWasSet(fs, "web-fetch") && o.webFetch != src.WebFetchEnabled {
-		fmt.Fprintln(os.Stderr, "error: resume: --web-fetch conflicts with the checkpoint's recorded web_fetch setting; start a fresh task")
-		return 2
-	}
 	cfg.WebFetch.Enabled = src.WebFetchEnabled
 	webFetch, err := newWebFetcher(fs, *o, &cfg)
 	if err != nil {
@@ -1186,27 +1160,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if err := checkPlugins(&cfg, os.Stderr, o.verbose, false); err != nil {
 		return configFail(err)
 	}
-	if flagWasSet(fs, "lsp") && o.lsp != src.LSPEnabled {
-		fmt.Fprintln(os.Stderr, "error: resume: --lsp conflicts with the checkpoint's recorded lsp setting; start a fresh task")
-		return 2
-	}
 	cfg.LSP.Enabled = src.LSPEnabled
-	if flagWasSet(fs, "scoped-agents-md") && o.scopedAgentsMD != src.ScopedAgentsMDEnabled {
-		fmt.Fprintln(os.Stderr, "error: resume: --scoped-agents-md conflicts with the checkpoint's recorded scoped_agents_md setting; start a fresh task")
-		return 2
-	}
 	cfg.ScopedAgentsMD = src.ScopedAgentsMDEnabled
-	if on, set, err := skillsFlag(fs, *o); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		return 2
-	} else if set && on != src.SkillsEnabled {
-		return fail(errors.New("resume: --skills/--no-skills conflicts with the checkpoint's recorded skills setting; start a fresh task"))
-	}
 	cfg.Skills = src.SkillsEnabled
-	if flagWasSet(fs, "memory") && o.memory.enabled != src.MemoryEnabled {
-		fmt.Fprintln(os.Stderr, "error: resume: --memory conflicts with the checkpoint's recorded memory setting; start a fresh task")
-		return 2
-	}
 	cfg.Memory.Enabled = src.MemoryEnabled
 	// Snapshots are per invocation: config or --snapshots decides for this
 	// resume, and earlier snapshots stay in the trajectory either way.
@@ -1277,9 +1233,6 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return fail(errors.New("resume: --output already exists; choose a new destination"))
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fail(fmt.Errorf("resume: checking --output: %w", err))
-	}
-	if flagWasSet(fs, "no-agents-md") && o.noAgentsMD != src.SkipAgentsMD {
-		return fail(errors.New("resume: --no-agents-md conflicts with the recorded loading mode; start a fresh task"))
 	}
 	if err := agent.ValidateResume(src, cfg, root); err != nil {
 		return fail(fmt.Errorf("resume: %w", err))
