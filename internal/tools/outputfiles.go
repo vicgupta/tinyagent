@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/skills"
@@ -218,33 +217,6 @@ func savedNotice(path string, text string) string {
 // readFileNotice is the line appended to a truncated read_file result.
 func readFileNotice(path string, lines int) string {
 	return fmt.Sprintf("[file has %s lines; output was truncated, use read_file on %s with offset/limit to read the rest]", groupDigits(lines), path)
-}
-
-// truncateRunes is truncate that keeps the result within max bytes,
-// marker included, and never splits a UTF-8 sequence. It returns "" when
-// max cannot hold even the marker.
-func truncateRunes(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	// The marker with the largest possible count bounds the real one.
-	keep := max - len(elidedMarker(len(s)))
-	if keep <= 0 {
-		return ""
-	}
-	head := keep / 2
-	for head > 0 && !utf8.RuneStart(s[head]) {
-		head--
-	}
-	tail := len(s) - (keep - keep/2)
-	for tail < len(s) && !utf8.RuneStart(s[tail]) {
-		tail++
-	}
-	return s[:head] + elidedMarker(tail-head) + s[tail:]
-}
-
-func elidedMarker(n int) string {
-	return fmt.Sprintf("\n\n... [%d characters elided] ...\n\n", n)
 }
 
 // TruncateWithNotice cuts body so body, a newline, and notice together fit

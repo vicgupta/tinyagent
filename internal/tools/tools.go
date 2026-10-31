@@ -680,17 +680,10 @@ func skipDir(name string) bool {
 	return false
 }
 
-// Truncate caps s at max characters, keeping its head and tail; 0 means
-// unlimited. It is the same cap applied to tool output.
+// Truncate caps s at max bytes of kept text, keeping its head and tail; 0
+// means unlimited. It is the same cap applied to tool output. See
+// truncate.go for the shared, UTF-8-safe implementation.
 func Truncate(s string, max int) string { return truncate(s, max) }
-
-func truncate(s string, max int) string {
-	if max <= 0 || len(s) <= max {
-		return s
-	}
-	half := max / 2
-	return fmt.Sprintf("%s\n\n... [%d characters elided] ...\n\n%s", s[:half], len(s)-2*half, s[len(s)-half:])
-}
 
 func isDir(path string) bool {
 	fi, err := os.Stat(path)

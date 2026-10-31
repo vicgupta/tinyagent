@@ -69,7 +69,7 @@ token_limit: 0            # max input+output tokens per run, delegates and worke
 wall_time_seconds: 1800
 max_format_errors: 3      # consecutive malformed-call steps before RepeatedFormatError (>= 1)
 bash_timeout_seconds: 120
-max_output_chars: 30000   # tool output is truncated, keeping head and tail
+max_output_chars: 30000   # tool output is truncated (bytes, cut on UTF-8 boundaries), keeping head and tail
 max_output_tokens: 0      # per-request model output budget; 0 = provider default (8192 on anthropic)
 max_truncations: 3        # consecutive cut-off responses before OutputTruncated (>= 1)
 max_background_processes: 4   # start_process processes running at once (0 uses 4)
