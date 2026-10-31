@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/vicgupta/tinyagent/internal/trajectory"
 	"io"
 	"os"
 	"os/exec"
@@ -88,22 +89,26 @@ type Record struct {
 	CostUSD          float64       `json:"cost_usd"`
 	InputTokens      int           `json:"input_tokens"`
 	OutputTokens     int           `json:"output_tokens"`
-	Steps            int           `json:"steps"`
-	WallTimeMS       int64         `json:"wall_time_ms"`
-	Trajectory       string        `json:"trajectory,omitempty"`
-	Log              string        `json:"log,omitempty"`
-	Worktree         string        `json:"worktree,omitempty"`
-	Error            string        `json:"error,omitempty"`
-	SkipReason       string        `json:"skip_reason,omitempty"`
+	// UsageByRole is the trial's per-role split (see the trajectory's
+	// usage_by_role); only when helpers or delegated children ran.
+	UsageByRole []trajectory.RoleUsage `json:"usage_by_role,omitempty"`
+	Steps       int                    `json:"steps"`
+	WallTimeMS  int64                  `json:"wall_time_ms"`
+	Trajectory  string                 `json:"trajectory,omitempty"`
+	Log         string                 `json:"log,omitempty"`
+	Worktree    string                 `json:"worktree,omitempty"`
+	Error       string                 `json:"error,omitempty"`
+	SkipReason  string                 `json:"skip_reason,omitempty"`
 }
 
 type trajSummary struct {
-	ExitStatus   string  `json:"exit_status"`
-	Steps        int     `json:"steps"`
-	Cost         float64 `json:"cost"`
-	InputTokens  int     `json:"input_tokens"`
-	OutputTokens int     `json:"output_tokens"`
-	ActiveModel  string  `json:"active_model"`
+	ExitStatus   string                 `json:"exit_status"`
+	Steps        int                    `json:"steps"`
+	Cost         float64                `json:"cost"`
+	InputTokens  int                    `json:"input_tokens"`
+	OutputTokens int                    `json:"output_tokens"`
+	ActiveModel  string                 `json:"active_model"`
+	UsageByRole  []trajectory.RoleUsage `json:"usage_by_role"`
 }
 
 // Run executes the suite sequentially and writes results.jsonl, report.json
@@ -263,6 +268,12 @@ func runTrial(ctx context.Context, o Options, tr Trial) (rec Record) {
 	rec.ExitStatus, rec.Steps, rec.CostUSD = ts.ExitStatus, ts.Steps, ts.Cost
 	rec.InputTokens, rec.OutputTokens = ts.InputTokens, ts.OutputTokens
 	rec.ActiveModel = ts.ActiveModel
+	for _, u := range ts.UsageByRole {
+		if u.Role != "main" {
+			rec.UsageByRole = ts.UsageByRole
+			break
+		}
+	}
 	if ts.ActiveModel != "" && ts.ActiveModel != tr.Model {
 		rec.FallbackModel = ts.ActiveModel
 	}

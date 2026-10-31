@@ -3,6 +3,7 @@ package eval
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/vicgupta/tinyagent/internal/trajectory"
 	"os"
 	"path/filepath"
 	"sort"
@@ -22,23 +23,26 @@ type Report struct {
 
 // ConfigReport aggregates one (model, profile) configuration.
 type ConfigReport struct {
-	Model         string             `json:"model"`
-	Profile       string             `json:"profile"`
-	Trials        int                `json:"trials"`
-	Attempted     int                `json:"attempted"`
-	Passed        int                `json:"passed"`
-	PassRate      float64            `json:"pass_rate"`
-	PassAtK       map[string]float64 `json:"pass_at_k"`
-	PassHatK      map[string]float64 `json:"pass_hat_k"`
-	Outcomes      map[string]int     `json:"outcomes"`
-	CostUSD       float64            `json:"cost_usd"`
-	MeanCostUSD   float64            `json:"mean_cost_usd"`
-	CostPerPass   *float64           `json:"cost_per_pass_usd"`
-	InputTokens   int                `json:"input_tokens"`
-	OutputTokens  int                `json:"output_tokens"`
-	MeanSteps     float64            `json:"mean_steps"`
-	MeanWallTimeS float64            `json:"mean_wall_time_s"`
-	Tasks         []TaskReport       `json:"tasks"`
+	Model        string             `json:"model"`
+	Profile      string             `json:"profile"`
+	Trials       int                `json:"trials"`
+	Attempted    int                `json:"attempted"`
+	Passed       int                `json:"passed"`
+	PassRate     float64            `json:"pass_rate"`
+	PassAtK      map[string]float64 `json:"pass_at_k"`
+	PassHatK     map[string]float64 `json:"pass_hat_k"`
+	Outcomes     map[string]int     `json:"outcomes"`
+	CostUSD      float64            `json:"cost_usd"`
+	MeanCostUSD  float64            `json:"mean_cost_usd"`
+	CostPerPass  *float64           `json:"cost_per_pass_usd"`
+	InputTokens  int                `json:"input_tokens"`
+	OutputTokens int                `json:"output_tokens"`
+	// UsageByRole totals the trials' usage_by_role by role, task and
+	// model; only when some trial used a helper or delegated child.
+	UsageByRole   []trajectory.RoleUsage `json:"usage_by_role,omitempty"`
+	MeanSteps     float64                `json:"mean_steps"`
+	MeanWallTimeS float64                `json:"mean_wall_time_s"`
+	Tasks         []TaskReport           `json:"tasks"`
 }
 
 // TaskReport is one task's results within a configuration.
@@ -123,6 +127,9 @@ func BuildReport(o Options, recs []Record) Report {
 		c.CostUSD += r.CostUSD
 		c.InputTokens += r.InputTokens
 		c.OutputTokens += r.OutputTokens
+		for _, u := range r.UsageByRole {
+			c.UsageByRole = addRoleUsage(c.UsageByRole, u)
+		}
 		c.MeanSteps += float64(r.Steps)
 		c.MeanWallTimeS += float64(r.WallTimeMS) / 1000
 	}
@@ -236,6 +243,7 @@ func markdown(rep Report) string {
 		}
 		b.WriteString("\n")
 	}
+	b.WriteString(usageByRoleMarkdown(rep))
 	b.WriteString("\n## Per task\n\n| Task | Model | Profile | Passed |\n|---|---|---|---|\n")
 	for _, c := range rep.Configs {
 		for _, t := range c.Tasks {
@@ -247,6 +255,28 @@ func markdown(rep Report) string {
 			fmt.Fprintf(&b, "\nAll configurations met the minimum pass rate %.2f.\n", *rep.MinPassRate)
 		} else {
 			fmt.Fprintf(&b, "\nBelow the minimum pass rate %.2f: %s.\n", *rep.MinPassRate, strings.Join(rep.BelowThreshold, ", "))
+		}
+	}
+	return b.String()
+}
+
+// addRoleUsage adds u to the matching role/task/model entry of list.
+func addRoleUsage(list []trajectory.RoleUsage, u trajectory.RoleUsage) []trajectory.RoleUsage {
+	t := trajectory.Trajectory{UsageByRole: list}
+	t.AddUsage(u)
+	return t.UsageByRole
+}
+
+// usageByRoleMarkdown is report.md's "Usage by role" table; empty when no
+// configuration used a helper or delegated child.
+func usageByRoleMarkdown(rep Report) string {
+	var b strings.Builder
+	for _, c := range rep.Configs {
+		for _, u := range c.UsageByRole {
+			if b.Len() == 0 {
+				b.WriteString("\n## Usage by role\n\n| Model | Profile | Role | Task | Served by | Requests | Input tokens | Output tokens | Cost |\n|---|---|---|---|---|---|---|---|---|\n")
+			}
+			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %d | %d | %d | $%.4f |\n", c.Model, c.Profile, u.Role, u.Task, u.Model, u.Requests, u.InputTokens, u.OutputTokens, u.CostUSD)
 		}
 	}
 	return b.String()

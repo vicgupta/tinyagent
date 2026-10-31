@@ -48,6 +48,7 @@ func (a *Agent) runVerifyReview(ctx context.Context, t *trajectory.Trajectory) {
 		{Role: "user", Content: sb.String()},
 	}
 	resp, cost, err := a.helperQuery(ctx, routing.TaskReview, req)
+	addUsage(t, routing.RoleAuxiliary, routing.TaskReview, a.helperName(routing.TaskReview), cost)
 	t.Cost += cost.USD
 	t.InputTokens += cost.InputTokens
 	t.OutputTokens += cost.OutputTokens

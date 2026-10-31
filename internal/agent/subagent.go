@@ -104,6 +104,8 @@ func (a *Agent) delegate(ctx context.Context, t *trajectory.Trajectory, call mod
 		a.routeEvent(routing.RoleDelegated, routing.TaskDelegate, childName, reason, "")
 	}
 	child := &Agent{
+		UsageRole: routing.RoleDelegated,
+		UsageTask: routing.TaskDelegate,
 		Model:     childModel,
 		ModelName: childName,
 		Tools: &tools.Executor{
@@ -146,6 +148,7 @@ func (a *Agent) delegate(ctx context.Context, t *trajectory.Trajectory, call mod
 
 	ct := child.Run(ctx, args.Task)
 
+	mergeUsage(t, ct)
 	t.Cost += ct.Cost
 	t.InputTokens += ct.InputTokens
 	t.OutputTokens += ct.OutputTokens
