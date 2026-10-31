@@ -35,7 +35,7 @@ func runCheck(o *options, fs *flag.FlagSet, w io.Writer) int {
 	}
 	r, err := resolveCheck(o, fs)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
+		fmt.Fprintln(os.Stderr, stderrStyle.Red("error:"), err)
 		var hint checkHint
 		if errors.As(err, &hint) {
 			printHint(os.Stderr, hint.spec, hint.msg)
@@ -43,9 +43,9 @@ func runCheck(o *options, fs *flag.FlagSet, w io.Writer) int {
 		return 2
 	}
 	for _, l := range r {
-		fmt.Fprintf(w, "%-10s %s\n", l[0]+":", l[1])
+		fmt.Fprintf(w, "%s %s\n", styleFor(w).Bold(fmt.Sprintf("%-10s", l[0]+":")), l[1])
 	}
-	fmt.Fprintln(w, "ok")
+	fmt.Fprintln(w, styleFor(w).Green("ok"))
 	return 0
 }
 

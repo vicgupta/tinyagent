@@ -128,6 +128,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 - Per-role model routing (`models:` in config, `--aux-model`, `--delegate-model`, `--route`, keyword or `task_type` routes, `--no-routing`) for compaction, the verify review and delegated children, each role with its own fallback chain and a `usage_by_role` cost split in the summary, JSON, trajectory, `--log-db` and eval reports; off by default.
 - Many providers: OpenAI, Anthropic, OpenRouter, Ollama, a ChatGPT subscription through Codex, handoff to your installed Claude Code (`claude-code`) or Codex CLI (`codex-exec`), and your own OpenAI-compatible endpoints.
 - Streaming text, `--json` event output, structured output, SQLite event logs and OpenTelemetry.
+- Terminal-aware styling: color only at a terminal, off with `NO_COLOR`, or forced with `--color=auto|always|never`; piped output stays plain text.
 - Project memory across runs, with approval before entries become active.
 - Session handoff for long-running work (`--handoff`): each run leaves `.tinyagent/handoff.md` with what it did and what's next, the next fresh run reads it as data, and an optional startup command runs before the first turn; see [Session handoff](docs/long-runs.md#session-handoff).
 - Project rules from agent failures (`tinyagent ratchet add`): each rule records its incident and an expiry or review condition, is added to the system prompt, and can be enforced as a permission deny rule; see [Project rules](docs/ratchet.md).
