@@ -169,7 +169,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 | Interactive chat (`tinyagent chat`) | [docs/chat.md](docs/chat.md) |
 | Tasks: passing a task, task types, task-based routing | [docs/tasks.md](docs/tasks.md) |
 | Reviews, worktrees, best-of-N, resume, transcripts, follow-ups, asking for input, token and cost budgets | [docs/runs.md](docs/runs.md) |
-| Long runs, session handoff, images, tool output files, apply_patch, subagents (read-only researchers), workers (read-write builders), web fetch, LSP | [docs/long-runs.md](docs/long-runs.md) |
+| Long runs, session handoff, images, tool output files (MCP results capped at 256 KiB), apply_patch, subagents (read-only researchers), workers (read-write builders), web fetch, LSP | [docs/long-runs.md](docs/long-runs.md) |
 | Planner (`update_plan`, `--plan-first`) | [docs/planner.md](docs/planner.md) |
 | Verify before stop (`--verify-on-stop`) | [docs/verify.md](docs/verify.md) |
 | `undo_file` and `--rewind` | [docs/undo.md](docs/undo.md) |
