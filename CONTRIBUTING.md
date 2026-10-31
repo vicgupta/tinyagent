@@ -1,8 +1,10 @@
 # Contributing to tinyagent
 
 Thanks for your interest in contributing. tinyagent is a minimal coding agent in a
-single static Go binary — it gives an LLM six tools and keeps a linear message
-history until the model submits. We keep the codebase small and the review bar
+single static Go binary — it gives an LLM ten base tools (`read_file`,
+`write_file`, `edit_file`, `undo_file`, `list_files`, `grep`, `bash`,
+`start_process`, `read_process`, `stop_process`), plus opt-in tools, and keeps a
+linear message history until the model submits. We keep the codebase small and the review bar
 high, so a little coordination up front goes a long way.
 
 ## Ground rules
@@ -25,8 +27,21 @@ make test     # go test ./...
 make dist     # linux/darwin/windows x amd64/arm64 in dist/
 ```
 
-You need Go 1.27 (see `go.mod`). The only dependency is `gopkg.in/yaml.v3`; keep
-it that way unless there is a very good reason to add one.
+You need Go 1.27 (see `go.mod`). Keep dependencies to a minimum and don't add one
+unless there is a very good reason. The direct dependencies in `go.mod` are:
+
+<!-- direct-deps:start -->
+- `github.com/BurntSushi/toml`: reads TOML (`memory.toml`, plugin data modules, ratchet files).
+- `github.com/extism/go-sdk`: runs WebAssembly plugins.
+- `github.com/modelcontextprotocol/go-sdk`: the MCP client used for MCP tools and resources.
+- `github.com/tetratelabs/wazero`: the WebAssembly runtime the plugin host configures.
+- `golang.org/x/sys`: terminal (TTY and line editor) system calls.
+- `gopkg.in/yaml.v3`: reads YAML config, profiles, skills, workflows and eval suites.
+- `modernc.org/sqlite`: pure-Go SQLite (no cgo) for the memory store and event log.
+<!-- direct-deps:end -->
+
+If you add or remove a direct dependency, update this list too;
+`internal/tools/docs_sync_test.go` fails when it drifts from `go.mod`.
 
 ## Layout
 
@@ -36,7 +51,7 @@ internal/agent/       the run loop, compaction, tool dispatch; build an Agent wi
 internal/config/      YAML config + built-in defaults
 internal/model/       providers, price table, context windows; CLI handoff providers (claudecode.go, codexexec.go, opencode.go) share handoff.go
 internal/resume/      what a --resume must match in its checkpoint (flag table, root, tool fingerprint, tool names); loads the checkpoint and pins its recorded settings onto the run config
-internal/tools/       the six tools (read_file, write_file, edit_file, list_files, grep, bash)
+internal/tools/       the base tools listed above, plus the opt-in tools; docs_sync_test.go keeps the docs' base tool list in sync with tools.Specs(false)
 internal/trajectory/  the -o JSON output
 internal/update/      --update self-update
 embed/prompts/        system prompt templates
