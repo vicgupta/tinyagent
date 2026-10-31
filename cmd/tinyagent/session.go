@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/vicgupta/tinyagent/internal/agent"
 	"github.com/vicgupta/tinyagent/internal/config"
@@ -303,33 +302,25 @@ func (s *session) turnAgent(cfg config.AgentConfig, images []model.Image, r turn
 		Profile:         o.profile,
 		ProviderAPI:     s.providerAPI,
 		ProviderBaseURL: s.providerBaseURL,
-		Tools: &tools.Executor{
-			Root:               s.root,
-			ReadOnly:           cfg.ReadOnly,
-			Env:                s.env,
-			BashTimeout:        time.Duration(cfg.BashTimeoutSec) * time.Second,
-			MaxOutputChars:     cfg.MaxOutputChars,
-			MaxProcesses:       cfg.MaxBackgroundProcesses,
-			ExternalSpecs:      s.extSpecs,
-			ExternalCall:       s.extCall,
-			Plan:               cfg.Plan.Enabled,
-			Images:             cfg.Images.Enabled,
-			ApplyPatch:         cfg.ApplyPatch,
-			Delegate:           s.subagents != nil,
-			TaskTypes:          taskTypes(s.cfg, s.subagents, s.workers),
-			Workers:            s.workers != nil,
-			AskUser:            cfg.AskUser.Enabled, // always off in ACP sessions
-			WebFetch:           s.webFetch,
-			LSP:                newLSP(cfg, s.root), // a turn's end stops them
-			OutputFiles:        s.outputFiles,
-			FileAccess:         s.fileAccess,
-			ExtraDirs:          s.extraDirs,
-			MaxImageBytes:      cfg.MaxImageBytes,
-			ExternalCallImages: s.mcp.CallImages(cfg.MaxImageBytes),
-			Redactor:           s.redactor,
-			CommandTools:       s.cmdTools,
-			CommandLog:         commandLog(o.verbose),
-		},
+		// AskUser is always off in ACP sessions; a turn's end stops its LSP
+		// servers, so each turn starts its own.
+		Tools: newRunExecutor(cfg, toolWiring{
+			root:        s.root,
+			env:         s.env,
+			cmdTools:    s.cmdTools,
+			commandLog:  commandLog(o.verbose),
+			extSpecs:    s.extSpecs,
+			extCall:     s.extCall,
+			mcp:         s.mcp,
+			subagents:   s.subagents,
+			workers:     s.workers,
+			webFetch:    s.webFetch,
+			lsp:         newLSP(cfg, s.root),
+			outputFiles: s.outputFiles,
+			fileAccess:  s.fileAccess,
+			extraDirs:   s.extraDirs,
+			redactor:    s.redactor,
+		}),
 		RedactSecrets:  s.redactInfo,
 		Config:         cfg,
 		Hooks:          s.hooks,
