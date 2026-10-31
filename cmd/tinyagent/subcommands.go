@@ -39,6 +39,9 @@ type subcommand struct {
 	// terminal instead of printing help: for a complete one-shot command
 	// (init) that needs no task, help would only add a step.
 	runBare bool
+	// positional names the flag a leading non-option word sets, and
+	// positionalArg its placeholder in help (triage <issues.json>).
+	positional, positionalArg string
 }
 
 type subAction struct {
@@ -115,6 +118,11 @@ var subcommands = []subcommand{
 		},
 	},
 	{
+		name: "triage", brief: "rank open issues by value/effort into a next-up list", summary: "rank the open issues in a gh issue list JSON file by value and effort, offline, flag likely duplicates, stale and blocked items, and print a next-up list (same as --triage)",
+		positional: "triage", positionalArg: "issues.json",
+		options: map[string]string{"out": "triage-out", "stale-days": "triage-stale-days"},
+	},
+	{
 		name: "tinygo", brief: "manage the external TinyGo compiler: install|update|status", summary: "manage the TinyGo compiler for Go plugin modules (a separate, downloaded project; same as --tinygo-*)",
 		actions: map[string]subAction{
 			"install": {flag: "tinygo-install", desc: "download, verify and cache the pinned TinyGo release (--tinygo-install)"},
@@ -165,7 +173,7 @@ func expandSubcommand(args []string) ([]string, *subHelp, error) {
 	if len(rest) > 0 {
 		first := rest[0]
 		_, isAction := s.actions[first]
-		if !strings.HasPrefix(first, "-") && !isAction && first != "help" {
+		if !strings.HasPrefix(first, "-") && !isAction && first != "help" && s.positional == "" {
 			return args, nil, nil // a prompt-like word: not a subcommand
 		}
 	}
@@ -203,6 +211,10 @@ func expandSubcommand(args []string) ([]string, *subHelp, error) {
 			} else {
 				out = append(out, "--"+act.flag)
 			}
+			continue
+		}
+		if s.positional != "" && i == 0 && (!strings.HasPrefix(a, "-") || a == "-") {
+			out = append(out, "--"+s.positional, a)
 			continue
 		}
 		if a == "--" {
@@ -269,6 +281,9 @@ func subcommandNames() string {
 func printSubcommandHelp(w io.Writer, s *subcommand) {
 	fs := newFlagSet(&options{})
 	fmt.Fprintf(w, "Usage: tinyagent %s", s.name)
+	if s.positionalArg != "" {
+		fmt.Fprintf(w, " <%s>", s.positionalArg)
+	}
 	if len(s.actions) > 0 {
 		fmt.Fprint(w, " [action]")
 	}

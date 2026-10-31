@@ -3,13 +3,23 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
-.PHONY: build test dist clean
+.PHONY: build test dist clean test-race lint fmt
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN) ./cmd/$(BIN)
 
 test:
-	go test ./...
+	go test -count=1 ./...
+
+test-race:
+	go test -race -count=1 ./...
+
+lint:
+	go vet ./...
+	$(GOPATH)/bin/staticcheck ./...
+
+fmt:
+	gofmt -l .
 
 dist:
 	@mkdir -p dist

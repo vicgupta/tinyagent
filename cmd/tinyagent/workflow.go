@@ -20,7 +20,7 @@ import (
 // run unattended in --cwd, one fresh run each.
 var workflowConflicts = []string{"resume", "rewind", "to", "dry-run", "transcript", "review", "review-base",
 	"review-commit", "worktree", "acp", "check", "eval", "image", "ask-user", "output-schema", "plan-file",
-	"list-profiles", "init-config", "update", "version", "completion", "skills-validate"}
+	"list-profiles", "init-config", "update", "version", "completion", "skills-validate", "triage"}
 
 // workflowOwn are flags --workflow consumes; every other flag set on the
 // command line is forwarded to each stage's run.
