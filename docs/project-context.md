@@ -105,6 +105,10 @@ Either way nothing more runs: no further attempts and no later stages, so a bloc
 
 **Re-queueing.** tinyagent keeps no list of blocked tasks; one run handles one task. To re-queue, fix the task or its acceptance criteria and run the same `tinyagent --workflow ... -t ...` command again. An outside loop that feeds tasks to tinyagent can park a task on exit 5; the suggested convention for an issue-label loop is to swap the issue's `amf:ready` label for `amf:blocked`, and have a person re-add `amf:ready` once the issue is fixed. [`tinyagent triage`](triage.md) flags issues with that label as `blocked` and ranks them last. tinyagent itself makes no GitHub calls.
 
+#### PR bodies
+
+A workflow (or an outside loop around it) that ends in a pull request should keep the PR body short and put the detail elsewhere. Write the full record to `--output` (the workflow `Result` JSON) and link or attach that run log; the PR body gets only the three sections of [`.github/pull_request_template.md`](../.github/pull_request_template.md): what changed, how it was verified, and risks or follow-ups, in under about 200 words, with no transcripts, run logs or full diffs. `gh pr create --body ...` ignores the template, so a tool that passes `--body` should follow the same three sections. tinyagent itself opens no PRs.
+
 #### Learning from failures
 
 `--workflow-observe` (off by default) adds an observer step after a `--workflow` run that ends `Failed` or `Blocked`. It turns the failure into one concrete artifact, a proposed [project rule](ratchet.md#observer-proposals), instead of leaving the lesson to be written by hand:
