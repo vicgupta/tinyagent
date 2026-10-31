@@ -144,8 +144,8 @@ Before opening a PR, confirm:
       three sections, under ~200 words, no transcripts or run logs.
 
 See [REVIEWPR.md](REVIEWPR.md) for how PRs get triaged and merged, and
-[LESSONS.md](LESSONS.md) for hard-won gotchas (rebases, build tags, golden tests,
-cross-file redeclarations) before you start.
+[LESSONS.md](LESSONS.md) for hard-won gotchas (conflict resolution, build tags, golden tests,
+cross-file redeclarations; its older rebase advice is superseded by the merge rule above) before you start.
 
 ## Issue reports
 

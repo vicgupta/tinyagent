@@ -4,6 +4,12 @@ Notes captured after each work session. These are hard-won, concrete lessons for
 
 ---
 
+## 2026-10-31 — Note: rebase guidance superseded
+
+> **Superseded:** the rebase guidance in the 2026-10-25 session below is kept as history only and no longer applies. The rule now: update a branch by merging the latest `main` into it; no rebasing and no force-pushing. Resolve conflicts keeping both sides' changes. Merge PRs with a merge commit only after CI is green. See [CONTRIBUTING.md](CONTRIBUTING.md) and [REVIEWPR.md](REVIEWPR.md).
+
+---
+
 ## 2026-10-25 — tinyagent rebase/merge session
 
 ### Git rebase & conflict resolution
