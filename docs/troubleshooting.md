@@ -29,12 +29,23 @@ When a run fails on a common setup problem, tinyagent prints a `hint:` line unde
 
 Other errors print no hint.
 
+Colors and styling (such as the `error:` and `hint:` labels) appear only at a terminal. Set `NO_COLOR=1` to turn them off, or pass `--color=never` (plain) or `--color=always` (styled even when piped, e.g. into `less -R`). Piped, redirected and `--json` output is plain text by default.
+
 A mistyped flag exits 2 with one line naming up to three close flags, such as `error: unknown flag --sandbxo; did you mean --sandbox? (see tinyagent --help)`, instead of the full usage.
 
 To check your setup before a run, use `tinyagent --check` with the same `-m`, `-c`, `--cwd`, fallback and limit flags you'd pass to a run. It sends no model request and writes nothing. It prints which config file, model, provider, fallbacks, working directory and limits a run would use, and where each came from, then `ok` (exit 0). A problem a run would hit, such as an unknown provider, a bad config key or a missing API key, is printed the same way a run prints it, with its `hint:`, and exits 2. Key values are never printed, only whether the variable is set.
 
 ```
 $ tinyagent --check -m anthropic/claude-sonnet-4
+summary
+  model        anthropic/claude-sonnet-4
+  provider     anthropic
+  api key      ANTHROPIC_API_KEY set
+  sandbox      off
+  permissions  none configured
+  lockdown     off
+  config       none (built-in defaults)
+
 config:    none (built-in defaults)
 model:     anthropic/claude-sonnet-4 (from -m)
 provider:  anthropic, ANTHROPIC_API_KEY is set

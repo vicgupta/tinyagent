@@ -48,6 +48,7 @@ var (
 
 // options holds the parsed command line.
 type options struct {
+	color                                            string
 	task, modelName, configPath, cwd, output, resume string
 	outputSchema                                     string
 	planFile                                         string
@@ -188,6 +189,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.commandEnv, "command-env", "", "environment bash and start_process inherit: all, core or none (default: config's command_env.inherit, else all)")
 	fs.BoolVar(&o.redactSecrets, "redact-secrets", false, "mask known secret values (secret-named and configured variables) as [REDACTED] in bash, process, MCP, web_fetch and hook output before the model sees it; --redact-secrets=false turns config redact_secrets off (default off)")
 	fs.BoolVar(&o.jsonOutput, "json", false, "write run events as JSONL to stdout")
+	fs.StringVar(&o.color, "color", "auto", "color output: auto (terminal and NO_COLOR unset), always or never")
 	fs.StringVar(&o.outputSchema, "output-schema", "", "end the run with a JSON result validated against this JSON Schema file (printed to stdout)")
 	fs.BoolVar(&o.snapshots, "snapshots", false, "snapshot the workspace before every tool batch that can change files, for --rewind; requires -o (default off; config snapshots)")
 	fs.StringVar(&o.rewind, "rewind", "", "restore --cwd to a workspace snapshot recorded in this trajectory JSON (see --to and --dry-run)")
@@ -275,6 +277,11 @@ func run() int {
 		}
 		return 2
 	}
+	if !validColorMode(o.color) {
+		fmt.Fprintf(fs.Output(), "error: --color %q must be auto, always or never\n", o.color)
+		return 2
+	}
+	setColor(o.color)
 	if o.showHelp {
 		printHelp(helpOutput, fs, o.verbose)
 		return 0
@@ -1841,7 +1848,7 @@ var usageGroups = []struct {
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "profile", "name"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}, {"", "ask-user", ""}, {"", "acp", ""}}},
 	{"Review", [][3]string{{"", "review", ""}, {"", "review-base", "ref"}, {"", "review-commit", "rev"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "token-limit", "n"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
-	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "otel", ""}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-backend", "name"}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
+	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "color", "when"}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "otel", ""}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-backend", "name"}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "list-profiles", ""}, {"", "list-plugins", ""}, {"", "plugins-prune", ""}, {"", "plugins-keep", "n"}, {"", "plugins-rollback", "module@sha256"}, {"", "tinygo-install", ""}, {"", "tinygo-update", ""}, {"", "tinygo-status", ""}, {"", "transcript", "path"}, {"", "init-config", ""}, {"", "init-force", ""}, {"", "init-migrate", ""}, {"", "trust-config", ""}, {"", "completion", "shell"}}},
 }
@@ -2064,7 +2071,7 @@ func formatInt(n int) string {
 
 func printHint(w io.Writer, modelName, errMsg string) {
 	if h := model.Hint(modelName, errMsg); h != "" {
-		fmt.Fprintln(w, "hint:", h)
+		fmt.Fprintln(w, styleFor(w).Yellow("hint:"), h)
 	}
 }
 

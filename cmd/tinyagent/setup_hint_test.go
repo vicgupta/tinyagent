@@ -89,3 +89,14 @@ func TestCheckMissingKeyAndHandoffKeepTheirHints(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckJSONCarriesSetupHint(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(path, []byte("lsp:\n  servers:\n    - name: x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _ := runCLI(t, "--check", "--json", "-c", path, "-m", "ollama/x")
+	if code != 2 || !strings.Contains(stdout, `"hint": "fix lsp.servers[0] in `+path) {
+		t.Fatalf("code %d stdout %q", code, stdout)
+	}
+}

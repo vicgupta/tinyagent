@@ -128,6 +128,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 - Per-role model routing (`models:` in config, `--aux-model`, `--delegate-model`, `--route`, keyword or `task_type` routes, `--no-routing`) for compaction, the verify review and delegated children, each role with its own fallback chain and a `usage_by_role` cost split in the summary, JSON, trajectory, `--log-db` and eval reports; off by default.
 - Many providers: OpenAI, Anthropic, OpenRouter, Ollama, a ChatGPT subscription through Codex, handoff to your installed Claude Code (`claude-code`) or Codex CLI (`codex-exec`), and your own OpenAI-compatible endpoints.
 - Streaming text, `--json` event output, structured output, SQLite event logs and OpenTelemetry.
+- Terminal-aware styling: color only at a terminal, off with `NO_COLOR`, or forced with `--color=auto|always|never`; piped output stays plain text.
 - Project memory across runs, with approval before entries become active.
 - Session handoff for long-running work (`--handoff`): each run leaves `.tinyagent/handoff.md` with what it did and what's next, the next fresh run reads it as data, and an optional startup command runs before the first turn; see [Session handoff](docs/long-runs.md#session-handoff).
 - Project rules from agent failures (`tinyagent ratchet add`): each rule records its incident and an expiry or review condition, is added to the system prompt, and can be enforced as a permission deny rule; see [Project rules](docs/ratchet.md).
@@ -140,6 +141,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 - `tinyagent skills validate <path>...`: check skill-workflow skill files, skills directories and workflow files without a model call (exit 1 names an invalid skill), for CI or a pre-commit hook; see [Skill workflows](docs/project-context.md#skill-workflows).
 - Help everywhere: `tinyagent` or `tinyagent <subcommand>` alone at a terminal prints help (the top-level one shows how to pass the task, pick the model and the common options); `--help --verbose` lists every flag by section.
 - Per-project config: `tinyagent init` writes a commented `./tinyagent.yaml`, which is read from `--cwd` (flags, environment variables and `--profile` outrank it). Settings that launch programs or loosen security (`mcp_servers`, `hooks`, `command_tools`, `permissions`, ...) are honored from it only with `--trust-config`. See [docs/config.md](docs/config.md#config).
+- `tinyagent --check`: a setup summary table (model, provider, API key set/missing, sandbox, permissions, lockdown, config source) with no model request, or `--check --json` for CI and scripts.
 - Setup hints: a known setup failure (missing API key, invalid config setting, unavailable sandbox, missing `claude`/`codex` CLI) prints one `hint:` line naming the next action, including the config path and rule; see [Troubleshooting](docs/troubleshooting.md#troubleshooting).
 - `tinyagent --update`: checksum-verified self-update with step-by-step progress and a `#` download bar.
 - Undo for file edits, workspace rewind, resume and follow-up runs.

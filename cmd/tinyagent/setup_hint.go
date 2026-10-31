@@ -108,6 +108,6 @@ func configHint(path, msg string) string {
 // printSetupHint prints setupHint(err) as a hint: line, if there is one.
 func printSetupHint(w io.Writer, err error) {
 	if h := setupHint(err); h != "" {
-		fmt.Fprintln(w, "hint:", h)
+		fmt.Fprintln(w, styleFor(w).Yellow("hint:"), h)
 	}
 }
