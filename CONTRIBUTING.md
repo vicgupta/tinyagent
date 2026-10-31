@@ -74,6 +74,16 @@ embed/prompts/        system prompt templates
   and name the file or key involved (see the config loader and provider code).
 - Prefer the standard library; add dependencies only with justification.
 
+## Adding an opt-in tool
+
+The tool set for a run is owned by `tools.Selection` (`internal/tools/selection.go`).
+Its `Specs()` is what the model is offered and its `Signature()` is the fingerprint a
+checkpoint must match to `--resume`; both come from the same list, so add the new
+tool's flag and spec there (plus a signature prefix if it is a built-in) and its
+behavior in the executor. Don't build a second list elsewhere. The signature of
+existing selections must not change, or older checkpoints stop resuming;
+`TestSelectionSignaturePinned` guards this.
+
 ## Testing
 
 - Unit tests live next to code as `_test.go` files. Run `go test ./...`.

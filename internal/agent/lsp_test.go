@@ -58,7 +58,7 @@ func (e *lspEvents) states() []string {
 
 func TestLSPOffKeepsSignature(t *testing.T) {
 	for _, ro := range []bool{false, true} {
-		if LSPToolSignature(ro, false, false, false, false, false, false) != toolSignature(ro, false) {
+		if LSPToolSignature(ro, false, false, false, false, false, false) != (tools.Selection{ReadOnly: ro}).Signature() {
 			t.Errorf("signature changed with lsp off (read-only %v)", ro)
 		}
 		if s := LSPToolSignature(ro, false, false, false, false, false, true); !strings.HasPrefix(s, "lsp-v1:") {

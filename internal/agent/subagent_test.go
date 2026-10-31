@@ -479,7 +479,7 @@ func TestResumeRefusesChangedSubagentsSetting(t *testing.T) {
 	if got.ExitStatus != StatusError || !strings.Contains(got.Submission, "subagents setting differs") {
 		t.Errorf("resume = %s %q", got.ExitStatus, got.Submission)
 	}
-	if toolSignature(false, false, false, false, true) == toolSignature(false, false, false, false, false) {
+	if (tools.Selection{Delegate: true}).Signature() == (tools.Selection{}).Signature() {
 		t.Error("signature ignores the subagents setting")
 	}
 }
