@@ -145,6 +145,8 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 
 | Topic | Doc |
 |---|---|
+| Tasks: passing a task, task types, task-based routing | [docs/tasks.md](docs/tasks.md) |
+| Models: choosing a model, providers, roles, fallback chains, usage by role | [docs/models.md](docs/models.md) |
 | Every flag, subcommands and exit status | [docs/subcommands.md](docs/subcommands.md) |
 | Config file, profiles, MCP and command tools | [docs/config.md](docs/config.md) |
 | Providers, ChatGPT subscription, reasoning and fallback | [docs/providers.md](docs/providers.md) |

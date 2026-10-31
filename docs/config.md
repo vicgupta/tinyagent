@@ -201,6 +201,7 @@ profiles:                    # omitted by default; named overlays selected with 
   review:
     model: openai/gpt-5-mini
     read_only: true
+```
 ### Verify before stop
 
 `verify_on_stop` (or `--verify-on-stop`, `--verify-command`, `--verify-check`, `--max-verify-reprompts`) keeps a run that changed files from finishing until a test or build command has passed, re-prompting the model up to `max_reprompts` times and otherwise marking the run unverified. `verify_on_stop.checks` lists computational checks (lint, type check, tests) that tinyagent runs itself, in order, when the model finishes with unverified changes; see [Computational checks](verify.md#computational-checks). `verify_on_stop.review` (or `--verify-review`) then asks the model once to review the changes, report only; see [Inferential review](verify.md#inferential-review). See [Verify before stop](verify.md#verify-before-stop) for the full rules.
@@ -277,36 +278,13 @@ They are not offered with `--read-only` (a forged call is rejected like any othe
 
 ## Model roles
 
-The `models:` section picks models per role. Every key is optional and nothing changes when it is unset.
+The `models:` section picks a model per role (`main`, `auxiliary`, `delegated`) and per task; every key is optional and nothing changes when it is unset. How roles resolve, [per-role fallback chains](models.md#per-role-fallback-chains) and [usage by role](models.md#usage-by-role) are described in [Models](models.md#model-roles); `models.delegated.routes` is described in [Task-based routing](tasks.md#task-based-routing).
 
-- **main** is the model from `--model`, `$AGENT_MODEL` or `model:`; it runs the agent loop.
-- **auxiliary** covers helper calls made outside the agent loop: `compaction` (summarizing context, see [Long runs](long-runs.md)) and `review` (the `verify_on_stop.review` pass). A task's model is `--route <task>=`, then `models.auxiliary.tasks.<task>`, then `--aux-model`, then `models.auxiliary.model`, then the main model. If the routed model fails, the call is retried once on the main model (a stderr warning says so). Helper calls are not steps, but their cost and tokens count toward `--cost-limit` and `--token-limit` as before.
-- **delegated** covers the children started by the [delegate and worker tools](long-runs.md#subagents). The `delegate` task's model is `--route delegate=`, then `models.delegated.tasks.delegate` (or its alias `subagents.model`), then `--delegate-model`, then `models.delegated.model`, then the main model; the `worker` task resolves the same way with `models.delegated.tasks.worker` and its alias `subagents.workers.model`.
-
-Each role may set `fallback_models`, its own [fallback chain](providers.md#model-fallback) (at most 3, no duplicates) used when the role's model keeps failing with `429`, `5xx` or network errors; it is checked like the main chain before any request and never inherits the top-level `fallback_models`. `--no-fallback` clears every role's chain too.
-
-### Task-based routes
-
-`models.delegated.routes` sends individual delegated tasks to other models. Each route has a `model` and at least one of `match` (keywords; the route matches when the task brief contains any of them, case-insensitive) and `type` (a single word). When a route sets a `type`, the `delegate` and `worker` tools get an optional `task_type` argument listing the configured types, and a route also matches when the model passes its type. Routes are checked in order and the first match wins; a task that matches none uses the delegated model resolved above. A routed child keeps the role's `fallback_models` chain.
-
-```yaml
-models:
-  delegated:
-    model: openai/gpt-5-mini
-    routes:
-      - match: [migration, schema]
-        model: anthropic/claude-sonnet-4
-      - type: docs
-        model: openai/gpt-5-nano
-```
-
-With routes configured, every delegated task emits a `model.route` event (`role`, `task`, `model`, `reason`: `type <name>`, `match "<keyword>"` or `default`), and an auxiliary helper that falls back to the main model emits one with `reason: fallback` and `fallback_from`. Without routes the tool schemas and events are unchanged. `--check` prints one `route:` line per route. Routes are only accepted under `models.delegated`.
-
-`--no-routing` turns all of this off for one run: the `models:` section and the `--aux-model`, `--delegate-model` and `--route` flags are ignored and every task uses the main model; `subagents.model` and `subagents.workers.model` still apply.
-
-### Usage by role
-
-Every model request is counted under its role and task: `main`/`main` for the agent loop, `auxiliary`/`compaction` and `auxiliary`/`review` for the helpers, `delegated`/`delegate` and `delegated`/`worker` for children (including their own helpers' role), split again by the model that served it. When anything other than the main loop made requests, the trajectory (`-o`), the `result` event, the [event log database](json-output.md#event-log-database) (`run_usage` table) and [eval](eval-framework.md) results and reports carry `usage_by_role`, and the summary line ends with `; by role: ...`. The split always adds up to the run's totals. `model.request` events carry `role` and `task`.
-
-`subagents.model` and `subagents.workers.model` remain supported as aliases of the task keys; setting an alias and its task key to different models is a config error. Unknown task names, empty values and specs containing whitespace are rejected. `--check` prints a `compaction:` and `review:` line when those tasks are routed away from the main model, and a `delegate:` and `worker:` line when those tools are on (each with the model, role, the key or flag it came from and any fallback chain); `run.started` lists the resolved routes as `models` (keyed by task: `role`, `model`, `source`).
-
+| Key | Meaning |
+|---|---|
+| `models.auxiliary.model` | Default model for helper calls (same as `--aux-model`) |
+| `models.auxiliary.tasks.compaction`, `models.auxiliary.tasks.review` | Per-task helper models |
+| `models.delegated.model` | Default model for `delegate` and `worker` children (same as `--delegate-model`) |
+| `models.delegated.tasks.delegate`, `models.delegated.tasks.worker` | Per-task child models; aliases `subagents.model` and `subagents.workers.model` |
+| `models.<role>.fallback_models` | The role's own fallback chain, at most 3 entries |
+| `models.delegated.routes` | Task-based routes, each with `model` and `match` and/or `type` |

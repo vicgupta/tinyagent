@@ -283,7 +283,7 @@ The draft requires the record to carry the fields below; exact field names are a
 | `checks` | list | Per check: `argv`, `exit_code`, `timed_out`, `duration_ms`, capped `output`. |
 | `cost_usd` | number | Run cost from the price table. |
 | `input_tokens` / `output_tokens` | int | Token totals (cache read/write when non-zero, as in trajectories). |
-| `usage_by_role` | list | The trajectory's per-role split (`role`, `task`, `model`, `requests`, tokens, `cost_usd`); only when a helper or delegated child made requests. See [Usage by role](config.md#usage-by-role). |
+| `usage_by_role` | list | The trajectory's per-role split (`role`, `task`, `model`, `requests`, tokens, `cost_usd`); only when a helper or delegated child made requests. See [Usage by role](models.md#usage-by-role). |
 | `steps` | int | Model steps. |
 | `wall_time_ms` | int | Trial wall time. |
 | `trajectory` | string | Path of the trajectory, relative to `--eval-out`. |
