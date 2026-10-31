@@ -369,7 +369,7 @@ Task:
       --fallback-model spec               provider/model to switch to when requests still fail with 429/5xx/network errors after retries (repeatable, tried in order; replaces fallback_models)
       --no-fallback                       don't fall back to other models (clears fallback_models)
       --openai-api api                    openai provider transport: auto, responses, or chat
-  -c, --config path                       YAML config (default: user config if present, else built-in)
+  -c, --config path                       YAML config (default: ./tinyagent.yaml in --cwd, else built-in)
       --profile name                      apply this named profile from the config file's profiles: section over its base settings
       --cwd dir                           working directory (default ".")
       --worktree [=name]                  run in a new Git worktree on branch tinyagent/<name> from HEAD of the repo containing --cwd, kept afterwards (default name generated)
@@ -417,7 +417,7 @@ Other:
   -V, --version                           print the version and exit
       --update                            update to the latest release and exit
       --check                             print the resolved config, model, provider key status, fallbacks, cwd and limits, then exit; makes no model request
-      --list-profiles                     print the profile names in the selected config file (or the user config), sorted one per line, then exit; makes no model request
+      --list-profiles                     print the profile names in the selected config file (-c or ./tinyagent.yaml in --cwd), sorted one per line, then exit; makes no model request
       --list-plugins                      print each configured plugin, its skills and its mcp.json servers with their state, then exit 0 (all load), 1 (a plugin is rejected or a configured server is invalid) or 2 (usage or config error); makes no model request and starts nothing
       --plugins-prune                     remove stored plugin module versions under --cwd's .tinyagent/modules except each module's current one and the --plugins-keep newest others, then exit
       --plugins-keep n                    versions besides current that --plugins-prune keeps per module (default 5)
@@ -426,7 +426,10 @@ Other:
       --tinygo-update                     install the TinyGo version pinned in this build if it isn't cached and remove other cached versions, then exit
       --tinygo-status                     print the pinned and installed TinyGo versions, path and checksum state, then exit
       --transcript path                   print this trajectory JSON as a Markdown transcript (secrets redacted, long results truncated) and exit; makes no model request
-      --init-config                       write a commented starter config to the user config path (or -c), refusing to overwrite, and exit
+      --init-config                       write a commented starter config to ./tinyagent.yaml in --cwd (or -c), refusing to overwrite, and exit; same as tinyagent init
+      --init-force                        tinyagent init --force: replace an existing config file atomically; symlinks are still refused
+      --init-migrate                      tinyagent init --migrate: copy the old per-user config (no longer read) instead of the starter; never deletes the original
+      --trust-config                      honor settings that launch executables or set security policy (mcp_servers, hooks, command_tools, lsp.servers, plugins, permissions, ...) in ./tinyagent.yaml in --cwd; they are ignored with a warning otherwise
       --completion shell                  print a flag-name completion script for this shell (bash, zsh or fish) and exit; load it with: source <(tinyagent --completion bash), or in zsh after compinit: source <(tinyagent --completion zsh), or in fish: tinyagent --completion fish | source; re-source it after --update
 
 Examples:

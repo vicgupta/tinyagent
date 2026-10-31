@@ -19,7 +19,7 @@ import (
 // without lockdown and an invalid untrusted_content exit 2. A config that
 // fails to load is left to the session, which reports it.
 func checkACPLockdown(o *options, fs *flag.FlagSet) int {
-	cfg, err := config.LoadProfile(config.Find(o.configPath), o.profile)
+	_, cfg, err := loadConfig(o, o.cwd, io.Discard)
 	if err != nil {
 		cfg = config.AgentConfig{}
 	}

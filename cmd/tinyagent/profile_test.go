@@ -136,9 +136,15 @@ func TestProfileExplicitConfigOnly(t *testing.T) { // AC14
 	if code != 2 || !strings.Contains(stderr, team) || !strings.Contains(stderr, "defined profiles: ci)") {
 		t.Errorf("user-config profile used with -c: exit %d: %s", code, stderr)
 	}
+	// The old user config is no longer read.
+	code, _, stderr = runCLI(t, "--check", "--cwd", dir, "--profile", "mine")
+	if code != 2 {
+		t.Errorf("user config profile: exit %d, want 2\n%s", code, stderr)
+	}
+	os.WriteFile(filepath.Join(dir, "tinyagent.yaml"), []byte("profiles:\n  mine: {}\n"), 0o644)
 	code, stdout, stderr = runCLI(t, "--check", "--cwd", dir, "--profile", "mine")
 	if code != 0 || !strings.Contains(stdout, "profile:   mine") {
-		t.Errorf("user config profile: exit %d\n%s%s", code, stdout, stderr)
+		t.Errorf("project config profile: exit %d\n%s%s", code, stdout, stderr)
 	}
 }
 

@@ -19,17 +19,14 @@ func TestListProfilesExplicitConfigSorted(t *testing.T) {
 	}
 }
 
-func TestListProfilesUserConfig(t *testing.T) {
+func TestListProfilesProjectConfig(t *testing.T) {
 	checkEnv(t)
-	xdg := os.Getenv("XDG_CONFIG_HOME")
-	p := filepath.Join(xdg, "tinyagent", "config.yaml")
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	cwd := t.TempDir()
+	p := filepath.Join(cwd, "tinyagent.yaml")
 	if err := os.WriteFile(p, []byte("profiles:\n  zebra: {}\n  apple: {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	code, stdout, stderr := runCLI(t, "--list-profiles")
+	code, stdout, stderr := runCLI(t, "--list-profiles", "--cwd", cwd)
 	if code != 0 {
 		t.Fatalf("exit %d; stderr:\n%s", code, stderr)
 	}

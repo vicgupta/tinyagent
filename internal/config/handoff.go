@@ -16,7 +16,7 @@ const (
 
 // Handoff configures the opt-in session handoff file (issue #251): a run
 // reads the file left by the previous session at start and rewrites it at
-// the end. Like memory it comes only from the user config, -c or a
+// the end. Like memory it comes only from -c, a trusted ./tinyagent.yaml (--trust-config) or a
 // profile, never from the repository, so a repository can't set the
 // startup command.
 type Handoff struct {

@@ -61,8 +61,8 @@ func (h checkHint) Error() string { return h.err.Error() }
 // resolveCheck returns the --check report lines, or the first error a run
 // would stop on before its first request.
 func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
-	cfgPath := config.Find(o.configPath)
-	cfg, err := config.LoadProfile(cfgPath, o.profile)
+	cfgSrc, cfg, err := loadConfig(o, o.cwd, io.Discard)
+	cfgPath := cfgSrc.Path
 	if err == nil {
 		err = applyMemoryConfig(&cfg, o.cwd, io.Discard)
 	}
@@ -136,14 +136,7 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 
 	var lines [][2]string
 	add := func(k, v string) { lines = append(lines, [2]string{k, v}) }
-	switch {
-	case o.configPath != "":
-		add("config", cfgPath+" (from -c)")
-	case cfgPath != "":
-		add("config", cfgPath+" (user config)")
-	default:
-		add("config", "none (built-in defaults)")
-	}
+	add("config", cfgSrc.Label())
 	if o.profile != "" {
 		add("profile", o.profile)
 	}
