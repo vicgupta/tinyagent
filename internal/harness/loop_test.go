@@ -95,6 +95,7 @@ func TestRunRetriesThenStops(t *testing.T) {
 		{"Submitted", "SUCCESS CHECK: FAIL - task 2 has no verification"},
 		{"Submitted", "no verdict here"},
 	}, &prompts))
+	// The last attempt had no verdict line: transient, so Failed, not Blocked.
 	if res.Status != StatusFailed || res.ExitCode() != 1 || res.FailedStage != "plan-tasks" {
 		t.Fatalf("result = %+v", res)
 	}
@@ -202,5 +203,58 @@ func TestModelVerdict(t *testing.T) {
 	}
 	if c := modelVerdict("SUCCESS CHECK: FAIL - missing tests"); c.Reason != "missing tests" {
 		t.Errorf("reason = %q", c.Reason)
+	}
+}
+
+func TestRunBlockedAfterModelFail(t *testing.T) {
+	w := loadTestWorkflow(t, "version: 1\nworkflows:\n  build:\n    stages:\n      - skill: plan-tasks\n        retries: 2\n      - skill: run-tests\n")
+	var prompts []string
+	res, events := runTest(t, w, "build", fakeAgent(t, [][2]string{
+		{"Submitted", "SUCCESS CHECK: FAIL - a"},
+		{"Submitted", "SUCCESS CHECK: FAIL - b"},
+		{"Submitted", "SUCCESS CHECK: FAIL - c"},
+	}, &prompts))
+	if res.Status != StatusBlocked || res.ExitCode() != ExitBlocked || res.FailedStage != "plan-tasks" || res.Reason != "c" {
+		t.Fatalf("result = %+v", res)
+	}
+	if len(prompts) != 3 || len(res.Attempts) != 3 {
+		t.Errorf("attempts = %d, want retries+1 = 3 and no later stage", len(res.Attempts))
+	}
+	fin := events[len(events)-1]
+	if fin["type"] != "workflow.finished" || fin["status"] != StatusBlocked || fin["blocked"] != true {
+		t.Errorf("workflow.finished = %v", fin)
+	}
+}
+
+func TestRunBlockedAfterCommandFail(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses sh")
+	}
+	w := loadTestWorkflow(t, "version: 1\nworkflows:\n  build:\n    stages:\n      - skill: run-tests\n        retries: 1\n        check: [sh, -c, \"exit 3\"]\n      - skill: plan-tasks\n")
+	var prompts []string
+	res, _ := runTest(t, w, "build", fakeAgent(t, [][2]string{{"Submitted", "done"}, {"Submitted", "done"}}, &prompts))
+	if res.Status != StatusBlocked || res.ExitCode() != 5 || len(prompts) != 2 {
+		t.Fatalf("result = %+v, calls %d", res, len(prompts))
+	}
+}
+
+func TestUnsatisfiable(t *testing.T) {
+	for name, c := range map[string]struct {
+		check Check
+		want  bool
+	}{
+		"command exit":    {Check{Method: "command", ExitCode: 1}, true},
+		"command timeout": {Check{Method: "command", ExitCode: -1, TimedOut: true}, false},
+		"command missing": {Check{Method: "command", ExitCode: -1}, false},
+		"model fail":      {modelVerdict("SUCCESS CHECK: FAIL - no"), true},
+		"model no line":   {modelVerdict("done"), false},
+		"run error":       {Check{Method: "run", Reason: "stage run ended StepLimitExceeded"}, false},
+		"behavior cases":  {Check{Method: "behavior", Evidence: []BehaviorResult{{}}}, true},
+		"behavior file":   {Check{Method: "behavior", Reason: "behavior file x: bad"}, false},
+		"passed":          {Check{Method: "command", Passed: true}, false},
+	} {
+		if got := Unsatisfiable(c.check); got != c.want {
+			t.Errorf("%s: %v, want %v", name, got, c.want)
+		}
 	}
 }
