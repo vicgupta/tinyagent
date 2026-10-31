@@ -12,6 +12,8 @@ workflows:
     stages:
       - skill: plan-tasks
         gate: spec
+        inputs:
+          contracts_dir: docs/contracts
       - skill: generate-code
         step_limit: 100
       - skill: validate-diff
@@ -21,3 +23,11 @@ workflows:
         check_timeout: 600
       - skill: verify-behavior
         behavior: .tinyagent/behavior.yaml
+  contract:
+    intent: Write or update a stable contract reference doc for one surface of a repository.
+    stages:
+      - skill: write-contract
+        inputs:
+          contracts_dir: docs/contracts
+        # Passes when a contract doc with the header exists; change the path if you change contracts_dir.
+        check: [grep, -rqE, "^# Contract: ", docs/contracts]
