@@ -806,7 +806,7 @@ func run() int {
 	}
 	redactor, redactInfo := newSecretRedactor(cfg, os.Environ(), os.Stderr, o.verbose)
 
-	a := &agent.Agent{
+	a, err := agent.New(agent.Options{
 		Model:           m,
 		ModelName:       o.modelName,
 		FallbackModels:  fallbacks,
@@ -864,6 +864,10 @@ func run() int {
 		Review:         reviewInfo,
 		TaskImages:     taskImages,
 		Lockdown:       lock,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
 	}
 	if policy != nil && !o.jsonOutput {
 		a.PermissionApprover = terminalPermissionApprover
@@ -1121,7 +1125,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return configFail(inConfig(cfgPath, err))
 	}
 	if src.MCPEnabled || len(src.ExternalTools) > 0 {
-		return fail(errors.New("resume: MCP-enabled runs cannot be resumed; start a fresh task"))
+		return fail(fmt.Errorf("resume: %w", agent.ErrMCPResume))
 	}
 	if len(cfg.MCPServers) > 0 {
 		fmt.Fprintln(os.Stderr, "resume: configured MCP servers are not started; resumed runs use only the built-in tools")
@@ -1382,7 +1386,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		prevStatus = "in progress"
 	}
 
-	a := &agent.Agent{
+	a, err := agent.New(agent.Options{
 		Model:           m,
 		ModelName:       modelName,
 		FallbackModels:  fallbacks,
@@ -1438,6 +1442,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		Routes:         modelRoutes(cfg, modelName, subagents, workers),
 		Helpers:        helpers,
 		Lockdown:       lock,
+	})
+	if err != nil {
+		return fail(fmt.Errorf("resume: %w", err))
 	}
 	if policy != nil && !o.jsonOutput {
 		a.PermissionApprover = terminalPermissionApprover

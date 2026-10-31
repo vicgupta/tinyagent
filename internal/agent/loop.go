@@ -313,26 +313,9 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 				return t
 			}
 		}
-		finished := trajectory.Finished(t.ExitStatus) || (a.Continue && t.ExitStatus != StatusNeedsInput)
-		asked := t.ExitStatus == StatusNeedsInput
-		if asked && a.FollowUp == "" {
-			t.ExitStatus, t.Submission = StatusError, "checkpoint is waiting for an answer to its question; answer it with a follow-up task"
-			return t
-		}
-		if asked && len(a.TaskImages) > 0 {
-			t.ExitStatus, t.Submission = StatusError, "image attachments can't be added to an answer"
-			return t
-		}
-		if finished && a.FollowUp == "" {
-			t.ExitStatus, t.Submission = StatusError, "checkpoint already finished; continue it with a follow-up task"
-			return t
-		}
-		if !finished && !asked && a.FollowUp != "" {
-			t.ExitStatus, t.Submission = StatusError, "a follow-up task can only continue a finished checkpoint"
-			return t
-		}
-		if !finished && len(a.TaskImages) > 0 {
-			t.ExitStatus, t.Submission = StatusError, "image attachments need a follow-up task"
+		finished, asked, err := resumeMode(t, a.FollowUp, a.Continue, len(a.TaskImages))
+		if err != nil {
+			t.ExitStatus, t.Submission = StatusError, err.Error()
 			return t
 		}
 		source := a.ResumeSource
