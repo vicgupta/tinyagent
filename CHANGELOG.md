@@ -1,10 +1,22 @@
 # Changelog
 
-## Unreleased
+## [v0.11.0] - 2026-10-31
 
 ### Features
 
-- Experimental GitHub Action eval mode (#260): `eval`, `eval-out`, `eval-min-pass-rate`, `cost-limit` and `time-limit` inputs run suites with the existing verified installer, expose report paths, gate CI via `fail-on-error`, and optionally append `report.md` to the job summary. Artifact uploads remain workflow-managed.
+- Project rules from agent failures (#254, closes #249): `tinyagent ratchet add|list|remove|path` records rules in `.tinyagent/ratchet.toml` with the incident that caused them and an expiry date or review condition; active rules join the system prompt and can be enforced as permission deny rules.
+- Computational checks for verify-on-stop (#255, part of #250): `verify_on_stop.checks` / repeatable `--verify-check <cmd>` run fast deterministic checks (lint, type check, tests), cheapest first, before a run that changed files may finish.
+- Inferential review for verify-on-stop (#256, closes #250): `verify_on_stop.review` / `--verify-review` runs a model review last, once every check passes, and reports its findings.
+- Session handoff (#257, closes #251): `--handoff` / `handoff.enabled` leaves `.tinyagent/handoff.md` with what a run did and what's next; the next fresh run reads it as data, and an optional startup command runs before the first turn.
+- `--update` progress (#258): every step is reported on stderr with a `#` download bar, and failures name the step that failed.
+- Brief help (#259): bare `tinyagent` and `tinyagent --help` show two examples and a Common options block; `--help --verbose` lists every flag.
+- Experimental GitHub Action eval mode (#261, closes #260): `eval`, `eval-out`, `eval-min-pass-rate`, `cost-limit` and `time-limit` inputs run suites with the existing verified installer, expose report paths, gate CI via `fail-on-error`, and optionally append `report.md` to the job summary. Artifact uploads remain workflow-managed.
+- Model routing (#262-#266): `models:` roles `main`, `auxiliary` (compaction, verify review) and `delegated` (`delegate`, `worker`) with `--aux-model`, `--delegate-model` and repeatable `--route task=spec`; per-role `fallback_models`; task-based `models.delegated.routes` (`match`, `type`) with a `model.route` event; `--no-routing`; and `usage_by_role` in trajectories, the `result` event, the summary line, the event log (`run_usage` table) and eval reports. `subagents.model` and `subagents.workers.model` remain as aliases.
+- Bubblewrap sandbox engine (#269): `--sandbox-backend auto|landlock|bwrap` / `sandbox_backend` / `tinyagent sandbox --backend`; `auto` uses bwrap with Landlock stacked inside when bwrap works, else Landlock alone.
+
+### Other
+
+- Docs synced for verify-on-stop, token budgets and help changes (#253); README documentation table grouped by topic (#267); new top-level Tasks and Models pages (#268).
 
 ## [v0.10.3] - 2026-10-30
 
