@@ -680,7 +680,7 @@ func TestUnpricedCostLimitWarning(t *testing.T) {
 	if err := os.WriteFile(noConfig, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { model.PriceOverride = [2]float64{} })
+	t.Cleanup(func() { model.DefaultRuntime.PriceOverride = [2]float64{} })
 	cases := []struct {
 		name string
 		args []string

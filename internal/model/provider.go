@@ -70,26 +70,6 @@ type Model interface {
 	Query(ctx context.Context, messages []Message, tools []ToolSpec) (Message, Cost, error)
 }
 
-// Prices maps a model name prefix to USD per million input/output tokens and,
-// optionally, the cache-read price as a multiple of the input price (0 means
-// the standard 0.1). The longest matching prefix wins. Unknown models cost 0
-// unless overridden.
-var Prices = map[string][3]float64{
-	"gpt-4o":            {2.50, 10.00},
-	"gpt-4o-mini":       {0.15, 0.60},
-	"gpt-4.1":           {2.00, 8.00},
-	"gpt-4.1-mini":      {0.40, 1.60},
-	"gpt-4.1-nano":      {0.10, 0.40},
-	"claude-sonnet-4":   {3.00, 15.00},
-	"claude-opus-4":     {15.00, 75.00},
-	"claude-haiku-4-5":  {1.00, 5.00},
-	"claude-3-5-haiku":  {0.80, 4.00},
-	"claude-3-7-sonnet": {3.00, 15.00},
-	"claude-sonnet-5-5": {2.00, 10.00, 0.05},
-	"claude-opus-5-5":   {4.00, 20.00, 0.05},
-	"claude-fable-5-1":  {10.00, 50.00, 0.025},
-}
-
 // Anthropic prices cache writes (5-minute TTL) and, by default, cache reads as
 // these multiples of the input price.
 const (
@@ -97,29 +77,25 @@ const (
 	cacheReadMultiplier  = 0.1
 )
 
-// PriceOverride, when non-zero, replaces the price table's input and output
-// prices. The table's cache-read multiplier still applies.
-var PriceOverride [2]float64
-
-func price(model string, in, out int) Cost {
-	return cachedPrice(model, in, 0, 0, out)
+func (r *Runtime) price(model string, in, out int) Cost {
+	return r.cachedPrice(model, in, 0, 0, out)
 }
 
 // cachedPrice prices a response whose input was in uncached tokens plus
 // cacheWrite tokens written to and cacheRead tokens read from the cache.
-func cachedPrice(model string, in, cacheWrite, cacheRead, out int) Cost {
-	return cachedPriceWith(model, nil, in, cacheWrite, cacheRead, out)
+func (r *Runtime) cachedPrice(model string, in, cacheWrite, cacheRead, out int) Cost {
+	return r.cachedPriceWith(model, nil, in, cacheWrite, cacheRead, out)
 }
 
 // cachedPriceWith is cachedPrice with custom, when non-nil, used in place
-// of the Prices table entry (a configured provider's model price).
-func cachedPriceWith(model string, custom *[3]float64, in, cacheWrite, cacheRead, out int) Cost {
-	p, _ := lookupPrice(model)
+// of the price table entry (a configured provider's model price).
+func (r *Runtime) cachedPriceWith(model string, custom *[3]float64, in, cacheWrite, cacheRead, out int) Cost {
+	p, _ := r.lookupPrice(model)
 	if custom != nil {
 		p = *custom
 	}
-	if PriceOverride != [2]float64{} {
-		p[0], p[1] = PriceOverride[0], PriceOverride[1]
+	if o := r.priceOverride(); o != [2]float64{} {
+		p[0], p[1] = o[0], o[1]
 	}
 	read := p[2]
 	if read == 0 {
@@ -135,10 +111,10 @@ func cachedPriceWith(model string, custom *[3]float64, in, cacheWrite, cacheRead
 	}
 }
 
-// lookupPrice returns the Prices entry with the longest prefix of model.
-func lookupPrice(model string) (p [3]float64, ok bool) {
+// lookupPrice returns the price table entry with the longest prefix of model.
+func (r *Runtime) lookupPrice(model string) (p [3]float64, ok bool) {
 	best := ""
-	for prefix, v := range Prices {
+	for prefix, v := range r.prices() {
 		if strings.HasPrefix(model, prefix) && len(prefix) > len(best) {
 			best, p, ok = prefix, v, true
 		}
@@ -147,16 +123,23 @@ func lookupPrice(model string) (p [3]float64, ok bool) {
 }
 
 // Unpriced reports whether spec, as passed to New, names a model billed per
-// token whose cost tinyagent can't estimate: no Prices entry and no
+// token whose cost tinyagent can't estimate under DefaultRuntime. See
+// Runtime.Unpriced.
+func Unpriced(spec string) bool {
+	return DefaultRuntime.Unpriced(spec)
+}
+
+// Unpriced reports whether spec, as passed to New, names a model billed per
+// token whose cost tinyagent can't estimate: no price table entry and no
 // PriceOverride, so its cost always reads 0. Ollama and Codex are free by
 // design and never unpriced.
-func Unpriced(spec string) bool {
+func (r *Runtime) Unpriced(spec string) bool {
 	provider, name := splitSpec(spec)
 	if _, ok := ConfiguredProvider(spec); ok {
-		if PriceOverride != [2]float64{} || providerPrice(spec) != nil {
+		if r.priceOverride() != [2]float64{} || r.providerPrice(spec) != nil {
 			return false
 		}
-		_, ok := lookupPrice(name)
+		_, ok := r.lookupPrice(name)
 		return !ok
 	}
 	switch provider {
@@ -164,10 +147,10 @@ func Unpriced(spec string) bool {
 	default:
 		return false
 	}
-	if PriceOverride != [2]float64{} {
+	if r.priceOverride() != [2]float64{} {
 		return false
 	}
-	_, ok := lookupPrice(name)
+	_, ok := r.lookupPrice(name)
 	return !ok
 }
 
@@ -195,6 +178,9 @@ type Options struct {
 	// Handoff is what the claude-code, codex-exec and opencode providers map onto
 	// the CLI they run. Other providers ignore it.
 	Handoff HandoffOptions
+	// Runtime supplies the HTTP client, retry policy and prices for the
+	// HTTP providers. nil uses DefaultRuntime.
+	Runtime *Runtime
 }
 
 // NewWith is New with provider options.
@@ -203,6 +189,7 @@ func NewWith(spec string, onText func(string), opts Options) (Model, error) {
 	if name == "" {
 		return nil, fmt.Errorf("model %q: missing model name", spec)
 	}
+	rt := opts.Runtime
 	switch provider {
 	case "openai":
 		if !ValidOpenAIAPI(opts.OpenAIAPI) {
@@ -210,20 +197,26 @@ func NewWith(spec string, onText func(string), opts Options) (Model, error) {
 		}
 		base := envOr("OPENAI_BASE_URL", openAIDefaultBaseURL)
 		if ResolveOpenAIAPI(opts.OpenAIAPI, os.Getenv("OPENAI_BASE_URL")) == OpenAIAPIResponses {
-			return &OpenAIResponses{BaseURL: base, APIKey: os.Getenv("OPENAI_API_KEY"), Model: name, OnText: onText}, nil
+			return &OpenAIResponses{BaseURL: base, APIKey: os.Getenv("OPENAI_API_KEY"), Model: name, OnText: onText, Runtime: rt}, nil
 		}
-		return &OpenAI{BaseURL: base, APIKey: os.Getenv("OPENAI_API_KEY"), Model: name, OnText: onText}, nil
+		return &OpenAI{BaseURL: base, APIKey: os.Getenv("OPENAI_API_KEY"), Model: name, OnText: onText, Runtime: rt}, nil
 	case "openrouter":
-		return &OpenAI{BaseURL: "https://openrouter.ai/api/v1", APIKey: os.Getenv("OPENROUTER_API_KEY"), Model: name, OnText: onText}, nil
+		return &OpenAI{BaseURL: "https://openrouter.ai/api/v1", APIKey: os.Getenv("OPENROUTER_API_KEY"), Model: name, OnText: onText, Runtime: rt}, nil
 	case "anthropic":
 		base := envOr("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
-		return &Anthropic{BaseURL: base, APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: name, OnText: onText}, nil
+		return &Anthropic{BaseURL: base, APIKey: os.Getenv("ANTHROPIC_API_KEY"), Model: name, OnText: onText, Runtime: rt}, nil
 	case "ollama":
 		m := NewOllama(name)
 		m.OnText = onText
+		m.Runtime = rt
 		return m, nil
 	case "codex":
-		return NewCodex(name, onText)
+		c, err := NewCodex(name, onText)
+		if err != nil {
+			return nil, err
+		}
+		c.Runtime = rt
+		return c, nil
 	case ClaudeCodeProvider:
 		return NewClaudeCode(name, opts.Handoff)
 	case CodexExecProvider:
@@ -232,7 +225,7 @@ func NewWith(spec string, onText func(string), opts Options) (Model, error) {
 		return NewOpenCode(name, opts.Handoff)
 	default:
 		if d, ok := ConfiguredProvider(spec); ok {
-			return newConfigured(d, spec, name, onText)
+			return newConfigured(d, spec, name, onText, rt)
 		}
 		return nil, fmt.Errorf("unknown provider %q (want %s)", provider, providerIDs())
 	}
@@ -244,12 +237,6 @@ func envOr(key, def string) string {
 	}
 	return def
 }
-
-var (
-	httpClient  = &http.Client{Timeout: 10 * time.Minute}
-	retryBase   = time.Second
-	maxAttempts = 6
-)
 
 type httpError struct {
 	status     int
@@ -303,8 +290,8 @@ func decodeBody(r io.Reader, out any) error {
 	return nil
 }
 
-func postJSON(ctx context.Context, url string, headers map[string]string, body, out any) error {
-	resp, err := post(ctx, url, headers, body)
+func (r *Runtime) postJSON(ctx context.Context, url string, headers map[string]string, body, out any) error {
+	resp, err := r.post(ctx, url, headers, body)
 	if err != nil {
 		return err
 	}
@@ -343,11 +330,12 @@ func retryReason(err error) string {
 
 // post sends body to url, retrying with exponential backoff on network errors,
 // 429, and 5xx. It returns a 2xx response whose body the caller must close.
-func post(ctx context.Context, url string, headers map[string]string, body any) (*http.Response, error) {
+func (r *Runtime) post(ctx context.Context, url string, headers map[string]string, body any) (*http.Response, error) {
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
+	maxAttempts, retryBase, client := r.maxAttempts(), r.retryBase(), r.httpClient()
 	var lastErr error
 	for attempt := range maxAttempts {
 		if attempt > 0 {
@@ -373,7 +361,7 @@ func post(ctx context.Context, url string, headers map[string]string, body any) 
 		for k, v := range headers {
 			req.Header.Set(k, v)
 		}
-		resp, err := httpClient.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()

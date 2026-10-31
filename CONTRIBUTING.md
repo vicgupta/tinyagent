@@ -111,6 +111,13 @@ Don't construct a `tools.Executor` literal anywhere else in `cmd/tinyagent`;
 - Add or update the price and context-window tables so `--cost-limit` and
   compaction keep working. Unknown models cost $0, which silently defeats
   `--cost-limit`.
+- The HTTP client, retry policy, price table and price override live on a
+  `model.Runtime` (`internal/model/runtime.go`), passed through
+  `model.Options.Runtime`; nil means the process-wide `model.DefaultRuntime`.
+  HTTP adapters read them from their `Runtime` field, never from package
+  globals. In tests, build an isolated runtime (`model.NewRuntime()` or a
+  literal `&model.Runtime{...}`) and use `t.Parallel()` instead of changing
+  `DefaultRuntime` and restoring it with `t.Cleanup`.
 - Update the flag tables in `docs/subcommands.md` and the troubleshooting table in `docs/troubleshooting.md` if the change
   is user-visible (new provider, new hint, new env var).
 - Add a `hint:` for common setup failures, matching the existing troubleshooting

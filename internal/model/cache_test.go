@@ -117,6 +117,8 @@ func checkCacheCost(t *testing.T, name string, c Cost, wantUSD float64) {
 }
 
 func TestCachedPriceMultipliers(t *testing.T) {
+	t.Parallel()
+	rt := NewRuntime()
 	cases := []struct {
 		model string
 		want  float64 // USD for 1M cache-read tokens
@@ -129,25 +131,25 @@ func TestCachedPriceMultipliers(t *testing.T) {
 		{"unknown-model", 0},
 	}
 	for _, c := range cases {
-		if got := cachedPrice(c.model, 0, 0, 1e6, 0); !approx(got.USD, c.want) {
+		if got := rt.cachedPrice(c.model, 0, 0, 1e6, 0); !approx(got.USD, c.want) {
 			t.Errorf("%s: 1M cache reads = $%v, want $%v", c.model, got.USD, c.want)
 		}
 	}
 	// Writes are 1.25x regardless of the read multiplier.
-	if got := cachedPrice("claude-opus-5-5", 0, 1e6, 0, 0); !approx(got.USD, 5) {
+	if got := rt.cachedPrice("claude-opus-5-5", 0, 1e6, 0, 0); !approx(got.USD, 5) {
 		t.Errorf("opus 5.5: 1M cache writes = $%v, want $5", got.USD)
 	}
 }
 
 func TestCachedPriceWithOverride(t *testing.T) {
-	PriceOverride = [2]float64{10, 20}
-	t.Cleanup(func() { PriceOverride = [2]float64{} })
+	t.Parallel()
+	rt := &Runtime{PriceOverride: [2]float64{10, 20}}
 
-	if got := cachedPrice("unknown-model", 1e6, 1e6, 1e6, 1e6); !approx(got.USD, 10+12.5+1+20) {
+	if got := rt.cachedPrice("unknown-model", 1e6, 1e6, 1e6, 1e6); !approx(got.USD, 10+12.5+1+20) {
 		t.Errorf("override, default multiplier: $%v, want $43.5", got.USD)
 	}
 	// The table's multiplier still applies on top of an overridden base price.
-	if got := cachedPrice("claude-sonnet-5-5", 0, 0, 1e6, 0); !approx(got.USD, 0.5) {
+	if got := rt.cachedPrice("claude-sonnet-5-5", 0, 0, 1e6, 0); !approx(got.USD, 0.5) {
 		t.Errorf("override, 0.05x model: $%v, want $0.5", got.USD)
 	}
 }

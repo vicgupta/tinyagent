@@ -665,7 +665,7 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
 	}
-	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
+	model.DefaultRuntime.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 
 	root, err := canonicalRoot(o.cwd)
 	if err != nil {
@@ -1169,7 +1169,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if code := checkLSP(cfg, cfgPath, "resume: "); code != 0 {
 		return code
 	}
-	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
+	model.DefaultRuntime.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 
 	root, err := canonicalRoot(o.cwd)
 	if err != nil {
