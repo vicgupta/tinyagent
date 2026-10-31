@@ -305,5 +305,9 @@ With routes configured, every delegated task emits a `model.route` event (`role`
 
 `--no-routing` turns all of this off for one run: the `models:` section and the `--aux-model`, `--delegate-model` and `--route` flags are ignored and every task uses the main model; `subagents.model` and `subagents.workers.model` still apply.
 
+### Usage by role
+
+Every model request is counted under its role and task: `main`/`main` for the agent loop, `auxiliary`/`compaction` and `auxiliary`/`review` for the helpers, `delegated`/`delegate` and `delegated`/`worker` for children (including their own helpers' role), split again by the model that served it. When anything other than the main loop made requests, the trajectory (`-o`), the `result` event, the [event log database](json-output.md#event-log-database) (`run_usage` table) and [eval](eval-framework.md) results and reports carry `usage_by_role`, and the summary line ends with `; by role: ...`. The split always adds up to the run's totals. `model.request` events carry `role` and `task`.
+
 `subagents.model` and `subagents.workers.model` remain supported as aliases of the task keys; setting an alias and its task key to different models is a config error. Unknown task names, empty values and specs containing whitespace are rejected. `--check` prints a `compaction:` and `review:` line when those tasks are routed away from the main model, and a `delegate:` and `worker:` line when those tools are on (each with the model, role, the key or flag it came from and any fallback chain); `run.started` lists the resolved routes as `models` (keyed by task: `role`, `model`, `source`).
 

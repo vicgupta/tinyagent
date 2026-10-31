@@ -341,6 +341,7 @@ func (s *SQLite) Emit(kind string, fields map[string]any) {
 		ops = append(ops, op{`UPDATE runs SET ended_at = ?, status = ?, steps = ?, input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_write_tokens = ?, cost_usd = ?, duration_ms = ? WHERE id = ?`,
 			[]any{now.UnixMilli(), str(fields["status"]), num(fields["steps"]), num(fields["input_tokens"]), num(fields["output_tokens"]),
 				num(fields["cache_read_tokens"]), num(fields["cache_write_tokens"]), fields["cost_usd"], num(fields["duration_ms"]), s.runID}})
+		ops = append(ops, s.usageOps(fields["usage_by_role"])...)
 	}
 	s.ch <- ops
 }
@@ -513,4 +514,35 @@ func truncate(s string, n int) string {
 		n--
 	}
 	return s[:n]
+}
+
+// usageOps stores the result event's usage_by_role in run_usage.
+func (s *SQLite) usageOps(v any) []op {
+	if v == nil {
+		return nil
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	var rows []struct {
+		Role             string  `json:"role"`
+		Task             string  `json:"task"`
+		Model            string  `json:"model"`
+		Requests         int     `json:"requests"`
+		InputTokens      int     `json:"input_tokens"`
+		OutputTokens     int     `json:"output_tokens"`
+		CacheReadTokens  int     `json:"cache_read_tokens"`
+		CacheWriteTokens int     `json:"cache_write_tokens"`
+		CostUSD          float64 `json:"cost_usd"`
+	}
+	if json.Unmarshal(b, &rows) != nil {
+		return nil
+	}
+	var ops []op
+	for _, r := range rows {
+		ops = append(ops, op{`INSERT INTO run_usage (run_id, role, task, model, requests, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			[]any{s.runID, r.Role, r.Task, r.Model, r.Requests, r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheWriteTokens, r.CostUSD}})
+	}
+	return ops
 }

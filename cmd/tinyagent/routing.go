@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/vicgupta/tinyagent/internal/agent"
+	"github.com/vicgupta/tinyagent/internal/trajectory"
 	"os"
 	"sort"
 	"strings"
@@ -147,4 +148,25 @@ func taskTypes(cfg config.AgentConfig, s *agent.Subagents, w *agent.Workers) []s
 		return nil
 	}
 	return cfg.Models.TaskTypes()
+}
+
+// usageByRoleSummary is the summary line's per-role split, e.g.
+// "; by role: main 12.0k tokens $0.10, worker (gpt-5-mini) 3.0k tokens
+// $0.01"; empty unless a helper or child made requests.
+func usageByRoleSummary(t *trajectory.Trajectory) string {
+	if !t.RoutedUsage() {
+		return ""
+	}
+	var parts []string
+	for _, u := range t.UsageByRole {
+		p := fmt.Sprintf("%s %s tokens", u.Task, formatInt(u.InputTokens+u.OutputTokens))
+		if u.Task != u.Role {
+			p = fmt.Sprintf("%s/%s (%s) %s tokens", u.Role, u.Task, u.Model, formatInt(u.InputTokens+u.OutputTokens))
+		}
+		if u.CostUSD > 0 {
+			p += " " + formatCost(u.CostUSD)
+		}
+		parts = append(parts, p)
+	}
+	return "; by role: " + strings.Join(parts, ", ")
 }

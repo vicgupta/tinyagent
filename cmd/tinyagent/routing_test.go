@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/vicgupta/tinyagent/internal/trajectory"
 	"os"
 	"path/filepath"
 	"strings"
@@ -162,5 +163,20 @@ func TestNoRoutingKeepsAliases(t *testing.T) {
 	d, _ := m["delegate"].(map[string]any)
 	if d["model"] != "openai/gpt-5-mini" {
 		t.Errorf("delegate = %v", d)
+	}
+}
+
+func TestUsageByRoleInResultAndSummary(t *testing.T) {
+	tr := &trajectory.Trajectory{ExitStatus: "Submitted"}
+	tr.AddUsage(trajectory.RoleUsage{Role: "main", Task: "main", Model: "a/b", Requests: 1, InputTokens: 1000})
+	if _, ok := resultFields(tr, 0)["usage_by_role"]; ok || usageByRoleSummary(tr) != "" {
+		t.Error("main-only run reports usage_by_role")
+	}
+	tr.AddUsage(trajectory.RoleUsage{Role: "auxiliary", Task: "review", Model: "a/c", Requests: 1, InputTokens: 500, CostUSD: 0.01})
+	if _, ok := resultFields(tr, 0)["usage_by_role"]; !ok {
+		t.Error("result lacks usage_by_role")
+	}
+	if got := summaryLine(tr, 0); !strings.Contains(got, "; by role: main 1,000 tokens, auxiliary/review (a/c) 500 tokens") {
+		t.Errorf("summary = %q", got)
 	}
 }

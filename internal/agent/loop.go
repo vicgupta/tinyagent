@@ -196,6 +196,9 @@ type Agent struct {
 	// routing.TaskReview) to the model serving it; a task without an
 	// entry uses Model.
 	Helpers map[string]model.Model
+	// UsageRole and UsageTask label this agent's own requests in
+	// usage_by_role and model.request; empty means main/main.
+	UsageRole, UsageTask string
 	// isWorker is set on a worker child.
 	isWorker bool
 	// scopedReported dedupes this invocation's instructions.skipped reports.
@@ -575,6 +578,12 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		t.OutputTokens += cost.OutputTokens
 		t.CacheReadTokens += cost.CacheReadTokens
 		t.CacheWriteTokens += cost.CacheWriteTokens
+		role, task := a.role()
+		served := a.ModelName
+		if t.ActiveModel != "" {
+			served = t.ActiveModel
+		}
+		addUsage(t, role, task, served, cost)
 		t.Messages = append(t.Messages, msg)
 		v.add(t, msg)
 		v.pendingChars = 0 // already counted in cost.OutputTokens
@@ -1180,7 +1189,8 @@ func (a *Agent) requested(t *trajectory.Trajectory, start time.Time, cost model.
 	if t.ActiveModel != "" {
 		name = t.ActiveModel
 	}
-	fields := map[string]any{"step": t.Steps + 1, "model": name, "duration_ms": time.Since(start).Milliseconds()}
+	role, task := a.role()
+	fields := map[string]any{"step": t.Steps + 1, "model": name, "role": role, "task": task, "duration_ms": time.Since(start).Milliseconds()}
 	if err != nil {
 		fields["error"] = err.Error()
 	} else {

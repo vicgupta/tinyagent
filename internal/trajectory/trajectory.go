@@ -203,6 +203,9 @@ type Trajectory struct {
 	CacheWriteTokens int    `json:"cache_write_tokens,omitempty"`
 	ExitStatus       string `json:"exit_status"`
 	Submission       string `json:"submission"`
+	// UsageByRole splits the totals above by routing role, task and model
+	// (main loop, compaction, review, delegate and worker children).
+	UsageByRole []RoleUsage `json:"usage_by_role,omitempty"`
 	// StructuredOutput is the validated result of an --output-schema run
 	// that ended Submitted; Submission holds the same JSON as a string.
 	StructuredOutput json.RawMessage `json:"structured_output,omitempty"`
@@ -619,4 +622,47 @@ type ScopedAgentsMDLoad struct {
 	Step       int    `json:"step"`
 	// Message is the index in Messages of the tool result carrying it.
 	Message int `json:"message"`
+}
+
+// RoleUsage totals the model requests of one routing role and task
+// (main/main, auxiliary/compaction, delegated/worker, ...) on one model.
+type RoleUsage struct {
+	Role             string  `json:"role"`
+	Task             string  `json:"task"`
+	Model            string  `json:"model"`
+	Requests         int     `json:"requests"`
+	InputTokens      int     `json:"input_tokens"`
+	OutputTokens     int     `json:"output_tokens"`
+	CacheReadTokens  int     `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int     `json:"cache_write_tokens,omitempty"`
+	CostUSD          float64 `json:"cost_usd"`
+}
+
+// AddUsage adds requests' usage to the role/task/model entry of
+// UsageByRole, creating it in first-use order.
+func (t *Trajectory) AddUsage(u RoleUsage) {
+	for i := range t.UsageByRole {
+		e := &t.UsageByRole[i]
+		if e.Role == u.Role && e.Task == u.Task && e.Model == u.Model {
+			e.Requests += u.Requests
+			e.InputTokens += u.InputTokens
+			e.OutputTokens += u.OutputTokens
+			e.CacheReadTokens += u.CacheReadTokens
+			e.CacheWriteTokens += u.CacheWriteTokens
+			e.CostUSD += u.CostUSD
+			return
+		}
+	}
+	t.UsageByRole = append(t.UsageByRole, u)
+}
+
+// RoutedUsage reports whether UsageByRole covers more than the main
+// loop, i.e. whether a helper or delegated child made requests.
+func (t *Trajectory) RoutedUsage() bool {
+	for _, u := range t.UsageByRole {
+		if u.Role != "main" {
+			return true
+		}
+	}
+	return false
 }
