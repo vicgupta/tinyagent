@@ -104,18 +104,11 @@ func (a *Agent) delegate(ctx context.Context, t *trajectory.Trajectory, call mod
 		a.routeEvent(routing.RoleDelegated, routing.TaskDelegate, childName, reason, "")
 	}
 	child := &Agent{
-		UsageRole: routing.RoleDelegated,
-		UsageTask: routing.TaskDelegate,
-		Model:     childModel,
-		ModelName: childName,
-		Tools: &tools.Executor{
-			Root:           a.Tools.Root,
-			ReadOnly:       true,
-			MaxOutputChars: a.Tools.MaxOutputChars,
-			OutputFiles:    a.Tools.OutputFiles,
-			FileAccess:     a.Tools.FileAccess,
-			ExtraDirs:      a.Tools.ExtraDirs,
-		},
+		UsageRole:      routing.RoleDelegated,
+		UsageTask:      routing.TaskDelegate,
+		Model:          childModel,
+		ModelName:      childName,
+		Tools:          a.Tools.Child(tools.ChildSpec{ReadOnly: true}),
 		Config:         cfg,
 		Out:            out,
 		Err:            a.Err,
