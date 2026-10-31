@@ -135,6 +135,29 @@ The example [`plan-tasks`](workflows/skills/plan-tasks.md) skill asks for exactl
 
 When the gate rejects a plan, the stage runs once more (a **re-plan**) with the gate's reason in its prompt. The re-plan gets the stage's normal retry budget again for its success check, so it doesn't use up the retries. If the gate rejects the re-plan too, the workflow stops before the next stage, with status `Failed`, the failed stage, and a reason starting `spec gate:`, and exits 1. It never re-plans in a loop. Each decision is a `stage.gate` event and an entry in the `-o` record's `gates` list, and is shown as a progress line. Without `gate:`, stages behave as before. `gate` is a new workflow key, so older tinyagent versions reject a workflow file that uses it.
 
+#### Contract docs
+
+A workflow keeps three things apart: the **spec** is what you are building this time (the `-t` task), a **skill** is how a stage builds it (a file in `skills_dir`), and a **contract doc** is the stable reference for a part of the target repository that keeps getting built on, such as a component library or an internal API. Without a contract doc, every plan re-researches that surface from the code.
+
+Contract docs live in the target repository, by default in `docs/contracts/<surface>.md`. Each starts with a fixed header and three sections:
+
+```markdown
+# Contract: tools-executor
+Covers: internal/tools
+Last verified: 3f2a9c1
+
+## Public API
+## Invariants
+## How to extend
+```
+
+- **Writing one (on request).** The example workflow file has a `contract` workflow that runs the [`write-contract`](workflows/skills/write-contract.md) skill: `tinyagent --workflow docs/workflows/workflow.yaml --workflow-name contract -t "write a contract doc for internal/tools"`. It reads the code, writes or updates `<contracts_dir>/<surface>.md`, and changes no code. Its `check` passes when a file in `docs/contracts` starts with `# Contract: `; if you set another `contracts_dir`, change the check path to match.
+- **Using them.** The example [`plan-tasks`](workflows/skills/plan-tasks.md) skill takes a `contracts_dir` input (the `implement` workflow sets `contracts_dir: docs/contracts`). It reads every contract doc whose `Covers:` line overlaps the spec before researching, lists the ones it used as `Contract used: <path>`, and lists each stable surface it had to research from scratch as `Contract candidate: <surface>`, so you know which contract to write next. With no contracts directory, it plans as before.
+- **Staleness.** `Last verified:` holds the commit or date the doc was checked against. When the covered code changed after that, plan-tasks re-checks what it relies on and reports the contract as stale instead of trusting it.
+- **Trust.** A contract doc is ordinary repository content, read as reference material. It is never loaded automatically, has no authority over the spec or AGENTS.md, and must not be named `AGENTS.md`.
+
+tinyagent doesn't detect repeated use across runs or refresh contracts by itself; run the `contract` workflow when plan-tasks reports a candidate or a stale contract.
+
 #### Verifying behavior
 
 Tests passing doesn't prove the built program does what the task asked. A stage with `behavior: <path>` checks that from the outside: the stage's run translates the task's behavioral acceptance criteria (what a command prints, which exit code it returns) into cases in that file, and the harness then runs each case itself and decides the stage on the observed output alone, not on the model's opinion. The example `implement` workflow ends with a `verify-behavior` stage that does this after `run-tests`.
