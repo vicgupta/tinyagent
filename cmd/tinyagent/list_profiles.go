@@ -42,7 +42,7 @@ func runListProfiles(o *options, fs *flag.FlagSet, w io.Writer) int {
 		fmt.Fprintf(os.Stderr, "error: unexpected positional argument %q\n", fs.Arg(0))
 		return 2
 	}
-	names, err := config.ProfileNames(config.Find(o.configPath))
+	names, err := config.ProfileNames(locateConfig(o, o.cwd, os.Stderr).Path)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2

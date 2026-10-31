@@ -124,6 +124,9 @@ func TestBareSubcommandPrintsHelp(t *testing.T) {
 	t.Setenv("AGENT_MODEL", "")
 	defer func(f func() bool) { stdinIsTerminal = f }(stdinIsTerminal)
 	for _, s := range subcommands {
+		if s.runBare {
+			continue // runs bare by design: TestInitSubcommand
+		}
 		t.Run(s.name, func(t *testing.T) {
 			stdinIsTerminal = func() bool { return true }
 			wantCode, want, wantErr := runWith(t, s.name, "--help")

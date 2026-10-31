@@ -9,7 +9,7 @@ import (
 )
 
 // Plugin is one Agent Plugins 1.0.0 package directory to load. Like
-// mcp_servers, plugins come only from the user config, -c or a profile.
+// mcp_servers, plugins come only from -c, a trusted ./tinyagent.yaml (--trust-config) or a profile.
 type Plugin struct {
 	// Path is the absolute path to the plugin root (the directory holding
 	// plugin.json).

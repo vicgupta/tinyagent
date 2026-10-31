@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/vicgupta/tinyagent/internal/routing"
 	"io"
 	"math"
 	"os"
@@ -16,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vicgupta/tinyagent/internal/routing"
 
 	"github.com/vicgupta/tinyagent/internal/agent"
 	"github.com/vicgupta/tinyagent/internal/config"
@@ -103,6 +104,7 @@ type options struct {
 	pluginsRollback                                  string
 	tinygoInstall, tinygoUpdate, tinygoStatus        bool
 	initConfig                                       bool
+	initForce, initMigrate, trustConfig              bool
 	review                                           bool
 	reviewBase, reviewCommit                         string
 	acp                                              bool
@@ -128,7 +130,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.task, "t", "", "shorthand for --task")
 	fs.StringVar(&o.modelName, "model", defaultModel(), "provider/model; if unset, $AGENT_MODEL, then the config's model")
 	fs.StringVar(&o.modelName, "m", defaultModel(), "shorthand for --model")
-	fs.StringVar(&o.configPath, "config", "", "YAML config (default: user config if present, else built-in)")
+	fs.StringVar(&o.configPath, "config", "", "YAML config (default: ./tinyagent.yaml in --cwd, else built-in)")
 	fs.StringVar(&o.configPath, "c", "", "shorthand for --config")
 	fs.StringVar(&o.profile, "profile", "", "apply this named profile from the config file's profiles: section over its base settings")
 	fs.StringVar(&o.cwd, "cwd", ".", "working directory")
@@ -165,7 +167,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.applyPatch, "apply-patch", false, "add the apply_patch tool: multi-file, multi-hunk edits in the *** Begin Patch format, checked before any write (default off; config apply_patch)")
 	fs.BoolVar(&o.webFetch, "web-fetch", false, "add the web_fetch tool: read an allowlisted http(s) URL as text, in tinyagent's own process, separate from command network access (default off; config web_fetch.enabled)")
 	fs.Var(&o.webFetchAllowDomains, "web-fetch-allow-domain", "with --web-fetch, let web_fetch read this host (name, *.domain or IP, optional :port); repeatable, replaces web_fetch.allowed_domains")
-	fs.BoolVar(&o.lsp, "lsp", false, "start the configured language servers (lsp.servers in the user config or -c): append compiler diagnostics to edit results and add the read-only lsp tool (default off; config lsp.enabled)")
+	fs.BoolVar(&o.lsp, "lsp", false, "start the configured language servers (lsp.servers in -c or a trusted ./tinyagent.yaml (--trust-config)): append compiler diagnostics to edit results and add the read-only lsp tool (default off; config lsp.enabled)")
 	fs.BoolVar(&o.subagents, "subagents", false, "add the delegate tool: hand a task to a read-only subagent with a fresh context and get back only its report (default off; config subagents.enabled)")
 	fs.BoolVar(&o.workers, "workers", false, "add the worker and apply_worker tools: a worker subagent edits files and runs commands in its own Git worktree, its changes are committed to branch tinyagent/<run>-w<n>, and apply_worker applies them (default off; config subagents.workers.enabled)")
 	fs.BoolVar(&o.askUser, "ask-user", false, "add the ask_user tool: the model may end the run with one question (status NeedsInput, exit 4), answered with --resume <trajectory> -t \"<answer>\"; requires -o (default off; config ask_user.enabled)")
@@ -201,9 +203,12 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.showVersion, "version", false, "print the version and exit")
 	fs.BoolVar(&o.showVersion, "V", false, "shorthand for --version")
 	fs.BoolVar(&o.doUpdate, "update", false, "update to the latest release and exit")
-	fs.BoolVar(&o.initConfig, "init-config", false, "write a commented starter config to the user config path (or -c), refusing to overwrite, and exit")
+	fs.BoolVar(&o.initConfig, "init-config", false, "write a commented starter config to ./tinyagent.yaml in --cwd (or -c), refusing to overwrite, and exit; same as tinyagent init")
+	fs.BoolVar(&o.initForce, "init-force", false, "tinyagent init --force: replace an existing config file atomically; symlinks are still refused")
+	fs.BoolVar(&o.initMigrate, "init-migrate", false, "tinyagent init --migrate: copy the old per-user config (no longer read) instead of the starter; never deletes the original")
+	fs.BoolVar(&o.trustConfig, "trust-config", false, "honor settings that launch executables or set security policy (mcp_servers, hooks, command_tools, lsp.servers, plugins, permissions, ...) in ./tinyagent.yaml in --cwd; they are ignored with a warning otherwise")
 	fs.BoolVar(&o.check, "check", false, "print the resolved config, model, provider key status, fallbacks, cwd and limits, then exit; makes no model request")
-	fs.BoolVar(&o.listProfiles, "list-profiles", false, "print the profile names in the selected config file (or the user config), sorted one per line, then exit; makes no model request")
+	fs.BoolVar(&o.listProfiles, "list-profiles", false, "print the profile names in the selected config file (-c or ./tinyagent.yaml in --cwd), sorted one per line, then exit; makes no model request")
 	fs.BoolVar(&o.pluginsPrune, "plugins-prune", false, "remove stored plugin module versions under --cwd's .tinyagent/modules except each module's current one and the --plugins-keep newest others, then exit")
 	fs.IntVar(&o.pluginsKeep, "plugins-keep", plugins.DefaultKeep, "versions besides current that --plugins-prune keeps per module")
 	fs.StringVar(&o.pluginsRollback, "plugins-rollback", "", "point a stored plugin module at an older version, given as <module>@<sha256>, then exit; refused when that version needs wider permissions than the first load")
@@ -363,12 +368,16 @@ func run() int {
 		fmt.Println("tinyagent", currentVersion())
 		return 0
 	}
+	if (o.initForce || o.initMigrate) && !o.initConfig {
+		fmt.Fprintln(os.Stderr, "error: --init-force and --init-migrate apply only to tinyagent init (--init-config)")
+		return 2
+	}
 	if o.initConfig {
 		if flagWasSet(fs, "task", "t", "resume", "rewind", "update") {
 			fmt.Fprintln(os.Stderr, "error: --init-config can't be combined with --task, --resume, --rewind or --update")
 			return 2
 		}
-		return runInitConfig(o.configPath)
+		return runInitConfig(&o)
 	}
 	if o.doUpdate {
 		u, err := update.New(currentVersion())
@@ -440,13 +449,16 @@ func run() int {
 		progress = os.Stderr
 	}
 
-	cfgPath := config.Find(o.configPath)
-	cfg, err := config.LoadProfile(cfgPath, o.profile)
+	cfgSrc, cfg, err := loadConfig(&o, o.cwd, os.Stderr)
+	cfgPath := cfgSrc.Path
 	if err == nil {
 		err = applyMemoryConfig(&cfg, o.cwd, os.Stderr)
 	}
 	if err != nil {
 		return loadConfigError(err)
+	}
+	if o.verbose {
+		fmt.Fprintln(os.Stderr, "config:", cfgSrc.Label())
 	}
 	registerProviders(cfg)
 	taskImages, err := loadTaskImages(o.imagePaths, cfg.MaxImageBytes)
@@ -1013,13 +1025,16 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return fail(fmt.Errorf("resume: --reasoning-effort %q conflicts with the checkpoint's reasoning_effort %q", o.reasoningEffort, src.ReasoningEffort))
 	}
 
-	cfgPath := config.Find(o.configPath)
-	cfg, err := config.LoadProfile(cfgPath, o.profile)
+	cfgSrc, cfg, err := loadConfig(o, o.cwd, os.Stderr)
+	cfgPath := cfgSrc.Path
 	if err == nil {
 		err = applyMemoryConfig(&cfg, o.cwd, os.Stderr)
 	}
 	if err != nil {
 		return loadConfigError(err)
+	}
+	if o.verbose {
+		fmt.Fprintln(os.Stderr, "config:", cfgSrc.Label())
 	}
 	registerProviders(cfg)
 	lock, code := setupResumeLockdown(fs, o.lockdown, &cfg, src, os.Stderr)
@@ -1823,7 +1838,7 @@ var usageGroups = []struct {
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "token-limit", "n"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "otel", ""}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-backend", "name"}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
-	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "list-profiles", ""}, {"", "list-plugins", ""}, {"", "plugins-prune", ""}, {"", "plugins-keep", "n"}, {"", "plugins-rollback", "module@sha256"}, {"", "tinygo-install", ""}, {"", "tinygo-update", ""}, {"", "tinygo-status", ""}, {"", "transcript", "path"}, {"", "init-config", ""}, {"", "completion", "shell"}}},
+	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "list-profiles", ""}, {"", "list-plugins", ""}, {"", "plugins-prune", ""}, {"", "plugins-keep", "n"}, {"", "plugins-rollback", "module@sha256"}, {"", "tinygo-install", ""}, {"", "tinygo-update", ""}, {"", "tinygo-status", ""}, {"", "transcript", "path"}, {"", "init-config", ""}, {"", "init-force", ""}, {"", "init-migrate", ""}, {"", "trust-config", ""}, {"", "completion", "shell"}}},
 }
 
 func printUsage(w io.Writer, fs *flag.FlagSet) {
