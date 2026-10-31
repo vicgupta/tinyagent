@@ -1,5 +1,31 @@
 # Changelog
 
+## [v0.13.0] - 2026-10-31
+
+### Features
+
+- Interactive chat mode (#302, closes #300): `tinyagent chat` / `-i, --interactive` with a built-in line editor and Up/Down history (`<cwd>/history/chat_history`, `--no-chat-history` / `chat_history: false`), checkpoints auto-saved to `.tinyagent/chats/`, `--resume`, per-turn limits, Ctrl-C to cancel a turn, and slash commands `/help /exit /quit /cost /new /clear /save /compact`. Refuses without a TTY or with conflicting flags (exit 2).
+- Issue triage (#303, closes #277): `tinyagent triage <issues.json>` / `--triage` ranks `gh issue list --json` output into a deterministic next-up list (`schema_version: 1` JSON plus a Markdown table) with reasons per entry and `stale`, `duplicate-of:#N`, `blocked` and `pull-request` flags. Offline, no model call; `--triage-out`, `--triage-stale-days`.
+- Workflow observer (#305, closes #278): `--workflow-observe` turns a `Failed` or `Blocked` `--workflow` run into one proposed ratchet rule with a ready-to-run `tinyagent ratchet add` command, keeps a ledger in `.tinyagent/observer/`, and flags recurring failures; new `observer.proposed` and `observer.recurrence` events. Rules are never applied automatically.
+- Contract docs in skill workflows (#315, closes #281): new `write-contract` skill and `contract` workflow; `plan-tasks` reads contract docs from `contracts_dir` and flags stale ones.
+- Workflow stage attempts record `unverified` in the `-o` record and `stage.finished` event (#321), report only.
+
+### Changes
+
+- **Behavior change for `--workflow` (#321, closes #284):** verify-on-stop is now on by default for every workflow stage; pass `--verify-on-stop=false` to opt out. Plain interactive and headless runs are unchanged (still off by default).
+- Chat and ACP sessions now offer the config's `command_tools` on every turn (#324); read-only sessions still don't.
+- Checkpoints taken with workers on now resume instead of failing with "tool set has changed" (#322, closes #306).
+- `--resume` compatibility checks have one owner, `internal/resume` (#333, #334, #338, part of #310). Messages and exit codes are unchanged, except that `--no-agents-md` now reads "conflicts with the checkpoint's recorded loading mode" and, with several conflicts, a different one may be reported first.
+
+### Documentation
+
+- The 256 KiB MCP result cap is documented for `--tool-output-files` (#316, closes #282).
+- Short PR body template in `.github/pull_request_template.md` (#320, closes #283).
+
+### Other
+
+- Internal refactors with no behavior change: shared session setup for ACP and chat (#301, closes #299), `tools.Selection` owns the tool catalog and resume fingerprint (#322), a single `Executor.RunResult` entry point (#323, closes #307), `agent.New(Options)` validates construction invariants (#324, closes #308), and `Executor.Child(ChildSpec)` for delegate and worker executors (#325, closes #309).
+
 ## [v0.12.0] - 2026-10-31
 
 ### Breaking Changes
