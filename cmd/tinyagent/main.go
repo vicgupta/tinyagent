@@ -107,6 +107,7 @@ type options struct {
 	reviewBase, reviewCommit                         string
 	acp                                              bool
 	workflow, workflowName                           string
+	skillsValidate                                   stringList
 	memory                                           memoryCmd
 	handoff                                          bool
 	ratchet                                          ratchetFlags
@@ -214,6 +215,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.completion, "completion", "", "print a flag-name completion script for this shell (bash, zsh or fish) and exit; load it with: source <(tinyagent --completion bash), or in zsh after compinit: source <(tinyagent --completion zsh), or in fish: tinyagent --completion fish | source; re-source it after --update")
 	fs.StringVar(&o.workflow, "workflow", "", "run the skill workflow in this YAML file on the task (-t): the router picks a workflow or skill by intent, and each stage runs automatically with the previous stage's output, gated by its success check")
 	fs.StringVar(&o.workflowName, "workflow-name", "", "with --workflow: run this workflow or skill instead of routing by the task's intent")
+	fs.Var(&o.skillsValidate, "skills-validate", "check a skill-workflow skill file (.md), skills directory or workflow file (.yaml) without running anything, then exit; repeatable; not for Agent Skills (--skills)")
 	registerMemoryFlags(fs, &o.memory)
 	registerHandoffFlags(fs, &o.handoff)
 	registerRatchetFlags(fs, &o.ratchet)
@@ -283,6 +285,13 @@ func run() int {
 	}
 	if o.pluginsPrune || flagWasSet(fs, "plugins-rollback") {
 		return runPluginStore(&o, os.Stdout, os.Stderr)
+	}
+	if len(o.skillsValidate) > 0 {
+		if o.task != "" || o.workflow != "" {
+			fmt.Fprintln(os.Stderr, "error: --skills-validate can't be combined with -t or --workflow")
+			return 2
+		}
+		return runSkillsValidate(o.skillsValidate, os.Stdout, os.Stderr)
 	}
 	if memoryCommandSet(fs) {
 		return runMemoryCommand(&o, fs, os.Stdout, os.Stderr)
