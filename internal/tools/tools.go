@@ -402,47 +402,7 @@ func (e *Executor) Catalog() []model.ToolSpec {
 }
 
 func (e *Executor) catalog() []model.ToolSpec {
-	out := Specs(e.ReadOnly)
-	if e.Plan {
-		out = append(out, PlanSpec())
-	}
-	if e.Images {
-		out = append(out, ViewImageSpec())
-	}
-	if e.ApplyPatch && !e.ReadOnly {
-		out = append(out, ApplyPatchSpec())
-	}
-	if e.Delegate {
-		out = append(out, WithTaskType(DelegateSpec(), e.TaskTypes))
-	}
-	if e.Workers && !e.ReadOnly {
-		out = append(out, WithTaskType(WorkerSpec(), e.TaskTypes), ApplyWorkerSpec())
-	}
-	if e.WebFetch != nil {
-		out = append(out, WebFetchSpec())
-	}
-	if e.LSP != nil {
-		out = append(out, LSPSpec())
-	}
-	if e.AskUser {
-		out = append(out, AskUserSpec())
-	}
-	if e.Remember != nil && !e.ReadOnly {
-		out = append(out, RememberSpecFor(e.Remember.Limits.MaxTextLen))
-		if e.MemoryTools {
-			out = append(out, MemorySearchSpec(), MemoryListSpec())
-		}
-	}
-	if e.Skills.Len() > 0 {
-		out = append(out, e.Skills.Spec())
-	}
-	if e.ReadOnly {
-		return out
-	}
-	for _, c := range e.CommandTools {
-		out = append(out, c.Spec())
-	}
-	return append(out, e.ExternalSpecs...)
+	return e.Selection().Specs()
 }
 
 // PlanToolName is the opt-in plan tool.

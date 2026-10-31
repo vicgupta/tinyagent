@@ -448,7 +448,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			SystemPrompt:          system,
 			SkipAgentsMD:          a.SkipAgentsMD,
 			Tools:                 toolNames(withoutCommandTools(a.Tools.Catalog(), a.Tools.CommandTools)),
-			ToolSignature:         toolSignature(a.Tools.ReadOnly, a.Tools.Plan, a.Tools.Images, a.Tools.ApplyPatch, a.Tools.Delegate, a.Tools.WebFetch != nil, a.Tools.LSP != nil, a.Tools.AskUser),
+			ToolSignature:         a.Tools.Selection().Signature(),
 			PlanEnabled:           a.Tools.Plan,
 			ImagesEnabled:         a.Tools.Images,
 			ApplyPatchEnabled:     a.Tools.ApplyPatch,

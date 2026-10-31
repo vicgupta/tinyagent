@@ -1,118 +1,72 @@
 package agent
 
 import (
-	"crypto/sha256"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"runtime"
 	"strings"
 
 	"github.com/vicgupta/tinyagent/internal/config"
-	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/skills"
 	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
 )
 
 // ToolSignature fingerprints the definitions plus an execution contract
-// version. Bump the prefix when tool semantics change without a spec change.
-// The plan tool is opt-in: without it the signature is unchanged, so
+// version (see tools.Selection.Signature). The opt-in tools are off, so
 // checkpoints from earlier builds still resume.
 func ToolSignature(readOnly ...bool) string {
-	return toolSignature(len(readOnly) > 0 && readOnly[0], false)
+	return tools.Selection{ReadOnly: len(readOnly) > 0 && readOnly[0]}.Signature()
 }
 
 // PlanToolSignature is ToolSignature with update_plan enabled or not.
-func PlanToolSignature(readOnly, plan bool) string { return toolSignature(readOnly, plan) }
+func PlanToolSignature(readOnly, plan bool) string {
+	return tools.Selection{ReadOnly: readOnly, Plan: plan}.Signature()
+}
 
 // ImagesToolSignature is ToolSignature with update_plan and view_image
 // enabled or not. Without images it equals PlanToolSignature.
 func ImagesToolSignature(readOnly, plan, images bool) string {
-	return toolSignature(readOnly, plan, images)
+	return tools.Selection{ReadOnly: readOnly, Plan: plan, Images: images}.Signature()
 }
 
 // WebFetchToolSignature is the signature with every opt-in tool flag,
 // web_fetch last.
 func WebFetchToolSignature(readOnly, plan, images, applyPatch, delegate, webFetch bool) string {
-	return toolSignature(readOnly, plan, images, applyPatch, delegate, webFetch)
+	return tools.Selection{ReadOnly: readOnly, Plan: plan, Images: images, ApplyPatch: applyPatch, Delegate: delegate, WebFetch: webFetch}.Signature()
 }
 
 // LSPToolSignature is the signature with every opt-in tool flag, lsp
 // last.
 func LSPToolSignature(readOnly, plan, images, applyPatch, delegate, webFetch, lsp bool) string {
-	return toolSignature(readOnly, plan, images, applyPatch, delegate, webFetch, lsp)
+	return tools.Selection{ReadOnly: readOnly, Plan: plan, Images: images, ApplyPatch: applyPatch, Delegate: delegate, WebFetch: webFetch, LSP: lsp}.Signature()
 }
 
 // ApplyPatchToolSignature is ImagesToolSignature with apply_patch enabled or
 // not. Without apply_patch it equals ImagesToolSignature.
 func ApplyPatchToolSignature(readOnly, plan, images, applyPatch bool) string {
-	return toolSignature(readOnly, plan, images, applyPatch)
+	return tools.Selection{ReadOnly: readOnly, Plan: plan, Images: images, ApplyPatch: applyPatch}.Signature()
 }
 
-// toolSignature takes the opt-in images, apply_patch, delegate, web_fetch,
-// lsp and ask_user settings, in that order, after readonly and plan.
-func toolSignature(readonly, plan bool, opt ...bool) string {
-	img := len(opt) > 0 && opt[0]
-	patch := len(opt) > 1 && opt[1]
-	delegate := len(opt) > 2 && opt[2]
-	webFetch := len(opt) > 3 && opt[3]
-	lsp := len(opt) > 4 && opt[4]
-	askUser := len(opt) > 5 && opt[5]
-	data, _ := json.Marshal(builtinSpecs(readonly, plan, img, patch, delegate, webFetch, lsp, askUser))
-	prefix := "tools-v1:"
-	if readonly {
-		prefix = "tools-read-only-v1:"
+// checkpointSelection is the tool selection a checkpoint recorded. set is
+// the rediscovered skills (nil when skills were off). Command and external
+// tools are not part of it: t.Tools omits command tools, and checkpoints
+// with external tools are refused before this.
+func checkpointSelection(t *trajectory.Trajectory, set *skills.Set) tools.Selection {
+	return tools.Selection{
+		ReadOnly:    t.ReadOnly,
+		Plan:        t.PlanEnabled,
+		Images:      t.ImagesEnabled,
+		ApplyPatch:  t.ApplyPatchEnabled,
+		Delegate:    t.SubagentsEnabled,
+		Workers:     t.WorkersEnabled,
+		WebFetch:    t.WebFetchEnabled,
+		LSP:         t.LSPEnabled,
+		AskUser:     t.AskUserEnabled,
+		Remember:    RememberOffered(t),
+		MemoryTools: MemoryToolsOffered(t),
+		Skills:      set,
 	}
-	if plan {
-		prefix = "plan-v1:" + prefix
-	}
-	if img {
-		prefix = "images-v1:" + prefix
-	}
-	if patch {
-		prefix = "apply-patch-v1:" + prefix
-	}
-	if delegate {
-		prefix = "subagents-v1:" + prefix
-	}
-	if webFetch {
-		prefix = "web-fetch-v1:" + prefix
-	}
-	if lsp {
-		prefix = "lsp-v1:" + prefix
-	}
-	if askUser {
-		prefix = "ask-user-v1:" + prefix
-	}
-	return fmt.Sprintf("%s%x", prefix, sha256.Sum256(data))
-}
-
-func builtinSpecs(readOnly, plan bool, opt ...bool) []model.ToolSpec {
-	specs := tools.Specs(readOnly)
-	if plan {
-		specs = append(specs, tools.PlanSpec())
-	}
-	if len(opt) > 0 && opt[0] {
-		specs = append(specs, tools.ViewImageSpec())
-	}
-	if len(opt) > 1 && opt[1] && !readOnly {
-		specs = append(specs, tools.ApplyPatchSpec())
-	}
-	if len(opt) > 2 && opt[2] {
-		specs = append(specs, tools.DelegateSpec())
-	}
-	if len(opt) > 3 && opt[3] {
-		specs = append(specs, tools.WebFetchSpec())
-	}
-	if len(opt) > 4 && opt[4] {
-		specs = append(specs, tools.LSPSpec())
-	}
-	if len(opt) > 5 && opt[5] {
-		specs = append(specs, tools.AskUserSpec())
-	}
-	return specs
 }
 
 // ValidateResume runs before provider setup, using only the explicit execution
@@ -125,23 +79,15 @@ func ValidateResume(t *trajectory.Trajectory, cfg config.AgentConfig, root strin
 	if root != t.Root {
 		return errors.New("--cwd does not match the checkpoint's canonical root")
 	}
-	if t.ToolSignature != toolSignature(t.ReadOnly, t.PlanEnabled, t.ImagesEnabled, t.ApplyPatchEnabled, t.SubagentsEnabled, t.WebFetchEnabled, t.LSPEnabled, t.AskUserEnabled) {
-		return errors.New("tool compatibility has changed; start a fresh task")
-	}
-	names := toolNames(builtinSpecs(t.ReadOnly, t.PlanEnabled, t.ImagesEnabled, t.ApplyPatchEnabled, t.SubagentsEnabled, t.WebFetchEnabled, t.LSPEnabled, t.AskUserEnabled))
-	if RememberOffered(t) {
-		names = append(names, tools.RememberToolName)
-		if MemoryToolsOffered(t) {
-			names = append(names, tools.MemorySearchToolName, tools.MemoryListToolName)
-		}
-	}
 	var set *skills.Set
 	if t.SkillsEnabled {
 		set, _ = skills.Discover(root, skills.UserDir())
-		if set.Len() > 0 {
-			names = append(names, skills.ToolName)
-		}
 	}
+	sel := checkpointSelection(t, set)
+	if t.ToolSignature != sel.Signature() {
+		return errors.New("tool compatibility has changed; start a fresh task")
+	}
+	names := sel.Names()
 	if len(names) != len(t.Tools) {
 		return errors.New("tool set has changed; start a fresh task")
 	}

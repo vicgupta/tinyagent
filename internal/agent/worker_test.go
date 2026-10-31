@@ -300,9 +300,22 @@ func TestWorkerResumeSettingMustMatch(t *testing.T) {
 	a, _, _ := workerAgent(t, []model.Message{{Role: "assistant", Content: "done" + submitMarker}}, nil)
 	tr := a.Run(context.Background(), "x")
 	r := &Agent{Model: &scripted{}, ModelName: "fake", Tools: &tools.Executor{Root: a.Tools.Root}, Config: a.Config,
-		SkipAgentsMD: true, Resume: tr}
+		SkipAgentsMD: true, Resume: tr, FollowUp: "more"}
 	got := r.Run(context.Background(), "")
-	if got.ExitStatus != StatusError || !(strings.Contains(got.Submission, "workers setting") || strings.Contains(got.Submission, "tool set has changed")) {
+	if got.ExitStatus != StatusError || !strings.Contains(got.Submission, "workers setting") {
 		t.Errorf("resume without workers = %s %q", got.ExitStatus, got.Submission)
+	}
+}
+
+// A workers checkpoint offers worker and apply_worker; its recorded tool
+// list must validate against the same selection (issue #306).
+func TestWorkerCheckpointValidates(t *testing.T) {
+	a, _, _ := workerAgent(t, []model.Message{{Role: "assistant", Content: "done" + submitMarker}}, nil)
+	tr := a.Run(context.Background(), "x")
+	if !tr.WorkersEnabled || !slices.Contains(tr.Tools, tools.WorkerToolName) {
+		t.Fatalf("checkpoint did not record workers: %v", tr.Tools)
+	}
+	if err := ValidateResume(tr, a.Config, a.Tools.Root); err != nil {
+		t.Errorf("ValidateResume = %v", err)
 	}
 }
