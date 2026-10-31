@@ -36,7 +36,7 @@ Common options:
   -t, --task string    the task/prompt; "-" reads it from stdin
   -m, --model string   provider/model: openai, anthropic, openrouter or ollama
                        (default $AGENT_MODEL, else config model, else ` + builtinModel + `)
-  -c, --config path    YAML config (default: user config if present)
+  -c, --config path    YAML config (default: ./tinyagent.yaml in --cwd)
       --cwd dir        working directory (default .)
       --resume path    continue or follow up a run saved with -o <path>
       --read-only      only read files; no edits or commands
@@ -105,7 +105,7 @@ var helpGroups = []flagGroup{
 	{"Plugins and TinyGo", [][3]string{{"", "list-plugins", ""}, {"", "plugins-prune", ""}, {"", "plugins-keep", "n"}, {"", "plugins-rollback", "module@sha256"}, {"", "tinygo-install", ""}, {"", "tinygo-update", ""}, {"", "tinygo-status", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
 	{"Workflow and eval", [][3]string{{"", "workflow", "file.yaml"}, {"", "workflow-name", "name"}, {"", "skills-validate", "path"}, {"", "eval", "suite.yaml"}, {"", "eval-out", "dir"}, {"", "eval-keep", ""}, {"", "eval-min-pass-rate", "rate"}}},
-	{"Setup and info", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "list-profiles", ""}, {"", "init-config", ""}, {"", "completion", "shell"}}},
+	{"Setup and info", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "list-profiles", ""}, {"", "init-config", ""}, {"", "init-force", ""}, {"", "init-migrate", ""}, {"", "trust-config", ""}, {"", "completion", "shell"}}},
 }
 
 // verboseGroups returns the --help --verbose sections.

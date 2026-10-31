@@ -2,17 +2,29 @@
 
 ## Config
 
-Run `tinyagent --init-config` to create a commented starter config at the default path below, or `tinyagent --init-config -c PATH` to choose a path; it creates parent directories, writes with mode 0600, refuses existing files (exit 2), and makes no model request. It cannot be combined with `-t`, `--resume`, `--rewind`, or `--update`.
+tinyagent reads its config from **`tinyagent.yaml` in the project directory** (`--cwd`, default `.`). Run `tinyagent init` (or `tinyagent --init-config`) to write a commented starter there; it writes with mode 0600, refuses an existing file or a symlink (exit 2), and makes no model request. `tinyagent init --force` replaces an existing file atomically (still refusing a symlink); `tinyagent init -c PATH` writes to PATH instead, creating parent directories. It cannot be combined with `-t`, `--resume`, `--rewind`, or `--update`.
 
-Without `-c`, tinyagent loads a per-user config file if one exists, so settings you always want don't need a flag:
+**Lookup order:**
 
-| OS | Default path |
-|---|---|
-| Linux and other Unix | `$XDG_CONFIG_HOME/tinyagent/config.yaml` (usually `~/.config/tinyagent/config.yaml`) |
-| macOS | `~/Library/Application Support/tinyagent/config.yaml` |
-| Windows | `%AppData%\tinyagent\config.yaml` |
+1. `-c PATH`, if given. A missing or unreadable file is an error, with no fallback.
+2. `tinyagent.yaml` in `--cwd`, exactly that directory: tinyagent does not look in parent directories, and the process directory doesn't matter when `--cwd` is set.
+3. The built-in defaults.
 
-The lookup order is: `-c PATH` if given (a missing or unreadable file is an error, with no fallback); otherwise the user config above, if it exists; otherwise the built-in defaults. A user config that exists but can't be read or parsed is an error naming the file, not skipped.
+A `tinyagent.yaml` that exists but can't be read or parsed is an error naming the file; nothing falls back. `--check` and `-v` show which file was used: `<path> (cwd)`, `<path> (from -c)` or `none (built-in defaults)`.
+
+**The per-user config is no longer read.** Earlier versions loaded `~/.config/tinyagent/config.yaml` (macOS `~/Library/Application Support/tinyagent/config.yaml`, Windows `%AppData%\tinyagent\config.yaml`). That file is now ignored; when it exists and no `tinyagent.yaml` was found, tinyagent prints `note: user config <path> is no longer read; run tinyagent init --migrate to copy it to ./tinyagent.yaml`. `tinyagent init --migrate` copies it into `--cwd` once (it refuses an existing `tinyagent.yaml` unless `--force`, and never deletes the original). To keep one config for many projects, pass it with `-c`, e.g. an alias `tinyagent -c ~/.config/tinyagent/config.yaml`.
+
+**Precedence**, highest first: explicit command-line flags, environment variables (such as `$AGENT_MODEL`, which still outranks the file's `model:`), the selected `--profile`, the config file, the built-in defaults. A flag counts only when given, so `--read-only=false` overrides `read_only: true`, and a repeatable list flag (`--fallback-model`, `--verify-check`, ...) replaces the file's list rather than adding to it.
+
+### Trusting a project config
+
+A `tinyagent.yaml` found in `--cwd` usually comes with the repository, so by default it can't make tinyagent run programs or loosen your security settings. These keys are **ignored with a warning** naming them, unless you pass `--trust-config`:
+
+`mcp_servers`, `hooks`, `command_tools`, `lsp.servers`, `plugins`, `tinygo`, `claude_code.path`, `codex_exec.path`, `handoff.startup_command`, `verify_on_stop.checks`, `attempts.checks`, `acp.client_mcp_servers`, `container.run_args`, `permissions`, `file_access`, `command_env`, `redact_secrets`, `untrusted_content`, `memory`.
+
+There is no prompt, so `--trust-config` works the same in CI. Pass it only for a repository you trust, after reading its `tinyagent.yaml`. A file given with `-c` is always trusted (you chose it), even if it is the same file. Command-line flags such as `--verify-check` and `--attempt-check` still work without `--trust-config`. Elsewhere in these docs, "read only from `-c`, never from the repository" means: from `-c`, or from `./tinyagent.yaml` with `--trust-config`.
+
+**Secrets.** `tinyagent.yaml` may be committed, so never put API keys or tokens in it: name environment variables instead (`api_key_env`, `env:` lists, `headers_env`). If the file holds personal settings, add `tinyagent.yaml` to `.gitignore`.
 
 Every key is optional, but an unrecognized key (a typo like `step_limt`) is an error naming the file and the key, rather than silently ignored. Command-line flags override the file.
 
@@ -69,13 +81,13 @@ plan:
 skills: false             # discover Agent Skills and offer the skill tool (same as --skills)
 apply_patch: false        # offer the apply_patch tool (same as --apply-patch)
 scoped_agents_md: false   # deliver AGENTS.md files below --cwd on first access (same as --scoped-agents-md)
-memory:                   # project memory; see Project memory (user config or -c only)
+memory:                   # project memory; see Project memory (-c, or ./tinyagent.yaml with --trust-config)
   enabled: false          # load active entries into the system prompt (same as --memory)
   approval: pending       # pending or auto: policy for entries the remember tool saves
   max_writes_per_run: 5   # entries one run may add, replace or forget; >= 1
   max_entries: 50         # active entries kept per project; >= 1
   max_bytes: 8192         # cap on the Project memory prompt section; 1 to 65536
-handoff:                  # session handoff file; see Session handoff (user config or -c only)
+handoff:                  # session handoff file; see Session handoff (-c, or ./tinyagent.yaml with --trust-config)
   enabled: false          # read the file at start and rewrite it at the end (same as --handoff)
   path: .tinyagent/handoff.md  # relative to --cwd; must stay inside it
   max_bytes: 16384        # bytes of the file loaded into the first message; >= 1
@@ -213,7 +225,7 @@ profiles:                    # omitted by default; named overlays selected with 
 
 ### Profiles
 
-`profiles` holds named overlays in the same config file tinyagent already loads (the user config, or the `-c` file). `--profile <name>` applies one of them over the file's base settings for that run, so you can switch between setups such as a cheap read-only review, CI with a sandbox and stop hooks, or a local model with one flag. A profile only lists the settings that differ from the base, and it can set anything the file can, including config-only settings like `command_env`, `file_access`, `hooks`, `mcp_servers`, `lsp` and `providers`.
+`profiles` holds named overlays in the same config file tinyagent already loads (`./tinyagent.yaml`, or the `-c` file). `--profile <name>` applies one of them over the file's base settings for that run, so you can switch between setups such as a cheap read-only review, CI with a sandbox and stop hooks, or a local model with one flag. A profile only lists the settings that differ from the base, and it can set anything the file can, including config-only settings like `command_env`, `file_access`, `hooks`, `mcp_servers`, `lsp` and `providers`.
 
 ```yaml
 model: anthropic/claude-sonnet-4-5
@@ -243,8 +255,8 @@ tinyagent --profile ci -t - -o run.json --json < task.md
 - **Merging**: mappings merge key by key, recursively, so a profile with `web_fetch: {enabled: true}` keeps the base `web_fetch.allowed_domains`. Scalars and lists replace the base value wholesale (a profile's `fallback_models` or `mcp_servers` replaces the base list; `hooks: {stop: []}` drops the base stop hooks). A value of a different kind replaces the base value, so a profile can use the `snapshots` mapping over a base `snapshots: true`. An explicit `null` in a profile is an error; it can't delete a base key.
 - **Validation**: the merged result goes through every existing check, and errors name the file and the profile. Every profile is checked on every run, selected or not: profile names may use only letters, digits, `_` and `-`; each profile must be a mapping; profiles can't be nested; and an unknown key inside any profile is an error naming the file, the profile and the key. These are usage errors (exit 2) before any model request, as are `--profile` naming an undefined profile (the error lists the defined ones) and `--profile` with no config file in use.
 - **Without `--profile`**, `profiles:` is validated and otherwise ignored; runs behave exactly as if it weren't there. There is no default profile.
-- **With `-c`**, profiles come only from that file; the user config isn't read, as usual for `-c`.
-- **Discovery**: `tinyagent --list-profiles [-c <file>]` prints the profile names in the selected config file (or the user config without `-c`), sorted, one per line. It makes no model request and needs no credentials. No config file, no `profiles:` section, or an empty mapping prints nothing and exits 0; a missing or unreadable file, malformed YAML, or an invalid profile exits 2 with nothing on stdout. It can't be combined with `-t`, `--profile`, or another mode (`--check`, review, `--resume`, `--rewind`, `--acp`, `--transcript`, `--completion`, `--init-config`, `--update`).
+- **With `-c`**, profiles come only from that file; `./tinyagent.yaml` isn't read, as usual for `-c`. The untrusted keys a profile sets in `./tinyagent.yaml` are ignored without `--trust-config`, like the base ones.
+- **Discovery**: `tinyagent --list-profiles [-c <file>]` prints the profile names in the selected config file (or `./tinyagent.yaml` in `--cwd` without `-c`), sorted, one per line. It makes no model request and needs no credentials. No config file, no `profiles:` section, or an empty mapping prints nothing and exits 0; a missing or unreadable file, malformed YAML, or an invalid profile exits 2 with nothing on stdout. It can't be combined with `-t`, `--profile`, or another mode (`--check`, review, `--resume`, `--rewind`, `--acp`, `--transcript`, `--completion`, `--init-config`, `--update`).
 - **Recording**: the profile *name* (never its settings) is recorded as `profile` in the trajectory (`-o`) and in `run.started`, and `-v` prints one `config profile:` line. Without `--profile` neither has the field. `--check --profile <name>` checks and reports the merged configuration.
 - **Resume**: `--resume` accepts `--profile` for the settings it re-reads from the current setup (credentials, providers, limits, fallbacks). The saved model still wins, and the original run's profile is not re-applied automatically; the resumed trajectory records the profile given to the resuming run. `--rewind` reads no config and rejects `--profile` (exit 2); `--update` and `--version` ignore it.
 
@@ -252,7 +264,7 @@ Configs with `profiles` fail to load on tinyagent versions without this feature,
 
 ### Local MCP tools
 
-MCP is disabled unless `mcp_servers` is explicitly configured. Each configured executable is trusted code with its own host and network permissions; this is tool preauthorization, not a sandbox or an interactive approval prompt. Configuration is read only from the user config or the explicitly selected `-c` file, never from the repository or model output. Tinyagent launches the command directly (no shell), with `--cwd` as its working directory and a minimal environment (`PATH`, plus the Windows process variables when present) and only the named forwarded variables. Missing forwarded variables fail before launch. Do not forward secrets unless the server needs them. Read-only runs never start MCP servers.
+MCP is disabled unless `mcp_servers` is explicitly configured. Each configured executable is trusted code with its own host and network permissions; this is tool preauthorization, not a sandbox or an interactive approval prompt. Configuration is read only from the explicitly selected `-c` file, or from `./tinyagent.yaml` with `--trust-config`, never from model output. Tinyagent launches the command directly (no shell), with `--cwd` as its working directory and a minimal environment (`PATH`, plus the Windows process variables when present) and only the named forwarded variables. Missing forwarded variables fail before launch. Do not forward secrets unless the server needs them. Read-only runs never start MCP servers.
 
 The Go MCP SDK v1.8.0 supports protocol revisions 2026-07-28, 2025-11-25, 2025-06-18, 2025-03-26, and 2024-11-05 over stdio. Tinyagent discovers the complete paginated catalog once per run, with a 15-second default discovery timeout, 100-page, 256-selected-tool, 64-KiB-per-schema, and 1-MiB-total-schema caps, and exposes only configured names. Tool names are sent to providers as `<alias>__<original-name>` and must fit provider-compatible naming rules. The accepted input schema subset supports object, array, string, number, integer, boolean and null types (a single type or an array such as `["string", "null"]`), nested properties/items, required, enum, const, numeric bounds and `multipleOf`, length, `pattern`, `format`, item and property counts, `uniqueItems`, annotations (`title`, `description`, `default`, `examples`), and boolean `additionalProperties`. A top-level `$schema` declaration is dropped. Other keywords, including `anyOf`/`oneOf`/`allOf` and references, are rejected, and a selected tool with such a schema stops startup. Each call defaults to a 60-second timeout; a timed-out call returns an error to the model and the server stays available, while any other call failure disables that server for the rest of the run. Text content is joined with newlines, structured output is appended as JSON, unsupported content is marked as omitted, tool errors remain visible, and model-visible output is capped at 256 KiB before the normal output cap is applied. Stdio protocol data is kept separate from server stderr.
 
@@ -271,7 +283,7 @@ MCP tool calls and results are stored in trajectories along with the external to
 
 ### Command tools
 
-`command_tools` gives the model your project's own actions (run the tests, regenerate code, check a migration) as named, typed tools, without writing an MCP server. Each entry has a `name` (`^[A-Za-z][A-Za-z0-9_-]{0,63}$`, not a built-in tool, MCP `<alias>__<tool>` or other command tool name), a `description`, optional `parameters` (a JSON Schema with `type: object` at the root, in the same subset as `--output-schema`; omitted means no arguments), an `argv` template, and optional `timeout_seconds` and `dir` (see the [Config](#config) example). Like `mcp_servers` and `hooks`, definitions are read only from the user config or `-c`, never from the repository. Every definition is checked at startup, and a bad one (name collision, empty `argv`, a placeholder in `argv[0]`, a placeholder for an undeclared or object-typed property, an unsupported schema keyword, a `dir` outside `--cwd`) exits 2 before the first model request, naming the tool and key. `--check` validates them too and prints how many are configured.
+`command_tools` gives the model your project's own actions (run the tests, regenerate code, check a migration) as named, typed tools, without writing an MCP server. Each entry has a `name` (`^[A-Za-z][A-Za-z0-9_-]{0,63}$`, not a built-in tool, MCP `<alias>__<tool>` or other command tool name), a `description`, optional `parameters` (a JSON Schema with `type: object` at the root, in the same subset as `--output-schema`; omitted means no arguments), an `argv` template, and optional `timeout_seconds` and `dir` (see the [Config](#config) example). Like `mcp_servers` and `hooks`, definitions are read only from `-c`, or from `./tinyagent.yaml` with `--trust-config`. Every definition is checked at startup, and a bad one (name collision, empty `argv`, a placeholder in `argv[0]`, a placeholder for an undeclared or object-typed property, an unsupported schema keyword, a `dir` outside `--cwd`) exits 2 before the first model request, naming the tool and key. `--check` validates them too and prints how many are configured.
 
 When the model calls a command tool, its arguments are checked against `parameters` first; if they fail, the model gets an error listing each problem and nothing runs. Then the `argv` template is filled in: a literal element passes through unchanged, and an element that is exactly `{{name}}` is replaced by that argument. A string becomes one element verbatim, a number or boolean its JSON form, an array of scalars one element per item, and a missing (or null) optional argument drops the element. Placeholders inside a larger string (`--pkg={{p}}`) are rejected. The command runs **without a shell**, so `;`, `$(...)`, backticks, quotes and newlines in an argument arrive as plain characters in one argv element.
 

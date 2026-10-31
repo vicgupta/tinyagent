@@ -1,14 +1,18 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
 	"github.com/vicgupta/tinyagent/internal/config"
 )
 
-const starterConfig = `# tinyagent user config. Flags override these values. Full reference: docs/config.md.
+const starterConfig = `# tinyagent project config (./tinyagent.yaml). Flags override these values. Full reference: docs/config.md.
+## Keep secrets in env vars (api_key_env names them); this file may be committed.
+## mcp_servers, hooks, command_tools, lsp.servers, plugins (and other executables) need --trust-config here.
 # model: openai/gpt-4o        # same <provider>/<model> syntax as -m
 # step_limit: 50
 # cost_limit: 2.0
@@ -50,36 +54,93 @@ const starterConfig = `# tinyagent user config. Flags override these values. Ful
 #                             # listed under its mcp_servers start; inspect with --list-plugins
 `
 
-func runInitConfig(path string) int {
+// runInitConfig handles tinyagent init (--init-config): it writes the
+// starter config, or with --init-migrate a copy of the old per-user config,
+// to -c PATH or ./tinyagent.yaml in --cwd. It refuses to overwrite unless
+// --init-force, and always refuses a symlink.
+func runInitConfig(o *options) int {
+	path := o.configPath
 	if path == "" {
-		var err error
-		path, err = config.DefaultPath()
+		path = filepath.Join(o.cwd, config.ProjectFile)
+	}
+	content := starterConfig
+	if o.initMigrate {
+		old, err := config.DefaultPath()
+		if err == nil {
+			var b []byte
+			if b, err = os.ReadFile(old); err == nil {
+				content = string(b)
+			}
+		}
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "error: config path:", err)
+			fmt.Fprintf(os.Stderr, "error: init --migrate: no user config to copy: %v\n", err)
+			return 2
+		}
+		if abs, _ := filepath.Abs(path); abs == old {
+			fmt.Fprintf(os.Stderr, "error: init --migrate: %s is the user config itself\n", path)
 			return 2
 		}
 	}
-	if err := writeStarterConfig(path); err != nil {
+	if err := writeConfigFile(path, content, o.configPath != "", o.initForce); err != nil {
 		fmt.Fprintf(os.Stderr, "error: init config %s: %v\n", path, err)
+		if errors.Is(err, fs.ErrExist) && !o.initForce {
+			fmt.Fprintln(os.Stderr, "hint: pass --force (tinyagent init --force) to replace it")
+		}
 		return 2
 	}
 	fmt.Println(path)
+	if o.configPath == "" {
+		fmt.Fprintf(os.Stderr, "hint: keep secrets in env vars (api_key_env, env: names), never in %s; it may be committed with the project\n", config.ProjectFile)
+	}
 	return 0
 }
 
-func writeStarterConfig(path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+// writeConfigFile creates path with mode 0600. mkdir creates missing parent
+// directories (for -c). Without force it uses exclusive creation, which also
+// refuses symlinks and avoids an overwrite race; with force it refuses a
+// symlink and replaces the file atomically through a temp file and rename.
+func writeConfigFile(path, content string, mkdir, force bool) error {
+	if mkdir {
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			return err
+		}
+	}
+	if !force {
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if err != nil {
+			return err
+		}
+		_, writeErr := f.WriteString(content)
+		closeErr := f.Close()
+		if writeErr != nil {
+			return writeErr
+		}
+		return closeErr
+	}
+	if fi, err := os.Lstat(path); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return errors.New("refusing to replace a symlink")
+		}
+		if !fi.Mode().IsRegular() {
+			return errors.New("not a regular file")
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	// Exclusive creation also refuses symlinks and avoids an overwrite race.
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".tinyagent-config-*")
 	if err != nil {
 		return err
 	}
-	_, writeErr := f.WriteString(starterConfig)
-	closeErr := f.Close()
+	defer os.Remove(tmp.Name())
+	_, writeErr := tmp.WriteString(content)
+	if err := tmp.Chmod(0600); err != nil && writeErr == nil {
+		writeErr = err
+	}
+	if err := tmp.Close(); err != nil && writeErr == nil {
+		writeErr = err
+	}
 	if writeErr != nil {
 		return writeErr
 	}
-	return closeErr
+	return os.Rename(tmp.Name(), path)
 }

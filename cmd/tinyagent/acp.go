@@ -150,8 +150,9 @@ func newACPSession(ctx context.Context, o *options, fs *flag.FlagSet, id, cwd st
 			s.Close()
 		}
 	}()
-	cfgPath := config.Find(o.configPath)
-	cfg, err := config.LoadProfile(cfgPath, o.profile)
+	// The project config is the session's: tinyagent.yaml in its cwd.
+	cfgSrc, cfg, err := loadConfig(o, root, os.Stderr)
+	cfgPath := cfgSrc.Path
 	if err == nil {
 		err = applyMemoryConfig(&cfg, o.cwd, os.Stderr)
 	}
@@ -362,7 +363,7 @@ func (s *acpSession) mcpServers(cfg config.AgentConfig, client []acp.MCPServer) 
 	}
 	switch {
 	case !cfg.ACP.ClientMCPServers:
-		s.notes = append(s.notes, fmt.Sprintf("Note: tinyagent did not start the MCP servers the editor offered (%s). Client-supplied MCP servers are off by default; set acp.client_mcp_servers: true in the tinyagent user config (or the -c file) to start them.", strings.Join(names, ", ")))
+		s.notes = append(s.notes, fmt.Sprintf("Note: tinyagent did not start the MCP servers the editor offered (%s). Client-supplied MCP servers are off by default; set acp.client_mcp_servers: true in the -c file (or ./tinyagent.yaml with --trust-config) to start them.", strings.Join(names, ", ")))
 		fmt.Fprintf(os.Stderr, "acp: ignoring client MCP servers (%s); acp.client_mcp_servers is off\n", strings.Join(names, ", "))
 		return out, nil
 	case cfg.ReadOnly:

@@ -117,7 +117,7 @@ func runMemoryCommand(o *options, fs *flag.FlagSet, stdout, stderr io.Writer) in
 		fmt.Fprintf(stderr, "error: --cwd %q is not a directory\n", o.cwd)
 		return 2
 	}
-	cfg, err := config.LoadProfile(config.Find(o.configPath), o.profile)
+	_, cfg, err := loadConfig(o, o.cwd, stderr)
 	if err == nil {
 		err = applyMemoryConfig(&cfg, o.cwd, stderr)
 	}
