@@ -263,7 +263,7 @@ func TestProviderUnknownID(t *testing.T) {
 	dir, _ := openaiAPISetup(t)
 	cfg := providerCfg(t, dir, "providers:\n  - id: gw\n    api: chat\n    base_url: http://127.0.0.1:1\n")
 	code, _, stderr := runCLI(t, "-t", "x", "-m", "nope/x", "--cwd", dir, "-c", cfg, "--no-stream")
-	if code == 0 || !strings.Contains(stderr, "openai, openrouter, anthropic, ollama, codex; configured: gw") {
+	if code == 0 || !strings.Contains(stderr, "openai, openrouter, anthropic, ollama, codex, claude-code, codex-exec; configured: gw") {
 		t.Errorf("exit %d, stderr %q", code, stderr)
 	}
 }

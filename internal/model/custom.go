@@ -18,7 +18,7 @@ const (
 )
 
 // builtinProviders are the provider names New knows without configuration.
-var builtinProviders = []string{"openai", "openrouter", "anthropic", "ollama", "codex"}
+var builtinProviders = []string{"openai", "openrouter", "anthropic", "ollama", "codex", "claude-code", "codex-exec"}
 
 // ModelMeta is per-model price and context-window metadata for a
 // configured provider. Zero values mean unknown.

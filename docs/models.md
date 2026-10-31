@@ -23,9 +23,58 @@ Everything after the first `/` is the provider's model name, so `openrouter/qwen
 | `openrouter` | `OPENROUTER_API_KEY` | |
 | `ollama` | none | Local models |
 | `codex` | ChatGPT sign-in | See [ChatGPT subscription](providers.md#chatgpt-subscription-codex) |
+| `claude-code` | Claude Code's own sign-in | Runs your installed `claude` CLI; see [CLI handoff providers](#cli-handoff-providers) |
+| `codex-exec` | Codex CLI's own sign-in | Runs your installed `codex exec`; see [CLI handoff providers](#cli-handoff-providers) |
 | your own id | per provider | [Named providers](providers.md#named-providers) from `providers:` in the config |
 
 See [Providers and models](providers.md) for transports, [reasoning](providers.md#reasoning) and the top-level [model fallback](providers.md#model-fallback) chain.
+
+## CLI handoff providers
+
+`claude-code` and `codex-exec` don't call a model API. Each query runs a coding-agent CLI you installed and signed in to yourself, hands it the task, and returns the CLI's final answer as the model's reply. The CLI does the work with its own tools, so a handoff run normally ends after one step. tinyagent never reads, copies, stores, refreshes or proxies the CLI's credentials (such as `~/.claude/.credentials.json` or `~/.codex/auth.json`) and never sets auth environment variables; the CLI inherits tinyagent's environment and signs itself in.
+
+```bash
+tinyagent -m claude-code/default -t "fix the failing test"   # Claude Code's configured model
+tinyagent -m claude-code/sonnet -t "..."                     # --model sonnet
+tinyagent -m codex-exec/default -t "..."                     # Codex's configured model
+tinyagent -m codex-exec/gpt-5.5 -t "..."                     # --model gpt-5.5
+```
+
+The model name `default` sends no model flag, so the CLI's own default applies. Any other name is passed to the CLI as is.
+
+### Common behavior
+
+- **Binary:** looked up on `PATH` (`claude`, `codex`), or set `claude_code.path` / `codex_exec.path` in the [config](config.md). If it's missing, the run fails before any request with install and sign-in instructions; `tinyagent --check` shows which binary will run.
+- **Prompt:** tinyagent's system prompt is left out (it describes tinyagent's tools, which the CLI doesn't have). A single task is sent as is; a longer conversation (e.g. `--resume`, chat) is sent as a labeled transcript. The prompt goes on stdin, never through a shell, so long prompts work.
+- **Working directory and time limit:** the CLI runs in `--cwd`. `--timeout` (and any cancellation) kills the CLI's whole process group on Unix; on Windows only the CLI process is killed.
+- **Errors:** a non-zero exit, an error result or malformed output fails the step with the CLI's own message; sign-in problems add the command to run. Output that isn't the expected JSON is used as plain answer text.
+- **Cost:** usage on a Claude or ChatGPT subscription isn't API spend, so cost always shows as $0 and `--cost-limit` has no effect; token counts the CLI reports are still recorded. If you point the CLI at an API key (for example `ANTHROPIC_API_KEY` or `CODEX_API_KEY` in your environment), that usage is billed by the vendor but still shows here as $0; check the vendor's console.
+- **Session id:** the CLI's session or thread id is stored in the reply's `extra.handoff_session_id` in the trajectory.
+- **Not supported:** `--reasoning-effort`, `--max-output-tokens` and images. Delegated children (`delegate`, `worker`) that use a handoff model run in tinyagent's working directory without the read-only mapping.
+
+### claude-code
+
+Runs Claude Code in print mode ([CLI reference](https://code.claude.com/docs/en/cli-reference), [headless mode](https://code.claude.com/docs/en/headless)):
+
+```
+claude -p --output-format json [--model <name>] [--tools Read,Glob,Grep --permission-mode dontAsk] "<instruction>"  < prompt
+```
+
+- **Sign in:** run `claude`, then `/login` ([authentication](https://code.claude.com/docs/en/authentication)). `--bare` is not used because it skips the subscription sign-in. If `ANTHROPIC_API_KEY` is set, Claude Code uses it in print mode instead of your subscription.
+- **Permissions:** normally no permission flags are passed, so your Claude Code settings decide what it may do; in print mode anything that would need an approval prompt is refused. With `--read-only`, tinyagent restricts it to the Read, Glob and Grep tools and `dontAsk`, so nothing else runs.
+- **Output:** the JSON result's `result` is the answer; `is_error`/`subtype` mark failures; `session_id` and `usage` are recorded. `total_cost_usd` is Claude Code's client-side estimate ([cost tracking](https://code.claude.com/docs/en/agent-sdk/cost-tracking)) and is not reported as spend.
+
+### codex-exec
+
+Runs `codex exec`, OpenAI's documented non-interactive route ([non-interactive mode](https://developers.openai.com/codex/noninteractive), [CLI reference](https://developers.openai.com/codex/cli/reference)). The separate `codex` provider instead talks to the ChatGPT Codex backend directly with the Codex CLI's saved tokens.
+
+```
+codex exec --json --sandbox <read-only|workspace-write> --cd <cwd> [--model <name>] -  < prompt
+```
+
+- **Sign in:** run `codex login` ([authentication](https://developers.openai.com/codex/auth)).
+- **Sandbox:** `--read-only` maps to Codex's `read-only` sandbox; otherwise `workspace-write` ([sandboxing](https://developers.openai.com/codex/security)). No approval or bypass flags are passed. Codex requires a Git repository by default; tinyagent doesn't override that, so outside one the run fails with Codex's message.
+- **Output:** the JSONL events are read; the last `agent_message` item is the answer, `thread.started` gives the thread id, `turn.completed` gives tokens, and `turn.failed`/`error` events fail the step. Codex reports no price, so cost is $0.
 
 ## Model roles
 

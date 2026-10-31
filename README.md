@@ -126,7 +126,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 
 - Small set of file, search, shell and background-process tools, plus opt-in planning, skills, images, patches, subagents (read-only researchers), workers (read-write builders in their own Git worktree), web fetch, LSP and MCP tools.
 - Per-role model routing (`models:` in config, `--aux-model`, `--delegate-model`, `--route`, keyword or `task_type` routes, `--no-routing`) for compaction, the verify review and delegated children, each role with its own fallback chain and a `usage_by_role` cost split in the summary, JSON, trajectory, `--log-db` and eval reports; off by default.
-- Many providers: OpenAI, Anthropic, OpenRouter, Ollama, a ChatGPT subscription through Codex, and your own OpenAI-compatible endpoints.
+- Many providers: OpenAI, Anthropic, OpenRouter, Ollama, a ChatGPT subscription through Codex, handoff to your installed Claude Code (`claude-code`) or Codex CLI (`codex-exec`), and your own OpenAI-compatible endpoints.
 - Streaming text, `--json` event output, structured output, SQLite event logs and OpenTelemetry.
 - Project memory across runs, with approval before entries become active.
 - Session handoff for long-running work (`--handoff`): each run leaves `.tinyagent/handoff.md` with what it did and what's next, the next fresh run reads it as data, and an optional startup command runs before the first turn; see [Session handoff](docs/long-runs.md#session-handoff).

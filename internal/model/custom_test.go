@@ -137,12 +137,12 @@ func TestConfiguredProviderEnvErrors(t *testing.T) {
 func TestUnknownProviderListsIDs(t *testing.T) {
 	withProviders(t)
 	_, err := New("nope/x", nil)
-	if err == nil || err.Error() != `unknown provider "nope" (want openai, openrouter, anthropic, ollama, or codex)` {
+	if err == nil || err.Error() != `unknown provider "nope" (want openai, openrouter, anthropic, ollama, codex, claude-code, or codex-exec)` {
 		t.Errorf("no providers: %v", err)
 	}
 	withProviders(t, ProviderDef{ID: "zeta", API: "chat", BaseURL: "http://x"}, ProviderDef{ID: "alpha", API: "chat", BaseURL: "http://x"})
 	_, err = New("nope/x", nil)
-	if err == nil || !strings.Contains(err.Error(), "openai, openrouter, anthropic, ollama, codex; configured: alpha, zeta") {
+	if err == nil || !strings.Contains(err.Error(), "openai, openrouter, anthropic, ollama, codex, claude-code, codex-exec; configured: alpha, zeta") {
 		t.Errorf("with providers: %v", err)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/vicgupta/tinyagent/internal/config"
@@ -46,6 +47,17 @@ func registerProviders(cfg config.AgentConfig) {
 		defs = append(defs, d)
 	}
 	model.SetProviders(defs)
+	model.SetCLIPaths(expandHome(cfg.ClaudeCode.Path), expandHome(cfg.CodexExec.Path))
+}
+
+// expandHome expands a leading ~/ in a configured path.
+func expandHome(p string) string {
+	if rest, ok := strings.CutPrefix(p, "~/"); ok {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, rest)
+		}
+	}
+	return p
 }
 
 // providerInfo returns the api and base_url of spec's configured provider,

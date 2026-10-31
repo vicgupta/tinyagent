@@ -117,6 +117,11 @@ type AgentConfig struct {
 	// ignore it.
 	OpenAIAPI string `yaml:"openai_api"`
 
+	// ClaudeCode and CodexExec configure the claude-code and codex-exec
+	// handoff providers (docs/models.md). Unset looks the CLI up on PATH.
+	ClaudeCode HandoffCLI `yaml:"claude_code,omitempty"`
+	CodexExec  HandoffCLI `yaml:"codex_exec,omitempty"`
+
 	MCPServers []MCPServer `yaml:"mcp_servers,omitempty"`
 
 	// Plugins lists Agent Plugins package directories (docs/plugins.md).
@@ -977,8 +982,15 @@ type ProviderModel struct {
 // ProviderAPIs are the accepted providers[].api values.
 var ProviderAPIs = []string{"chat", "responses", "anthropic"}
 
+// HandoffCLI configures a provider that runs an installed coding-agent CLI.
+type HandoffCLI struct {
+	// Path is the CLI binary to run; "" looks it up on PATH. A leading ~/
+	// is expanded.
+	Path string `yaml:"path,omitempty"`
+}
+
 // BuiltinProviders are reserved and can't be used as a providers[].id.
-var BuiltinProviders = []string{"openai", "openrouter", "anthropic", "ollama", "codex"}
+var BuiltinProviders = []string{"openai", "openrouter", "anthropic", "ollama", "codex", "claude-code", "codex-exec"}
 
 // ErrInvalidProvider wraps every providers validation error, so callers can
 // exit 2 for them.
