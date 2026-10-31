@@ -20,6 +20,15 @@ A warning goes to stderr, the summary line shows `..., N truncated responses`, `
 
 When a run fails on a common setup problem, tinyagent prints a `hint:` line under the error. The error itself is kept, and hints name environment variables without printing their values.
 
+| Failure | Hint |
+| --- | --- |
+| Missing or rejected API key | names the provider's key variable to set |
+| Invalid config setting (permission rule, hook, command tool, LSP server, YAML type) | `fix <setting> in <config path>, then rerun tinyagent --check`; the error names the file and the rule index |
+| Sandbox backend can't start | names the backend and how to fix it: another `--sandbox-backend`, or run without `--sandbox` |
+| `claude-code` / `codex-exec` binary missing | how to install and sign in, or set its configured path |
+
+Other errors print no hint.
+
 Colors and styling (such as the `error:` and `hint:` labels) appear only at a terminal. Set `NO_COLOR=1` to turn them off, or pass `--color=never` (plain) or `--color=always` (styled even when piped, e.g. into `less -R`). Piped, redirected and `--json` output is plain text by default.
 
 A mistyped flag exits 2 with one line naming up to three close flags, such as `error: unknown flag --sandbxo; did you mean --sandbox? (see tinyagent --help)`, instead of the full usage.

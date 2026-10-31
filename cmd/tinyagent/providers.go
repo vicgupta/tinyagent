@@ -19,6 +19,7 @@ import (
 func loadConfigError(err error) int {
 	if errors.Is(err, config.ErrInvalidProvider) {
 		fmt.Fprintln(os.Stderr, "error:", err)
+		printSetupHint(os.Stderr, err)
 		return 2
 	}
 	return configFail(err)

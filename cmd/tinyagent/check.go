@@ -42,6 +42,9 @@ func runCheck(o *options, fs *flag.FlagSet, w io.Writer) int {
 		if errors.As(err, &hint) {
 			printHint(os.Stderr, hint.spec, hint.msg)
 			sum.Error.Hint = model.Hint(hint.spec, hint.msg)
+		} else {
+			printSetupHint(os.Stderr, err)
+			sum.Error.Hint = setupHint(err)
 		}
 		if o.jsonOutput {
 			sum.writeJSON(w)
@@ -86,11 +89,11 @@ func resolveCheck(o *options, fs *flag.FlagSet, sum *checkSummary) ([][2]string,
 	}
 	registerProviders(cfg)
 	if _, err := hooks.New(cfg.Hooks, cfgPath); err != nil {
-		return nil, err
+		return nil, inConfig(cfgPath, err)
 	}
 	policy, err := permissions.New(cfg.Permissions)
 	if err != nil {
-		return nil, err
+		return nil, inConfig(cfgPath, err)
 	}
 	applyFlagOverrides(fs, &cfg, o.stepLimit, o.costLimit, o.timeLimit)
 	if flagWasSet(fs, "max-output-tokens") {
@@ -150,7 +153,10 @@ func resolveCheck(o *options, fs *flag.FlagSet, sum *checkSummary) ([][2]string,
 	}
 	cmdTools, err := tools.NewCommandTools(cfg.CommandTools, root, cfg.BashTimeoutSec)
 	if err != nil {
-		return nil, fmt.Errorf("config: %w", err)
+		if cfgPath == "" {
+			return nil, fmt.Errorf("config: %w", err)
+		}
+		return nil, inConfig(cfgPath, err)
 	}
 
 	var lines [][2]string
