@@ -66,6 +66,8 @@ type options struct {
 	skills, noSkills                                 bool
 	reasoningEffort                                  string
 	fallbackModels                                   specList
+	auxModel                                         string
+	routes                                           routeList
 	noFallback                                       bool
 	openaiAPI                                        string
 	execEnv                                          string
@@ -169,6 +171,8 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.planFile, "plan-file", "", "with the plan enabled, also export the current plan as Markdown to this file after each save")
 	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "provider reasoning effort: none, minimal, low, medium, high, xhigh, or max")
 	fs.Var(&o.fallbackModels, "fallback-model", "provider/model to switch to when requests still fail with 429/5xx/network errors after retries (repeatable, tried in order; replaces fallback_models)")
+	fs.StringVar(&o.auxModel, "aux-model", "", "provider/model for auxiliary helper calls (context compaction, verify review); replaces models.auxiliary.model")
+	fs.Var(&o.routes, "route", "route one task to its own model, task=provider/model (repeatable; tasks: compaction, review); beats models.<role>.tasks")
 	fs.BoolVar(&o.noFallback, "no-fallback", false, "don't fall back to other models (clears fallback_models)")
 	fs.StringVar(&o.openaiAPI, "openai-api", "", "openai provider transport: auto, responses, or chat")
 	fs.StringVar(&o.execEnv, "env", "", "where bash and start_process run: local or container (default: config's environment, else local)")
@@ -572,6 +576,11 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
 	}
+	helpers, err := newHelpers(cfg, o.modelName, cfg.ReasoningEffort)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	}
 	subagents, err := newSubagents(cfg, o.modelName, cfg.ReasoningEffort)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -778,6 +787,7 @@ func run() int {
 		Subagents:      subagents,
 		Workers:        workers,
 		Routes:         modelRoutes(cfg, o.modelName, subagents, workers),
+		Helpers:        helpers,
 		Worktree:       worktree,
 		Review:         reviewInfo,
 		TaskImages:     taskImages,
@@ -1258,6 +1268,10 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if err := model.SetReasoningEffort(m, modelName, src.ReasoningEffort); err != nil {
 		return fail(fmt.Errorf("resume: %w", err))
 	}
+	helpers, err := newHelpers(cfg, modelName, src.ReasoningEffort)
+	if err != nil {
+		return fail(err)
+	}
 	subagents, err := newSubagents(cfg, modelName, src.ReasoningEffort)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error: resume:", err)
@@ -1344,6 +1358,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		Subagents:      subagents,
 		Workers:        workers,
 		Routes:         modelRoutes(cfg, modelName, subagents, workers),
+		Helpers:        helpers,
 		Lockdown:       lock,
 	}
 	if policy != nil && !o.jsonOutput {
@@ -2039,6 +2054,12 @@ func validateLimits(o options) string {
 func applyFlagOverrides(fs *flag.FlagSet, cfg *config.AgentConfig, stepLimit int, costLimit float64, timeLimit int) {
 	fs.Visit(func(f *flag.Flag) {
 		switch f.Name {
+		case "aux-model":
+			cfg.Models.Flags.AuxModel = strings.TrimSpace(f.Value.String())
+		case "route":
+			if r, ok := f.Value.(*routeList); ok {
+				cfg.Models.Flags.Routes = *r
+			}
 		case "step-limit":
 			cfg.StepLimit = stepLimit
 		case "cost-limit":

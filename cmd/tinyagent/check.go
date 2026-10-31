@@ -293,10 +293,11 @@ func providerStatus(spec string, m model.Model) string {
 	return s
 }
 
-// checkRoutes lists the delegated routes --check reports: the delegate and
-// worker tasks when those tools are on.
+// checkRoutes lists the routes --check reports: auxiliary tasks routed
+// away from the main model, and the delegate and worker tasks when those
+// tools are on.
 func checkRoutes(cfg config.AgentConfig, main string) []routing.Route {
-	var out []routing.Route
+	out := auxRoutes(cfg, main)
 	if cfg.Subagents.Enabled {
 		out = append(out, routing.Delegated(cfg, main, routing.TaskDelegate))
 	}

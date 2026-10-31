@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"github.com/vicgupta/tinyagent/internal/routing"
 	"strings"
 
 	"github.com/vicgupta/tinyagent/internal/model"
@@ -46,7 +47,7 @@ func (a *Agent) runVerifyReview(ctx context.Context, t *trajectory.Trajectory) {
 		{Role: "system", Content: verifyReviewSystem},
 		{Role: "user", Content: sb.String()},
 	}
-	resp, cost, err := a.Model.Query(ctx, req, nil)
+	resp, cost, err := a.helperQuery(ctx, routing.TaskReview, req)
 	t.Cost += cost.USD
 	t.InputTokens += cost.InputTokens
 	t.OutputTokens += cost.OutputTokens

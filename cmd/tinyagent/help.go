@@ -92,7 +92,7 @@ type flagGroup = struct {
 var helpGroups = []flagGroup{
 	{"", [][3]string{{"h", "help", ""}}},
 	{"Task", [][3]string{{"t", "task", "string"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}, {"", "ask-user", ""}, {"", "acp", ""}, {"", "image", "path"}, {"", "images", ""}, {"", "untrusted-task", ""}}},
-	{"Model and provider", [][3]string{{"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "profile", "name"}}},
+	{"Model and provider", [][3]string{{"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "aux-model", "spec"}, {"", "route", "task=spec"}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "profile", "name"}}},
 	{"Run control", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "token-limit", "n"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}, {"", "subagents", ""}, {"", "workers", ""}}},
 	{"Verify before stop", verifyGroup.flags},
 	{"Attempts (best of N)", attemptsGroup.flags},

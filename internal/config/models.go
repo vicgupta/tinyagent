@@ -10,9 +10,22 @@ import (
 // Every key is optional; an empty models: section (the default) leaves
 // every task on the main model, exactly as without it.
 type Models struct {
+	// Auxiliary is the role of helper calls made outside the agent loop:
+	// context compaction (task "compaction") and the verify_on_stop
+	// review (task "review").
+	Auxiliary RoleModels `yaml:"auxiliary,omitempty"`
 	// Delegated is the role of the child agents: the delegate tool's
 	// read-only subagents (task "delegate") and workers (task "worker").
 	Delegated RoleModels `yaml:"delegated,omitempty"`
+	// Flags holds the command-line routing overrides (--aux-model,
+	// --route); they beat the config keys. Never read from a file.
+	Flags RouteFlags `yaml:"-"`
+}
+
+// RouteFlags are the routing flags of one invocation.
+type RouteFlags struct {
+	AuxModel string            // --aux-model
+	Routes   map[string]string // --route task=spec
 }
 
 // RoleModels is one role's models: a default for the role and optional
@@ -24,6 +37,9 @@ type RoleModels struct {
 	Tasks map[string]string `yaml:"tasks,omitempty"`
 }
 
+// AuxiliaryTasks are the task names models.auxiliary.tasks accepts.
+var AuxiliaryTasks = []string{"compaction", "review"}
+
 // DelegatedTasks are the task names models.delegated.tasks accepts.
 var DelegatedTasks = []string{"delegate", "worker"}
 
@@ -32,32 +48,43 @@ var DelegatedTasks = []string{"delegate", "worker"}
 // subagents.workers.model is models.delegated.tasks.worker, and setting
 // both to different models is an error.
 func validateModels(cfg *AgentConfig) error {
-	d := cfg.Models.Delegated
-	if err := checkSpec("models.delegated.model", d.Model); err != nil {
+	if err := validateRole("auxiliary", cfg.Models.Auxiliary, AuxiliaryTasks); err != nil {
 		return err
 	}
-	keys := make([]string, 0, len(d.Tasks))
-	for k := range d.Tasks {
-		keys = append(keys, k)
+	if err := validateRole("delegated", cfg.Models.Delegated, DelegatedTasks); err != nil {
+		return err
 	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		if !contains(DelegatedTasks, k) {
-			return fmt.Errorf("models.delegated.tasks: unknown task %q (want one of %s)", k, strings.Join(DelegatedTasks, ", "))
-		}
-		if strings.TrimSpace(d.Tasks[k]) == "" {
-			return fmt.Errorf("models.delegated.tasks.%s must be a provider/model, got an empty value", k)
-		}
-		if err := checkSpec("models.delegated.tasks."+k, d.Tasks[k]); err != nil {
-			return err
-		}
-	}
+	d := cfg.Models.Delegated
 	if a, b := strings.TrimSpace(cfg.Subagents.Model), strings.TrimSpace(d.Tasks["delegate"]); a != "" && b != "" && a != b {
 		return fmt.Errorf("subagents.model %q conflicts with models.delegated.tasks.delegate %q; set only one (subagents.model is an alias)", a, b)
 	}
 	if w := cfg.Subagents.Workers; w != nil {
 		if a, b := strings.TrimSpace(w.Model), strings.TrimSpace(d.Tasks["worker"]); a != "" && b != "" && a != b {
 			return fmt.Errorf("subagents.workers.model %q conflicts with models.delegated.tasks.worker %q; set only one (subagents.workers.model is an alias)", a, b)
+		}
+	}
+	return nil
+}
+
+// validateRole checks one role's model and task keys.
+func validateRole(role string, r RoleModels, tasks []string) error {
+	if err := checkSpec("models."+role+".model", r.Model); err != nil {
+		return err
+	}
+	keys := make([]string, 0, len(r.Tasks))
+	for k := range r.Tasks {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if !contains(tasks, k) {
+			return fmt.Errorf("models.%s.tasks: unknown task %q (want one of %s)", role, k, strings.Join(tasks, ", "))
+		}
+		if strings.TrimSpace(r.Tasks[k]) == "" {
+			return fmt.Errorf("models.%s.tasks.%s must be a provider/model, got an empty value", role, k)
+		}
+		if err := checkSpec("models."+role+".tasks."+k, r.Tasks[k]); err != nil {
+			return err
 		}
 	}
 	return nil

@@ -14,6 +14,7 @@ import (
 const (
 	RoleMain      = "main"
 	RoleDelegated = "delegated"
+	RoleAuxiliary = "auxiliary"
 )
 
 // Tasks.
@@ -21,6 +22,9 @@ const (
 	TaskMain     = "main"
 	TaskDelegate = "delegate"
 	TaskWorker   = "worker"
+
+	TaskCompaction = "compaction"
+	TaskReview     = "review"
 )
 
 // SourceMain is the Source of a task that falls back to the main model.
@@ -62,6 +66,27 @@ func Delegated(cfg config.AgentConfig, main, task string) Route {
 		r.Model, r.Source = strings.TrimSpace(alias), aliasKey
 	case strings.TrimSpace(d.Model) != "":
 		r.Model, r.Source = strings.TrimSpace(d.Model), "models.delegated.model"
+	default:
+		r.Model, r.Source = main, SourceMain
+	}
+	return r
+}
+
+// Auxiliary resolves an auxiliary task (TaskCompaction or TaskReview):
+// --route <task>=, then models.auxiliary.tasks.<task>, then --aux-model,
+// then models.auxiliary.model, then the main model.
+func Auxiliary(cfg config.AgentConfig, main, task string) Route {
+	r := Route{Role: RoleAuxiliary, Task: task}
+	f, a := cfg.Models.Flags, cfg.Models.Auxiliary
+	switch {
+	case strings.TrimSpace(f.Routes[task]) != "":
+		r.Model, r.Source = strings.TrimSpace(f.Routes[task]), "--route "+task
+	case strings.TrimSpace(a.Tasks[task]) != "":
+		r.Model, r.Source = strings.TrimSpace(a.Tasks[task]), "models.auxiliary.tasks."+task
+	case strings.TrimSpace(f.AuxModel) != "":
+		r.Model, r.Source = strings.TrimSpace(f.AuxModel), "--aux-model"
+	case strings.TrimSpace(a.Model) != "":
+		r.Model, r.Source = strings.TrimSpace(a.Model), "models.auxiliary.model"
 	default:
 		r.Model, r.Source = main, SourceMain
 	}

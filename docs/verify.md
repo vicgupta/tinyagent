@@ -51,7 +51,7 @@ Each check also counts as a verification command when the model runs it, so a mo
 
 ### Inferential review
 
-`verify_on_stop.review` (or `--verify-review`) adds the inferential tier, run last: once every computational check has passed at stop, tinyagent sends the model one extra request, without tools, asking it to review the file changes the run made, in the spirit of [`--review`](runs.md#reviewing-changes). The order is always cheap checks first, review last, and the review runs at most once per stop that passes the checks.
+`verify_on_stop.review` (or `--verify-review`) adds the inferential tier, run last: once every computational check has passed at stop, tinyagent sends the model (or the `review` route's, see [Model roles](config.md#model-roles)) one extra request, without tools, asking it to review the file changes the run made, in the spirit of [`--review`](runs.md#reviewing-changes). The order is always cheap checks first, review last, and the review runs at most once per stop that passes the checks.
 
 ```yaml
 verify_on_stop:

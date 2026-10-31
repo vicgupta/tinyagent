@@ -107,6 +107,7 @@ type acpSession struct {
 	model                        model.Model
 	subagents                    *agent.Subagents
 	workers                      *agent.Workers
+	helpers                      map[string]model.Model
 	hooks                        *hooks.Runner
 	policy                       *permissions.Policy
 	env                          tools.Environment
@@ -273,6 +274,9 @@ func newACPSession(ctx context.Context, o *options, fs *flag.FlagSet, id, cwd st
 		return nil, err
 	}
 	if s.workers, err = newWorkers(cfg, s.modelName, cfg.ReasoningEffort); err != nil {
+		return nil, err
+	}
+	if s.helpers, err = newHelpers(cfg, s.modelName, cfg.ReasoningEffort); err != nil {
 		return nil, err
 	}
 	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
@@ -508,6 +512,7 @@ func (s *acpSession) Prompt(ctx context.Context, p acp.Prompt, u *acp.Updates) (
 		NoCompact:      o.noCompact,
 		Subagents:      s.subagents,
 		Workers:        s.workers,
+		Helpers:        s.helpers,
 		TaskImages:     images,
 		Lockdown:       s.lockdown,
 	}

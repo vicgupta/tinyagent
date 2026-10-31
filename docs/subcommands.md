@@ -41,6 +41,8 @@ Six subcommands are shortcuts for existing flags. They rewrite the command line 
 | `--reasoning-effort` | config `reasoning_effort`, else unset | Reasoning effort sent to the provider: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; see [Reasoning](providers.md#reasoning) |
 | `--fallback-model <spec>` | config `fallback_models`, else none | Model to switch to when the current one keeps failing with `429`, `5xx` or network errors after retries; repeatable, tried in order, at most 3, and replaces `fallback_models`; see [Model fallback](providers.md#model-fallback) |
 | `--no-fallback` | off | Don't fall back to other models (clears `fallback_models`); conflicts with `--fallback-model` |
+| `--aux-model <spec>` | config `models.auxiliary.model`, else the main model | Model for auxiliary helper calls: context compaction and the `verify_on_stop` review; replaces `models.auxiliary.model`. If it fails, the call is retried once on the main model; see [Model roles](config.md#model-roles) |
+| `--route <task>=<spec>` | config `models.<role>.tasks`, else none | Route one task to its own model; repeatable, one model per task. Tasks: `compaction`, `review`; beats the config's task keys and `--aux-model` |
 | `--openai-api` | config `openai_api`, else `auto` | Transport for the `openai` provider: `auto`, `responses`, or `chat`; see [OpenAI transport](providers.md#openai-transport) |
 | `--init-config` | | Write a commented starter config (including `token_limit` and `verify_on_stop`) to the user config path (or `-c PATH`), refuse overwrites, and exit |
 | `-c, --config` | user config, else built-in | YAML config file; see [Config](config.md#config) |
