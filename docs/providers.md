@@ -83,4 +83,4 @@ Every entry is checked before the first request: an unknown provider, a missing 
 
 **Your conversation goes to the fallback provider.** After a switch, the whole history so far (task, files the model read, tool output) is sent to the next provider in the list, so only list providers you are willing to share that data with.
 
-`--resume` uses the chain from the current config and flags, not the saved one, and the resumed run starts on the primary model. Subagents (`delegate`) don't fall back. Older tinyagent versions reject a config file containing the `fallback_models` key.
+`--resume` uses the chain from the current config and flags, not the saved one, and the resumed run starts on the primary model. Delegated children (`delegate`, `worker`) use the `models.delegated.fallback_models` chain instead; see [Per-role fallback chains](models.md#per-role-fallback-chains). Older tinyagent versions reject a config file containing the `fallback_models` key.

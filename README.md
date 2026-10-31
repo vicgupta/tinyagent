@@ -154,6 +154,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 
 | Topic | Doc |
 |---|---|
+| Tasks: passing a task, task types, task-based routing | [docs/tasks.md](docs/tasks.md) |
 | Reviews, worktrees, best-of-N, resume, transcripts, follow-ups, asking for input, token and cost budgets | [docs/runs.md](docs/runs.md) |
 | Long runs, session handoff, images, tool output files, apply_patch, subagents, workers, web fetch, LSP | [docs/long-runs.md](docs/long-runs.md) |
 | Planner (`update_plan`, `--plan-first`) | [docs/planner.md](docs/planner.md) |
@@ -167,6 +168,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 
 | Topic | Doc |
 |---|---|
+| Models: choosing a model, providers, roles, fallback chains, usage by role | [docs/models.md](docs/models.md) |
 | Providers, ChatGPT subscription, reasoning and fallback | [docs/providers.md](docs/providers.md) |
 | `--json`, streaming, structured output, event log, OpenTelemetry | [docs/json-output.md](docs/json-output.md) |
 
