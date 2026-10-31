@@ -8,7 +8,7 @@ defaults:
   step_limit: 50
 workflows:
   implement:
-    intent: Implement a feature from a spec, then validate and test it.
+    intent: Implement a feature from a spec, then validate, test and verify its behavior.
     stages:
       - skill: plan-tasks
       - skill: generate-code
@@ -18,3 +18,5 @@ workflows:
       - skill: run-tests
         check: [go, test, -count=1, ./...]
         check_timeout: 600
+      - skill: verify-behavior
+        behavior: .tinyagent/behavior.yaml

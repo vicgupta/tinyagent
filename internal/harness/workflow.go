@@ -46,7 +46,11 @@ type Stage struct {
 	// Check is a command whose exit status decides the stage's success
 	// check; when empty the model's own verdict on the skill's success
 	// check line decides.
-	Check        []string          `json:"check,omitempty"`
+	Check []string `json:"check,omitempty"`
+	// Behavior, when set, is a path (relative to --cwd) where the stage
+	// writes behavior cases; the harness runs them and decides the stage on
+	// their observed output. See behavior.go.
+	Behavior     string            `json:"behavior,omitempty"`
 	CheckTimeout int               `json:"check_timeout"`
 	Retries      int               `json:"retries"`
 	Model        string            `json:"model,omitempty"`
@@ -78,6 +82,7 @@ type Workflow struct {
 type fileStage struct {
 	Skill    string            `yaml:"skill"`
 	Check    []string          `yaml:"check"`
+	Behavior *string           `yaml:"behavior"`
 	Inputs   map[string]string `yaml:"inputs"`
 	Settings `yaml:",inline"`
 }
@@ -192,11 +197,22 @@ func (w *Workflow) resolve(fs fileStage) (Stage, error) {
 	if fs.Check != nil && (len(fs.Check) == 0 || fs.Check[0] == "") {
 		return Stage{}, errors.New("check must be a non-empty argv list")
 	}
-	if sk.SuccessCheck == "" && len(fs.Check) == 0 {
+	if fs.Behavior != nil {
+		if err := checkBehaviorPath(*fs.Behavior); err != nil {
+			return Stage{}, err
+		}
+		if len(fs.Check) > 0 {
+			return Stage{}, errors.New("a stage can have check or behavior, not both")
+		}
+	}
+	if sk.SuccessCheck == "" && len(fs.Check) == 0 && fs.Behavior == nil {
 		return Stage{}, fmt.Errorf("skill %s has no \"Success check:\" line, so the stage needs a check command", sk.Name)
 	}
 	st := w.single(sk)
 	st.Check = fs.Check
+	if fs.Behavior != nil {
+		st.Behavior = *fs.Behavior
+	}
 	st.Inputs = fs.Inputs
 	apply(&st, fs.Settings)
 	return st, nil

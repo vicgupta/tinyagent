@@ -69,6 +69,10 @@ tinyagent --verify-on-stop --verify-check "go test ./..." --verify-review -t "..
 - **Cost:** the request counts toward the run's tokens and cost.
 - **When it runs:** only with the guard on, at least one check configured (a config with `review` and no `checks` is rejected), changes pending at stop and every check passing. It never runs for subagent or `--output-schema` runs. Off by default.
 
+### Behavior verification in workflows
+
+`--verify-on-stop` and its checks prove the code builds and the tests pass. To check what the built program actually does, a [skill workflow](project-context.md#skill-workflows) can end with a `verify-behavior` stage, which runs the program and compares its observed output with the task's behavioral acceptance criteria. See [Verifying behavior](project-context.md#verifying-behavior).
+
 ## Where it shows up
 
 - **Summary line:** ends with `, unverified changes`.
