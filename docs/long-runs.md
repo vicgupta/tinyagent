@@ -98,7 +98,23 @@ Writes are not transactional: if writing fails part-way (for example, a permissi
 
 A checkpoint records whether `apply_patch` was enabled (`apply_patch_enabled`), and `--resume` keeps that setting: passing a conflicting `--apply-patch` exits 2, and the config's `apply_patch` is ignored on resume.
 
+### Subagents and workers at a glance
+
+tinyagent can hand work to two kinds of child agents. A **subagent** is a read-only researcher: it investigates and reports back, and cannot change files. A **worker** is a read-write builder: it makes changes in its own Git worktree, and the parent applies them. Both start with a fresh context and share the parent's cost and token budget.
+
+| | Subagent (read-only researcher) | Worker (read-write builder) |
+| --- | --- | --- |
+| Enable | `--subagents` (`subagents.enabled`) | `--workers` (`subagents.workers.enabled`) |
+| Tool the model calls | `delegate` | `worker`, then `apply_worker` |
+| Can do | Read, list and grep files, then report findings | Edit files and run commands, then report a commit |
+| Cannot do | Change files, run commands, or use the network | Touch your working tree directly; its change lands only when the parent calls `apply_worker` |
+| Isolation | Fresh context; read-only tools in your working tree | Fresh context; its own Git worktree and branch |
+| Cost | Usually cheap: few steps (default cap 30), no Git setup | Higher: more steps (default cap 60), a worktree, and optional parallel runs |
+| Use it for | Finding callers, explaining code, answering questions | Well-scoped implementation subtasks you want to review before applying |
+
 ### Subagents
+
+A subagent is a read-only researcher: it investigates and reports back, and cannot change files.
 
 `--subagents` (or `subagents.enabled: true`) adds a `delegate` tool. A call such as `{"task": "find every caller of LoadConfig and say which ones ignore its error", "label": "callers"}` starts a child agent with a fresh context: the same system prompt and `AGENTS.md`, plus a notice that it is a subagent that must answer first and then give evidence with `file:line` references. The child runs to completion, and the parent gets back only its final report followed by a footer such as `[delegate d1: Submitted, 4 steps, 9200 in / 410 out tokens, $0.0123]`. It is off by default; with it off, requests, tools, and checkpoints are unchanged.
 
@@ -112,6 +128,8 @@ A checkpoint records whether `apply_patch` was enabled (`apply_patch_enabled`), 
 Not in this version: children that can write or run commands, parallel children, nested delegation, and streaming the child's output.
 
 ### Workers
+
+A worker is a read-write builder: it makes changes in its own Git worktree, and the parent applies them.
 
 `--workers` (or `subagents.workers.enabled: true`) adds two tools. `worker` hands a well-scoped implementation subtask to a child agent that may edit files and run commands, but only in its own Git worktree. `apply_worker` then applies the worker's change to your working tree. Nothing is merged, pushed or applied automatically.
 

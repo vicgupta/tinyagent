@@ -83,7 +83,7 @@ handoff:                  # session handoff file; see Session handoff (user conf
   startup_timeout_seconds: 120  # bound on the startup command; >= 1
   startup_max_output: 8192      # bytes of startup output (the tail) given to the model; >= 1
 subagents:
-  enabled: false          # offer the delegate tool (same as --subagents)
+  enabled: false          # offer the delegate tool: a read-only researcher subagent (same as --subagents)
   model: ""               # child model, e.g. openai/gpt-5-mini; empty uses the parent model
   max_steps: 30           # step cap per delegated task; 0 means the default (30)
 models:                  # per-role model routing; see Model roles (all optional, off by default)

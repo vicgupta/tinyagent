@@ -124,7 +124,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 
 ## Features
 
-- Small set of file, search, shell and background-process tools, plus opt-in planning, skills, images, patches, subagents, web fetch, LSP and MCP tools.
+- Small set of file, search, shell and background-process tools, plus opt-in planning, skills, images, patches, subagents (read-only researchers), workers (read-write builders in their own Git worktree), web fetch, LSP and MCP tools.
 - Per-role model routing (`models:` in config, `--aux-model`, `--delegate-model`, `--route`, keyword or `task_type` routes, `--no-routing`) for compaction, the verify review and delegated children, each role with its own fallback chain and a `usage_by_role` cost split in the summary, JSON, trajectory, `--log-db` and eval reports; off by default.
 - Many providers: OpenAI, Anthropic, OpenRouter, Ollama, a ChatGPT subscription through Codex, and your own OpenAI-compatible endpoints.
 - Streaming text, `--json` event output, structured output, SQLite event logs and OpenTelemetry.
@@ -156,7 +156,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 |---|---|
 | Tasks: passing a task, task types, task-based routing | [docs/tasks.md](docs/tasks.md) |
 | Reviews, worktrees, best-of-N, resume, transcripts, follow-ups, asking for input, token and cost budgets | [docs/runs.md](docs/runs.md) |
-| Long runs, session handoff, images, tool output files, apply_patch, subagents, workers, web fetch, LSP | [docs/long-runs.md](docs/long-runs.md) |
+| Long runs, session handoff, images, tool output files, apply_patch, subagents (read-only researchers), workers (read-write builders), web fetch, LSP | [docs/long-runs.md](docs/long-runs.md) |
 | Planner (`update_plan`, `--plan-first`) | [docs/planner.md](docs/planner.md) |
 | Verify before stop (`--verify-on-stop`) | [docs/verify.md](docs/verify.md) |
 | `undo_file` and `--rewind` | [docs/undo.md](docs/undo.md) |
