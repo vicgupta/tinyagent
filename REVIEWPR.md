@@ -44,14 +44,14 @@ A branch that branched off main *before* a later-merged PR (that touches the sam
 ## 4. Pick the merge order
 
 1. **Merge the narrower PR first** (smaller `additions`/`deletions`, already `CLEAN`/`MERGEABLE`).
-2. **Rebase each remaining PR onto the *current* main** (post-previous-merge) before review.
+2. **Merge the *current* main into each remaining PR** (post-previous-merge) before review; no rebase, no force-push.
 3. Merge the next PR, then repeat.
 
-This confines all conflict resolution to exactly one rebase per PR, and the final merge is clean.
+This confines all conflict resolution to exactly one main merge per PR, and the final merge is clean.
 
 ## 5. Review each PR for
 
-- **Rebase-before-approve.** The PR must be based on current `main`. Reject or send back any PR carrying a `Merge remote-tracking branch ...` commit — especially one whose commit body contains `# Conflicts:` residue — and ask the author to rebase instead.
+- **Up to date before approve.** The PR must have current `main` merged in. Send back a merge commit that drops either side's changes or leaves conflict markers in the code or in its commit message (`# Conflicts:` residue).
 - **Shared-file hygiene.** Changes to hot files (`cmd/tinyagent/main.go`, `internal/config/config.go`, `internal/agent/loop.go`, `internal/trajectory/trajectory.go`, `README.md`, `CHANGELOG.md`) should stay in their own regions so "both sides added content at the same spot" conflicts stay mechanical.
 - **Full suite green:** `gofmt -l .`, `go build ./...`, `go vet ./...`, `go test -count=1 ./...`.
 - **Linux build-tagged files:** run `GOOS=linux go build ./...` and `GOOS=linux go vet ./...` for anything touching `//go:build linux` files — macOS tests don't compile them.
@@ -60,8 +60,8 @@ This confines all conflict resolution to exactly one rebase per PR, and the fina
 ## Non-negotiable rules
 
 - Never review/merge two overlapping PRs in parallel.
-- Never approve a PR that isn't rebased onto current `main`.
-- Prefer rebase over merge commits — keep history linear.
+- Never approve a PR that doesn't have current `main` merged in.
+- Update branches by merging `main` in; never rebase or force-push. Merge PRs with a merge commit only after CI is green.
 - When resolving, keep **both** semantic behaviors; never drop an exit/error path while taking one side.
 
 ## Known hot files (most collision-prone)

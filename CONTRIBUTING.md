@@ -11,8 +11,9 @@ high, so a little coordination up front goes a long way.
   [MIT license](LICENSE).
 - **Small, focused pull requests.** One change per PR. Refactors and behavior
   changes go in separate PRs, never the same one.
-- **Linear history.** Rebase onto `main`; don't merge `main` into your branch.
-  Merge commits that carry conflict-marker residue will be sent back.
+- **Merge, don't rebase.** To update a branch, merge the latest `main` into it;
+  no rebasing and no force-pushing. Resolve conflicts while keeping both sides'
+  changes. PRs are merged with a merge commit only after CI is green.
 - **Two PRs that touch the same file merge serially, never in parallel.** See
   [REVIEWPR.md](REVIEWPR.md) for the triage workflow.
 
@@ -81,8 +82,9 @@ joined path.
    GOOS=linux go vet ./...
    ```
 
-6. Rebase onto the latest `main` (`git fetch origin && git rebase origin/main`),
-   resolve any conflicts, and force-push. Keep history linear.
+6. Merge the latest `main` into your branch (`git fetch origin && git merge origin/main`),
+   resolve any conflicts keeping both sides' changes, re-run the checks above,
+   and push (never force-push).
 
 ## Code style
 
@@ -130,7 +132,7 @@ existing selections must not change, or older checkpoints stop resuming;
 
 Before opening a PR, confirm:
 
-- [ ] Rebased onto current `main`; no merge commits.
+- [ ] Latest `main` merged in (no rebase, no force-push); conflicts keep both sides.
 - [ ] `gofmt -l .` is empty.
 - [ ] `go build ./...`, `go vet ./...`, `go test -count=1 ./...` pass.
 - [ ] `GOOS=linux go build ./... && GOOS=linux go vet ./...` pass if build-tagged
