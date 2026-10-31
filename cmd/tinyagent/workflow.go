@@ -24,7 +24,7 @@ var workflowConflicts = []string{"resume", "rewind", "to", "dry-run", "transcrip
 
 // workflowOwn are flags --workflow consumes; every other flag set on the
 // command line is forwarded to each stage's run.
-var workflowOwn = []string{"workflow", "workflow-name", "workflow-observe", "t", "task", "o", "output", "cwd", "json"}
+var workflowOwn = []string{"workflow", "workflow-name", "workflow-observe", "playbooks", "playbook", "no-playbook-fallback", "t", "task", "o", "output", "cwd", "json"}
 
 // runWorkflowAgent runs one stage; tests replace it with a fake.
 var runWorkflowAgent = func() (harness.RunAgent, error) {

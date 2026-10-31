@@ -125,6 +125,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 ## Features
 
 - Small set of file, search, shell and background-process tools, plus opt-in planning, skills (from `./skills` in `--cwd`), images, patches, subagents (read-only researchers), workers (read-write builders in their own Git worktree), web fetch, LSP and MCP tools.
+- [Playbooks](docs/playbooks.md) (`--playbooks`, `tinyagent playbooks`): Markdown checklists for bug fixes, features, refactors, PRs and investigations, picked by keywords (with one model fallback), with their skills and done checks; read only from `./playbooks` in `--cwd`; off by default.
 - Per-role model routing (`models:` in config, `--aux-model`, `--delegate-model`, `--route`, keyword or `task_type` routes, `--no-routing`) for compaction, the verify review and delegated children, each role with its own fallback chain and a `usage_by_role` cost split in the summary, JSON, trajectory, `--log-db` and eval reports; off by default.
 - Many providers: OpenAI, Anthropic, OpenRouter, Ollama, a ChatGPT subscription through Codex, handoff to your installed Claude Code (`claude-code`) or Codex CLI (`codex-exec`), and your own OpenAI-compatible endpoints.
 - Interactive chat (`tinyagent chat` or `-i`): a multi-turn conversation on the terminal with line editing, history, Ctrl-C to stop a turn and slash commands (`/cost`, `/new`, `/save`, `/compact`); every turn gets the same tools as a run, including [command tools](docs/config.md#command-tools); every session is saved and can be resumed. See [Interactive chat](docs/chat.md).
@@ -176,6 +177,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 | Project memory | [docs/memory.md](docs/memory.md) |
 | Project rules from agent failures (`ratchet`) | [docs/ratchet.md](docs/ratchet.md) |
 | AGENTS.md, skills and skill workflows | [docs/project-context.md](docs/project-context.md) |
+| Playbooks (`--playbooks`, `tinyagent playbooks`) | [docs/playbooks.md](docs/playbooks.md) |
 
 ### Models
 

@@ -38,6 +38,7 @@ Line editing works on Linux and macOS. Elsewhere chat reads plain lines (no arro
 | `/new`, `/clear` | Start a fresh conversation with a new checkpoint |
 | `/save [path]` | Save the checkpoint now, or a copy to `path` |
 | `/compact` | Compact the conversation before the next request (refused with `--no-compact`) |
+| `/playbook <name>` | Follow [playbook](playbooks.md) `<name>` from `./playbooks` for the next message only (`tinyagent chat --playbook <name>` does the same for the first message) |
 
 A message that really starts with `/` is sent with a doubled slash: `//etc/hosts is empty?` sends `/etc/hosts is empty?`.
 

@@ -38,11 +38,14 @@ Playbooks and skills are read only from inside the current working directory.
 - **Read-only and hooks:** the `skill` tool only reads, so it is available with `--read-only`. `pre_tool`/`post_tool` hooks match it as `skill`.
 - **Compaction:** loaded skill instructions are never elided by stage-1 compaction. When old turns are summarized, the latest instructions of each loaded skill are re-attached after the summary (up to 32 KiB combined; any skill left out is named so the model can reload it).
 - **Resume:** the checkpoint records whether skills were enabled and which were found. `--resume` keeps that setting (passing a conflicting `--skills`/`--no-skills` is an error) and refuses to continue if the skills catalog changed. Checkpoints from before this feature resume with skills off.
+- **Playbooks:** a [playbook](playbooks.md) can name skills in `skills:`; they load with the playbook from `./skills` without `--skills`.
 - With no skills found, the prompt and tool list are exactly as without `--skills`. `-v` prints each loaded skill and its path; warnings go to stderr and, with `--json`, as `warning` events.
 
 **Trust:** skill instructions are prompt input. A project skill from a repository you don't trust can steer the agent like a malicious AGENTS.md, and bundled scripts run with your permissions if the agent invokes them. Skill text sent to the model goes to your model provider like any other prompt, and the trajectory records loaded skill content.
 
 ### Skill workflows
+
+For a lighter option, a [playbook](playbooks.md) puts a checklist for one kind of task in the system prompt of a single run, and can hand off to a workflow with `workflow:`.
 
 `--workflow file.yaml` runs a sequence of small skills on the task (`-t`) as one automatic pipeline, for example plan, then generate, then validate, then test. Each stage is a fresh, unattended tinyagent run in `--cwd` that gets the original task and the previous stage's output. As soon as a stage passes its success check the next one starts; there is no pause or approval between stages. Without `--workflow`, tinyagent behaves exactly as before, and `--skills` Agent Skills are unaffected.
 

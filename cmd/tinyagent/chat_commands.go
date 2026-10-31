@@ -13,6 +13,7 @@ var chatCommands = []struct{ name, alias, desc string }{
 	{"/new", "/clear", "start a fresh conversation (new checkpoint)"},
 	{"/save", "", "save the checkpoint now, or to /save <path>"},
 	{"/compact", "", "compact the conversation before the next request"},
+	{"/playbook", "", "follow playbook <name> from ./playbooks for the next message"},
 }
 
 // command runs one slash command and reports whether the session ends.
@@ -77,6 +78,18 @@ func (c *chat) command(line string) bool {
 		}
 		c.compact = true
 		fmt.Fprintln(w, c.st.Dim("the next message compacts the conversation first"))
+	case "/playbook":
+		if arg == "" {
+			fmt.Fprintln(w, "usage: /playbook <name> (tinyagent playbooks list shows them)")
+			return false
+		}
+		p, err := chatPlaybook(c.s.root, arg)
+		if err != nil {
+			fmt.Fprintln(w, c.st.Red("error: "+err.Error()))
+			return false
+		}
+		c.playbook = p
+		fmt.Fprintln(w, c.st.Dim("the next message follows playbook "+p.Name))
 	default:
 		var names []string
 		for _, cmd := range chatCommands {

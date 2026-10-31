@@ -17,6 +17,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/agent"
 	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/lockdown"
+	"github.com/vicgupta/tinyagent/internal/playbooks"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
 )
 
@@ -88,8 +89,10 @@ type chat struct {
 	source  string // ResumeSource for the next turn
 	cont    bool   // the next turn continues s.traj (Continue)
 	compact bool   // /compact: compact before the next request
-	turns   int
-	start   time.Time
+	// playbook is set by /playbook and applies to the next turn only.
+	playbook *playbooks.Playbook
+	turns    int
+	start    time.Time
 
 	mu         sync.Mutex
 	cancel     context.CancelFunc // the running turn's, or nil at the prompt
@@ -160,6 +163,12 @@ func runChatIO(o *options, fs *flag.FlagSet, cio chatIO) int {
 		}
 	}
 	c := &chat{s: s, io: cio, st: styleFor(errw), start: time.Now()}
+	if o.pb.name != "" {
+		if c.playbook, err = chatPlaybook(root, o.pb.name); err != nil {
+			fmt.Fprintln(errw, "error:", err)
+			return 2
+		}
+	}
 	c.path = o.output
 	if c.path == "" {
 		if c.path, err = newChatPath(root); err != nil {
@@ -308,6 +317,11 @@ func (c *chat) prompt() string { return c.st.Bold("> ") }
 // asFollowUp is false only for re-running an unfinished checkpoint.
 func (c *chat) turn(msg string, asFollowUp bool) {
 	s, o, errw := c.s, c.s.o, c.io.errw
+	if p := c.playbook; p != nil {
+		c.playbook = nil
+		fmt.Fprintln(errw, "playbook: "+p.Name+" (/playbook)")
+		msg = chatPlaybookMessage(s.root, p, msg, func(m string) { fmt.Fprintln(errw, "warning: "+m) })
+	}
 	s.turn++
 	c.turns++
 	prev := s.traj

@@ -185,6 +185,12 @@ type AgentConfig struct {
 	// Skills turns on Agent Skills discovery from ./skills in --cwd (off by
 	// default; --skills / --no-skills override it).
 	Skills bool `yaml:"skills"`
+	// Playbooks turns on playbook routing from ./playbooks in --cwd (off by
+	// default; --playbooks). See docs/playbooks.md.
+	Playbooks bool `yaml:"playbooks"`
+	// PlaybookFallback, when false, turns off the one auxiliary-model call
+	// that picks a playbook when keywords tie or miss (default on).
+	PlaybookFallback *bool `yaml:"playbook_fallback,omitempty"`
 	// Memory configures opt-in cross-run project memory (off by default;
 	// --memory overrides Enabled). It comes only from -c or a trusted ./tinyagent.yaml (--trust-config).
 	Memory Memory `yaml:"memory"`

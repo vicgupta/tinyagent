@@ -79,6 +79,8 @@ context_window: 200000    # tokens; overrides the built-in table, used for compa
 plan:
   enabled: false          # give the model the update_plan tool (same as --plan)
 skills: false             # discover Agent Skills in ./skills and offer the skill tool (same as --skills)
+playbooks: false          # route tasks to playbooks in ./playbooks (same as --playbooks); see docs/playbooks.md
+playbook_fallback: true   # with playbooks: one aux-model call when keywords tie or miss (false = --no-playbook-fallback)
 apply_patch: false        # offer the apply_patch tool (same as --apply-patch)
 scoped_agents_md: false   # deliver AGENTS.md files below --cwd on first access (same as --scoped-agents-md)
 memory:                   # project memory; see Project memory (-c, or ./tinyagent.yaml with --trust-config)

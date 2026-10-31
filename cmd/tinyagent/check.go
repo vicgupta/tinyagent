@@ -282,6 +282,9 @@ func resolveCheck(o *options, fs *flag.FlagSet, sum *checkSummary) ([][2]string,
 		sum.Permissions = checkPermissions{Configured: true, Rules: policy.RuleCount(), Default: ps.Default, NonInteractive: ps.NonInteractive}
 		add("permissions", fmt.Sprintf("%d rules, default %s, non-interactive %s", policy.RuleCount(), policy.Summary().Default, policy.Summary().NonInteractive))
 	}
+	if v := checkPlaybooks(fs, *o, cfg); v != "" {
+		add("playbooks", v)
+	}
 	return lines, nil
 }
 

@@ -71,6 +71,18 @@ type AdditionalDir struct {
 	Mode string `json:"mode"`
 }
 
+// PlaybookInfo records the playbook a run followed: its name, how it was
+// chosen (named, keywords or model), the matched keywords, its file, and
+// the content hash of the playbook and its skills, which --resume checks.
+type PlaybookInfo struct {
+	Name     string   `json:"name"`
+	Method   string   `json:"method"`
+	Keywords []string `json:"keywords,omitempty"`
+	Path     string   `json:"path"`
+	Format   string   `json:"format"`
+	Hash     string   `json:"hash"`
+}
+
 // WorktreeInfo records the Git worktree a --worktree run worked in: its
 // path, branch, the commit it was branched from and the main repository.
 type WorktreeInfo struct {
@@ -346,6 +358,8 @@ type Trajectory struct {
 	Skills []SkillInfo `json:"skills,omitempty"`
 	// Plugins records the configured plugins that loaded (issue #173).
 	Plugins []PluginInfo `json:"plugins,omitempty"`
+	// Playbook records the playbook the run followed, if any.
+	Playbook *PlaybookInfo `json:"playbook,omitempty"`
 	// SnapshotsEnabled records whether the last invocation took opt-in
 	// workspace snapshots (--snapshots). It is per invocation: a resume may
 	// turn snapshots on or off.

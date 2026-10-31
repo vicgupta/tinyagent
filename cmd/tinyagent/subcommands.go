@@ -130,6 +130,7 @@ var subcommands = []subcommand{
 			"status":  {flag: "tinygo-status", desc: "print pinned and installed versions, path and checksum state (--tinygo-status)"},
 		},
 	},
+	playbooksSubcommand,
 }
 
 func findSubcommand(name string) *subcommand {

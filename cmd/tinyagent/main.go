@@ -115,6 +115,7 @@ type options struct {
 	workflow, workflowName                           string
 	workflowObserve                                  bool
 	skillsValidate                                   stringList
+	pb                                               playbookOpts
 	memory                                           memoryCmd
 	handoff                                          bool
 	ratchet                                          ratchetFlags
@@ -179,6 +180,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.images, "images", false, "let vision-capable models see images: the view_image tool and MCP image pass-through (default off; config images.enabled)")
 	fs.Var(&o.imagePaths, "image", fmt.Sprintf("attach this PNG, JPEG, GIF or WebP file to the task message (or a --resume follow-up); repeatable, at most %d; independent of --images", model.MaxTaskImages))
 	fs.BoolVar(&o.skills, "skills", false, "discover Agent Skills in ./skills inside --cwd and add the skill tool (default off; config skills)")
+	addPlaybookFlags(fs, &o.pb)
 	fs.BoolVar(&o.noSkills, "no-skills", false, "turn Agent Skills discovery off, overriding config skills; --no-skills=false turns it on")
 	fs.StringVar(&o.planFile, "plan-file", "", "with the plan enabled, also export the current plan as Markdown to this file after each save")
 	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "provider reasoning effort: none, minimal, low, medium, high, xhigh, or max")
@@ -316,6 +318,9 @@ func run() int {
 		}
 		return runSkillsValidate(o.skillsValidate, os.Stdout, os.Stderr)
 	}
+	if playbooksCommandSet(&o) {
+		return runPlaybooksCommand(&o, os.Stdout, os.Stderr)
+	}
 	if memoryCommandSet(fs) {
 		return runMemoryCommand(&o, fs, os.Stdout, os.Stderr)
 	}
@@ -382,10 +387,14 @@ func run() int {
 	if flagWasSet(fs, "triage") {
 		return runTriage(&o, fs, os.Stdin, os.Stdout, os.Stderr)
 	}
+	skipWorkflow, code, done := playbookGate(&o, fs, os.Stdin, os.Stderr)
+	if done {
+		return code
+	}
 	if o.interactive {
 		return runChat(&o, fs)
 	}
-	if flagWasSet(fs, "workflow") {
+	if flagWasSet(fs, "workflow") && !skipWorkflow {
 		return runWorkflow(&o, fs, os.Args[1:], os.Stdout, os.Stderr)
 	}
 	if flagWasSet(fs, "eval") {
@@ -665,6 +674,9 @@ func run() int {
 		return 2
 	}
 	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
+	if code, handoff := applyPlaybook(&o, fs, &cfg, task, os.Stdout, os.Stderr); handoff {
+		return code
+	}
 
 	root, err := canonicalRoot(o.cwd)
 	if err != nil {
@@ -877,6 +889,7 @@ func run() int {
 	db, dbErr := openLogDB(fs, o, cfg, root, task, o.modelName, false, a, warn)
 	tr, trWarn := startOTel(otelCfg, cfg, a, task, false, o.verbose)
 	a.Plugins = pluginRecords(cfg, root, !cfg.ReadOnly)
+	a.Playbook = playbookInfo(&o)
 	events = startEvents(os.Stdout, o.jsonOutput, a, false, stop, db, tr)
 	deltas.events = events
 	if events.err != nil {
@@ -884,6 +897,7 @@ func run() int {
 		return 1
 	}
 	defer events.close()
+	emitPlaybook(a.Playbook, events.emit)
 	if dbErr != nil {
 		warn(dbErr.Error())
 	}
@@ -1199,6 +1213,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if root != src.Root {
 		return fail(fmt.Errorf("resume: --cwd %s does not match the checkpoint's root %s", root, src.Root))
 	}
+	if err := resumePlaybook(&cfg, src.Playbook, root, os.Stderr); err != nil {
+		return fail(fmt.Errorf("resume: %w", err))
+	}
 	outputFiles, err := toolOutputFiles(fs, *o, cfg, root)
 	if err != nil {
 		return fail(err)
@@ -1407,6 +1424,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	db, dbErr := openLogDB(fs, *o, cfg, root, src.Task, modelName, true, a, warn)
 	tr, trWarn := startOTel(otelCfg, cfg, a, a.FollowUp, true, o.verbose)
 	a.Plugins = pluginRecords(cfg, root, false)
+	a.Playbook = src.Playbook
 	events = startEvents(os.Stdout, o.jsonOutput, a, true, stop, db, tr)
 	deltas.events = events
 	if events.err != nil {
