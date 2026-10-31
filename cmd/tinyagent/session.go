@@ -198,7 +198,7 @@ func (s *session) setup(ctx context.Context, m sessionMode) (err error) {
 	if s.helpers, err = newHelpers(cfg, s.modelName, cfg.ReasoningEffort); err != nil {
 		return err
 	}
-	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
+	model.DefaultRuntime.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 	if s.outputFiles, err = toolOutputFiles(fs, *o, cfg, root); err != nil {
 		return err
 	}

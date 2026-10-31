@@ -19,9 +19,12 @@ type Anthropic struct {
 	// Headers, if set, are added to every request after the defaults
 	// (configured providers).
 	Headers map[string]string
-	// Price, if set, replaces the Prices table entry for this model
-	// (configured providers); PriceOverride still wins.
+	// Price, if set, replaces the Runtime's price table entry for this
+	// model (configured providers); the Runtime's PriceOverride still wins.
 	Price *[3]float64
+	// Runtime supplies the HTTP client, retry policy and prices. nil uses
+	// DefaultRuntime.
+	Runtime *Runtime
 	// OmitEmptyKey sends no x-api-key header when APIKey is empty
 	// (configured providers without api_key_env).
 	OmitEmptyKey bool
@@ -202,7 +205,7 @@ func (a *Anthropic) Query(ctx context.Context, messages []Message, tools []ToolS
 		body["stream"] = true
 		resp, err = a.stream(ctx, url, headers, body)
 	} else {
-		err = postJSON(ctx, url, headers, body, &resp)
+		err = a.Runtime.postJSON(ctx, url, headers, body, &resp)
 	}
 	if err != nil {
 		return Message{}, Cost{}, err
@@ -251,13 +254,13 @@ func (a *Anthropic) Query(ctx context.Context, messages []Message, tools []ToolS
 		msg.Extra[ExtraAnthropicContent] = raw
 	}
 	u := resp.Usage
-	return msg, cachedPriceWith(a.Model, a.Price, u.InputTokens, u.CacheCreationInputTokens, u.CacheReadInputTokens, u.OutputTokens), nil
+	return msg, a.Runtime.cachedPriceWith(a.Model, a.Price, u.InputTokens, u.CacheCreationInputTokens, u.CacheReadInputTokens, u.OutputTokens), nil
 }
 
 // stream reads an SSE response into the same shape as a non-streamed
 // response, passing text deltas to OnText as they arrive.
 func (a *Anthropic) stream(ctx context.Context, url string, headers map[string]string, body any) (anthropicResponse, error) {
-	resp, err := post(ctx, url, headers, body)
+	resp, err := a.Runtime.post(ctx, url, headers, body)
 	if err != nil {
 		return anthropicResponse{}, err
 	}
