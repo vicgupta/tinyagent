@@ -28,7 +28,7 @@ func pluginRecords(cfg config.AgentConfig, root string, withMCP bool) []trajecto
 	}
 	bySkill := map[string][]string{}
 	if cfg.Skills {
-		set, _ := skills.DiscoverWith(root, skills.UserDir(), plugins.SkillSources(ls))
+		set, _ := skills.DiscoverWith(root, plugins.SkillSources(ls))
 		for _, k := range set.Skills {
 			if k.Plugin != "" {
 				bySkill[k.Plugin] = append(bySkill[k.Plugin], k.Name)

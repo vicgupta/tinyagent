@@ -32,9 +32,9 @@ func skillsRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	for path, body := range map[string]string{
-		".git/HEAD":                       "",
-		".agents/skills/release/SKILL.md": "---\nname: release\ndescription: Cut a release.\n---\nsteps\n",
-		".agents/skills/broken/SKILL.md":  "---\nname: broken\n---\nno description\n",
+		".git/HEAD":               "",
+		"skills/release/SKILL.md": "---\nname: release\ndescription: Cut a release.\n---\nsteps\n",
+		"skills/broken/SKILL.md":  "---\nname: broken\n---\nno description\n",
 	} {
 		p := filepath.Join(dir, path)
 		os.MkdirAll(filepath.Dir(p), 0o755)
@@ -104,5 +104,33 @@ func TestSkillsWarningsInJSON(t *testing.T) { // AC14
 	}
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "broken") || !strings.Contains(warnings[0], "description") {
 		t.Errorf("warnings = %q", warnings)
+	}
+}
+
+// Skills are read only from ./skills inside --cwd: nothing in the home
+// folder, and ./.agents/skills only earns a one-line hint.
+func TestSkillsCwdOnlyAndLegacyHint(t *testing.T) {
+	var offered atomic.Bool
+	skillsServer(t, &offered)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, p := range []string{".agents/skills/mine/SKILL.md", "skills/mine2/SKILL.md", ".agents/playbooks/p.md", "playbooks/p.md"} {
+		path := filepath.Join(home, p)
+		os.MkdirAll(filepath.Dir(path), 0o755)
+		os.WriteFile(path, []byte("---\nname: home\ndescription: From home.\n---\nhome body\n"), 0o644)
+	}
+	dir := skillsRepo(t)
+	old := filepath.Join(dir, ".agents/skills/old/SKILL.md")
+	os.MkdirAll(filepath.Dir(old), 0o755)
+	os.WriteFile(old, []byte("---\nname: old\ndescription: Old.\n---\nold body\n"), 0o644)
+	code, stdout, stderr := runSkills(t, dir, "--skills", "-v")
+	if code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	if n := strings.Count(stderr, "no longer read"); n != 1 || !strings.Contains(stderr, filepath.Join(dir, "skills")) {
+		t.Errorf("hint count %d, stderr %q", n, stderr)
+	}
+	if strings.Count(stdout, "loaded skill ") != 1 || !strings.Contains(stdout, "loaded skill release") || strings.Contains(stdout+stderr, home) {
+		t.Errorf("stdout %q, stderr %q", stdout, stderr)
 	}
 }

@@ -145,7 +145,7 @@ func TestPluginMCPConfigErrors(t *testing.T) { // AC3, AC11, AC13, AC14
 		"mcp.json":             `{"$schema":"https://agent-plugins.org/schemas/1.0.0/mcp.schema.json","mcpServers":{},"extra":1}`,
 		"skills/lint/SKILL.md": "---\nname: lint\ndescription: Lint.\n---\n",
 	})
-	code, stdout, stderr := runSkills(t, t.TempDir(), "-c", pluginConfig(t, "plugins:\n  - path: "+odd+"\n"), "--skills", "-v")
+	code, stdout, stderr := runSkills(t, filepath.Dir(odd), "-c", pluginConfig(t, "plugins:\n  - path: "+odd+"\n"), "--skills", "-v")
 	if code != 0 || !strings.Contains(stderr, "MCP is disabled") || !strings.Contains(stdout+stderr, "loaded skill lint") {
 		t.Errorf("odd: exit %d, stderr %q", code, stderr)
 	}

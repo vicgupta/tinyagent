@@ -29,7 +29,8 @@ func TestListPlugins(t *testing.T) { // AC2, AC11, AC18
 	os.MkdirAll(filepath.Join(dir, "skills", "lint"), 0o755)
 	os.WriteFile(filepath.Join(dir, "skills", "lint", "SKILL.md"), []byte("---\nname: lint\ndescription: Lint.\n---\n"), 0o644)
 	cfg := pluginConfig(t, "plugins:\n  - path: "+dir+"\n    mcp_servers:\n      - server: validator\n        alias: kit\n        tools: [echo]\n")
-	code, stdout, stderr = runCLI(t, "--list-plugins", "-c", cfg)
+	// Plugin skills are read only from inside --cwd.
+	code, stdout, stderr = runCLI(t, "--list-plugins", "--cwd", filepath.Dir(dir), "-c", cfg)
 	if code != 0 {
 		t.Fatalf("kit: exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
@@ -92,7 +93,7 @@ func TestPluginRecords(t *testing.T) { // AC1, AC16
 	os.WriteFile(filepath.Join(dir, "skills", "lint", "SKILL.md"), []byte("---\nname: lint\ndescription: Lint.\n---\n"), 0o644)
 	cfg := pluginConfig(t, "plugins:\n  - path: "+dir+"\n    mcp_servers:\n      - server: validator\n        alias: kit\n        tools: [echo]\n")
 	out := filepath.Join(t.TempDir(), "run.json")
-	code, stdout, stderr := runSkills(t, t.TempDir(), "-c", cfg, "--skills", "--json", "-o", out)
+	code, stdout, stderr := runSkills(t, filepath.Dir(dir), "-c", cfg, "--skills", "--json", "-o", out)
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}

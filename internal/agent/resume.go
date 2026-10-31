@@ -81,7 +81,7 @@ func ValidateResume(t *trajectory.Trajectory, cfg config.AgentConfig, root strin
 	}
 	var set *skills.Set
 	if t.SkillsEnabled {
-		set, _ = skills.Discover(root, skills.UserDir())
+		set, _ = skills.Discover(root)
 	}
 	sel := checkpointSelection(t, set)
 	if t.ToolSignature != sel.Signature() {

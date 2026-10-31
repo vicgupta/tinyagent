@@ -12,7 +12,7 @@ plugins:
 
 - `path` must be absolute and an existing directory; the same directory listed twice (after resolving symlinks) is a config error, as are unknown keys. A profile's `plugins:` replaces the base list.
 - The manifest is validated (`$schema`, `name`, optional `version`). A plugin with an invalid or missing manifest is skipped with a warning; unknown manifest fields only warn. Two plugins with the same `name` are a config error (exit 2).
-- With `--skills`, skills under `<plugin>/skills/` join the catalog with the lowest precedence (see [Agent Skills](project-context.md#agent-skills)). Skill folders or a `skills` directory that resolve outside the plugin root are skipped with a warning.
+- With `--skills`, skills under `<plugin>/skills/` join the catalog with the lowest precedence (see [Agent Skills](project-context.md#agent-skills)). Plugin skills are read only when the plugin directory is inside `--cwd`; a plugin outside it contributes no skills (a warning names it). Skill folders or a `skills` directory that resolve outside the plugin root or `--cwd` are skipped with a warning.
 - **MCP servers.** A plugin's `mcp.json` servers start only when listed under that plugin's `mcp_servers`, with an explicit allowlist, exactly like `mcp_servers` entries:
 
   ```yaml

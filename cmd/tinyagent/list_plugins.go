@@ -63,7 +63,7 @@ func runListPlugins(o *options, fs *flag.FlagSet, w io.Writer) int {
 	if r, err := canonicalRoot(o.cwd); err == nil {
 		root = r
 	}
-	set, warnings := skills.DiscoverWith(root, skills.UserDir(), plugins.SkillSources(ls))
+	set, warnings := skills.DiscoverWith(root, plugins.SkillSources(ls))
 	code := 0
 	for i, l := range ls {
 		if l.Err != nil {

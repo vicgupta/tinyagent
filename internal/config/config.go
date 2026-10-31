@@ -182,7 +182,7 @@ type AgentConfig struct {
 	// results and the read-only lsp tool (off by default; --lsp overrides
 	// Enabled). It comes only from -c or a trusted ./tinyagent.yaml (--trust-config).
 	LSP LSP `yaml:"lsp"`
-	// Skills turns on Agent Skills discovery from .agents/skills (off by
+	// Skills turns on Agent Skills discovery from ./skills in --cwd (off by
 	// default; --skills / --no-skills override it).
 	Skills bool `yaml:"skills"`
 	// Memory configures opt-in cross-run project memory (off by default;

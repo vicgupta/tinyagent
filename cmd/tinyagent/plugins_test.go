@@ -29,10 +29,17 @@ func TestPluginSkills(t *testing.T) {
 		"skills/lint/SKILL.md":    "---\nname: lint\ndescription: Lint the code.\n---\nlint steps\n",
 		"skills/release/SKILL.md": "---\nname: release\ndescription: Plugin release.\n---\n",
 	})
+	// Plugin skills are read only from inside --cwd, so the plugin lives there.
+	repoDir := skillsRepo(t)
+	inside := filepath.Join(repoDir, "kit")
+	if err := os.Rename(kit, inside); err != nil {
+		t.Fatal(err)
+	}
+	kit = inside
 	bad := t.TempDir()
 	cfg := filepath.Join(t.TempDir(), "c.yaml")
 	os.WriteFile(cfg, []byte("plugins:\n  - path: "+kit+"\n  - path: "+bad+"\n"), 0o644)
-	code, stdout, stderr := runSkills(t, skillsRepo(t), "-c", cfg, "--skills", "-v")
+	code, stdout, stderr := runSkills(t, repoDir, "-c", cfg, "--skills", "-v")
 	if code != 0 || !offered.Load() {
 		t.Fatalf("exit %d, stderr %q", code, stderr)
 	}

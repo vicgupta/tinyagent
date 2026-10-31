@@ -178,7 +178,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.askUser, "ask-user", false, "add the ask_user tool: the model may end the run with one question (status NeedsInput, exit 4), answered with --resume <trajectory> -t \"<answer>\"; requires -o (default off; config ask_user.enabled)")
 	fs.BoolVar(&o.images, "images", false, "let vision-capable models see images: the view_image tool and MCP image pass-through (default off; config images.enabled)")
 	fs.Var(&o.imagePaths, "image", fmt.Sprintf("attach this PNG, JPEG, GIF or WebP file to the task message (or a --resume follow-up); repeatable, at most %d; independent of --images", model.MaxTaskImages))
-	fs.BoolVar(&o.skills, "skills", false, "discover Agent Skills in .agents/skills (project, up to the repo root, and ~/.agents/skills) and add the skill tool (default off; config skills)")
+	fs.BoolVar(&o.skills, "skills", false, "discover Agent Skills in ./skills inside --cwd and add the skill tool (default off; config skills)")
 	fs.BoolVar(&o.noSkills, "no-skills", false, "turn Agent Skills discovery off, overriding config skills; --no-skills=false turns it on")
 	fs.StringVar(&o.planFile, "plan-file", "", "with the plan enabled, also export the current plan as Markdown to this file after each save")
 	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "provider reasoning effort: none, minimal, low, medium, high, xhigh, or max")
@@ -2887,7 +2887,10 @@ func skillsFlag(fs *flag.FlagSet, o options) (on, set bool, err error) {
 // loadSkills discovers skills for a run rooted at root, reporting each
 // problem through warn and, with -v, one line per skill.
 func loadSkills(a *agent.Agent, root string, plugins []skills.PluginSource, warn func(string)) {
-	set, warnings := skills.DiscoverWith(root, skills.UserDir(), plugins)
+	if hint := skills.LegacyHint(root); hint != "" {
+		warn(hint)
+	}
+	set, warnings := skills.DiscoverWith(root, plugins)
 	for _, w := range warnings {
 		warn(w)
 	}

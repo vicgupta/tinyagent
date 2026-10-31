@@ -78,7 +78,7 @@ output_price_per_mtok: 15
 context_window: 200000    # tokens; overrides the built-in table, used for compaction
 plan:
   enabled: false          # give the model the update_plan tool (same as --plan)
-skills: false             # discover Agent Skills and offer the skill tool (same as --skills)
+skills: false             # discover Agent Skills in ./skills and offer the skill tool (same as --skills)
 apply_patch: false        # offer the apply_patch tool (same as --apply-patch)
 scoped_agents_md: false   # deliver AGENTS.md files below --cwd on first access (same as --scoped-agents-md)
 memory:                   # project memory; see Project memory (-c, or ./tinyagent.yaml with --trust-config)

@@ -16,14 +16,12 @@ func skillCall(name, args string) model.ToolCall {
 }
 
 func TestSkillToolCatalogAndReadOnly(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	userSkill := filepath.Join(home, ".agents", "skills", "mine", "SKILL.md")
+	root := t.TempDir()
+	userSkill := filepath.Join(root, "skills", "mine", "SKILL.md")
 	os.MkdirAll(filepath.Dir(userSkill), 0o755)
 	os.WriteFile(userSkill, []byte("---\nname: mine\ndescription: Mine.\n---\nuser body\n"), 0o644)
-	root := t.TempDir()
 	os.Mkdir(filepath.Join(root, ".git"), 0o755)
-	set, _ := skills.Discover(root, skills.UserDir())
+	set, _ := skills.Discover(root)
 
 	for _, ro := range []bool{false, true} {
 		e := &Executor{Root: root, ReadOnly: ro}
@@ -44,11 +42,6 @@ func TestSkillToolCatalogAndReadOnly(t *testing.T) {
 		out := r.Text
 		if r.IsError || !strings.Contains(out, "user body") {
 			t.Errorf("read-only %v: %q", ro, out)
-		}
-		// AC7: other tools still cannot read outside the root.
-		out = e.RunResult(context.Background(), skillCall("read_file", `{"path":"`+userSkill+`"}`)).Text
-		if strings.Contains(out, "user body") {
-			t.Errorf("read-only %v: read_file escaped the root: %q", ro, out)
 		}
 	}
 }
