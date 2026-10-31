@@ -393,6 +393,7 @@ Output:
   -v, --verbose                           print tool outputs
       --no-stream                         wait for full responses instead of streaming
       --json                              write run events as JSONL to stdout
+      --color when                        color output: auto (terminal and NO_COLOR unset), always or never (default "auto")
       --output-schema path                end the run with a JSON result validated against this JSON Schema file (printed to stdout)
       --log-db [=path]                    also log run events to SQLite (default .tinyagent/tinyagent.db under --cwd); --log-db=false turns config log_db off
       --otel                              export the run as an OpenTelemetry trace over OTLP/HTTP (otel.endpoint, else OTEL_EXPORTER_OTLP_ENDPOINT, else localhost:4318); OTEL_* variables alone never turn it on (default off; config otel.enabled)
