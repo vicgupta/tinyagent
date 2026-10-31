@@ -12,6 +12,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/hooks"
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/permissions"
+	"github.com/vicgupta/tinyagent/internal/routing"
 	"github.com/vicgupta/tinyagent/internal/tools"
 )
 
@@ -158,6 +159,15 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 	default:
 		add("fallback", strings.Join(fallbacks, ", ")+" (from config)")
 	}
+	if flagWasSet(fs, "subagents") {
+		cfg.Subagents.Enabled = o.subagents
+	}
+	if flagWasSet(fs, "workers") {
+		setWorkers(&cfg, o.workers)
+	}
+	for _, r := range checkRoutes(cfg, spec) {
+		add(r.Task, r.Model+" ("+r.Role+", from "+r.Source+")")
+	}
 	cwdSource := "default"
 	if flagWasSet(fs, "cwd") {
 		cwdSource = "from --cwd"
@@ -281,4 +291,17 @@ func providerStatus(spec string, m model.Model) string {
 		s += " (OPENAI_BASE_URL is set)"
 	}
 	return s
+}
+
+// checkRoutes lists the delegated routes --check reports: the delegate and
+// worker tasks when those tools are on.
+func checkRoutes(cfg config.AgentConfig, main string) []routing.Route {
+	var out []routing.Route
+	if cfg.Subagents.Enabled {
+		out = append(out, routing.Delegated(cfg, main, routing.TaskDelegate))
+	}
+	if workersEnabled(cfg) {
+		out = append(out, routing.Delegated(cfg, main, routing.TaskWorker))
+	}
+	return out
 }

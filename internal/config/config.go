@@ -157,6 +157,9 @@ type AgentConfig struct {
 	// read-only child agent (off by default; --subagents overrides
 	// Enabled).
 	Subagents Subagents `yaml:"subagents"`
+	// Models routes roles and tasks to their own models (empty by
+	// default: every task uses the main model).
+	Models Models `yaml:"models,omitempty"`
 	// WebFetch configures the opt-in web_fetch tool (off by default;
 	// --web-fetch overrides Enabled).
 	WebFetch WebFetch `yaml:"web_fetch"`
@@ -1181,6 +1184,9 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		return cfg, fmt.Errorf("config %s: max_output_tokens must be a whole number >= 0, got %d", src, cfg.MaxOutputTokens)
 	}
 	if err := validateWorkers(cfg.Subagents.Workers); err != nil {
+		return cfg, fmt.Errorf("config %s: %w", src, err)
+	}
+	if err := validateModels(&cfg); err != nil {
 		return cfg, fmt.Errorf("config %s: %w", src, err)
 	}
 	if cfg.Subagents.MaxSteps < 0 {

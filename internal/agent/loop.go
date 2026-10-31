@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/vicgupta/tinyagent/internal/routing"
 	"io"
 	"os"
 	"path/filepath"
@@ -188,6 +189,9 @@ type Agent struct {
 	// Workers runs the opt-in worker tool's children; Tools.Workers
 	// offers the tool. nil leaves worker calls failing with an error.
 	Workers *Workers
+	// Routes are the resolved model routes (main, delegated tasks) this
+	// run uses, reported in run.started; informational only.
+	Routes []routing.Route
 	// isWorker is set on a worker child.
 	isWorker bool
 	// scopedReported dedupes this invocation's instructions.skipped reports.

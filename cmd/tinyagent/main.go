@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/vicgupta/tinyagent/internal/routing"
 	"io"
 	"math"
 	"os"
@@ -776,6 +777,7 @@ func run() int {
 		Snapshots:      snaps,
 		Subagents:      subagents,
 		Workers:        workers,
+		Routes:         modelRoutes(cfg, o.modelName, subagents, workers),
 		Worktree:       worktree,
 		Review:         reviewInfo,
 		TaskImages:     taskImages,
@@ -1341,6 +1343,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		TaskImages:     taskImages,
 		Subagents:      subagents,
 		Workers:        workers,
+		Routes:         modelRoutes(cfg, modelName, subagents, workers),
 		Lockdown:       lock,
 	}
 	if policy != nil && !o.jsonOutput {
@@ -2210,6 +2213,9 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	}
 	started := map[string]any{"schema_version": 1, "model": a.ModelName, "root": a.Tools.Root, "read_only": a.Tools.ReadOnly, "resumed": resumed}
 	addAttemptLink(started)
+	if len(a.Routes) > 0 {
+		started["models"] = routing.Info(a.Routes)
+	}
 	if a.ReasoningEffort != "" {
 		started["reasoning_effort"] = a.ReasoningEffort
 	}

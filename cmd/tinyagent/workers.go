@@ -7,6 +7,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/agent"
 	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/gitwt"
+	"github.com/vicgupta/tinyagent/internal/routing"
 )
 
 // workersEnabled reports whether config turns the worker tool on.
@@ -28,25 +29,25 @@ func setWorkers(cfg *config.AgentConfig, on bool) {
 	cfg.Subagents.Workers.Enabled = on
 }
 
-// newWorkers builds the worker children's model when workers are on:
-// subagents.workers.model, or the parent's model spec when it is empty,
-// with the same provider rules as newSubagents. It returns nil when
-// workers are off.
+// newWorkers builds the worker children's model when workers are on: the
+// delegated route for the worker task (models.delegated.tasks.worker or
+// its alias subagents.workers.model, then models.delegated.model, then the
+// parent's model spec), with the same provider rules as newSubagents. It
+// returns nil when workers are off.
 func newWorkers(cfg config.AgentConfig, parentModel, reasoningEffort string) (*agent.Workers, error) {
 	if !workersEnabled(cfg) {
 		return nil, nil
 	}
 	w := cfg.Subagents.Workers
-	c := cfg
-	c.Subagents = config.Subagents{Enabled: true, Model: w.Model}
-	s, err := newSubagents(c, parentModel, reasoningEffort)
+	r := routing.Delegated(cfg, parentModel, routing.TaskWorker)
+	m, err := newChildModel(cfg, r.Model, parentModel, reasoningEffort)
 	if err != nil {
-		if w.Model != "" {
-			return nil, fmt.Errorf("subagents.workers.model %q: %w", w.Model, errors.Unwrap(err))
+		if r.Source == routing.SourceMain {
+			return nil, fmt.Errorf("workers: %w", err)
 		}
-		return nil, fmt.Errorf("workers: %w", errors.Unwrap(err))
+		return nil, fmt.Errorf("%s %q: %w", r.Source, r.Model, err)
 	}
-	return &agent.Workers{Model: s.Model, ModelName: s.ModelName, MaxSteps: w.MaxSteps, Tools: w.Tools, MaxConcurrent: w.MaxConcurrent}, nil
+	return &agent.Workers{Model: m, ModelName: r.Model, MaxSteps: w.MaxSteps, Tools: w.Tools, MaxConcurrent: w.MaxConcurrent}, nil
 }
 
 // checkWorkers rejects --workers when its preconditions can't hold, before
