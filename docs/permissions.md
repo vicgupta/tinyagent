@@ -48,6 +48,8 @@ Every decision is recorded: a `permission` event goes to `--json`, `--log-db` an
 
 **This is a guardrail, not a security boundary.** Command-text matching cannot stop a determined model from running something equivalent (for example `Bash(rm *)` doesn't stop `/bin/rm` or `bash -c 'rm ...'`). For real containment keep using [`--sandbox`](sandbox.md#sandboxing-commands), [`sandbox_allowed_domains`](sandbox.md#sandboxing-commands) and `--env container`. Older tinyagent versions reject a config containing `permissions`.
 
+In [`tinyagent chat`](chat.md), `ask` rules prompt on the terminal before the tool runs, as in a normal terminal run.
+
 ### Tool hooks
 
 Hooks are disabled unless `hooks` is configured. A `pre_tool` hook runs before a matching tool call and can deny it with a reason the model sees; a `post_tool` hook runs after it and can append feedback, such as formatter or linter output, to the result the model sees. Like MCP servers, hooks are trusted local executables running with your privileges: they are read only from `-c` or a trusted `./tinyagent.yaml` (`--trust-config`), never from the repository, launched directly (no shell) with an absolute `command`, `--cwd` as the working directory, and the same minimal environment (`PATH`, the Windows process variables when present, and only the named `env` variables, which must be set at startup). Provider API keys are not passed unless named. Hooks are a guardrail and automation point, not a sandbox: they see a call's parsed arguments, not what a shell command actually does.

@@ -157,6 +157,9 @@ type AgentConfig struct {
 	// ApplyPatch offers the opt-in apply_patch tool (off by default;
 	// --apply-patch overrides it).
 	ApplyPatch bool `yaml:"apply_patch"`
+	// ChatHistory records interactive chat input in <cwd>/history/chat_history
+	// (default on; false or --no-chat-history keeps it in memory only).
+	ChatHistory *bool `yaml:"chat_history,omitempty"`
 	// ScopedAgentsMD also delivers AGENTS.md files in directories below
 	// --cwd with the results of file tools touching paths there (off by
 	// default; --scoped-agents-md overrides it).

@@ -53,6 +53,8 @@ Use the full path to the binary. Pass `-m`, `-c`, `--profile` and any policy fla
 
 **Trust model:** the editor controls the prompts and the `cwd`, so it has the same power as whoever runs `tinyagent -t` in that directory. Everything that limits what tinyagent may do (the tool set, `--read-only`, `--sandbox`, `file_access`, `command_env`, hooks and limits) comes from your config and flags, and ACP adds no way to loosen it. Repository content stays untrusted prompt input, as in any run.
 
+For a conversation in the terminal instead of an editor, use [`tinyagent chat`](chat.md); it shares the ACP session code, with the same lockdown and MCP handling.
+
 ## GitHub Actions
 
 `action.yml` at the root of this repo is a composite action. It installs a tinyagent release on a Linux or macOS runner (amd64 or arm64), checks it against the release's `SHA256SUMS`, runs one task or review, and sets the result as step outputs. It adds no agent behavior: every input maps to an existing flag.

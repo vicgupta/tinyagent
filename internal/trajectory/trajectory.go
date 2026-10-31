@@ -493,7 +493,7 @@ type ModelSwitch struct {
 // Indexes refer to Trajectory.Messages.
 type Compaction struct {
 	Step         int    `json:"step"`   // steps completed when it ran
-	Reason       string `json:"reason"` // "proactive" or "overflow"
+	Reason       string `json:"reason"` // "proactive", "overflow" or "requested" (chat /compact)
 	Stage        string `json:"stage"`  // "elide" or "summarize"
 	TokensBefore int    `json:"tokens_before"`
 	TokensAfter  int    `json:"tokens_after"`

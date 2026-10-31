@@ -96,6 +96,9 @@ type Agent struct {
 	Verbose       bool
 	// Streamed means the model already wrote its text to Out as it arrived.
 	Streamed bool
+	// CompactFirst compacts the conversation before the run's first model
+	// request, whatever its size (chat's /compact). NoCompact wins.
+	CompactFirst bool
 	// SkipAgentsMD stops Run from appending the nearest AGENTS.md at or above
 	// <root> to the system prompt.
 	SkipAgentsMD bool
@@ -539,8 +542,14 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			return a.finish(t, status, "")
 		}
 		a.warnBudget(t, v)
-		if a.needsCompaction(t, v) {
-			if err := a.compact(ctx, t, v, "proactive"); err != nil {
+		reason := "proactive"
+		if a.CompactFirst && !a.NoCompact && len(v.msgs) > 2 {
+			a.CompactFirst, reason = false, "requested"
+		} else if !a.needsCompaction(t, v) {
+			reason = ""
+		}
+		if reason != "" {
+			if err := a.compact(ctx, t, v, reason); err != nil {
 				return a.compactFailed(ctx, t, err)
 			}
 			if status, ok := a.checkLimits(ctx, t); !ok {
