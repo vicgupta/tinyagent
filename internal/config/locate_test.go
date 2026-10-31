@@ -19,6 +19,7 @@ command_tools:
 tinygo: /opt/tinygo
 claude_code: {path: /bin/claude}
 codex_exec: {path: /bin/codex}
+opencode: {path: /bin/opencode}
 verify_on_stop: {checks: [make test]}
 step_limit: 7
 `
@@ -30,7 +31,7 @@ step_limit: 7
 		t.Skipf("fixture doesn't match this config schema: %v", err)
 	}
 	got := StripUntrusted(&cfg)
-	want := []string{"mcp_servers", "hooks", "command_tools", "tinygo", "claude_code.path", "codex_exec.path", "verify_on_stop.checks"}
+	want := []string{"mcp_servers", "hooks", "command_tools", "tinygo", "claude_code.path", "codex_exec.path", "opencode.path", "verify_on_stop.checks"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("stripped %v, want %v", got, want)
 	}

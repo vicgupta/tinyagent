@@ -121,6 +121,8 @@ type AgentConfig struct {
 	// handoff providers (docs/models.md). Unset looks the CLI up on PATH.
 	ClaudeCode HandoffCLI `yaml:"claude_code,omitempty"`
 	CodexExec  HandoffCLI `yaml:"codex_exec,omitempty"`
+	// OpenCode configures the opencode handoff provider the same way.
+	OpenCode HandoffCLI `yaml:"opencode,omitempty"`
 
 	MCPServers []MCPServer `yaml:"mcp_servers,omitempty"`
 
@@ -993,7 +995,7 @@ type HandoffCLI struct {
 }
 
 // BuiltinProviders are reserved and can't be used as a providers[].id.
-var BuiltinProviders = []string{"openai", "openrouter", "anthropic", "ollama", "codex", "claude-code", "codex-exec"}
+var BuiltinProviders = []string{"openai", "openrouter", "anthropic", "ollama", "codex", "claude-code", "codex-exec", "opencode"}
 
 // ErrInvalidProvider wraps every providers validation error, so callers can
 // exit 2 for them.
