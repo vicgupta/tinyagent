@@ -24,8 +24,10 @@ type Models struct {
 
 // RouteFlags are the routing flags of one invocation.
 type RouteFlags struct {
-	AuxModel string            // --aux-model
-	Routes   map[string]string // --route task=spec
+	AuxModel      string            // --aux-model
+	DelegateModel string            // --delegate-model
+	Routes        map[string]string // --route task=spec
+	NoFallback    bool              // --no-fallback also clears every role's fallback_models
 }
 
 // RoleModels is one role's models: a default for the role and optional
@@ -35,6 +37,10 @@ type RoleModels struct {
 	Model string `yaml:"model,omitempty"`
 	// Tasks maps a task name to its own provider/model.
 	Tasks map[string]string `yaml:"tasks,omitempty"`
+	// FallbackModels is the role's own fallback chain, tried in order
+	// when its model keeps failing; empty means none. It never inherits
+	// the main model's fallback_models.
+	FallbackModels []string `yaml:"fallback_models,omitempty"`
 }
 
 // AuxiliaryTasks are the task names models.auxiliary.tasks accepts.
@@ -70,6 +76,22 @@ func validateModels(cfg *AgentConfig) error {
 func validateRole(role string, r RoleModels, tasks []string) error {
 	if err := checkSpec("models."+role+".model", r.Model); err != nil {
 		return err
+	}
+	if len(r.FallbackModels) > 3 {
+		return fmt.Errorf("models.%s.fallback_models: at most 3 fallback models are allowed, got %d", role, len(r.FallbackModels))
+	}
+	seen := map[string]bool{}
+	for _, f := range r.FallbackModels {
+		if strings.TrimSpace(f) == "" {
+			return fmt.Errorf("models.%s.fallback_models: empty entry", role)
+		}
+		if err := checkSpec("models."+role+".fallback_models", f); err != nil {
+			return err
+		}
+		if seen[f] {
+			return fmt.Errorf("models.%s.fallback_models: %q is listed more than once", role, f)
+		}
+		seen[f] = true
 	}
 	keys := make([]string, 0, len(r.Tasks))
 	for k := range r.Tasks {

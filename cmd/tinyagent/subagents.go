@@ -22,12 +22,12 @@ func newSubagents(cfg config.AgentConfig, parentModel, reasoningEffort string) (
 		return nil, nil
 	}
 	r := routing.Delegated(cfg, parentModel, routing.TaskDelegate)
-	m, err := newChildModel(cfg, r.Model, parentModel, reasoningEffort)
+	m, err := routedModel(cfg, r, parentModel, reasoningEffort)
 	if err != nil {
 		if r.Source == routing.SourceMain {
 			return nil, fmt.Errorf("subagents: %w", err)
 		}
-		return nil, fmt.Errorf("%s %q: %w", r.Source, r.Model, err)
+		return nil, err
 	}
 	return &agent.Subagents{Model: m, ModelName: r.Model, MaxSteps: cfg.Subagents.MaxSteps}, nil
 }

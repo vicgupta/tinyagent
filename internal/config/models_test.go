@@ -51,3 +51,21 @@ func TestAuxiliaryModelsConfig(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+func TestRoleFallbackModelsConfig(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	write(t, p, "models:\n  delegated:\n    fallback_models: [a/b, c/d]\n")
+	if cfg, err := Load(p); err != nil || len(cfg.Models.Delegated.FallbackModels) != 2 {
+		t.Fatalf("%+v %v", cfg.Models.Delegated, err)
+	}
+	for _, c := range []struct{ body, want string }{
+		{"models:\n  auxiliary:\n    fallback_models: [a/b, a/b]\n", "listed more than once"},
+		{"models:\n  delegated:\n    fallback_models: [a, b, c, d]\n", "at most 3"},
+		{"models:\n  delegated:\n    fallback_models: [\"\"]\n", "empty entry"},
+	} {
+		write(t, p, c.body)
+		if _, err := Load(p); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: err = %v", c.body, err)
+		}
+	}
+}

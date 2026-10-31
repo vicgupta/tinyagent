@@ -166,7 +166,16 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 		setWorkers(&cfg, o.workers)
 	}
 	for _, r := range checkRoutes(cfg, spec) {
-		add(r.Task, r.Model+" ("+r.Role+", from "+r.Source+")")
+		if r.Model != spec || len(r.Fallbacks) > 0 {
+			if _, err := routedModel(cfg, r, spec, cfg.ReasoningEffort); err != nil {
+				return nil, err
+			}
+		}
+		line := r.Model + " (" + r.Role + ", from " + r.Source + ")"
+		if len(r.Fallbacks) > 0 {
+			line += ", fallback " + strings.Join(r.Fallbacks, " -> ")
+		}
+		add(r.Task, line)
 	}
 	cwdSource := "default"
 	if flagWasSet(fs, "cwd") {

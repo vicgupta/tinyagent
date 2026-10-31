@@ -110,3 +110,29 @@ func TestRouteFlagErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestDelegatedRoutingFlagsAndFallbacks(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test")
+	cfg := writeCfg(t, "models:\n  delegated:\n    fallback_models: [openai/gpt-5-nano]\n")
+	code, out, stderr := runCLI(t, "--check", "-c", cfg, "--cwd", t.TempDir(), "--subagents", "--delegate-model", "openai/gpt-5-mini")
+	if code != 0 || !strings.Contains(out, "delegate:  openai/gpt-5-mini (delegated, from --delegate-model), fallback openai/gpt-5-nano") {
+		t.Errorf("exit %d, --check:\n%s%s", code, out, stderr)
+	}
+	code, out, _ = runCLI(t, "--check", "-c", cfg, "--cwd", t.TempDir(), "--subagents", "--route", "delegate=openai/gpt-4.1", "--no-fallback")
+	if code != 0 || !strings.Contains(out, "delegate:  openai/gpt-4.1 (delegated, from --route delegate)\n") {
+		t.Errorf("exit %d, --check with --route and --no-fallback:\n%s", code, out)
+	}
+	bad := writeCfg(t, "models:\n  delegated:\n    fallback_models: [nosuch/model]\n")
+	if code, _, stderr := runCLI(t, "--check", "-c", bad, "--cwd", t.TempDir(), "--subagents", "--delegate-model", "openai/gpt-5-mini"); code == 0 || !strings.Contains(stderr, "models.delegated.fallback_models") {
+		t.Errorf("bad fallback: exit %d, stderr %s", code, stderr)
+	}
+}
+
+func TestRunStartedDelegatedFallbacks(t *testing.T) {
+	cfg := writeCfg(t, "models:\n  delegated:\n    model: openai/gpt-5-mini\n    fallback_models: [openai/gpt-5-nano]\n")
+	m := runStartedModels(t, "-c", cfg, "--subagents")
+	d, _ := m["delegate"].(map[string]any)
+	if fb, _ := d["fallback_models"].([]any); len(fb) != 1 || fb[0] != "openai/gpt-5-nano" {
+		t.Errorf("delegate route = %v", d)
+	}
+}

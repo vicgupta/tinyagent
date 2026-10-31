@@ -28,3 +28,24 @@ func TestDelegatedResolutionOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestDelegatedFlagsAndFallbacks(t *testing.T) {
+	var cfg config.AgentConfig
+	cfg.Subagents.Model = "x/alias"
+	cfg.Models.Delegated.FallbackModels = []string{"x/fb", "x/route"}
+	cfg.Models.Flags.DelegateModel = "x/flag"
+	if r := Delegated(cfg, "x/main", TaskWorker); r.Model != "x/flag" || r.Source != "--delegate-model" || len(r.Fallbacks) != 2 {
+		t.Errorf("worker = %+v", r)
+	}
+	if r := Delegated(cfg, "x/main", TaskDelegate); r.Source != "subagents.model" {
+		t.Errorf("alias should beat --delegate-model: %+v", r)
+	}
+	cfg.Models.Flags.Routes = map[string]string{"delegate": "x/route"}
+	if r := Delegated(cfg, "x/main", TaskDelegate); r.Model != "x/route" || len(r.Fallbacks) != 1 {
+		t.Errorf("route = %+v (its own model is dropped from the chain)", r)
+	}
+	cfg.Models.Flags.NoFallback = true
+	if r := Delegated(cfg, "x/main", TaskDelegate); len(r.Fallbacks) != 0 {
+		t.Errorf("--no-fallback kept %v", r.Fallbacks)
+	}
+}
