@@ -190,6 +190,24 @@ func LoadSkills(dir string) (map[string]*Skill, error) {
 	return out, nil
 }
 
+// LoadSkillFile reads and parses one skill file with the same rules
+// LoadSkills applies: its name is the file stem, or the folder name for a
+// <name>/SKILL.md, and must be a valid skill name.
+func LoadSkillFile(path string) (*Skill, error) {
+	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	if strings.EqualFold(filepath.Base(path), "SKILL.md") {
+		name = filepath.Base(filepath.Dir(path))
+	}
+	if !reName.MatchString(name) {
+		return nil, fmt.Errorf("skill %q: name must be lowercase letters, digits, '.', '_' or '-'", name)
+	}
+	data, err := readCapped(path)
+	if err != nil {
+		return nil, fmt.Errorf("skill %s: %v", name, err)
+	}
+	return ParseSkill(name, path, data)
+}
+
 func readCapped(path string) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {

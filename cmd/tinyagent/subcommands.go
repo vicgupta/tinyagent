@@ -42,6 +42,9 @@ type subAction struct {
 	arg  bool
 	// arg2 means the action takes two values, joined as "<a>@<b>".
 	arg2 bool
+	// args means the action takes one or more values up to the next
+	// option, each passed as its own --flag value.
+	args bool
 	desc string
 	// withBase keeps the base flags (sandbox network still runs sandboxed).
 	withBase bool
@@ -89,6 +92,12 @@ var subcommands = []subcommand{
 			"rollback": {flag: "plugins-rollback", arg2: true, desc: "point <module> at stored version <sha256> (--plugins-rollback <module>@<sha256>)"},
 		},
 		options: map[string]string{"keep": "plugins-keep"},
+	},
+	{
+		name: "skills", brief: "check workflow skill files and workflow files: validate", summary: "check skill-workflow Markdown skills and YAML workflow files without running anything (same as --skills-validate); not Agent Skills (--skills)",
+		actions: map[string]subAction{
+			"validate": {flag: "skills-validate", args: true, desc: "validate skill files, skills directories or workflow files, then exit (--skills-validate <path>, repeatable)"},
+		},
 	},
 	{
 		name: "tinygo", brief: "manage the external TinyGo compiler: install|update|status", summary: "manage the TinyGo compiler for Go plugin modules (a separate, downloaded project; same as --tinygo-*)",
@@ -155,7 +164,16 @@ func expandSubcommand(args []string) ([]string, *subHelp, error) {
 		}
 		if act, ok := s.actions[a]; ok && i == 0 {
 			action = !act.withBase
-			if act.arg2 {
+			if act.args {
+				j := i + 1
+				for ; j < len(rest) && !strings.HasPrefix(rest[j], "-"); j++ {
+					out = append(out, "--"+act.flag, rest[j])
+				}
+				if j == i+1 {
+					return nil, nil, fmt.Errorf("%s %s needs at least one value", s.name, a)
+				}
+				i = j - 1
+			} else if act.arg2 {
 				if i+2 >= len(rest) {
 					return nil, nil, fmt.Errorf("%s %s needs two values", s.name, a)
 				}
@@ -260,6 +278,9 @@ func printSubcommandHelp(w io.Writer, s *subcommand) {
 			}
 			if a.arg2 {
 				arg = " <module> <sha256>"
+			}
+			if a.args {
+				arg = " <path>..."
 			}
 			rows = append(rows, [2]string{k + arg, a.desc})
 		}

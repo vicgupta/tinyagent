@@ -146,7 +146,7 @@ func TestBareSubcommandPrintsHelp(t *testing.T) {
 				t.Errorf("bare %s with piped stdin: exit %d, want its help (unchanged)", s.name, code)
 			}
 			for a, act := range s.actions {
-				if act.arg || act.arg2 {
+				if act.arg || act.arg2 || act.args {
 					continue
 				}
 				args, sh, err := expandSubcommand([]string{s.name, a})

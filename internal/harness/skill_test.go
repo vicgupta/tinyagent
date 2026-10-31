@@ -1,6 +1,8 @@
 package harness
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -77,5 +79,27 @@ func TestLoadSkills(t *testing.T) {
 	bad := writeFiles(t, t.TempDir(), map[string]string{"Bad Name.md": planSkill})
 	if _, err := LoadSkills(bad); err == nil {
 		t.Error("bad name accepted")
+	}
+}
+
+func TestLoadSkillFile(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "lint", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(good), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(good, []byte("# Skill: lint\n> Intent: Lint.\n\n**Inputs**\n- task\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := LoadSkillFile(good)
+	if err != nil || s.Name != "lint" {
+		t.Fatalf("got %+v, %v", s, err)
+	}
+	bad := filepath.Join(dir, "Bad Name.md")
+	if err := os.WriteFile(bad, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadSkillFile(bad); err == nil {
+		t.Fatal("bad name accepted")
 	}
 }
