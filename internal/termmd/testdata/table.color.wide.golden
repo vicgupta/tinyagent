@@ -1,0 +1,4 @@
+[1mName[0m  [2m │ [0m[1mCount[0m[2m │ [0m                  [1mNote[0m
+[2m───────┼───────┼──────────────────────────────────────────[0m
+alpha [2m │ [0m    1[2m │ [0m                  short
+beta [1mb[0m[2m │ [0m   22[2m │ [0ma much longer note that wraps when narrow

@@ -108,6 +108,7 @@ models:                  # per-role model routing; see Model roles (all optional
     tasks: {}             # per-task override: delegate, worker (e.g. worker: openai/gpt-5-mini)
     fallback_models: []   # the role's own fallback chain for children, at most 3
 chat_history: true       # record chat input in <cwd>/history/chat_history (false is the same as --no-chat-history); see Interactive chat
+chat_markdown: true      # render Markdown in chat replies (false shows raw Markdown, like /raw); see Interactive chat
 ask_user:
   enabled: false          # offer the ask_user tool (same as --ask-user); see Asking for input
   max_questions: 3        # questions per run, counted across resumes; 1 to 20

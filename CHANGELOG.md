@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- Prettier interactive chat: replies render Markdown for the terminal (headings, bold/italic, inline and fenced code with a language label and light highlighting, nested and task lists, blockquotes, links with their URL (OSC 8 hyperlinks where the terminal supports them), rules and tables), wrapped to the terminal width and rendered block by block as they stream. New `/raw` command and `chat_markdown` config key to show raw Markdown instead. Also: a clearer banner, a `›` prompt, a thinking spinner and a one-line tool activity summary per step, readable errors with a retry hint, formatted `/help` and `/cost`, and an exit summary with the saved path and resume command. Respects `--color` and `NO_COLOR` (plain ASCII structure, no escape codes); enables VT processing on Windows. `--json` output and saved transcripts are unchanged (raw Markdown). New package `internal/termmd`, no new dependencies.
+
 ## [v0.14.0] - 2026-10-31
 
 ### Features
