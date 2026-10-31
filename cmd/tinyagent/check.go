@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -346,6 +347,15 @@ func providerStatus(spec string, m model.Model) string {
 			return "codex-exec, runs " + c.Path + " (its own sign-in; not checked)"
 		}
 		return "codex-exec"
+	case model.OpenCodeProvider:
+		if c, ok := m.(*model.OpenCode); ok {
+			v := c.Version(context.Background())
+			if v == "" {
+				v = "version unknown"
+			}
+			return "opencode, runs " + c.Path + " (" + v + "; its own sign-in; not checked)"
+		}
+		return "opencode"
 	}
 	env := map[string]string{"openai": "OPENAI_API_KEY", "openrouter": "OPENROUTER_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}[provider]
 	if os.Getenv(env) == "" {

@@ -34,7 +34,7 @@ it that way unless there is a very good reason to add one.
 cmd/tinyagent/        CLI entrypoint, flag parsing, main loop glue
 internal/agent/       the run loop, compaction, tool dispatch; build an Agent with agent.New (it validates the options)
 internal/config/      YAML config + built-in defaults
-internal/model/       providers, price table, context windows
+internal/model/       providers, price table, context windows; CLI handoff providers (claudecode.go, codexexec.go, opencode.go) share handoff.go
 internal/resume/      what a --resume must match in its checkpoint (flag table, root, tool fingerprint, tool names); loads the checkpoint and pins its recorded settings onto the run config
 internal/tools/       the six tools (read_file, write_file, edit_file, list_files, grep, bash)
 internal/trajectory/  the -o JSON output
@@ -115,6 +115,14 @@ Don't construct a `tools.Executor` literal anywhere else in `cmd/tinyagent`;
   is user-visible (new provider, new hint, new env var).
 - Add a `hint:` for common setup failures, matching the existing troubleshooting
   table. Hints name environment variables without printing their values.
+- CLI handoff providers (`claude-code`, `codex-exec`, `opencode`) only run the
+  user's installed binary through `runCLI`/`runCLIEnv` in `handoff.go`: never
+  read, copy or proxy the CLI's credential files or tokens, and don't add
+  reads of the home or config folders. Register a new one in `provider.go`,
+  the built-in provider lists (`internal/model/custom.go`,
+  `internal/config/config.go`), `hint.go`, the `--check` line in
+  `cmd/tinyagent/check.go`, its `<name>.path` config key (`config.go`,
+  `locate.go`), and test it with a fake binary on PATH.
 
 ## Pull request checklist
 

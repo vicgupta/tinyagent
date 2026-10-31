@@ -5,12 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
 )
 
-// Handoff providers (claude-code, codex-exec) run a coding-agent CLI the
+// Handoff providers (claude-code, codex-exec, opencode) run a coding-agent CLI the
 // user installed and signed in to themselves, hand it the task, and return
 // its final answer as one assistant message with no tool calls. They never
 // read, copy, store, refresh or proxy the CLI's credentials and never set
@@ -34,6 +35,12 @@ var cliPaths = map[string]string{}
 // codex-exec providers; "" means look the binary up on PATH.
 func SetCLIPaths(claude, codex string) {
 	cliPaths = map[string]string{ClaudeCodeProvider: claude, CodexExecProvider: codex}
+}
+
+// SetOpenCodePath sets the configured binary path of the opencode
+// provider; "" means look it up on PATH. Call it after SetCLIPaths.
+func SetOpenCodePath(p string) {
+	cliPaths[OpenCodeProvider] = p
 }
 
 // handoffWaitDelay bounds how long Wait waits for the CLI's output pipes
@@ -80,8 +87,17 @@ type cliResult struct {
 // cancelled or expired ctx kills the CLI's whole process group and returns
 // ctx's error.
 func runCLI(ctx context.Context, provider, path string, args []string, dir, stdin string) (cliResult, error) {
+	return runCLIEnv(ctx, provider, path, args, dir, stdin, nil)
+}
+
+// runCLIEnv is runCLI with extra environment entries added to tinyagent's
+// own environment (nil inherits it unchanged).
+func runCLIEnv(ctx context.Context, provider, path string, args []string, dir, stdin string, env []string) (cliResult, error) {
 	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Dir = dir
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	cmd.Stdin = strings.NewReader(stdin)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb

@@ -49,6 +49,7 @@ func registerProviders(cfg config.AgentConfig) {
 	}
 	model.SetProviders(defs)
 	model.SetCLIPaths(expandHome(cfg.ClaudeCode.Path), expandHome(cfg.CodexExec.Path))
+	model.SetOpenCodePath(expandHome(cfg.OpenCode.Path))
 }
 
 // expandHome expands a leading ~/ in a configured path.
