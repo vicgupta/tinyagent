@@ -1969,6 +1969,7 @@ func summaryLine(t *trajectory.Trajectory, elapsed time.Duration) string {
 	if n := len(t.Subagents); n > 0 {
 		s += fmt.Sprintf(", %d subagent runs (%d steps)", n, t.SubagentSteps)
 	}
+	s += usageByRoleSummary(t)
 	s += lockdownSummary(t)
 	if t.Unverified {
 		s += ", unverified changes"
@@ -2656,6 +2657,9 @@ func resultFields(t *trajectory.Trajectory, elapsed time.Duration) map[string]an
 	}
 	if kept := workerResultFields(t); kept != nil {
 		fields["worker_branches"] = kept
+	}
+	if t.RoutedUsage() {
+		fields["usage_by_role"] = t.UsageByRole
 	}
 	if t.StopReason != "" {
 		fields["stop_reason"] = t.StopReason

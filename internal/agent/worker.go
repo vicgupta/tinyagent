@@ -266,6 +266,8 @@ func (a *Agent) prepareWorker(t *trajectory.Trajectory, call model.ToolCall, id 
 		a.routeEvent(routing.RoleDelegated, routing.TaskWorker, childName, reason, "")
 	}
 	child := &Agent{
+		UsageRole: routing.RoleDelegated,
+		UsageTask: routing.TaskWorker,
 		Model:     childModel,
 		ModelName: childName,
 		Tools: &tools.Executor{
@@ -328,6 +330,7 @@ func (a *Agent) prepareWorker(t *trajectory.Trajectory, call model.ToolCall, id 
 func (a *Agent) finishWorker(t *trajectory.Trajectory, j *workerJob) tools.Result {
 	ct, call, id, label, top, wt, branch, base := j.ct, j.call, j.id, j.label, j.top, j.wt, j.branch, j.base
 	args := struct{ Task string }{j.task}
+	mergeUsage(t, ct)
 	t.Cost += ct.Cost
 	t.InputTokens += ct.InputTokens
 	t.OutputTokens += ct.OutputTokens

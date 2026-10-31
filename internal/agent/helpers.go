@@ -7,6 +7,7 @@ import (
 
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/routing"
+	"github.com/vicgupta/tinyagent/internal/trajectory"
 )
 
 // helperQuery sends one tool-less helper request for an auxiliary task.
@@ -73,6 +74,42 @@ func (a *Agent) routeEvent(role, task, modelName, reason, fallbackFrom string) {
 		ev["fallback_from"] = fallbackFrom
 	}
 	a.event("model.route", ev)
+}
+
+// role and task name this agent's own loop in usage_by_role and
+// model.request events: main/main, or delegated/<task> for a child.
+func (a *Agent) role() (string, string) {
+	if a.UsageRole != "" {
+		return a.UsageRole, a.UsageTask
+	}
+	return routing.RoleMain, routing.TaskMain
+}
+
+// addUsage records cost under role/task in t.UsageByRole.
+func addUsage(t *trajectory.Trajectory, role, task, modelName string, cost model.Cost) {
+	if cost.USD == 0 && cost.InputTokens == 0 && cost.OutputTokens == 0 {
+		return
+	}
+	t.AddUsage(trajectory.RoleUsage{Role: role, Task: task, Model: modelName, Requests: 1,
+		InputTokens: cost.InputTokens, OutputTokens: cost.OutputTokens,
+		CacheReadTokens: cost.CacheReadTokens, CacheWriteTokens: cost.CacheWriteTokens, CostUSD: cost.USD})
+}
+
+// helperName is the model that serves a helper task.
+func (a *Agent) helperName(task string) string {
+	if _, ok := a.Helpers[task]; ok {
+		if m := a.routeModel(task); m != "" {
+			return m
+		}
+	}
+	return a.ModelName
+}
+
+// mergeUsage adds a child's usage_by_role to t.
+func mergeUsage(t, ct *trajectory.Trajectory) {
+	for _, u := range ct.UsageByRole {
+		t.AddUsage(u)
+	}
 }
 
 // routeModel is the spec of a routed task's model, from Routes.

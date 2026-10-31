@@ -87,7 +87,7 @@ All under `--eval-out <dir>`:
 
 - **Per-trial trajectory**: one trajectory JSON per trial (the same format as `-o`), named by trial id so parallel trials never collide.
 - **`results.jsonl`**: one stable-schema record per trial (see [§6](#6-results-schema-resultsjsonl-schema_version-1)).
-- **`report.md`** and **`report.json`**: per-configuration pass rate, pass@k, mean and total cost, tokens, steps and time.
+- **`report.md`** and **`report.json`**: per-configuration pass rate, pass@k, mean and total cost, tokens, steps and time, plus `usage_by_role` (and a "Usage by role" table in `report.md`) totalling the trials' per-role usage when any trial routed work to a helper or child.
 
 On stderr, eval mode prints one line per finished trial and a final summary table.
 
@@ -283,6 +283,7 @@ The draft requires the record to carry the fields below; exact field names are a
 | `checks` | list | Per check: `argv`, `exit_code`, `timed_out`, `duration_ms`, capped `output`. |
 | `cost_usd` | number | Run cost from the price table. |
 | `input_tokens` / `output_tokens` | int | Token totals (cache read/write when non-zero, as in trajectories). |
+| `usage_by_role` | list | The trajectory's per-role split (`role`, `task`, `model`, `requests`, tokens, `cost_usd`); only when a helper or delegated child made requests. See [Usage by role](config.md#usage-by-role). |
 | `steps` | int | Model steps. |
 | `wall_time_ms` | int | Trial wall time. |
 | `trajectory` | string | Path of the trajectory, relative to `--eval-out`. |

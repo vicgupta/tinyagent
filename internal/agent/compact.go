@@ -305,6 +305,7 @@ func (a *Agent) summarize(ctx context.Context, t *trajectory.Trajectory, task st
 	if err != nil {
 		return "", fmt.Errorf("summarizing context: %w", err)
 	}
+	addUsage(t, routing.RoleAuxiliary, routing.TaskCompaction, a.helperName(routing.TaskCompaction), cost)
 	t.Cost += cost.USD
 	t.InputTokens += cost.InputTokens
 	t.OutputTokens += cost.OutputTokens
