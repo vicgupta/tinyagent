@@ -23,7 +23,7 @@ const (
 )
 
 // Attempts configures best-of-N runs (--attempts, issue #172). Like hooks
-// it comes only from the user config, -c or a profile, never from the
+// it comes only from -c, a trusted ./tinyagent.yaml (--trust-config) or a profile, never from the
 // repository. It has no effect without --attempts.
 type Attempts struct {
 	// Checks are the verification commands an attempt must pass. Each runs

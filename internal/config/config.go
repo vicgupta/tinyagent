@@ -128,7 +128,7 @@ type AgentConfig struct {
 	Plugins []Plugin `yaml:"plugins,omitempty"`
 
 	// Providers are named model providers selectable as "<id>/<model>".
-	// They come only from the user config or -c.
+	// They come only from -c or a trusted ./tinyagent.yaml (--trust-config).
 	Providers []Provider `yaml:"providers,omitempty"`
 
 	// Hooks are trusted local executables run around matching tool calls.
@@ -141,7 +141,7 @@ type AgentConfig struct {
 
 	// CommandTools are user-defined tools that run a fixed argv filled in
 	// with schema-checked arguments, without a shell. They come only from
-	// the user config or -c.
+	// -c or a trusted ./tinyagent.yaml (--trust-config).
 	CommandTools []CommandTool `yaml:"command_tools,omitempty"`
 
 	// Plan configures the opt-in update_plan tool (off by default).
@@ -177,16 +177,16 @@ type AgentConfig struct {
 	AskUser AskUser `yaml:"ask_user"`
 	// LSP configures opt-in language servers: diagnostics appended to edit
 	// results and the read-only lsp tool (off by default; --lsp overrides
-	// Enabled). It comes only from the user config or -c.
+	// Enabled). It comes only from -c or a trusted ./tinyagent.yaml (--trust-config).
 	LSP LSP `yaml:"lsp"`
 	// Skills turns on Agent Skills discovery from .agents/skills (off by
 	// default; --skills / --no-skills override it).
 	Skills bool `yaml:"skills"`
 	// Memory configures opt-in cross-run project memory (off by default;
-	// --memory overrides Enabled). It comes only from the user config or -c.
+	// --memory overrides Enabled). It comes only from -c or a trusted ./tinyagent.yaml (--trust-config).
 	Memory Memory `yaml:"memory"`
 	// Handoff configures the opt-in session handoff file (off by default;
-	// --handoff overrides Enabled). It comes only from the user config or -c.
+	// --handoff overrides Enabled). It comes only from -c or a trusted ./tinyagent.yaml (--trust-config).
 	Handoff Handoff `yaml:"handoff"`
 	// LogDB is the opt-in SQLite event log.
 	LogDB LogDB `yaml:"log_db"`
@@ -1068,11 +1068,7 @@ func LoadProfile(path, profile string) (AgentConfig, error) {
 		return loadFile(path, "")
 	}
 	if path == "" {
-		where := "the user config"
-		if p, err := DefaultPath(); err == nil {
-			where = p
-		}
-		return Default(), &InvalidError{fmt.Errorf("--profile %s: no config file defines profiles (no -c given and no user config at %s)", profile, where)}
+		return Default(), &InvalidError{fmt.Errorf("--profile %s: no config file defines profiles (no -c given and no ./%s in --cwd)", profile, ProjectFile)}
 	}
 	cfg, err := loadFile(path, profile)
 	var invalid *InvalidError

@@ -45,7 +45,7 @@ func runListPlugins(o *options, fs *flag.FlagSet, w io.Writer) int {
 		fmt.Fprintf(os.Stderr, "error: unexpected positional argument %q\n", fs.Arg(0))
 		return 2
 	}
-	cfg, err := config.LoadProfile(config.Find(o.configPath), o.profile)
+	_, cfg, err := loadConfig(o, o.cwd, os.Stderr)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2

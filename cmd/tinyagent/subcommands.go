@@ -35,6 +35,10 @@ type subcommand struct {
 	actions map[string]subAction
 	// options map a subcommand option name to the global flag it sets.
 	options map[string]string
+	// runBare runs the base flags even for a bare "tinyagent <sub>" at a
+	// terminal instead of printing help: for a complete one-shot command
+	// (init) that needs no task, help would only add a step.
+	runBare bool
 }
 
 type subAction struct {
@@ -51,6 +55,12 @@ type subAction struct {
 }
 
 var subcommands = []subcommand{
+	{
+		name: "init", brief: "write ./tinyagent.yaml in --cwd (--force, --migrate)", summary: "write a commented starter ./tinyagent.yaml in --cwd, or with -c to that path (same as --init-config)",
+		base:    []string{"--init-config"},
+		runBare: true,
+		options: map[string]string{"force": "init-force", "migrate": "init-migrate"},
+	},
 	{
 		name: "sandbox", brief: "run a task with commands confined to --cwd", summary: "run with commands confined to --cwd (same as --sandbox)",
 		base:    []string{"--sandbox"},
@@ -144,7 +154,7 @@ func expandSubcommand(args []string) ([]string, *subHelp, error) {
 	// "tinyagent <sub> --help" and like plain "tinyagent" (#242). With stdin
 	// piped or redirected, one with base flags keeps running them (a
 	// missing -t still fails as before), so scripts see no change.
-	if len(rest) == 0 && (len(s.base) == 0 || stdinIsTerminal()) {
+	if len(rest) == 0 && !s.runBare && (len(s.base) == 0 || stdinIsTerminal()) {
 		return nil, &subHelp{s}, nil
 	}
 	if len(rest) > 0 {
@@ -260,11 +270,13 @@ func printSubcommandHelp(w io.Writer, s *subcommand) {
 	if len(s.options) > 0 {
 		fmt.Fprint(w, " [options]")
 	}
-	if len(s.base) > 0 {
+	if len(s.base) > 0 && !s.runBare {
 		fmt.Fprint(w, " [-t \"<prompt>\" | -- <prompt>]")
 	}
 	fmt.Fprintf(w, "\n%s.\n", strings.ToUpper(s.summary[:1])+s.summary[1:])
-	if len(s.base) > 0 {
+	if s.runBare {
+		fmt.Fprintf(w, "Run bare, it does this right away (%s).\n", strings.Join(s.base, " "))
+	} else if len(s.base) > 0 {
 		fmt.Fprintf(w, "Without an action it runs a task with %s.\n", strings.Join(s.base, " "))
 	}
 	if len(s.actions) > 0 {
@@ -299,7 +311,9 @@ func printSubcommandHelp(w io.Writer, s *subcommand) {
 		}
 		printRows(w, rows)
 	}
-	if len(s.base) > 0 {
+	if s.runBare {
+		fmt.Fprintln(w, "\n--cwd <dir> and -c <path> choose where the file goes.\nEvery --flag form keeps working without the subcommand.")
+	} else if len(s.base) > 0 {
 		fmt.Fprintf(w, "\nAny other tinyagent flag (-t, -m, --cwd, ...) may follow.\nEvery --flag form keeps working without the subcommand.\nA task starting with %q is passed with -t, e.g. tinyagent -t %q.\n", s.name, s.name+" ...")
 	} else {
 		fmt.Fprintln(w, "\nEvery --flag form keeps working without the subcommand.")

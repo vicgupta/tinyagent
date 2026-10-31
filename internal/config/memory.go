@@ -3,7 +3,7 @@ package config
 import "fmt"
 
 // Memory configures opt-in cross-run project memory (issue #170). Like
-// mcp_servers and redact_secrets it comes only from the user config, -c or
+// mcp_servers and redact_secrets it comes only from -c, a trusted ./tinyagent.yaml (--trust-config) or
 // a profile, never from the repository.
 type Memory struct {
 	// Enabled loads the project's active memory entries into the system

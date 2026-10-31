@@ -76,7 +76,7 @@ func runAttempts(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.
 		fmt.Fprintf(fs.Output(), "error: "+format+"\n", v...)
 		return 2
 	}
-	cfg, err := config.LoadProfile(config.Find(o.configPath), o.profile)
+	_, cfg, err := loadConfig(o, o.cwd, os.Stderr)
 	if err != nil {
 		return usage("%v", err)
 	}

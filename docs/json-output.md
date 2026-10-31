@@ -71,7 +71,7 @@ Environment: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (any OpenAI-compatible endpoint
 {
   "schema_version": 1,
   "ok": true,
-  "config": {"path": "/home/me/.config/tinyagent/config.yaml", "source": "user config"},
+  "config": {"path": "/home/me/project/tinyagent.yaml", "source": "cwd"},
   "profile": "",
   "model": {"spec": "anthropic/claude-sonnet-4-5", "source": "-m"},
   "provider": {"name": "anthropic", "api_key_env": "ANTHROPIC_API_KEY", "api_key": "set"},
@@ -89,7 +89,7 @@ Environment: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (any OpenAI-compatible endpoint
 |---|---|
 | `schema_version` | `1`; bumped on any incompatible change |
 | `ok` | `true` when a run would start (exit 0) |
-| `config.path`, `config.source` | The config file (`""` for none) and where it came from, the same label as the text `config:` line without its parentheses or `from ` (`-c`, `user config`, `built-in defaults`) |
+| `config.path`, `config.source` | The config file (`""` for none) and where it came from, the same label as the text `config:` line without its parentheses or `from ` (`-c`, `cwd` for `./tinyagent.yaml`, `built-in defaults`) |
 | `profile` | `--profile`, or `""` |
 | `model.spec`, `model.source` | The model and where it came from (`-m`, `$AGENT_MODEL`, `config`, `default`, or `attempt 1, from --attempt-model`) |
 | `provider.name`, `provider.api_key_env`, `provider.api_key` | The provider, the key variable it reads (`""` if none) and `set`, `missing` or `n/a` |

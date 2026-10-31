@@ -118,7 +118,7 @@ func TestCheckSourceLabels(t *testing.T) {
 
 }
 
-func TestCheckUserConfigAndFallbacks(t *testing.T) {
+func TestCheckProjectConfigAndFallbacks(t *testing.T) {
 	checkEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", "k")
 	t.Setenv("OPENROUTER_API_KEY", "k")
@@ -130,17 +130,22 @@ func TestCheckUserConfigAndFallbacks(t *testing.T) {
 	if err := os.WriteFile(p, []byte("model: anthropic/claude-sonnet-4-5\nfallback_models: [openrouter/a/b]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	code, stdout, stderr := runCLI(t, "--check")
+	// The old user config is no longer read: a project file is.
+	cwd := t.TempDir()
+	if err := os.Rename(p, filepath.Join(cwd, "tinyagent.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := runCLI(t, "--check", "--cwd", cwd)
 	if code != 0 {
 		t.Fatalf("exit %d; stderr:\n%s", code, stderr)
 	}
-	if got := reportLine(t, stdout, "config"); got != p+" (user config)" {
-		t.Errorf("config line %q, want %q", got, p+" (user config)")
+	if got, want := reportLine(t, stdout, "config"), filepath.Join(cwd, "tinyagent.yaml")+" (cwd)"; got != want {
+		t.Errorf("config line %q, want %q", got, want)
 	}
 	if got := reportLine(t, stdout, "fallback"); got != "openrouter/a/b (from config)" {
 		t.Errorf("fallback line %q", got)
 	}
-	_, stdout, _ = runCLI(t, "--check", "--no-fallback")
+	_, stdout, _ = runCLI(t, "--check", "--cwd", cwd, "--no-fallback")
 	if got := reportLine(t, stdout, "fallback"); got != "none (--no-fallback)" {
 		t.Errorf("no-fallback line %q", got)
 	}

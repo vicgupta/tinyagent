@@ -79,7 +79,7 @@ sandbox_writable_paths:    # their caches, see above
 
 ## Command environment
 
-By default `bash`, `start_process` and [command tool](config.md#command-tools) commands inherit tinyagent's whole environment, including the provider API keys tinyagent itself needs, so a prompt-injected `env` or `echo $OPENAI_API_KEY` can read them. `command_env` (config only, from the user config or `-c`) controls what they get instead:
+By default `bash`, `start_process` and [command tool](config.md#command-tools) commands inherit tinyagent's whole environment, including the provider API keys tinyagent itself needs, so a prompt-injected `env` or `echo $OPENAI_API_KEY` can read them. `command_env` (config only, from `-c` or a trusted `./tinyagent.yaml` (`--trust-config`)) controls what they get instead:
 
 ```yaml
 command_env:

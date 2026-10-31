@@ -42,7 +42,7 @@ func runEval(o *options, fs *flag.FlagSet, args []string, stderr io.Writer) int 
 		fmt.Fprintln(fs.Output(), "error: --eval-min-pass-rate must be between 0 and 1")
 		return 2
 	}
-	names, err := config.ProfileNames(config.Find(o.configPath))
+	names, err := config.ProfileNames(locateConfig(o, o.cwd, stderr).Path)
 	if err != nil {
 		fmt.Fprintln(fs.Output(), "error:", err)
 		return 2

@@ -18,11 +18,9 @@ func TestInitConfig(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			hits := checkEnv(t)
-			path, err := config.DefaultPath()
-			if err != nil {
-				t.Fatal(err)
-			}
-			args := []string{"--init-config"}
+			dir := t.TempDir()
+			path := filepath.Join(dir, "tinyagent.yaml")
+			args := []string{"--init-config", "--cwd", dir}
 			if custom {
 				path = filepath.Join(t.TempDir(), "nested", "starter.yaml")
 				args = append(args, "-c", path)

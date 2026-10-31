@@ -76,8 +76,8 @@ func (h checkHint) Error() string { return h.err.Error() }
 // It fills sum as it goes, so a failed check still reports what it
 // resolved before the error.
 func resolveCheck(o *options, fs *flag.FlagSet, sum *checkSummary) ([][2]string, error) {
-	cfgPath := config.Find(o.configPath)
-	cfg, err := config.LoadProfile(cfgPath, o.profile)
+	cfgSrc, cfg, err := loadConfig(o, o.cwd, io.Discard)
+	cfgPath := cfgSrc.Path
 	if err == nil {
 		err = applyMemoryConfig(&cfg, o.cwd, io.Discard)
 	}
@@ -155,15 +155,8 @@ func resolveCheck(o *options, fs *flag.FlagSet, sum *checkSummary) ([][2]string,
 
 	var lines [][2]string
 	add := func(k, v string) { lines = append(lines, [2]string{k, v}) }
-	switch {
-	case o.configPath != "":
-		add("config", cfgPath+" (from -c)")
-	case cfgPath != "":
-		add("config", cfgPath+" (user config)")
-	default:
-		add("config", "none (built-in defaults)")
-	}
-	sum.setConfigLine(lines[len(lines)-1][1])
+	add("config", cfgSrc.Label())
+	sum.setConfigLine(cfgSrc.Label())
 	if o.profile != "" {
 		add("profile", o.profile)
 	}

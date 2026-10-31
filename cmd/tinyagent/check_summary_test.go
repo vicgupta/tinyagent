@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -108,3 +110,22 @@ func TestCheckSummarySandboxUnavailable(t *testing.T) {
 }
 
 var errUnavailableForTest = errors.New("sandbox: not here")
+
+func TestCheckJSONCwdConfigSource(t *testing.T) {
+	t.Setenv("AGENT_MODEL", "")
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "tinyagent.yaml"), []byte("model: ollama/llama3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := runCLI(t, "--check", "--json", "--cwd", dir)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	var s checkSummary
+	if err := json.Unmarshal([]byte(stdout), &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.Config.Source != "cwd" || filepath.Base(s.Config.Path) != "tinyagent.yaml" {
+		t.Errorf("config = %+v", s.Config)
+	}
+}

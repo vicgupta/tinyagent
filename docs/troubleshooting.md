@@ -52,5 +52,8 @@ ok
 | `HTTP 404` with `ollama/...` | Pull the model: `ollama pull <model>`. |
 | `every model in the fallback chain failed` | Each listed model used up its retries; the message names each one and why. Check the providers' status pages, or add a model from another provider to `fallback_models`. |
 | An editor says the ACP agent failed to start or exited | Use the full path to `tinyagent` in the agent's `command`, put the API key in the agent's `env` (editors don't read your shell profile), and check the editor's agent log, which shows tinyagent's stderr. |
+| `note: user config ... is no longer read` | tinyagent now reads only `-c` or `./tinyagent.yaml` in `--cwd`. Run `tinyagent init --migrate` in the project to copy the old file there, or pass it with `-c`. See [Config](config.md#config). |
+| `warning: ignoring mcp_servers, hooks, ... from ./tinyagent.yaml` | A project config can't launch programs or loosen security settings by default. Read the file, then pass `--trust-config` if you trust the repository, or move those settings to a `-c` file. See [Trusting a project config](config.md#trusting-a-project-config). |
+| Settings in `tinyagent.yaml` seem ignored | `--check` prints the `config:` line; the file must be in `--cwd` itself (parent directories aren't searched), and flags, `$AGENT_MODEL` and `--profile` outrank it. |
 | `codex: no login` | Run `codex login` and choose ChatGPT. |
 | `model is not supported` with `codex/...` | Use a model the Codex CLI's model picker shows for your plan. |

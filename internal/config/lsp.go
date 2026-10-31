@@ -12,7 +12,7 @@ import (
 )
 
 // LSP configures opt-in language servers. Servers are trusted executables
-// configured only in the user config or -c, launched directly (no shell)
+// configured only in -c or a trusted ./tinyagent.yaml (--trust-config), launched directly (no shell)
 // with a minimal environment, like MCP servers.
 type LSP struct {
 	Enabled bool `yaml:"enabled"`
@@ -133,7 +133,7 @@ func (l LSP) CheckEnabled(file string) error {
 		return nil
 	}
 	if file == "" {
-		return errors.New("lsp is enabled (--lsp) but no config file defines lsp.servers; add them to the user config or pass -c")
+		return errors.New("lsp is enabled (--lsp) but no config file defines lsp.servers; add them to the -c file, or to ./tinyagent.yaml and pass --trust-config")
 	}
 	return fmt.Errorf("config %s: lsp is enabled but lsp.servers is empty", file)
 }

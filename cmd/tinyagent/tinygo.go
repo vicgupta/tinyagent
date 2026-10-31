@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/vicgupta/tinyagent/internal/config"
 	"github.com/vicgupta/tinyagent/internal/tinygo"
 	"github.com/vicgupta/tinyagent/internal/tools"
 )
@@ -21,7 +20,7 @@ var newTinygoManager = tinygo.Default
 // runTinygo handles --tinygo-install, --tinygo-update and --tinygo-status.
 func runTinygo(o *options, stdout, stderr io.Writer) int {
 	override := ""
-	if cfg, err := config.LoadProfile(config.Find(o.configPath), o.profile); err == nil {
+	if _, cfg, err := loadConfig(o, o.cwd, io.Discard); err == nil {
 		override = cfg.TinyGo
 	} else if o.configPath != "" {
 		fmt.Fprintln(stderr, "error:", err)

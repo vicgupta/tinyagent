@@ -14,7 +14,7 @@ import (
 // MCP result, a --review diff, an --untrusted-task task) is tainted, and
 // from then on its outbound channels are refused: commands, web_fetch
 // outside Lockdown.WebFetchAllowedDomains, and MCP tools. Like mcp_servers
-// and memory it comes only from the user config, -c or a profile, never
+// and memory it comes only from -c, a trusted ./tinyagent.yaml (--trust-config) or a profile, never
 // from the repository.
 type UntrustedContent struct {
 	// Enabled turns lockdown on (off by default; --lockdown and
