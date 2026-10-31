@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.11.1] - 2026-10-31
+
+### Documentation
+
+- The `--workflow` file format is now unambiguous: workflow files are YAML and skills are Markdown (#271).
+- Subagents are documented as read-only researchers and workers as read-write builders; no renames in code or config (#272).
+
 ## [v0.11.0] - 2026-10-31
 
 ### Features
