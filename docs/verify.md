@@ -1,6 +1,6 @@
 # Verify before stop
 
-An opt-in guard that keeps a run from finishing on untested changes: when files changed since the last successful test or build command, the model is sent back to verify before its final answer is accepted. Off by default.
+An opt-in guard that keeps a run from finishing on untested changes: when files changed since the last successful test or build command, the model is sent back to verify before its final answer is accepted. Off by default for plain runs; on by default for every stage of a [`--workflow` run](#default-on-for-workflow-runs).
 
 ```bash
 tinyagent --verify-on-stop -t "fix the failing test in pkg/foo"
@@ -9,7 +9,7 @@ tinyagent --verify-on-stop --verify-command "go test ./..." --max-verify-repromp
 
 | Flag | Config | Default | |
 |---|---|---|---|
-| `--verify-on-stop` | `verify_on_stop.enabled` | off | Turn the guard on (`--verify-on-stop=false` turns it off) |
+| `--verify-on-stop` | `verify_on_stop.enabled` | off; on for `--workflow` stages | Turn the guard on (`--verify-on-stop=false` turns it off, including for workflow stages) |
 | `--verify-command <cmd>` | `verify_on_stop.commands` | common test/build commands | A `bash` command that counts as verification; repeatable, replaces the config list |
 | `--verify-check <cmd>` | `verify_on_stop.checks` | none | A computational check tinyagent runs itself before the run may finish, in order; repeatable, replaces the config list. See [Computational checks](#computational-checks) |
 | `--verify-review` | `verify_on_stop.review` | off | After every check passes, ask the model once to review the run's changes; report only. Needs at least one check. See [Inferential review](#inferential-review) |
@@ -69,6 +69,17 @@ tinyagent --verify-on-stop --verify-check "go test ./..." --verify-review -t "..
 - **Cost:** the request counts toward the run's tokens and cost.
 - **When it runs:** only with the guard on, at least one check configured (a config with `review` and no `checks` is rejected), changes pending at stop and every check passing. It never runs for subagent or `--output-schema` runs. Off by default.
 
+### Default on for workflow runs
+
+A [`--workflow`](project-context.md#skill-workflows) run passes `--verify-on-stop` to every stage unless you set the flag yourself, so a stage that changed files can't stop on untested changes. Plain interactive and headless runs are unchanged and stay off unless you enable the guard.
+
+- **Precedence:** the `--verify-on-stop` flag, then this workflow default (on), then the config. Because `verify_on_stop.enabled: false` in a config file can't be told apart from an unset key, the opt-out is the flag: `tinyagent --workflow ... --verify-on-stop=false`.
+- **All stages:** the default applies to every stage. A stage that makes no edits (such as `plan-tasks`) is unaffected, because the guard only acts when files changed.
+- **Cost:** each re-prompt (up to `--max-verify-reprompts`, default 2) is a normal step and counts against the stage's `step_limit` (default 50) and cost limits.
+- **Non-Go repos:** the default verification commands cover common toolchains (`go test`, `cargo test`, `npm test`, `make`, `pytest` and similar). If your project's test command isn't one of them, pass `--verify-command "<cmd>"`, or the stage ends unverified after its re-prompts.
+- **Reporting only:** a stage that ends unverified still passes or fails on its own check. Its attempt in the workflow record (`-o`) and its `stage.finished` event carry `"unverified": true`.
+- `--verify-command`, `--verify-check`, `--verify-review` and `--max-verify-reprompts` are forwarded to stages as before.
+
 ### Behavior verification in workflows
 
 `--verify-on-stop` and its checks prove the code builds and the tests pass. To check what the built program actually does, a [skill workflow](project-context.md#skill-workflows) can end with a `verify-behavior` stage, which runs the program and compares its observed output with the task's behavioral acceptance criteria. See [Verifying behavior](project-context.md#verifying-behavior).
@@ -78,5 +89,6 @@ tinyagent --verify-on-stop --verify-check "go test ./..." --verify-review -t "..
 - **Summary line:** ends with `, unverified changes`.
 - **`--json`:** `verify.check` (`index`, `command`, `passed`) for each computational check, `verify.review` (`findings`, or `error`) when the [inferential review](#inferential-review) ran, `verify.reprompt` (`reprompt`, `max_reprompts`) each time the model is sent back, `verify.unverified` (`reason`, `reprompts`) when the run ends unverified, and the `result` event's `unverified` and `verify_reprompts` fields; see [JSON output](json-output.md#machine-readable-output).
 - **Trajectory (`-o`):** `unverified: true`, `verify_reprompts`, and `verify_review` (the review findings, when it ran).
+- **Workflow runs:** each attempt in the workflow record and each `stage.finished` event has `unverified: true` when that stage ended unverified.
 
 The config block is shown in the [example config](config.md#config).

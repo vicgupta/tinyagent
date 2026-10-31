@@ -103,6 +103,10 @@ type Attempt struct {
 	Trajectory string  `json:"trajectory,omitempty"`
 	Log        string  `json:"log,omitempty"`
 	DurationMS int64   `json:"duration_ms"`
+	// Unverified is set when the stage's run finished with changes that
+	// verify-on-stop could not see verified. It is reported only; it does
+	// not change whether the stage passed.
+	Unverified bool `json:"unverified,omitempty"`
 }
 
 // Result is a whole workflow run; it is what --output writes.
@@ -278,6 +282,7 @@ type trajSummary struct {
 	Submission string  `json:"submission"`
 	Steps      int     `json:"steps"`
 	Cost       float64 `json:"cost"`
+	Unverified bool    `json:"unverified"`
 }
 
 func runAttempt(ctx context.Context, o Options, st Stage, idx, n int, input string) Attempt {
@@ -335,6 +340,7 @@ func runAttempt(ctx context.Context, o Options, st Stage, idx, n int, input stri
 		return at
 	}
 	at.ExitStatus, at.Output, at.Steps, at.CostUSD = ts.ExitStatus, ts.Submission, ts.Steps, ts.Cost
+	at.Unverified = ts.Unverified
 	if ts.ExitStatus != "Submitted" && ts.ExitStatus != "Completed" {
 		at.Check = Check{Method: "run", Reason: "stage run ended " + ts.ExitStatus + ": " + oneLine(ts.Submission)}
 		return at
