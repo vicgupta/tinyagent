@@ -21,7 +21,16 @@ const (
 	StatusPassed      = "Passed"
 	StatusFailed      = "Failed"
 	StatusInterrupted = "Interrupted"
+	// StatusBlocked means a stage ran out of retries because its success
+	// check kept failing on its merits (a check command exited non-zero, the
+	// model reported SUCCESS CHECK: FAIL, behavior cases failed): the task
+	// as specified can't be satisfied without a human. StatusFailed is kept
+	// for transient or infrastructure failures.
+	StatusBlocked = "Blocked"
 )
+
+// ExitBlocked is the process exit code for StatusBlocked.
+const ExitBlocked = 5
 
 // MaxCheckOutput caps a check command's recorded output, and MaxFeedback
 // the failure reason handed to a retry.
@@ -73,6 +82,9 @@ type Check struct {
 	Output   string   `json:"output,omitempty"`
 	// Skipped is set when a behavior stage found no behavioral criteria.
 	Skipped bool `json:"skipped,omitempty"`
+	// NoVerdict is set when a model-checked stage's output had no
+	// SUCCESS CHECK line.
+	NoVerdict bool `json:"no_verdict,omitempty"`
 	// Evidence is each behavior case's observed output.
 	Evidence []BehaviorResult `json:"evidence,omitempty"`
 }
@@ -107,8 +119,10 @@ type Result struct {
 	Output        string    `json:"output,omitempty"` // the last stage's output
 	Stages        []Stage   `json:"stages"`
 	Attempts      []Attempt `json:"attempts"`
-	CostUSD       float64   `json:"cost_usd"`
-	DurationMS    int64     `json:"duration_ms"`
+	// Gates are the stage gate decisions, in order.
+	Gates      []GateDecision `json:"gates,omitempty"`
+	CostUSD    float64        `json:"cost_usd"`
+	DurationMS int64          `json:"duration_ms"`
 }
 
 // ExitCode maps a result to the process exit code.
@@ -118,6 +132,8 @@ func (r *Result) ExitCode() int {
 		return 0
 	case StatusInterrupted:
 		return 130
+	case StatusBlocked:
+		return ExitBlocked
 	}
 	return 1
 }
@@ -141,30 +157,57 @@ func Run(ctx context.Context, o Options) *Result {
 		var last Attempt
 		passed := false
 		feedback := ""
-		for a := 1; a <= st.Retries+1; a++ {
-			if ctx.Err() != nil {
+		n := 0 // attempts so far at this stage, across a re-plan
+		// rounds is 1, or 2 when a spec gate rejects the first plan: the
+		// re-plan gets the stage's full retry budget again.
+		for round := 1; round <= 2; round++ {
+			passed = false
+			for a := 1; a <= st.Retries+1; a++ {
+				if ctx.Err() != nil {
+					break
+				}
+				n++
+				input := Prompt(i+1, len(p.Stages), st, o.Task, prev, prevName, o.Cwd, feedback)
+				emit("stage.started", map[string]any{"stage": i + 1, "skill": st.Skill.Name, "attempt": n, "input": input})
+				last = runAttempt(ctx, o, st, i+1, n, input)
+				res.Attempts = append(res.Attempts, last)
+				res.CostUSD += last.CostUSD
+				emit("stage.finished", attemptFields(last))
+				if o.Progress != nil {
+					verdict := "passed"
+					if last.Check.Skipped {
+						verdict = "skipped: " + oneLine(last.Check.Reason)
+					} else if !last.Check.Passed {
+						verdict = "failed: " + oneLine(last.Check.Reason)
+					}
+					fmt.Fprintf(o.Progress, "workflow %s: stage %d/%d %s attempt %d %s\n", p.Name, i+1, len(p.Stages), st.Skill.Name, n, verdict)
+				}
+				if last.Check.Passed {
+					passed = true
+					break
+				}
+				feedback = last.Check.Reason
+			}
+			if !passed || ctx.Err() != nil || st.Gate != GateSpec {
 				break
 			}
-			input := Prompt(i+1, len(p.Stages), st, o.Task, prev, prevName, o.Cwd, feedback)
-			emit("stage.started", map[string]any{"stage": i + 1, "skill": st.Skill.Name, "attempt": a, "input": input})
-			last = runAttempt(ctx, o, st, i+1, a, input)
-			res.Attempts = append(res.Attempts, last)
-			res.CostUSD += last.CostUSD
-			emit("stage.finished", attemptFields(last))
+			g := SpecGate(last.Output, o.Cwd)
+			d := GateDecision{Stage: i + 1, Skill: st.Skill.Name, Gate: st.Gate, Attempt: round, Passed: g.Passed, Reason: g.Reason, Missing: g.Missing}
+			res.Gates = append(res.Gates, d)
+			emit("stage.gate", map[string]any{"stage": d.Stage, "skill": d.Skill, "gate": d.Gate, "attempt": d.Attempt, "passed": d.Passed, "reason": d.Reason, "missing": d.Missing})
 			if o.Progress != nil {
 				verdict := "passed"
-				if last.Check.Skipped {
-					verdict = "skipped: " + oneLine(last.Check.Reason)
-				} else if !last.Check.Passed {
-					verdict = "failed: " + oneLine(last.Check.Reason)
+				if !g.Passed {
+					verdict = "rejected: " + oneLine(g.Reason)
 				}
-				fmt.Fprintf(o.Progress, "workflow %s: stage %d/%d %s attempt %d %s\n", p.Name, i+1, len(p.Stages), st.Skill.Name, a, verdict)
+				fmt.Fprintf(o.Progress, "workflow %s: stage %d/%d %s spec gate %s\n", p.Name, i+1, len(p.Stages), st.Skill.Name, verdict)
 			}
-			if last.Check.Passed {
-				passed = true
+			if g.Passed {
 				break
 			}
-			feedback = last.Check.Reason
+			passed = false
+			last.Check.Reason = "spec gate: " + g.Reason
+			feedback = "The spec gate rejected your plan: " + g.Reason + "\nEvery task needs a \"Task N: <title>\" line, an \"Acceptance criteria:\" list with at least one bullet, and a \"Verify: `<command>`\" line whose program exists."
 		}
 		if ctx.Err() != nil {
 			res.Status, res.FailedStage, res.Reason = StatusInterrupted, st.Skill.Name, "interrupted"
@@ -172,6 +215,9 @@ func Run(ctx context.Context, o Options) *Result {
 		}
 		if !passed {
 			res.Status, res.FailedStage, res.Reason = StatusFailed, st.Skill.Name, last.Check.Reason
+			if Unsatisfiable(last.Check) {
+				res.Status = StatusBlocked
+			}
 			break
 		}
 		prev, prevName = last.Output, st.Skill.Name
@@ -184,8 +230,32 @@ func Run(ctx context.Context, o Options) *Result {
 	if res.FailedStage != "" {
 		f["failed_stage"], f["reason"] = res.FailedStage, res.Reason
 	}
+	if res.Status == StatusBlocked {
+		f["blocked"] = true
+	}
 	emit("workflow.finished", f)
 	return res
+}
+
+// Unsatisfiable reports whether a failed check failed on its merits, so a
+// stage that keeps failing it is blocked rather than failed: a check command
+// that ran and exited non-zero, a model verdict of SUCCESS CHECK: FAIL, or
+// behavior cases that ran and failed. A run error or limit hit, a missing
+// verdict line, a check command that timed out or couldn't start, and an
+// invalid behavior file are transient.
+func Unsatisfiable(c Check) bool {
+	if c.Passed {
+		return false
+	}
+	switch c.Method {
+	case "command":
+		return !c.TimedOut && c.ExitCode > 0
+	case "model":
+		return !c.NoVerdict
+	case "behavior":
+		return len(c.Evidence) > 0
+	}
+	return false
 }
 
 func stageNames(p *Pipeline) []string {
@@ -344,6 +414,7 @@ func modelVerdict(out string) Check {
 	m := reVerdict.FindAllStringSubmatch(out, -1)
 	if len(m) == 0 {
 		c.Reason = "the stage output has no SUCCESS CHECK: PASS or FAIL line"
+		c.NoVerdict = true
 		return c
 	}
 	last := m[len(m)-1]

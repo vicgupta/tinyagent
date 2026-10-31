@@ -121,6 +121,9 @@ func runWorkflow(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.
 	}
 	if res.Status != harness.StatusPassed {
 		fmt.Fprintf(stderr, "workflow %s %s at stage %s: %s\n", route.Name, res.Status, res.FailedStage, res.Reason)
+		if res.Status == harness.StatusBlocked {
+			fmt.Fprintln(stderr, "blocked: no more attempts will run; fix the task or its acceptance criteria, then re-run the same tinyagent --workflow command")
+		}
 	} else if !o.jsonOutput {
 		fmt.Fprintln(stdout, res.Output)
 	}

@@ -125,7 +125,7 @@ func TestBehaviorStageFailsWorkflow(t *testing.T) {
 	}
 	bad := "version: 1\ncases:\n  - run: [sh, -c, \"echo panic: boom\"]\n    expect:\n      stdout_not_contains: [panic]\n"
 	res, _, _ := runBehaviorWorkflow(t, 0, []string{bad}, false)
-	if res.Status != StatusFailed || res.FailedStage != "verify-behavior" || !strings.Contains(res.Reason, `stdout contains "panic"`) {
+	if res.Status != StatusBlocked || res.FailedStage != "verify-behavior" || !strings.Contains(res.Reason, `stdout contains "panic"`) {
 		t.Fatalf("result = %+v", res)
 	}
 }

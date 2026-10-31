@@ -50,7 +50,10 @@ type Stage struct {
 	// Behavior, when set, is a path (relative to --cwd) where the stage
 	// writes behavior cases; the harness runs them and decides the stage on
 	// their observed output. See behavior.go.
-	Behavior     string            `json:"behavior,omitempty"`
+	Behavior string `json:"behavior,omitempty"`
+	// Gate, when "spec", checks the stage's output with SpecGate after it
+	// passes; see gate.go.
+	Gate         string            `json:"gate,omitempty"`
 	CheckTimeout int               `json:"check_timeout"`
 	Retries      int               `json:"retries"`
 	Model        string            `json:"model,omitempty"`
@@ -83,6 +86,7 @@ type fileStage struct {
 	Skill    string            `yaml:"skill"`
 	Check    []string          `yaml:"check"`
 	Behavior *string           `yaml:"behavior"`
+	Gate     string            `yaml:"gate"`
 	Inputs   map[string]string `yaml:"inputs"`
 	Settings `yaml:",inline"`
 }
@@ -205,6 +209,9 @@ func (w *Workflow) resolve(fs fileStage) (Stage, error) {
 			return Stage{}, errors.New("a stage can have check or behavior, not both")
 		}
 	}
+	if fs.Gate != "" && fs.Gate != GateSpec {
+		return Stage{}, fmt.Errorf("unknown gate %q (known: %s)", fs.Gate, GateSpec)
+	}
 	if sk.SuccessCheck == "" && len(fs.Check) == 0 && fs.Behavior == nil {
 		return Stage{}, fmt.Errorf("skill %s has no \"Success check:\" line, so the stage needs a check command", sk.Name)
 	}
@@ -214,6 +221,7 @@ func (w *Workflow) resolve(fs fileStage) (Stage, error) {
 		st.Behavior = *fs.Behavior
 	}
 	st.Inputs = fs.Inputs
+	st.Gate = fs.Gate
 	apply(&st, fs.Settings)
 	return st, nil
 }

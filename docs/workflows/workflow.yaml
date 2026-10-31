@@ -11,6 +11,7 @@ workflows:
     intent: Implement a feature from a spec, then validate, test and verify its behavior.
     stages:
       - skill: plan-tasks
+        gate: spec
       - skill: generate-code
         step_limit: 100
       - skill: validate-diff

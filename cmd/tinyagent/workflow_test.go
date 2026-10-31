@@ -80,19 +80,28 @@ func TestWorkflowCLIFailureAndJSON(t *testing.T) {
 	wf := writeWorkflowFiles(t)
 	var calls [][]string
 	fakeWorkflowAgent(t, "SUCCESS CHECK: FAIL - nothing planned", &calls)
-	code, stdout, stderr := runCLI(t, "--workflow", wf, "--workflow-name", "plan-tasks", "-t", "x", "--json", "--cwd", t.TempDir())
-	if code != 1 {
+	out := filepath.Join(t.TempDir(), "run.json")
+	code, stdout, stderr := runCLI(t, "--workflow", wf, "--workflow-name", "plan-tasks", "-t", "x", "--json", "-o", out, "--cwd", t.TempDir())
+	if code != harness.ExitBlocked {
 		t.Fatalf("exit %d, stderr:\n%s", code, stderr)
 	}
 	if len(calls) != 2 {
 		t.Errorf("calls = %d, want 2 (default one retry)", len(calls))
 	}
-	if !strings.Contains(stderr, "stage plan-tasks: nothing planned") {
+	if !strings.Contains(stderr, "workflow plan-tasks Blocked at stage plan-tasks: nothing planned") || !strings.Contains(stderr, "re-run the same tinyagent --workflow command") {
 		t.Errorf("stderr = %q", stderr)
 	}
 	lines := strings.Split(strings.TrimSpace(stdout), "\n")
-	if len(lines) != 6 || !strings.Contains(lines[0], `"workflow.started"`) || !strings.Contains(lines[5], `"workflow.finished"`) {
+	if len(lines) != 6 || !strings.Contains(lines[0], `"workflow.started"`) || !strings.Contains(lines[5], `"workflow.finished"`) || !strings.Contains(lines[5], `"status":"Blocked"`) {
 		t.Errorf("events:\n%s", stdout)
+	}
+	var res harness.Result
+	b, err := os.ReadFile(out)
+	if err != nil || json.Unmarshal(b, &res) != nil {
+		t.Fatalf("read -o: %v", err)
+	}
+	if res.Status != harness.StatusBlocked || res.FailedStage != "plan-tasks" || res.Reason != "nothing planned" {
+		t.Errorf("result = %+v", res)
 	}
 }
 
