@@ -141,6 +141,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 - `tinyagent skills validate <path>...`: check skill-workflow skill files, skills directories and workflow files without a model call (exit 1 names an invalid skill), for CI or a pre-commit hook; see [Skill workflows](docs/project-context.md#skill-workflows).
 - Help everywhere: `tinyagent` or `tinyagent <subcommand>` alone at a terminal prints help (the top-level one shows how to pass the task, pick the model and the common options); `--help --verbose` lists every flag by section.
 - Per-project config: `tinyagent init` writes a commented `./tinyagent.yaml`, which is read from `--cwd` (flags, environment variables and `--profile` outrank it). Settings that launch programs or loosen security (`mcp_servers`, `hooks`, `command_tools`, `permissions`, ...) are honored from it only with `--trust-config`. See [docs/config.md](docs/config.md#config).
+- `tinyagent --check`: a setup summary table (model, provider, API key set/missing, sandbox, permissions, lockdown, config source) with no model request, or `--check --json` for CI and scripts.
 - `tinyagent --update`: checksum-verified self-update with step-by-step progress and a `#` download bar.
 - Undo for file edits, workspace rewind, resume and follow-up runs.
 - Sandboxed commands (Linux: Bubblewrap with Landlock stacked inside, or Landlock alone, via `--sandbox-backend`; macOS: Seatbelt) with a network allowlist, permission rules, hooks, untrusted-content lockdown and file-access rules.
