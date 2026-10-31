@@ -111,6 +111,8 @@ Before opening a PR, confirm:
 - [ ] `README.md` or `docs/` updated for any user-visible change (flag, config key, env var,
       provider, hint).
 - [ ] Tests cover the new behavior, including any golden-output expectations.
+- [ ] PR body follows [`.github/pull_request_template.md`](.github/pull_request_template.md):
+      three sections, under ~200 words, no transcripts or run logs.
 
 See [REVIEWPR.md](REVIEWPR.md) for how PRs get triaged and merged, and
 [LESSONS.md](LESSONS.md) for hard-won gotchas (rebases, build tags, golden tests,
