@@ -59,6 +59,7 @@ workflows:
     intent: Implement a feature from a spec, then validate and test it.
     stages:
       - skill: plan-tasks
+        gate: spec        # check the plan before code is generated
       - skill: generate-code
         step_limit: 100
       - skill: validate-diff
@@ -70,7 +71,7 @@ workflows:
         behavior: .tinyagent/behavior.yaml
 ```
 
-Settings in `defaults` or on a stage: `model`, `profile`, `step_limit`, `cost_limit`, `token_limit`, `time_limit`, `retries`, and `check_timeout` (seconds). A stage can also have `check` (a command) or `behavior` (a behavior file; see [Verifying behavior](#verifying-behavior)), but not both. The defaults are 1 retry (at most 5), 50 steps, a 300 second check timeout, and otherwise your usual config. Flags you pass with `--workflow` (such as `--sandbox` or `-m`) are forwarded to every stage, and stage settings override them. Workflows are sequential and have at most 20 stages. A complete example is in [docs/workflows](workflows).
+Settings in `defaults` or on a stage: `model`, `profile`, `step_limit`, `cost_limit`, `token_limit`, `time_limit`, `retries`, and `check_timeout` (seconds). A stage can also have `check` (a command) or `behavior` (a behavior file; see [Verifying behavior](#verifying-behavior)), but not both, and `gate: spec` (see [Spec gate](#spec-gate)). The defaults are 1 retry (at most 5), 50 steps, a 300 second check timeout, and otherwise your usual config. Flags you pass with `--workflow` (such as `--sandbox` or `-m`) are forwarded to every stage, and stage settings override them. Workflows are sequential and have at most 20 stages. A complete example is in [docs/workflows](workflows).
 
 **Skill files (Markdown).** Each stage's skill is a Markdown file with three required parts: a heading, an intent line, and a list of inputs. A one-line success check is required too, unless the workflow gives that stage a `check` command.
 
@@ -102,6 +103,18 @@ Either way nothing more runs: no further attempts and no later stages, so a bloc
 
 **Re-queueing.** tinyagent keeps no list of blocked tasks; one run handles one task. To re-queue, fix the task or its acceptance criteria and run the same `tinyagent --workflow ... -t ...` command again. An outside loop that feeds tasks to tinyagent can park a task on exit 5; the suggested convention for an issue-label loop is to swap the issue's `amf:ready` label for `amf:blocked`, and have a person re-add `amf:ready` once the issue is fixed. tinyagent itself makes no GitHub calls.
 
+#### Spec gate
+
+A thin plan wastes a whole generate-code stage before anyone notices it can't be built or checked. `gate: spec` on a stage (normally `plan-tasks`) checks that stage's output after it passes its success check and before the next stage starts. The plan passes the gate when it has at least one task and every task has:
+
+- a `Task N: <title>` line that starts the task (it may be a heading or bold);
+- an `Acceptance criteria:` list with at least one bullet;
+- a ``Verify: `<command>` `` line with one command in backticks whose program exists: its first word after any `VAR=value` prefixes is found on `PATH`, or, if it contains a `/`, exists relative to `--cwd`. The command is not run, because the code it checks doesn't exist yet.
+
+The example [`plan-tasks`](workflows/skills/plan-tasks.md) skill asks for exactly this shape. The gate checks structure only; it doesn't judge whether the criteria are good.
+
+When the gate rejects a plan, the stage runs once more (a **re-plan**) with the gate's reason in its prompt. The re-plan gets the stage's normal retry budget again for its success check, so it doesn't use up the retries. If the gate rejects the re-plan too, the workflow stops before the next stage, with status `Failed`, the failed stage, and a reason starting `spec gate:`, and exits 1. It never re-plans in a loop. Each decision is a `stage.gate` event and an entry in the `-o` record's `gates` list, and is shown as a progress line. Without `gate:`, stages behave as before. `gate` is a new workflow key, so older tinyagent versions reject a workflow file that uses it.
+
 #### Verifying behavior
 
 Tests passing doesn't prove the built program does what the task asked. A stage with `behavior: <path>` checks that from the outside: the stage's run translates the task's behavioral acceptance criteria (what a command prints, which exit code it returns) into cases in that file, and the harness then runs each case itself and decides the stage on the observed output alone, not on the model's opinion. The example `implement` workflow ends with a `verify-behavior` stage that does this after `run-tests`.
@@ -130,6 +143,6 @@ When the task has no behavioral criteria, the stage writes no file (or `cases: [
 
 **Evidence.** Each case's observed output (argv, exit code, stdout and stderr, each capped at 4 KiB, and its failures) is recorded in the check's `evidence` list in the `-o` workflow record and the `stage.finished` event, and is appended to that attempt's log under `== verify-behavior evidence ==`.
 
-**Output and exit status.** Progress lines go to stderr, and the last stage's output goes to stdout. `-o run.json` writes a workflow record (`"kind": "workflow"`) with the route, status, failed stage and reason, total cost, and one entry per attempt with its input, output, exit status, check result, and paths to that attempt's trajectory and log under `run.json.stages/`. Without `-o`, the per-stage files are temporary. `--json` prints JSONL events `workflow.started`, `stage.started` (with the input), `stage.finished` (input, output and `check`, which for a [behavior stage](#verifying-behavior) has `method: "behavior"`, `skipped` and `evidence`), and `workflow.finished`. Exit status is 0 when every stage passes, 5 when a stage is [blocked](#blocked-tasks), 1 when a stage fails for another reason, 2 for an invalid skill or workflow file, a routing error or a conflicting flag (all before any model request), and 130 when interrupted. `--workflow` can't be combined with flags for one interactive or resumed run, such as `--resume`, `--review`, `--worktree`, `--eval` or `--ask-user`.
+**Output and exit status.** Progress lines go to stderr, and the last stage's output goes to stdout. `-o run.json` writes a workflow record (`"kind": "workflow"`) with the route, status, failed stage and reason, total cost, the spec gate decisions (`gates`), and one entry per attempt with its input, output, exit status, check result, and paths to that attempt's trajectory and log under `run.json.stages/`. Without `-o`, the per-stage files are temporary. `--json` prints JSONL events `workflow.started`, `stage.started` (with the input), `stage.finished` (input, output and `check`, which for a [behavior stage](#verifying-behavior) has `method: "behavior"`, `skipped` and `evidence`), `stage.gate` (a [spec gate](#spec-gate) decision), and `workflow.finished`. Exit status is 0 when every stage passes, 5 when a stage is [blocked](#blocked-tasks), 1 when a stage fails for another reason, 2 for an invalid skill or workflow file, a routing error or a conflicting flag (all before any model request), and 130 when interrupted. `--workflow` can't be combined with flags for one interactive or resumed run, such as `--resume`, `--review`, `--worktree`, `--eval` or `--ask-user`.
 
 **Trust:** workflow skills are prompt input, and `check` commands run with your permissions, just like a project's AGENTS.md or Agent Skills. Only run workflow files you trust.

@@ -119,8 +119,10 @@ type Result struct {
 	Output        string    `json:"output,omitempty"` // the last stage's output
 	Stages        []Stage   `json:"stages"`
 	Attempts      []Attempt `json:"attempts"`
-	CostUSD       float64   `json:"cost_usd"`
-	DurationMS    int64     `json:"duration_ms"`
+	// Gates are the stage gate decisions, in order.
+	Gates      []GateDecision `json:"gates,omitempty"`
+	CostUSD    float64        `json:"cost_usd"`
+	DurationMS int64          `json:"duration_ms"`
 }
 
 // ExitCode maps a result to the process exit code.
@@ -155,30 +157,57 @@ func Run(ctx context.Context, o Options) *Result {
 		var last Attempt
 		passed := false
 		feedback := ""
-		for a := 1; a <= st.Retries+1; a++ {
-			if ctx.Err() != nil {
+		n := 0 // attempts so far at this stage, across a re-plan
+		// rounds is 1, or 2 when a spec gate rejects the first plan: the
+		// re-plan gets the stage's full retry budget again.
+		for round := 1; round <= 2; round++ {
+			passed = false
+			for a := 1; a <= st.Retries+1; a++ {
+				if ctx.Err() != nil {
+					break
+				}
+				n++
+				input := Prompt(i+1, len(p.Stages), st, o.Task, prev, prevName, o.Cwd, feedback)
+				emit("stage.started", map[string]any{"stage": i + 1, "skill": st.Skill.Name, "attempt": n, "input": input})
+				last = runAttempt(ctx, o, st, i+1, n, input)
+				res.Attempts = append(res.Attempts, last)
+				res.CostUSD += last.CostUSD
+				emit("stage.finished", attemptFields(last))
+				if o.Progress != nil {
+					verdict := "passed"
+					if last.Check.Skipped {
+						verdict = "skipped: " + oneLine(last.Check.Reason)
+					} else if !last.Check.Passed {
+						verdict = "failed: " + oneLine(last.Check.Reason)
+					}
+					fmt.Fprintf(o.Progress, "workflow %s: stage %d/%d %s attempt %d %s\n", p.Name, i+1, len(p.Stages), st.Skill.Name, n, verdict)
+				}
+				if last.Check.Passed {
+					passed = true
+					break
+				}
+				feedback = last.Check.Reason
+			}
+			if !passed || ctx.Err() != nil || st.Gate != GateSpec {
 				break
 			}
-			input := Prompt(i+1, len(p.Stages), st, o.Task, prev, prevName, o.Cwd, feedback)
-			emit("stage.started", map[string]any{"stage": i + 1, "skill": st.Skill.Name, "attempt": a, "input": input})
-			last = runAttempt(ctx, o, st, i+1, a, input)
-			res.Attempts = append(res.Attempts, last)
-			res.CostUSD += last.CostUSD
-			emit("stage.finished", attemptFields(last))
+			g := SpecGate(last.Output, o.Cwd)
+			d := GateDecision{Stage: i + 1, Skill: st.Skill.Name, Gate: st.Gate, Attempt: round, Passed: g.Passed, Reason: g.Reason, Missing: g.Missing}
+			res.Gates = append(res.Gates, d)
+			emit("stage.gate", map[string]any{"stage": d.Stage, "skill": d.Skill, "gate": d.Gate, "attempt": d.Attempt, "passed": d.Passed, "reason": d.Reason, "missing": d.Missing})
 			if o.Progress != nil {
 				verdict := "passed"
-				if last.Check.Skipped {
-					verdict = "skipped: " + oneLine(last.Check.Reason)
-				} else if !last.Check.Passed {
-					verdict = "failed: " + oneLine(last.Check.Reason)
+				if !g.Passed {
+					verdict = "rejected: " + oneLine(g.Reason)
 				}
-				fmt.Fprintf(o.Progress, "workflow %s: stage %d/%d %s attempt %d %s\n", p.Name, i+1, len(p.Stages), st.Skill.Name, a, verdict)
+				fmt.Fprintf(o.Progress, "workflow %s: stage %d/%d %s spec gate %s\n", p.Name, i+1, len(p.Stages), st.Skill.Name, verdict)
 			}
-			if last.Check.Passed {
-				passed = true
+			if g.Passed {
 				break
 			}
-			feedback = last.Check.Reason
+			passed = false
+			last.Check.Reason = "spec gate: " + g.Reason
+			feedback = "The spec gate rejected your plan: " + g.Reason + "\nEvery task needs a \"Task N: <title>\" line, an \"Acceptance criteria:\" list with at least one bullet, and a \"Verify: `<command>`\" line whose program exists."
 		}
 		if ctx.Err() != nil {
 			res.Status, res.FailedStage, res.Reason = StatusInterrupted, st.Skill.Name, "interrupted"
