@@ -1,0 +1,4 @@
+Name   | Count |                   Note
+-------+-------+------------------------------------------
+alpha  |     1 |                   short
+beta b |    22 | a much longer note that wraps when narrow

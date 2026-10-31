@@ -162,6 +162,9 @@ type AgentConfig struct {
 	// ChatHistory records interactive chat input in <cwd>/history/chat_history
 	// (default on; false or --no-chat-history keeps it in memory only).
 	ChatHistory *bool `yaml:"chat_history,omitempty"`
+	// ChatMarkdown renders chat replies as formatted Markdown (headings,
+	// lists, code blocks, tables); false shows them raw. nil means on.
+	ChatMarkdown *bool `yaml:"chat_markdown,omitempty"`
 	// ScopedAgentsMD also delivers AGENTS.md files in directories below
 	// --cwd with the results of file tools touching paths there (off by
 	// default; --scoped-agents-md overrides it).

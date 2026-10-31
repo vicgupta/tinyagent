@@ -50,6 +50,7 @@ cmd/tinyagent/        CLI entrypoint, flag parsing, main loop glue
 internal/agent/       the run loop, compaction, tool dispatch; build an Agent with agent.New (it validates the options)
 internal/config/      YAML config + built-in defaults
 internal/model/       providers, price table, context windows; CLI handoff providers (claudecode.go, codexexec.go, opencode.go) share handoff.go
+internal/termmd/       streaming Markdown-to-terminal renderer used by chat (no dependencies; golden tests in testdata/)
 internal/resume/      what a --resume must match in its checkpoint (flag table, root, tool fingerprint, tool names); loads the checkpoint and pins its recorded settings onto the run config
 internal/tools/       the base tools listed above, plus the opt-in tools; docs_sync_test.go keeps the docs' base tool list in sync with tools.Specs(false)
 internal/trajectory/  the -o JSON output
@@ -89,6 +90,11 @@ embed/prompts/        system prompt templates
 - Follow existing naming and error-handling patterns. Errors should be actionable
   and name the file or key involved (see the config loader and provider code).
 - Prefer the standard library; add dependencies only with justification.
+- Terminal output must degrade cleanly without color: with `--color never`,
+  `NO_COLOR` or a non-terminal, keep the structure (plain ASCII markers such
+  as `#`, `-`, `|`) and write no escape codes. Chat UI pieces live in
+  `cmd/tinyagent/chat_ui.go`; the Markdown renderer in `internal/termmd`.
+  Update its goldens with `go test ./internal/termmd -update` and review the diff.
 
 ## Adding an opt-in tool
 

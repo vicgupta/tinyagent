@@ -72,6 +72,10 @@ func runChat(o *options, fs *flag.FlagSet) int {
 		fmt.Fprintln(os.Stderr, "error: chat needs an interactive terminal on stdin and stdout; for scripts run tinyagent -t \"<task>\" (with --resume to continue)")
 		return 2
 	}
+	if !enableEscapes(os.Stdout) || !enableEscapes(os.Stderr) {
+		// A console without ANSI support would show escapes as text.
+		stdoutStyle, stderrStyle = styler{}, styler{}
+	}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
 	defer signal.Stop(sig)
@@ -83,7 +87,9 @@ type chat struct {
 	s       *session
 	io      chatIO
 	ed      *lineEditor
-	st      styler
+	st      styler // stderr's
+	outSt   styler // stdout's, for replies
+	md      bool   // render replies as Markdown (/raw turns it off)
 	path    string // checkpoint written after every step
 	source  string // ResumeSource for the next turn
 	cont    bool   // the next turn continues s.traj (Continue)
@@ -159,7 +165,8 @@ func runChatIO(o *options, fs *flag.FlagSet, cio chatIO) int {
 			return 1
 		}
 	}
-	c := &chat{s: s, io: cio, st: styleFor(errw), start: time.Now()}
+	c := &chat{s: s, io: cio, st: styleFor(errw), outSt: styleFor(cio.out), start: time.Now()}
+	c.md = s.cfg.ChatMarkdown == nil || *s.cfg.ChatMarkdown
 	c.path = o.output
 	if c.path == "" {
 		if c.path, err = newChatPath(root); err != nil {
@@ -177,8 +184,7 @@ func runChatIO(o *options, fs *flag.FlagSet, cio chatIO) int {
 	c.ed = newLineEditor(cio.in, cio.reader, cio.out, hist)
 	go c.watchInterrupts()
 
-	fmt.Fprintln(errw, c.st.Dim(fmt.Sprintf("tinyagent chat · %s · %s · checkpoint %s", s.modelName, root, relTo(root, c.path))))
-	fmt.Fprintln(errw, c.st.Dim("Enter sends · \\ at line end or \"\"\" continues · Ctrl-C stops a turn · Ctrl-D or /exit quits · /help"))
+	io.WriteString(errw, c.banner())
 	if prev != nil {
 		s.traj, c.source = prev, o.resume
 		c.turns = 0
@@ -302,7 +308,9 @@ func (c *chat) readMessage() (string, error) {
 	return line, nil
 }
 
-func (c *chat) prompt() string { return c.st.Bold("> ") }
+func (c *chat) prompt() string {
+	return "\n" + c.st.Bold(c.st.Glyph("\x1b[36m›\x1b[0m\x1b[1m ", "> "))
+}
 
 // turn runs one message as one Agent.Run continuing the conversation.
 // asFollowUp is false only for re-running an unfinished checkpoint.
@@ -325,9 +333,12 @@ func (c *chat) turn(msg string, asFollowUp bool) {
 		s.turn--
 		c.turns--
 		fmt.Fprintln(errw, c.st.Red("error: ")+err.Error())
+		fmt.Fprintln(errw, c.st.Dim("nothing was sent; fix that and try again, or /help"))
 		return
 	}
-	a.Out, a.Err = errw, errw
+	act := newChatActivity(errw, c.st)
+	termErr, termOut := act.writer(errw), act.writer(c.io.out)
+	a.Out, a.Err = lineEndFilter{termErr, &c.md}, termErr
 	a.CompactFirst, c.compact = c.compact, false
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -370,20 +381,75 @@ func (c *chat) turn(msg string, asFollowUp bool) {
 		checkpointSaved(a, t, c.path, o.planFile)
 		return nil
 	}
-	streamed := false
-	text := &markerFilter{emit: func(t string) {
+	// Replies render as Markdown a block at a time; tool calls end the
+	// block before them and collapse into one line once text resumes.
+	var mu sync.Mutex
+	streamed, endsLine := false, true
+	md := newChatRenderer(termOut, chatWidth(c.io.out), c.outSt)
+	summarize := func() {
+		if line := act.summary(); line != "" {
+			if !endsLine {
+				io.WriteString(termOut, "\n")
+				endsLine = true
+			}
+			fmt.Fprintln(termErr, line)
+		}
+	}
+	var text *markerFilter
+	text = &markerFilter{emit: func(t string) {
+		if t == "" {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		summarize()
 		streamed = true
-		io.WriteString(c.io.out, t)
+		if c.md {
+			md.Write(t)
+			return
+		}
+		io.WriteString(termOut, t)
+		endsLine = strings.HasSuffix(t, "\n")
 	}}
+	logged := a.OnEvent
+	a.OnEvent = func(kind string, fields map[string]any) {
+		if logged != nil {
+			logged(kind, fields)
+		}
+		switch kind {
+		case "tool.call":
+			text.flush()
+			mu.Lock()
+			md.Flush()
+			mu.Unlock()
+			name, _ := fields["name"].(string)
+			act.toolCall(name, fields["arguments"])
+		case "tool.result":
+			isErr, _ := fields["is_error"].(bool)
+			act.toolResult(isErr)
+		}
+	}
+	io.WriteString(errw, "\n")
+	act.run()
 	s.setText(text.write)
 	start := time.Now()
 	t := a.Run(ctx, msg)
 	s.setText(nil)
 	text.flush()
+	mu.Lock()
+	md.Flush()
+	summarize()
+	mu.Unlock()
+	act.finish()
 	elapsed := time.Since(start)
 	if !streamed && t.Submission != "" && t.ExitStatus != agent.StatusError {
-		io.WriteString(c.io.out, strings.TrimRight(t.Submission, "\n")+"\n")
-	} else if streamed {
+		if c.md {
+			md.Write(t.Submission)
+			md.Flush()
+		} else {
+			io.WriteString(c.io.out, strings.TrimRight(t.Submission, "\n")+"\n")
+		}
+	} else if streamed && !endsLine {
 		io.WriteString(c.io.out, "\n")
 	}
 	if err := t.Save(c.path); err != nil {
@@ -402,10 +468,11 @@ func (c *chat) turn(msg string, asFollowUp bool) {
 	case agent.StatusError:
 		fmt.Fprintln(errw, c.st.Red("error: ")+t.Submission)
 		printHint(errw, s.modelName, t.Submission)
+		fmt.Fprintln(errw, c.st.Dim("the conversation is kept; send a message to retry or carry on, or /help"))
 	default:
 		fmt.Fprintln(errw, c.st.Yellow(t.ExitStatus)+c.st.Dim(" (your next message continues from here)"))
 	}
-	fmt.Fprintln(errw, c.st.Dim(c.turnLine(prev, t, elapsed)))
+	fmt.Fprintln(errw, "\n"+c.st.Dim(c.turnLine(prev, t, elapsed)))
 	events.finish(t, elapsed)
 	s.traj, c.source, c.cont = t, "chat session", true
 }
@@ -417,7 +484,7 @@ func (c *chat) turnLine(prev, t *trajectory.Trajectory, elapsed time.Duration) s
 	if prev != nil {
 		steps, in, out, cost = steps-prev.Steps, in-prev.InputTokens, out-prev.OutputTokens, cost-prev.Cost
 	}
-	line := fmt.Sprintf("turn %d · %d steps · %s in / %s out tokens", c.turns, steps, formatInt(in), formatInt(out))
+	line := fmt.Sprintf("turn %d · %s · %s in / %s out tokens", c.turns, count(steps, "step"), formatInt(in), formatInt(out))
 	if t.Cost > 0 {
 		line += fmt.Sprintf(" · %s (session %s)", formatCost(cost), formatCost(t.Cost))
 	}
@@ -431,9 +498,38 @@ func (c *chat) exit() int {
 		fmt.Fprintln(c.io.errw, c.st.Dim("no turns; nothing saved"))
 		return 0
 	}
-	fmt.Fprintf(c.io.errw, "chat: %d turns, %s\n", c.turns, summaryLine(t, time.Since(c.start)))
-	fmt.Fprintln(c.io.errw, "continue with: tinyagent chat --resume "+shellQuote(c.path)+" --cwd "+shellQuote(c.s.root))
+	io.WriteString(c.io.errw, c.exitSummary(t))
 	return 0
+}
+
+// lineEndFilter drops the bare newline the agent writes to end a streamed
+// reply when the Markdown renderer already ends its lines.
+type lineEndFilter struct {
+	w  io.Writer
+	md *bool
+}
+
+func (f lineEndFilter) Write(p []byte) (int, error) {
+	if *f.md && string(p) == "\n" {
+		return len(p), nil
+	}
+	return f.w.Write(p)
+}
+
+// exitSummary is the session's totals, where it was saved and how to
+// resume it.
+func (c *chat) exitSummary(t *trajectory.Trajectory) string {
+	st := c.st
+	line := fmt.Sprintf("chat ended · %s · %s · %s in / %s out tokens", count(c.turns, "turn"), count(t.Steps, "step"), formatInt(t.InputTokens), formatInt(t.OutputTokens))
+	if t.Cost > 0 {
+		line += " · " + formatCost(t.Cost)
+	}
+	line += " · " + formatDuration(time.Since(c.start))
+	var b strings.Builder
+	b.WriteString("\n" + st.Bold(line) + "\n")
+	fmt.Fprintf(&b, "  %s %s\n", st.Dim("saved "), relTo(c.s.root, c.path))
+	fmt.Fprintf(&b, "  %s %s\n", st.Dim("resume"), "tinyagent chat --resume "+shellQuote(c.path)+" --cwd "+shellQuote(c.s.root))
+	return b.String()
 }
 
 // newChatPath returns a fresh .tinyagent/chats/<timestamp>.json under root.

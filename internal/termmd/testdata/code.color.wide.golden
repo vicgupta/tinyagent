@@ -1,0 +1,10 @@
+[2m╭─ go[0m
+[2m│[0m [35mfunc[0m main() {
+[2m│[0m     [2m// say hi[0m
+[2m│[0m     fmt.Println([32m"hi"[0m, [33m42[0m)
+[2m│[0m }
+[2m╰─[0m
+
+[2m╭─[0m
+[2m│[0m no language
+[2m╰─[0m

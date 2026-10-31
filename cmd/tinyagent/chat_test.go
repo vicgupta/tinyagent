@@ -107,7 +107,7 @@ func TestChatMultiTurn(t *testing.T) {
 	if last := lastUser(t, reqs[2]); !strings.HasPrefix(last, trajectory.FollowUpNotice) || !strings.HasSuffix(last, "and \nnow?") {
 		t.Errorf("follow-up = %q", last)
 	}
-	for _, want := range []string{"turn 1 ·", "turn 2 ·", "2 turns ·", "continue with: tinyagent chat --resume"} {
+	for _, want := range []string{"turn 1 ·", "turn 2 ·", "chat ended · 2 turns ·", "resume tinyagent chat --resume"} {
 		if !strings.Contains(r.stderr, want) {
 			t.Errorf("stderr lacks %q:\n%s", want, r.stderr)
 		}
@@ -230,7 +230,7 @@ func TestChatSlashCommands(t *testing.T) {
 	if r.code != 0 {
 		t.Fatalf("exit %d\n%s", r.code, r.stderr)
 	}
-	for _, want := range []string{"/exit, /quit", "no turns yet", "nothing to save yet", "unknown command /bogus", "did you mean /compact?", "1 turns ·", "compacted context", "compacts the conversation first", "saved " + filepath.Join(root, "s.json"), "new conversation"} {
+	for _, want := range []string{"/exit, /quit", "no turns yet", "nothing to save yet", "unknown command /bogus", "did you mean /compact?", "turns   1", "compacted context", "compacts the conversation first", "saved " + filepath.Join(root, "s.json"), "new conversation"} {
 		if !strings.Contains(r.stderr, want) {
 			t.Errorf("stderr lacks %q", want)
 		}
