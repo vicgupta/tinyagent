@@ -67,6 +67,7 @@ type options struct {
 	reasoningEffort                                  string
 	fallbackModels                                   specList
 	auxModel                                         string
+	delegateModel                                    string
 	routes                                           routeList
 	noFallback                                       bool
 	openaiAPI                                        string
@@ -172,7 +173,8 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "provider reasoning effort: none, minimal, low, medium, high, xhigh, or max")
 	fs.Var(&o.fallbackModels, "fallback-model", "provider/model to switch to when requests still fail with 429/5xx/network errors after retries (repeatable, tried in order; replaces fallback_models)")
 	fs.StringVar(&o.auxModel, "aux-model", "", "provider/model for auxiliary helper calls (context compaction, verify review); replaces models.auxiliary.model")
-	fs.Var(&o.routes, "route", "route one task to its own model, task=provider/model (repeatable; tasks: compaction, review); beats models.<role>.tasks")
+	fs.StringVar(&o.delegateModel, "delegate-model", "", "provider/model for delegated children (delegate subagents, workers); replaces models.delegated.model")
+	fs.Var(&o.routes, "route", "route one task to its own model, task=provider/model (repeatable; tasks: compaction, review, delegate, worker); beats models.<role>.tasks")
 	fs.BoolVar(&o.noFallback, "no-fallback", false, "don't fall back to other models (clears fallback_models)")
 	fs.StringVar(&o.openaiAPI, "openai-api", "", "openai provider transport: auto, responses, or chat")
 	fs.StringVar(&o.execEnv, "env", "", "where bash and start_process run: local or container (default: config's environment, else local)")
@@ -2056,6 +2058,10 @@ func applyFlagOverrides(fs *flag.FlagSet, cfg *config.AgentConfig, stepLimit int
 		switch f.Name {
 		case "aux-model":
 			cfg.Models.Flags.AuxModel = strings.TrimSpace(f.Value.String())
+		case "delegate-model":
+			cfg.Models.Flags.DelegateModel = strings.TrimSpace(f.Value.String())
+		case "no-fallback":
+			cfg.Models.Flags.NoFallback = f.Value.String() == "true"
 		case "route":
 			if r, ok := f.Value.(*routeList); ok {
 				cfg.Models.Flags.Routes = *r

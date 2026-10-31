@@ -40,12 +40,12 @@ func newWorkers(cfg config.AgentConfig, parentModel, reasoningEffort string) (*a
 	}
 	w := cfg.Subagents.Workers
 	r := routing.Delegated(cfg, parentModel, routing.TaskWorker)
-	m, err := newChildModel(cfg, r.Model, parentModel, reasoningEffort)
+	m, err := routedModel(cfg, r, parentModel, reasoningEffort)
 	if err != nil {
 		if r.Source == routing.SourceMain {
 			return nil, fmt.Errorf("workers: %w", err)
 		}
-		return nil, fmt.Errorf("%s %q: %w", r.Source, r.Model, err)
+		return nil, err
 	}
 	return &agent.Workers{Model: m, ModelName: r.Model, MaxSteps: w.MaxSteps, Tools: w.Tools, MaxConcurrent: w.MaxConcurrent}, nil
 }

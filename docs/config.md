@@ -89,9 +89,11 @@ models:                  # per-role model routing; see Model roles (all optional
   auxiliary:              # models for helper calls outside the agent loop
     model: ""             # default for compaction and review (same as --aux-model); empty uses the main model
     tasks: {}             # per-task override: compaction, review (same as --route task=spec)
+    fallback_models: []   # the role's own fallback chain, at most 3; never inherits fallback_models
   delegated:              # models for delegated children
     model: ""             # default for delegate and worker children; empty uses the main model
     tasks: {}             # per-task override: delegate, worker (e.g. worker: openai/gpt-5-mini)
+    fallback_models: []   # the role's own fallback chain for children, at most 3
 ask_user:
   enabled: false          # offer the ask_user tool (same as --ask-user); see Asking for input
   max_questions: 3        # questions per run, counted across resumes; 1 to 20
@@ -279,7 +281,9 @@ The `models:` section picks models per role. Every key is optional and nothing c
 
 - **main** is the model from `--model`, `$AGENT_MODEL` or `model:`; it runs the agent loop.
 - **auxiliary** covers helper calls made outside the agent loop: `compaction` (summarizing context, see [Long runs](long-runs.md)) and `review` (the `verify_on_stop.review` pass). A task's model is `--route <task>=`, then `models.auxiliary.tasks.<task>`, then `--aux-model`, then `models.auxiliary.model`, then the main model. If the routed model fails, the call is retried once on the main model (a stderr warning says so). Helper calls are not steps, but their cost and tokens count toward `--cost-limit` and `--token-limit` as before.
-- **delegated** covers the children started by the [delegate and worker tools](long-runs.md#subagents). The `delegate` task's model is `models.delegated.tasks.delegate`, then `subagents.model`, then `models.delegated.model`, then the main model; the `worker` task's is `models.delegated.tasks.worker`, then `subagents.workers.model`, then `models.delegated.model`, then the main model.
+- **delegated** covers the children started by the [delegate and worker tools](long-runs.md#subagents). The `delegate` task's model is `--route delegate=`, then `models.delegated.tasks.delegate` (or its alias `subagents.model`), then `--delegate-model`, then `models.delegated.model`, then the main model; the `worker` task resolves the same way with `models.delegated.tasks.worker` and its alias `subagents.workers.model`.
 
-`subagents.model` and `subagents.workers.model` remain supported as aliases of the task keys; setting an alias and its task key to different models is a config error. Unknown task names, empty values and specs containing whitespace are rejected. `--check` prints a `compaction:` and `review:` line when those tasks are routed away from the main model, and a `delegate:` and `worker:` line when those tools are on (each with the model, role and the key or flag it came from); `run.started` lists the resolved routes as `models` (keyed by task: `role`, `model`, `source`).
+Each role may set `fallback_models`, its own [fallback chain](providers.md#model-fallback) (at most 3, no duplicates) used when the role's model keeps failing with `429`, `5xx` or network errors; it is checked like the main chain before any request and never inherits the top-level `fallback_models`. `--no-fallback` clears every role's chain too.
+
+`subagents.model` and `subagents.workers.model` remain supported as aliases of the task keys; setting an alias and its task key to different models is a config error. Unknown task names, empty values and specs containing whitespace are rejected. `--check` prints a `compaction:` and `review:` line when those tasks are routed away from the main model, and a `delegate:` and `worker:` line when those tools are on (each with the model, role, the key or flag it came from and any fallback chain); `run.started` lists the resolved routes as `models` (keyed by task: `role`, `model`, `source`).
 
