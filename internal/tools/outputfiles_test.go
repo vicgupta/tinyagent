@@ -70,7 +70,7 @@ func TestOutputFilesSaveBashOutput(t *testing.T) { // AC2, AC3
 	}
 	// Lines 2502-2511 of the result text are the command's lines 2500-2509
 	// (the result starts with two header lines).
-	got := e.Run(context.Background(), toolCall("c2", "read_file", map[string]any{"path": path, "offset": 2502, "limit": 10}))
+	got := e.RunResult(context.Background(), toolCall("c2", "read_file", map[string]any{"path": path, "offset": 2502, "limit": 10})).Text
 	if !strings.HasPrefix(got, "2500\n2501\n") || !strings.Contains(got, "2509") || strings.Contains(got, "2510\n") {
 		t.Errorf("paged read = %q", got)
 	}
@@ -145,24 +145,24 @@ func TestOutputFilesExcludedFromWalks(t *testing.T) { // AC6
 		t.Fatal(err)
 	}
 	os.WriteFile(filepath.Join(e.Root, "a.txt"), []byte("other\n"), 0o644)
-	if out := e.Run(context.Background(), toolCall("g", "grep", map[string]any{"pattern": "only-in-saved-file", "path": "."})); strings.Contains(out, "tool-output") {
+	if out := e.RunResult(context.Background(), toolCall("g", "grep", map[string]any{"pattern": "only-in-saved-file", "path": "."})).Text; strings.Contains(out, "tool-output") {
 		t.Errorf("grep . matched the saved file: %q", out)
 	}
-	if out := e.Run(context.Background(), toolCall("g", "grep", map[string]any{"pattern": "only-in-saved-file", "path": ".tinyagent"})); strings.Contains(out, "tool-output") {
+	if out := e.RunResult(context.Background(), toolCall("g", "grep", map[string]any{"pattern": "only-in-saved-file", "path": ".tinyagent"})).Text; strings.Contains(out, "tool-output") {
 		t.Errorf("grep .tinyagent matched the saved file: %q", out)
 	}
-	if out := e.Run(context.Background(), toolCall("g", "grep", map[string]any{"pattern": "only-in-saved-file", "path": ".tinyagent/tool-output"})); !strings.Contains(out, path) {
+	if out := e.RunResult(context.Background(), toolCall("g", "grep", map[string]any{"pattern": "only-in-saved-file", "path": ".tinyagent/tool-output"})).Text; !strings.Contains(out, path) {
 		t.Errorf("grep on the output dir = %q, want a match in %s", out, path)
 	}
-	if out := e.Run(context.Background(), toolCall("l", "list_files", map[string]any{"pattern": "*.txt"})); strings.Contains(out, "tool-output") || !strings.Contains(out, "a.txt") {
+	if out := e.RunResult(context.Background(), toolCall("l", "list_files", map[string]any{"pattern": "*.txt"})).Text; strings.Contains(out, "tool-output") || !strings.Contains(out, "a.txt") {
 		t.Errorf("list_files = %q", out)
 	}
-	if out := e.Run(context.Background(), toolCall("l", "list_files", map[string]any{"path": ".tinyagent/tool-output", "pattern": "*.txt"})); !strings.Contains(out, path) {
+	if out := e.RunResult(context.Background(), toolCall("l", "list_files", map[string]any{"path": ".tinyagent/tool-output", "pattern": "*.txt"})).Text; !strings.Contains(out, path) {
 		t.Errorf("list_files in the output dir = %q", out)
 	}
 	// With the feature off, nothing extra is skipped.
 	off := &Executor{Root: e.Root}
-	if out := off.Run(context.Background(), toolCall("g", "grep", map[string]any{"pattern": "only-in-saved-file", "path": "."})); !strings.Contains(out, path) {
+	if out := off.RunResult(context.Background(), toolCall("g", "grep", map[string]any{"pattern": "only-in-saved-file", "path": "."})).Text; !strings.Contains(out, path) {
 		t.Errorf("feature off: grep = %q", out)
 	}
 }
@@ -186,7 +186,7 @@ func TestOutputFilesReadOnlyGrep(t *testing.T) { // AC7
 	if r.OutputFile == "" {
 		t.Fatalf("grep result not saved: %q", r.Text)
 	}
-	got := e.Run(context.Background(), toolCall("r", "read_file", map[string]any{"path": r.OutputFile, "limit": 2}))
+	got := e.RunResult(context.Background(), toolCall("r", "read_file", map[string]any{"path": r.OutputFile, "limit": 2})).Text
 	if !strings.Contains(got, "src.txt:1: match here") {
 		t.Errorf("read_file of saved grep = %q", got)
 	}

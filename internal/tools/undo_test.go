@@ -12,7 +12,8 @@ import (
 )
 
 func undoCall(e *Executor, name, args string) (string, bool) {
-	return e.RunWithError(context.Background(), model.ToolCall{ID: "c", Type: "function", Function: model.FunctionCall{Name: name, Arguments: args}})
+	r := e.RunResult(context.Background(), model.ToolCall{ID: "c", Type: "function", Function: model.FunctionCall{Name: name, Arguments: args}})
+	return r.Text, r.IsError
 }
 
 func snapFile(t *testing.T, e *Executor, path string) string {

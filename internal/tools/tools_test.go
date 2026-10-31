@@ -60,7 +60,7 @@ func TestReadOnlyExecutorDeniesNonReadTools(t *testing.T) {
 		{"start_process", `{"command":"touch marker"}`},
 		{"read_process", `{}`}, {"stop_process", `{}`}, {"future_tool", `{}`},
 	} {
-		out := e.Run(context.Background(), model.ToolCall{ID: "id", Function: model.FunctionCall{Name: tc.name, Arguments: tc.args}})
+		out := e.RunResult(context.Background(), model.ToolCall{ID: "id", Function: model.FunctionCall{Name: tc.name, Arguments: tc.args}}).Text
 		if !strings.Contains(out, "read-only mode") {
 			t.Errorf("%s: %q", tc.name, out)
 		}
@@ -166,7 +166,7 @@ func TestGrepInclude(t *testing.T) {
 		t.Errorf("empty include changed results: %q", out)
 	}
 	e := &Executor{Root: root}
-	out := e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: `{"pattern":"TODO","include":"*.go"}`}})
+	out := e.RunResult(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: `{"pattern":"TODO","include":"*.go"}`}}).Text
 	if out != "pkg/util.go:2: // TODO fix" {
 		t.Errorf("executor grep include = %q", out)
 	}
@@ -228,7 +228,7 @@ func TestExecutorGrepIgnoreCase(t *testing.T) {
 		{"no matches", `{"pattern":"missing","ignore_case":true}`, "no matches"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			got := e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: tt.args}})
+			got := e.RunResult(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: tt.args}}).Text
 			if got != tt.want {
 				t.Errorf("grep %s = %q, want %q", tt.args, got, tt.want)
 			}
@@ -236,7 +236,7 @@ func TestExecutorGrepIgnoreCase(t *testing.T) {
 	}
 	for _, flag := range []string{"", `,"ignore_case":false`, `,"ignore_case":null`, `,"ignore_case":true`} {
 		args := `{"pattern":"(?i)error","path":"Logs/app.log"` + flag + `}`
-		if got := e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: args}}); got != all {
+		if got := e.RunResult(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: args}}).Text; got != all {
 			t.Errorf("inline flag with %s = %q, want %q", args, got, all)
 		}
 	}
@@ -247,13 +247,13 @@ func TestExecutorGrepIgnoreCaseValidation(t *testing.T) {
 	for _, value := range []string{`"true"`, `"yes"`, `0`, `1`, `[]`, `{}`} {
 		args := `{"pattern":"error","ignore_case":` + value + `}`
 		want := "error: ignore_case must be true or false, got " + value
-		if got := e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: args}}); got != want {
+		if got := e.RunResult(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: args}}).Text; got != want {
 			t.Errorf("grep %s = %q, want %q", args, got, want)
 		}
 	}
 	for _, flag := range []string{"", `,"ignore_case":false`, `,"ignore_case":null`, `,"ignore_case":true`} {
 		args := `{"pattern":"("` + flag + `}`
-		if got := e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: args}}); !strings.HasPrefix(got, "error: bad regexp:") {
+		if got := e.RunResult(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: args}}).Text; !strings.HasPrefix(got, "error: bad regexp:") {
 			t.Errorf("grep %s = %q, want a bad regexp error", args, got)
 		}
 	}
@@ -344,7 +344,7 @@ func TestExecutorGrepFixedStrings(t *testing.T) {
 		{"path confinement", `{"pattern":"func(","path":"..","fixed_strings":true}`, `error: path ".." is outside the working directory`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			got := e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: tt.args}})
+			got := e.RunResult(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: tt.args}}).Text
 			if got != tt.want {
 				t.Errorf("grep %s = %q, want %q", tt.args, got, tt.want)
 			}
@@ -353,7 +353,7 @@ func TestExecutorGrepFixedStrings(t *testing.T) {
 	for _, flag := range []string{"", `,"fixed_strings":false`, `,"fixed_strings":null`} {
 		for _, pattern := range []string{"config.json", "(?i)config.json", "func("} {
 			args := `{"pattern":` + fmt.Sprintf("%q", pattern) + `,"path":"main.go"` + flag + `}`
-			got := e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: args}})
+			got := e.RunResult(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: args}}).Text
 			want := "main.go:1: config.json\nmain.go:2: configXjson\nmain.go:7: (?i)config.json"
 			if pattern == "(?i)config.json" {
 				want += "\nmain.go:8: CONFIG.JSON"
@@ -374,7 +374,7 @@ func TestExecutorGrepFixedStringsValidation(t *testing.T) {
 	for _, value := range []string{`"true"`, `"yes"`, `0`, `1`, `[]`, `{}`} {
 		args := `{"pattern":"func(","fixed_strings":` + value + `}`
 		want := "error: fixed_strings must be true or false, got " + value
-		if got := e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: args}}); got != want {
+		if got := e.RunResult(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: args}}).Text; got != want {
 			t.Errorf("grep %s = %q, want %q", args, got, want)
 		}
 	}
@@ -420,7 +420,7 @@ func TestExecutorGrepContext(t *testing.T) {
 	}
 	e := &Executor{Root: root}
 	call := func(args string) string {
-		return e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: args}})
+		return e.RunResult(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: args}}).Text
 	}
 	if got := call(`{"pattern":"HIT","path":"src/a.go","context_lines":1}`); got != "src/a.go-2- two\nsrc/a.go:3: HIT\nsrc/a.go-4- four" {
 		t.Errorf("middle context = %q", got)
@@ -500,7 +500,7 @@ func TestExecutorRun(t *testing.T) {
 	root := t.TempDir()
 	e := &Executor{Root: root, MaxOutputChars: 100}
 	call := func(name, args string) string {
-		return e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: name, Arguments: args}})
+		return e.RunResult(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: name, Arguments: args}}).Text
 	}
 	if out := call("write_file", `{"path":"x.txt","content":"`+strings.Repeat("a", 500)+`"}`); out != "ok" {
 		t.Errorf("write = %q", out)
@@ -594,7 +594,7 @@ func TestExecutorReadFileBinaryAndText(t *testing.T) {
 	}
 	e := &Executor{Root: root}
 	call := func(args string) string {
-		return e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "read_file", Arguments: args}})
+		return e.RunResult(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "read_file", Arguments: args}}).Text
 	}
 	for _, tc := range []struct {
 		name, args, want string
@@ -626,7 +626,7 @@ func TestExecutorReadFileRangeArgs(t *testing.T) {
 	}
 	e := &Executor{Root: root}
 	call := func(args string) string {
-		return e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "read_file", Arguments: args}})
+		return e.RunResult(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "read_file", Arguments: args}}).Text
 	}
 	want := ""
 	for i := 100; i < 150; i++ {
@@ -680,7 +680,7 @@ func TestExecutorEditReplaceAll(t *testing.T) {
 	}
 	e := &Executor{Root: root}
 	call := func(args string) string {
-		return e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "edit_file", Arguments: args}})
+		return e.RunResult(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "edit_file", Arguments: args}}).Text
 	}
 	read := func() string {
 		got, _ := ReadFile(root, "x.go", 0, 0)
@@ -765,7 +765,7 @@ func TestBashPerCallTimeout(t *testing.T) {
 	root := t.TempDir()
 	e := &Executor{Root: root, BashTimeout: 30 * time.Second}
 	call := func(args string) string {
-		return e.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "bash", Arguments: args}})
+		return e.RunResult(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "bash", Arguments: args}}).Text
 	}
 
 	start := time.Now()
@@ -784,7 +784,7 @@ func TestBashPerCallTimeout(t *testing.T) {
 	// Omitted and 0 both fall back to the configured timeout.
 	short := &Executor{Root: root, BashTimeout: 300 * time.Millisecond}
 	for _, args := range []string{`{"command":"sleep 5"}`, `{"command":"sleep 5","timeout":0}`} {
-		out := short.Run(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "bash", Arguments: args}})
+		out := short.RunResult(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "bash", Arguments: args}}).Text
 		if !strings.Contains(out, "timed out after 300ms") {
 			t.Errorf("%s: output = %q", args, out)
 		}
