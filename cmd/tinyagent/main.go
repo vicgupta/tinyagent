@@ -94,6 +94,8 @@ type options struct {
 	eval, evalOut                                    string
 	evalKeep                                         bool
 	evalMinPassRate                                  float64
+	triage, triageOut                                string
+	triageStaleDays                                  int
 	rewind, rewindTo                                 string
 	transcript                                       string
 	profile                                          string
@@ -200,6 +202,9 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.evalOut, "eval-out", "", "with --eval: directory for results.jsonl, report.json, report.md and trajectories")
 	fs.BoolVar(&o.evalKeep, "eval-keep", false, "with --eval: keep each trial's worktree")
 	fs.Float64Var(&o.evalMinPassRate, "eval-min-pass-rate", 0, "with --eval: exit 1 if any configuration's pass rate is below this (0-1)")
+	fs.StringVar(&o.triage, "triage", "", "rank the open issues in this JSON file (gh issue list --json output, - for stdin) by value and effort, offline, and print a next-up list (see docs/triage.md)")
+	fs.StringVar(&o.triageOut, "triage-out", "", "with --triage: write the next-up JSON here instead of stdout")
+	fs.IntVar(&o.triageStaleDays, "triage-stale-days", 30, "with --triage: flag issues not updated for more than this many days (0 = off)")
 	fs.StringVar(&o.transcript, "transcript", "", "print this trajectory JSON as a Markdown transcript (secrets redacted, long results truncated) and exit; makes no model request")
 	fs.Var(&o.logDB, "log-db", "also log run events to SQLite (default .tinyagent/tinyagent.db under --cwd); --log-db=false turns config log_db off")
 	fs.BoolVar(&o.otel, "otel", false, "export the run as an OpenTelemetry trace over OTLP/HTTP (otel.endpoint, else OTEL_EXPORTER_OTLP_ENDPOINT, else localhost:4318); OTEL_* variables alone never turn it on (default off; config otel.enabled)")
@@ -363,6 +368,13 @@ func run() int {
 	if !flagWasSet(fs, "workflow") && flagWasSet(fs, "workflow-name") {
 		fmt.Fprintln(fs.Output(), "error: --workflow-name applies only to --workflow")
 		return 2
+	}
+	if !flagWasSet(fs, "triage") && flagWasSet(fs, "triage-out", "triage-stale-days") {
+		fmt.Fprintln(fs.Output(), "error: --triage-out and --triage-stale-days apply only to --triage")
+		return 2
+	}
+	if flagWasSet(fs, "triage") {
+		return runTriage(&o, fs, os.Stdin, os.Stdout, os.Stderr)
 	}
 	if o.interactive {
 		return runChat(&o, fs)

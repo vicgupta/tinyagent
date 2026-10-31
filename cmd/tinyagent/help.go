@@ -106,7 +106,7 @@ var helpGroups = []flagGroup{
 	{"Memory and planner", [][3]string{{"", "memory", ""}, {"", "memory-approve", "id|all"}, {"", "memory-forget", "id|all"}, {"", "memory-help", ""}, {"", "memory-list", ""}, {"", "memory-path", ""}, {"", "memory-yes", ""}, {"", "handoff", ""}, {"", "plan", ""}, {"", "plan-file", "path"}, {"", "plan-first", ""}}},
 	{"Plugins and TinyGo", [][3]string{{"", "list-plugins", ""}, {"", "plugins-prune", ""}, {"", "plugins-keep", "n"}, {"", "plugins-rollback", "module@sha256"}, {"", "tinygo-install", ""}, {"", "tinygo-update", ""}, {"", "tinygo-status", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
-	{"Workflow and eval", [][3]string{{"", "workflow", "file.yaml"}, {"", "workflow-name", "name"}, {"", "skills-validate", "path"}, {"", "eval", "suite.yaml"}, {"", "eval-out", "dir"}, {"", "eval-keep", ""}, {"", "eval-min-pass-rate", "rate"}}},
+	{"Workflow and eval", [][3]string{{"", "workflow", "file.yaml"}, {"", "workflow-name", "name"}, {"", "skills-validate", "path"}, {"", "eval", "suite.yaml"}, {"", "eval-out", "dir"}, {"", "eval-keep", ""}, {"", "eval-min-pass-rate", "rate"}, {"", "triage", "issues.json"}, {"", "triage-out", "path"}, {"", "triage-stale-days", "n"}}},
 	{"Setup and info", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "list-profiles", ""}, {"", "init-config", ""}, {"", "init-force", ""}, {"", "init-migrate", ""}, {"", "trust-config", ""}, {"", "completion", "shell"}}},
 }
 
