@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/vicgupta/tinyagent/internal/routing"
 	"strings"
 
 	"github.com/vicgupta/tinyagent/internal/model"
@@ -300,7 +301,7 @@ func (a *Agent) summarize(ctx context.Context, t *trajectory.Trajectory, task st
 		{Role: "system", Content: summarizerSystem},
 		{Role: "user", Content: sb.String()},
 	}
-	resp, cost, err := a.Model.Query(ctx, req, nil)
+	resp, cost, err := a.helperQuery(ctx, routing.TaskCompaction, req)
 	if err != nil {
 		return "", fmt.Errorf("summarizing context: %w", err)
 	}

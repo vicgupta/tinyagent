@@ -73,9 +73,10 @@ func sameProvider(a, b string) bool {
 }
 
 // modelRoutes lists this run's model routes: the main model, then the
-// delegate and worker routes when those tools are on.
+// auxiliary tasks routed away from it, then the delegate and worker
+// routes when those tools are on.
 func modelRoutes(cfg config.AgentConfig, main string, s *agent.Subagents, w *agent.Workers) []routing.Route {
-	routes := []routing.Route{routing.Main(main)}
+	routes := append([]routing.Route{routing.Main(main)}, auxRoutes(cfg, main)...)
 	if s != nil {
 		routes = append(routes, routing.Delegated(cfg, main, routing.TaskDelegate))
 	}

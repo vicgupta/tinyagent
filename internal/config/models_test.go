@@ -38,3 +38,16 @@ func TestModelsConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestAuxiliaryModelsConfig(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	write(t, p, "models:\n  auxiliary:\n    model: openai/gpt-5-mini\n    tasks:\n      review: anthropic/claude-haiku-4-5\n")
+	cfg, err := Load(p)
+	if err != nil || cfg.Models.Auxiliary.Model != "openai/gpt-5-mini" || cfg.Models.Auxiliary.Tasks["review"] != "anthropic/claude-haiku-4-5" {
+		t.Fatalf("auxiliary = %+v, %v", cfg.Models.Auxiliary, err)
+	}
+	write(t, p, "models:\n  auxiliary:\n    tasks:\n      worker: a/b\n")
+	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), `models.auxiliary.tasks: unknown task "worker"`) {
+		t.Errorf("err = %v", err)
+	}
+}

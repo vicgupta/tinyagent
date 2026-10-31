@@ -192,6 +192,10 @@ type Agent struct {
 	// Routes are the resolved model routes (main, delegated tasks) this
 	// run uses, reported in run.started; informational only.
 	Routes []routing.Route
+	// Helpers maps an auxiliary task (routing.TaskCompaction,
+	// routing.TaskReview) to the model serving it; a task without an
+	// entry uses Model.
+	Helpers map[string]model.Model
 	// isWorker is set on a worker child.
 	isWorker bool
 	// scopedReported dedupes this invocation's instructions.skipped reports.

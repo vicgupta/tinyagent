@@ -74,3 +74,39 @@ func TestCheckListsDelegatedRoutes(t *testing.T) {
 		t.Errorf("exit %d, --check without subagents:\n%s", code, out)
 	}
 }
+
+func TestRunStartedModelsAuxiliary(t *testing.T) {
+	cfg := writeCfg(t, "models:\n  auxiliary:\n    model: openai/gpt-5-mini\n")
+	m := runStartedModels(t, "-c", cfg, "--route", "review=openai/gpt-5-nano")
+	c, _ := m["compaction"].(map[string]any)
+	r, _ := m["review"].(map[string]any)
+	if c["model"] != "openai/gpt-5-mini" || c["source"] != "models.auxiliary.model" || c["role"] != "auxiliary" {
+		t.Errorf("compaction route = %v", c)
+	}
+	if r["model"] != "openai/gpt-5-nano" || r["source"] != "--route review" {
+		t.Errorf("review route = %v", r)
+	}
+}
+
+func TestCheckListsAuxRoutes(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test")
+	code, out, _ := runCLI(t, "--check", "-c", writeCfg(t, ""), "--cwd", t.TempDir(), "--aux-model", "openai/gpt-5-mini")
+	for _, want := range []string{"compaction: openai/gpt-5-mini (auxiliary, from --aux-model)", "review:"} {
+		if code != 0 || !strings.Contains(out, want) {
+			t.Errorf("exit %d, --check lacks %q:\n%s", code, want, out)
+		}
+	}
+}
+
+func TestRouteFlagErrors(t *testing.T) {
+	for _, c := range []struct{ arg, want string }{
+		{"planner=a/b", `unknown task "planner"`},
+		{"compaction", "want task=provider/model"},
+		{"review=a b", "single provider/model"},
+	} {
+		code, _, stderr := runCLI(t, "--check", "-c", writeCfg(t, ""), "--route", c.arg)
+		if code != 2 || !strings.Contains(stderr, c.want) {
+			t.Errorf("--route %s: exit %d, stderr %s", c.arg, code, stderr)
+		}
+	}
+}
