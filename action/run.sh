@@ -26,6 +26,15 @@ bool job-summary "$INPUT_JOB_SUMMARY"
 bool fail-on-error "$INPUT_FAIL_ON_ERROR"
 command -v jq >/dev/null 2>&1 || usage "jq is required to read tinyagent's result; install it before this step"
 
+if [ -n "$INPUT_EVAL" ]; then
+	for name in task:TASK task-file:TASK_FILE review-base:REVIEW_BASE review-commit:REVIEW_COMMIT attempts:ATTEMPTS model:MODEL profile:PROFILE; do
+		var=INPUT_${name#*:}
+		[ -z "${!var}" ] || usage "eval can't be combined with ${name%%:*}"
+	done
+elif [ -n "$INPUT_EVAL_OUT$INPUT_EVAL_MIN_PASS_RATE" ]; then
+	usage "eval-out and eval-min-pass-rate need eval"
+fi
+
 if [ -n "$INPUT_TASK" ] && [ -n "$INPUT_TASK_FILE" ]; then
 	usage "set task or task-file, not both"
 fi
@@ -46,11 +55,27 @@ fi
 out=$(mktemp -d "${RUNNER_TEMP:-/tmp}/tinyagent.XXXXXX")
 traj=$out/trajectory.json
 events=$out/events.jsonl
-args=(--json -o "$traj")
+args=()
+eval_out=
+if [ -n "$INPUT_EVAL" ]; then
+	[ -z "$INPUT_WORKING_DIRECTORY" ] || cd -- "$INPUT_WORKING_DIRECTORY"
+	eval_out=${INPUT_EVAL_OUT:-$out/eval}
+	# Make outputs unambiguous for later workflow steps. Do not create the
+	# directory here: tinyagent validates the suite before writing reports.
+	[[ $eval_out = /* ]] || eval_out=$PWD/$eval_out
+	args+=(--eval "$INPUT_EVAL" --eval-out "$eval_out")
+	[ -z "$INPUT_EVAL_MIN_PASS_RATE" ] || args+=(--eval-min-pass-rate "$INPUT_EVAL_MIN_PASS_RATE")
+else
+	args+=(--json -o "$traj")
+fi
+[ -z "$INPUT_COST_LIMIT" ] || args+=(--cost-limit "$INPUT_COST_LIMIT")
+[ -z "$INPUT_TIME_LIMIT" ] || args+=(--time-limit "$INPUT_TIME_LIMIT")
 [ -z "$INPUT_MODEL" ] || args+=(-m "$INPUT_MODEL")
 [ -z "$INPUT_PROFILE" ] || args+=(--profile "$INPUT_PROFILE")
 [ -z "$INPUT_CONFIG" ] || args+=(-c "$INPUT_CONFIG")
-[ -z "$INPUT_WORKING_DIRECTORY" ] || args+=(--cwd "$INPUT_WORKING_DIRECTORY")
+if [ -z "$INPUT_EVAL" ]; then
+	[ -z "$INPUT_WORKING_DIRECTORY" ] || args+=(--cwd "$INPUT_WORKING_DIRECTORY")
+fi
 [ -z "$INPUT_REVIEW_BASE" ] || args+=(--review-base "$INPUT_REVIEW_BASE")
 [ -z "$INPUT_REVIEW_COMMIT" ] || args+=(--review-commit "$INPUT_REVIEW_COMMIT")
 [ "$INPUT_READ_ONLY" = false ] || args+=(--read-only)
@@ -75,7 +100,9 @@ fi
 # The task goes to tinyagent on stdin (`-t -`), never through the shell.
 # --attempts can't read stdin (every attempt needs the task), so there it
 # is one argv element instead, still never shell-evaluated.
-if [ -n "$attempts" ]; then
+if [ -n "$INPUT_EVAL" ]; then
+	exec 3</dev/null
+elif [ -n "$attempts" ]; then
 	if [ -n "$INPUT_TASK_FILE" ]; then
 		[ -f "$INPUT_TASK_FILE" ] || usage "task-file is not a file"
 		task=$(cat "$INPUT_TASK_FILE")
@@ -99,7 +126,7 @@ else
 	exec 3</dev/null
 fi
 
-echo "events=$events" >>"$GITHUB_OUTPUT"
+[ -n "$INPUT_EVAL" ] || echo "events=$events" >>"$GITHUB_OUTPUT"
 
 # Stop the runner from acting on workflow commands (::add-mask::, ::error::
 # ...) in tinyagent's model-influenced log output.
@@ -124,6 +151,38 @@ set_output() { # set_output <name> <file>
 		printf '\n%s\n' "$delim"
 	} >>"$GITHUB_OUTPUT"
 }
+
+if [ -n "$INPUT_EVAL" ]; then
+	# Eval stdout is a human-readable table, not JSON events. Never parse it
+	# as a result event, even if a trial prints something resembling one.
+	cat "$events"
+	value=$out/value
+	printf '%s' "$eval_out" >"$value"
+	set_output eval-out "$value"
+	: >"$value"
+	[ ! -f "$eval_out/report.json" ] || printf '%s' "$eval_out/report.json" >"$value"
+	set_output eval-report "$value"
+	: >"$value"
+	if [ -f "$eval_out/report.json" ]; then
+		jq -c '{configs: [.configs[]? | {model, profile, passed, attempted, pass_rate, cost_usd}], below_threshold: (.below_threshold // [])}' "$eval_out/report.json" >"$value"
+	fi
+	set_output eval-results "$value"
+	echo "exit-code=$code" >>"$GITHUB_OUTPUT"
+	if [ "$INPUT_JOB_SUMMARY" = true ] && [ -f "$eval_out/report.md" ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+		size=$(wc -c <"$eval_out/report.md" | tr -d ' ')
+		if [ "$size" -le 1048576 ]; then
+			cat "$eval_out/report.md" >>"$GITHUB_STEP_SUMMARY"
+		else
+			echo "tinyagent: the eval report ($size bytes) exceeds the 1 MiB job summary limit and was not added." >>"$GITHUB_STEP_SUMMARY"
+		fi
+	fi
+	echo "::$token::"
+	if [ "$code" -eq 2 ] || { [ "$code" -ne 0 ] && [ "$INPUT_FAIL_ON_ERROR" = true ]; }; then
+		echo "::error::tinyagent exited with status $code"
+		exit "$code"
+	fi
+	exit 0
+fi
 
 result=$out/result.json
 if [ -n "$attempts" ]; then

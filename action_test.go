@@ -261,6 +261,23 @@ func buildTinyagent(t *testing.T) string {
 	return bin
 }
 
+// setXOrEval matches `set -x` and the eval builtin in command position, not the
+// word "eval" in flags, output names or messages (--eval, eval-out, "need eval").
+var setXOrEval = regexp.MustCompile(`set -[a-z]*x|(?m)(^|[;&|(]|\b(then|do|else)\b)[ \t]*eval([ \t]|$)`)
+
+func TestSetXOrEvalPattern(t *testing.T) {
+	for _, bad := range []string{"set -x", "set -ex", "eval \"$x\"", "\teval $cmd", "true; eval x", "if a; then eval x; fi", "( eval x )"} {
+		if !setXOrEval.MatchString(bad) {
+			t.Errorf("not caught: %q", bad)
+		}
+	}
+	for _, ok := range []string{"args+=(--eval \"$f\" --eval-out \"$d\")", "set_output eval-out \"$v\"", "usage \"eval can't be combined\"", "eval_out=$out/eval", "evaluate"} {
+		if setXOrEval.MatchString(ok) {
+			t.Errorf("false positive: %q", ok)
+		}
+	}
+}
+
 func TestActionNoUntrustedContextInScripts(t *testing.T) {
 	a := loadAction(t)
 	if a.Runs.Using != "composite" {
@@ -279,7 +296,7 @@ func TestActionNoUntrustedContextInScripts(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if regexp.MustCompile(`set -[a-z]*x|\beval\b`).Match(data) {
+		if setXOrEval.Match(data) {
 			t.Errorf("%s uses set -x or eval", f)
 		}
 	}

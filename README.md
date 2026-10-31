@@ -163,3 +163,32 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 | Built-in tool notes | [docs/tools.md](docs/tools.md) |
 | Malformed tool calls, output truncation, troubleshooting | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | Evaluation framework | [docs/eval-framework.md](docs/eval-framework.md) |
+
+### Evaluate changes in GitHub Actions
+
+The experimental Action eval mode runs suites with the verified installer and
+fails below a pass-rate threshold:
+
+```yaml
+- uses: actions/checkout@v4
+  with: { fetch-depth: 0 }
+- uses: vicgupta/tinyagent@main
+  with:
+    version: latest
+    eval: evals/suite.yaml
+    eval-out: evals/out
+    eval-min-pass-rate: '0.8'
+    cost-limit: '5'
+    job-summary: 'true'
+  env:
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+- uses: actions/upload-artifact@v4
+  if: always()
+  with: { name: eval-results, path: evals/out }
+```
+
+Use full history (`fetch-depth: 0`) and set a cost limit. Run only trusted suites;
+do not expose secrets to untrusted fork PRs. Pin the Action ref and binary
+version for reproducible CI once released. See the [complete CI example and
+outputs](docs/eval-framework.md#9-ci-usage-and-pass-rate-gating), including fork
+PR filtering and dry runs.
