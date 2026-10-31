@@ -55,3 +55,7 @@ A fresh run loads the file automatically when it exists; without a file nothing 
 - **Invalid file.** A rules file that can't be parsed or validated stops the run with exit 2 before any model request, rather than silently dropping enforcement. Fix the file or pass `--no-ratchet`.
 
 `--resume` and follow-up runs replay the system prompt saved in the checkpoint, so rules added afterwards apply to the next fresh run. [ACP](integrations.md#editor-integration-acp) sessions don't load project rules yet.
+
+## Observer proposals
+
+A `--workflow` run with `--workflow-observe` turns a failed or blocked run into a proposed rule in `.tinyagent/observer/proposals.jsonl`, with a ready-to-run `tinyagent ratchet add ... --incident ...` command; see [Learning from failures](project-context.md#learning-from-failures). Proposals are never added to `ratchet.toml` automatically: review the rule, edit it if needed (add `--deny-command` or `--review` for example), then run the command. The incident ends with an `observer <signature prefix>` tag; keep it, so when the same failure happens again the observer can report that this rule didn't prevent it (`gate did not hold`).

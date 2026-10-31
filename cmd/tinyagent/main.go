@@ -113,6 +113,7 @@ type options struct {
 	acp                                              bool
 	interactive, noChatHistory                       bool
 	workflow, workflowName                           string
+	workflowObserve                                  bool
 	skillsValidate                                   stringList
 	memory                                           memoryCmd
 	handoff                                          bool
@@ -231,6 +232,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.completion, "completion", "", "print a flag-name completion script for this shell (bash, zsh or fish) and exit; load it with: source <(tinyagent --completion bash), or in zsh after compinit: source <(tinyagent --completion zsh), or in fish: tinyagent --completion fish | source; re-source it after --update")
 	fs.StringVar(&o.workflow, "workflow", "", "run the skill workflow in this YAML file on the task (-t): the router picks a workflow or skill by intent, and each stage runs automatically with the previous stage's output, gated by its success check")
 	fs.StringVar(&o.workflowName, "workflow-name", "", "with --workflow: run this workflow or skill instead of routing by the task's intent")
+	fs.BoolVar(&o.workflowObserve, "workflow-observe", false, "with --workflow: after a Failed or Blocked run, write one proposed project rule (with a ready-to-run `tinyagent ratchet add` command) to .tinyagent/observer/proposals.jsonl in --cwd, and flag a failure that recurs (default off)")
 	fs.Var(&o.skillsValidate, "skills-validate", "check a skill-workflow skill file (.md), skills directory or workflow file (.yaml) without running anything, then exit; repeatable; not for Agent Skills (--skills)")
 	registerMemoryFlags(fs, &o.memory)
 	registerHandoffFlags(fs, &o.handoff)
@@ -367,6 +369,10 @@ func run() int {
 	}
 	if !flagWasSet(fs, "workflow") && flagWasSet(fs, "workflow-name") {
 		fmt.Fprintln(fs.Output(), "error: --workflow-name applies only to --workflow")
+		return 2
+	}
+	if !flagWasSet(fs, "workflow") && flagWasSet(fs, "workflow-observe") {
+		fmt.Fprintln(fs.Output(), "error: --workflow-observe applies only to --workflow")
 		return 2
 	}
 	if !flagWasSet(fs, "triage") && flagWasSet(fs, "triage-out", "triage-stale-days") {
