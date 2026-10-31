@@ -85,6 +85,10 @@ subagents:
   enabled: false          # offer the delegate tool (same as --subagents)
   model: ""               # child model, e.g. openai/gpt-5-mini; empty uses the parent model
   max_steps: 30           # step cap per delegated task; 0 means the default (30)
+models:                  # per-role model routing; see Model roles (all optional, off by default)
+  delegated:              # models for delegated children
+    model: ""             # default for delegate and worker children; empty uses the main model
+    tasks: {}             # per-task override: delegate, worker (e.g. worker: openai/gpt-5-mini)
 ask_user:
   enabled: false          # offer the ask_user tool (same as --ask-user); see Asking for input
   max_questions: 3        # questions per run, counted across resumes; 1 to 20
@@ -265,3 +269,13 @@ Command tools run where `bash` runs and under the same controls: the [execution 
 They are not offered with `--read-only` (a forged call is rejected like any other read-only denial), and subagents never get them. [Hooks](permissions.md#tool-hooks) match them by name, with `arguments` as the decoded JSON the model sent. `-v` prints one stderr line per call with the final argv, `--json` and `--log-db` record the usual `tool.call` and `tool.result` events, `run.started` lists their names as `command_tools`, and trajectories record each definition (`name`, `argv` template, `schema_digest`). With `--resume`, the current config's command tools apply; if they differ from the checkpoint's, stderr and the model are told, and a call to one that no longer exists gets an error result.
 
 **Security:** command tools are trusted definitions that run with your privileges, like hooks and MCP servers. Schema checks limit what the model can pass; they don't make an unsafe `argv` safe: `[bash, -c, "{{script}}"]` gives back arbitrary execution. An argument starting with `-` is passed through as is and can be read as an option (for example `--output=/etc/passwd`), so constrain every placeholder with a `pattern`, `enum` or similar, as in the `^\./` pattern above. Older tinyagent versions reject a config file containing the `command_tools` key.
+
+## Model roles
+
+The `models:` section picks models per role. Every key is optional and nothing changes when it is unset.
+
+- **main** is the model from `--model`, `$AGENT_MODEL` or `model:`; it runs the agent loop.
+- **delegated** covers the children started by the [delegate and worker tools](long-runs.md#subagents). The `delegate` task's model is `models.delegated.tasks.delegate`, then `subagents.model`, then `models.delegated.model`, then the main model; the `worker` task's is `models.delegated.tasks.worker`, then `subagents.workers.model`, then `models.delegated.model`, then the main model.
+
+`subagents.model` and `subagents.workers.model` remain supported as aliases of the task keys; setting an alias and its task key to different models is a config error. Unknown task names, empty values and specs containing whitespace are rejected. `--check` prints a `delegate:` and `worker:` line (model, role and the key it came from) when those tools are on, and `run.started` lists the resolved routes as `models` (keyed by task: `role`, `model`, `source`).
+

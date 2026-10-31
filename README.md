@@ -125,6 +125,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 ## Features
 
 - Small set of file, search, shell and background-process tools, plus opt-in planning, skills, images, patches, subagents, web fetch, LSP and MCP tools.
+- Per-role model routing (`models:` in config) for delegated children; off by default.
 - Many providers: OpenAI, Anthropic, OpenRouter, Ollama, a ChatGPT subscription through Codex, and your own OpenAI-compatible endpoints.
 - Streaming text, `--json` event output, structured output, SQLite event logs and OpenTelemetry.
 - Project memory across runs, with approval before entries become active.
