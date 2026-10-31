@@ -375,6 +375,8 @@ Task:
       --worktree [=name]                  run in a new Git worktree on branch tinyagent/<name> from HEAD of the repo containing --cwd, kept afterwards (default name generated)
       --resume path                       continue an unfinished run from a trajectory JSON checkpoint, a finished one with -t "<follow-up>", or answer a NeedsInput one with -t "<answer>"
       --ask-user                          add the ask_user tool: the model may end the run with one question (status NeedsInput, exit 4), answered with --resume <trajectory> -t "<answer>"; requires -o (default off; config ask_user.enabled)
+  -i, --interactive                       start an interactive chat session (REPL) on the terminal; same as tinyagent chat; -t sends a first message; limits apply per turn
+      --no-chat-history                   don't write chat input to <cwd>/history/chat_history (config chat_history: false)
       --acp                               serve the Agent Client Protocol on stdin/stdout for editors such as Zed and JetBrains IDEs (experimental): each session runs in the client's cwd with this config and flags; limits apply per prompt
 Review:
       --review                            review the uncommitted changes (staged, unstaged and untracked) against HEAD: tinyagent collects the diff and runs a read-only review; -t adds focus instructions

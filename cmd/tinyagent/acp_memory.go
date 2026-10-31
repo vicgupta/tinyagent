@@ -6,7 +6,7 @@ import (
 )
 
 // memoryTurn sets up project memory (memory.enabled or --memory) for one
-// ACP turn. The session's first turn loads the store like a fresh run: the
+// ACP or chat turn. The session's first turn loads the store like a fresh run: the
 // active entries become the Project memory section of the session's system
 // prompt, memory.loaded is emitted, and the remember tool is offered unless
 // the session is read-only. Later turns continue that conversation like a
@@ -16,11 +16,11 @@ import (
 //
 // One writer serves the whole session, so max_writes_per_run counts every
 // write in the session, and once untrusted content entered the
-// conversation every later write stays pending. A session that started
-// client-supplied MCP servers (acp.client_mcp_servers) treats its context
-// as untrusted from the start, since their tool descriptions come from the
+// conversation every later write stays pending. With untrusted (an ACP
+// session that started client-supplied MCP servers, acp.client_mcp_servers)
+// the context is untrusted from the start, since their tool descriptions come from the
 // editor rather than the trusted config.
-func (s *acpSession) memoryTurn(a *agent.Agent, prev *trajectory.Trajectory, events *runEvents, warn func(string)) {
+func (s *session) memoryTurn(a *agent.Agent, prev *trajectory.Trajectory, events *runEvents, warn func(string), untrusted bool) {
 	if !s.cfg.Memory.Enabled {
 		return
 	}
@@ -28,7 +28,7 @@ func (s *acpSession) memoryTurn(a *agent.Agent, prev *trajectory.Trajectory, eve
 		loadMemory(a, s.cfg.Memory, s.root, warn)
 		events.emit("memory.loaded", agent.MemoryLoadedFields(a.Memory))
 		s.remember = memoryWriter(a, s.cfg.Memory)
-		if s.remember != nil && s.clientMCP {
+		if s.remember != nil && untrusted {
 			s.remember.MarkUntrusted()
 		}
 	} else {

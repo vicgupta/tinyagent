@@ -302,6 +302,7 @@ func (s *session) turnAgent(cfg config.AgentConfig, images []model.Image) *agent
 			Delegate:           s.subagents != nil,
 			TaskTypes:          taskTypes(s.cfg, s.subagents, s.workers),
 			Workers:            s.workers != nil,
+			AskUser:            cfg.AskUser.Enabled, // always off in ACP sessions
 			WebFetch:           s.webFetch,
 			LSP:                newLSP(cfg, s.root), // a turn's end stops them
 			OutputFiles:        s.outputFiles,

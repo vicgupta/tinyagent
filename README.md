@@ -127,6 +127,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 - Small set of file, search, shell and background-process tools, plus opt-in planning, skills, images, patches, subagents (read-only researchers), workers (read-write builders in their own Git worktree), web fetch, LSP and MCP tools.
 - Per-role model routing (`models:` in config, `--aux-model`, `--delegate-model`, `--route`, keyword or `task_type` routes, `--no-routing`) for compaction, the verify review and delegated children, each role with its own fallback chain and a `usage_by_role` cost split in the summary, JSON, trajectory, `--log-db` and eval reports; off by default.
 - Many providers: OpenAI, Anthropic, OpenRouter, Ollama, a ChatGPT subscription through Codex, handoff to your installed Claude Code (`claude-code`) or Codex CLI (`codex-exec`), and your own OpenAI-compatible endpoints.
+- Interactive chat (`tinyagent chat` or `-i`): a multi-turn conversation on the terminal with line editing, history, Ctrl-C to stop a turn and slash commands (`/cost`, `/new`, `/save`, `/compact`); every session is saved and can be resumed. See [Interactive chat](docs/chat.md).
 - Streaming text, `--json` event output, structured output, SQLite event logs and OpenTelemetry.
 - Terminal-aware styling: color only at a terminal, off with `NO_COLOR`, or forced with `--color=auto|always|never`; piped output stays plain text.
 - Project memory across runs, with approval before entries become active.
@@ -162,6 +163,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 
 | Topic | Doc |
 |---|---|
+| Interactive chat (`tinyagent chat`) | [docs/chat.md](docs/chat.md) |
 | Tasks: passing a task, task types, task-based routing | [docs/tasks.md](docs/tasks.md) |
 | Reviews, worktrees, best-of-N, resume, transcripts, follow-ups, asking for input, token and cost budgets | [docs/runs.md](docs/runs.md) |
 | Long runs, session handoff, images, tool output files, apply_patch, subagents (read-only researchers), workers (read-write builders), web fetch, LSP | [docs/long-runs.md](docs/long-runs.md) |

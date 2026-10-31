@@ -178,6 +178,10 @@ tinyagent --resume run.json --cwd . -t "per API key" -o run-2.json
 
 The question is model-written text that can quote workspace files or fetched pages; treat it as untrusted if you forward it to other systems.
 
+### Chat sessions
+
+`tinyagent chat` saves its conversation as a normal trajectory in `.tinyagent/chats/<timestamp>.json` (or `-o`), so `--transcript` and `--rewind` work on it, and `tinyagent chat --resume <file> --cwd <dir>` continues it, including a file from a headless run. In chat, limits such as `--max-turns` and `--cost-limit` apply per message. See [Interactive chat](chat.md).
+
 ## Token and cost budgets
 
 `--token-limit n` (config `token_limit`) caps the run's provider-reported input plus output tokens; prompt-cache tokens are part of input. `--cost-limit usd` (config `cost_limit`) caps its cost, computed from the same usage and the model's price (the built-in table, or `input_price_per_mtok` and `output_price_per_mtok`). Both are off (0) by default, and delegates and workers count against the parent's budget. A model with no known price can't be held to a cost limit: tinyagent warns once at start, and only the token limit is enforced.

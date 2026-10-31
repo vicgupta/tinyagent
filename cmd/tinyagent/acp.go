@@ -267,7 +267,7 @@ func (s *acpSession) Prompt(ctx context.Context, p acp.Prompt, u *acp.Updates) (
 	if cfg.Skills {
 		loadSkills(a, s.root, pluginSkillSources(cfg), warn)
 	}
-	s.memoryTurn(a, prev, events, warn)
+	s.memoryTurn(a, prev, events, warn, s.clientMCP)
 	turn := newACPTurn(u, s, a, prev)
 	logged := a.OnEvent
 	a.OnEvent = func(kind string, fields map[string]any) {

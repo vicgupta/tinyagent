@@ -56,6 +56,11 @@ type subAction struct {
 
 var subcommands = []subcommand{
 	{
+		name: "chat", brief: "start an interactive session (REPL)", summary: "start an interactive chat session on the terminal: each message is one turn of the same conversation (same as --interactive / -i); -- <msg> or -t sends the first message",
+		base:    []string{"--interactive"},
+		runBare: true,
+	},
+	{
 		name: "init", brief: "write ./tinyagent.yaml in --cwd (--force, --migrate)", summary: "write a commented starter ./tinyagent.yaml in --cwd, or with -c to that path (same as --init-config)",
 		base:    []string{"--init-config"},
 		runBare: true,

@@ -2,10 +2,11 @@
 
 ## Subcommands
 
-Eight subcommands are shortcuts for existing flags. They rewrite the command line into those flags before parsing, so config, environment variables and precedence work the same either way, and every `--flag` form keeps working.
+Nine subcommands are shortcuts for existing flags. They rewrite the command line into those flags before parsing, so config, environment variables and precedence work the same either way, and every `--flag` form keeps working.
 
 | Subcommand | Same as |
 |---|---|
+| `tinyagent chat [-t "..."] [-- message]` | `--interactive` (`-i`); see [Interactive chat](chat.md) |
 | `tinyagent init [--force] [--migrate]` | `--init-config [--init-force] [--init-migrate]` |
 | `tinyagent sandbox -t "..."` | `--sandbox` |
 | `tinyagent sandbox network [--allow-domain host]... -t "..."` | `--sandbox --sandbox-network [--sandbox-allow-domain host]` (`--allowed-domains` is an alias) |
@@ -39,6 +40,8 @@ Eight subcommands are shortcuts for existing flags. They rewrite the command lin
 | `-h, --help` | | Print usage to stdout and exit |
 | `-t, --task` | — | Task prompt (required unless `--resume`; with `--resume` of a finished run, the follow-up task; of a `NeedsInput` run, the answer); `-` reads it from stdin |
 | `--resume` | — | Continue a validated unfinished trajectory; requires explicit matching `--cwd` and a new `-o` path |
+| `-i, --interactive` | off | Same as `tinyagent chat`: an interactive session on the terminal; `-t` sends the first message, and limits apply per turn. Needs a terminal (exit 2 otherwise); see [Interactive chat](chat.md) |
+| `--no-chat-history` | config `chat_history`, else on | Don't record chat input in `<cwd>/history/chat_history`; see [Interactive chat](chat.md#files) |
 | `--ask-user` | config `ask_user.enabled`, else off | Give the model the `ask_user` tool: it may end the run with one question (status `NeedsInput`, exit 4), answered with `--resume <trajectory> -t "<answer>"`. Requires `-o`; can't be combined with `--output-schema`; `--ask-user=false` disables it. See [Asking for input](runs.md#asking-for-input) |
 | `--acp` | off | Serve the [Agent Client Protocol](integrations.md#editor-integration-acp) on stdin/stdout so editors such as Zed and JetBrains IDEs can run tinyagent as an external agent (experimental). Can't be combined with `-t`, `--resume`, `--rewind`, `--transcript`, review flags, `--worktree`, `--output-schema`, `--json`, `--ask-user`, `--check`, `--init-config`, `--completion`, `-o`, `--cwd`, `--image` or `--snapshots` (exit 2) |
 | `-m, --model` | `$AGENT_MODEL`, else config `model`, else `openai/gpt-4o` | `<provider>/<model>`; no `/` means openai. Providers: openai, openrouter, anthropic, ollama, codex, claude-code, codex-exec, plus any defined under [`providers`](providers.md#named-providers) |

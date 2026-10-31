@@ -109,6 +109,7 @@ type options struct {
 	review                                           bool
 	reviewBase, reviewCommit                         string
 	acp                                              bool
+	interactive, noChatHistory                       bool
 	workflow, workflowName                           string
 	skillsValidate                                   stringList
 	memory                                           memoryCmd
@@ -218,6 +219,9 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.tinygoUpdate, "tinygo-update", false, "install the TinyGo version pinned in this build if it isn't cached and remove other cached versions, then exit")
 	fs.BoolVar(&o.tinygoStatus, "tinygo-status", false, "print the pinned and installed TinyGo versions, path and checksum state, then exit")
 	fs.BoolVar(&o.listPlugins, "list-plugins", false, "print each configured plugin, its skills and its mcp.json servers with their state, then exit 0 (all load), 1 (a plugin is rejected or a configured server is invalid) or 2 (usage or config error); makes no model request and starts nothing")
+	fs.BoolVar(&o.interactive, "interactive", false, "start an interactive chat session (REPL) on the terminal; same as tinyagent chat; -t sends a first message; limits apply per turn")
+	fs.BoolVar(&o.interactive, "i", false, "shorthand for --interactive")
+	fs.BoolVar(&o.noChatHistory, "no-chat-history", false, "don't write chat input to <cwd>/history/chat_history (config chat_history: false)")
 	fs.BoolVar(&o.acp, "acp", false, "serve the Agent Client Protocol on stdin/stdout for editors such as Zed and JetBrains IDEs (experimental): each session runs in the client's cwd with this config and flags; limits apply per prompt")
 	fs.StringVar(&o.completion, "completion", "", "print a flag-name completion script for this shell (bash, zsh or fish) and exit; load it with: source <(tinyagent --completion bash), or in zsh after compinit: source <(tinyagent --completion zsh), or in fish: tinyagent --completion fish | source; re-source it after --update")
 	fs.StringVar(&o.workflow, "workflow", "", "run the skill workflow in this YAML file on the task (-t): the router picks a workflow or skill by intent, and each stage runs automatically with the previous stage's output, gated by its success check")
@@ -317,6 +321,12 @@ func run() int {
 			return 2
 		}
 	}
+	if o.interactive {
+		if f := chatConflict(fs); f != "" {
+			fmt.Fprintf(fs.Output(), "error: --interactive can't be combined with %s\n", f)
+			return 2
+		}
+	}
 	if flagWasSet(fs, "transcript") {
 		return runTranscript(&o, fs, os.Stdout)
 	}
@@ -353,6 +363,9 @@ func run() int {
 	if !flagWasSet(fs, "workflow") && flagWasSet(fs, "workflow-name") {
 		fmt.Fprintln(fs.Output(), "error: --workflow-name applies only to --workflow")
 		return 2
+	}
+	if o.interactive {
+		return runChat(&o, fs)
 	}
 	if flagWasSet(fs, "workflow") {
 		return runWorkflow(&o, fs, os.Args[1:], os.Stdout, os.Stderr)
@@ -1845,7 +1858,7 @@ var usageGroups = []struct {
 	flags [][3]string
 }{
 	{"", [][3]string{{"h", "help", ""}}},
-	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "profile", "name"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}, {"", "ask-user", ""}, {"", "acp", ""}}},
+	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "profile", "name"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}, {"", "ask-user", ""}, {"i", "interactive", ""}, {"", "no-chat-history", ""}, {"", "acp", ""}}},
 	{"Review", [][3]string{{"", "review", ""}, {"", "review-base", "ref"}, {"", "review-commit", "rev"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "token-limit", "n"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "color", "when"}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "otel", ""}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-backend", "name"}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},

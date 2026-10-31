@@ -31,6 +31,7 @@ var helpBrief = helpIntro + "\n" + helpEssentials + helpSubcommands() + "\n" + h
 var helpEssentials = `Examples:
   tinyagent -t "fix the failing test in ./pkg"
   git diff | tinyagent -t - -m anthropic/claude-sonnet-4-5 --read-only
+  tinyagent chat       # interactive session: type messages, Ctrl-D to quit
 
 Common options:
   -t, --task string    the task/prompt; "-" reads it from stdin
@@ -39,6 +40,7 @@ Common options:
   -c, --config path    YAML config (default: ./tinyagent.yaml in --cwd)
       --cwd dir        working directory (default .)
       --resume path    continue or follow up a run saved with -o <path>
+  -i, --interactive    chat on the terminal (same as tinyagent chat)
       --read-only      only read files; no edits or commands
   -o, --output path    write the trajectory JSON
       --json           write run events as JSONL to stdout
@@ -91,7 +93,7 @@ type flagGroup = struct {
 // FlagSet. TestVerboseHelp checks that every registered flag is listed.
 var helpGroups = []flagGroup{
 	{"", [][3]string{{"h", "help", ""}}},
-	{"Task", [][3]string{{"t", "task", "string"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}, {"", "ask-user", ""}, {"", "acp", ""}, {"", "image", "path"}, {"", "images", ""}, {"", "untrusted-task", ""}}},
+	{"Task", [][3]string{{"t", "task", "string"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}, {"", "ask-user", ""}, {"i", "interactive", ""}, {"", "no-chat-history", ""}, {"", "acp", ""}, {"", "image", "path"}, {"", "images", ""}, {"", "untrusted-task", ""}}},
 	{"Model and provider", [][3]string{{"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "aux-model", "spec"}, {"", "delegate-model", "spec"}, {"", "route", "task=spec"}, {"", "no-routing", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "profile", "name"}}},
 	{"Run control", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "token-limit", "n"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}, {"", "subagents", ""}, {"", "workers", ""}}},
 	{"Verify before stop", verifyGroup.flags},

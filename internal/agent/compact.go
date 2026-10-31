@@ -201,7 +201,13 @@ func (a *Agent) compact(ctx context.Context, t *trajectory.Trajectory, v *view, 
 	if w > 0 {
 		target = int(elideTarget * float64(w))
 	}
-	b := v.protectedFrom(int(keepRecent * float64(w)))
+	keep := int(keepRecent * float64(w))
+	if reason == "requested" {
+		// Asked for (chat /compact): halve the context and keep only the
+		// last exchanges verbatim, whatever the window.
+		target, keep = before/2, 0
+	}
+	b := v.protectedFrom(keep)
 	rec := trajectory.Compaction{Step: t.Steps, Reason: reason, Stage: "elide", TokensBefore: before}
 
 	// Stage 1: elide old tool outputs.
@@ -268,6 +274,10 @@ func (a *Agent) compact(ctx context.Context, t *trajectory.Trajectory, v *view, 
 		}
 		fmt.Fprintf(a.Err, "compacted context: ~%s → ~%s tokens (%s)\n", formatInt(before), formatInt(after), detail)
 		a.event("compaction", map[string]any{"step": rec.Step, "reason": rec.Reason, "stage": rec.Stage, "tokens_before": rec.TokensBefore, "tokens_after": rec.TokensAfter, "elided_messages": len(rec.Elided), "summarized_messages": len(rec.Summarized)})
+	}
+	if !changed && reason == "requested" {
+		fmt.Fprintln(a.Err, "compaction: nothing to compact yet")
+		return nil
 	}
 	if !changed || (w > 0 && float64(after) > compactAt*float64(w)) {
 		return errStillTooLong
