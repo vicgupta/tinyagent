@@ -20,6 +20,15 @@ A warning goes to stderr, the summary line shows `..., N truncated responses`, `
 
 When a run fails on a common setup problem, tinyagent prints a `hint:` line under the error. The error itself is kept, and hints name environment variables without printing their values.
 
+| Failure | Hint |
+| --- | --- |
+| Missing or rejected API key | names the provider's key variable to set |
+| Invalid config setting (permission rule, hook, command tool, LSP server, YAML type) | `fix <setting> in <config path>, then rerun tinyagent --check`; the error names the file and the rule index |
+| Sandbox backend can't start | names the backend and how to fix it: another `--sandbox-backend`, or run without `--sandbox` |
+| `claude-code` / `codex-exec` binary missing | how to install and sign in, or set its configured path |
+
+Other errors print no hint.
+
 A mistyped flag exits 2 with one line naming up to three close flags, such as `error: unknown flag --sandbxo; did you mean --sandbox? (see tinyagent --help)`, instead of the full usage.
 
 To check your setup before a run, use `tinyagent --check` with the same `-m`, `-c`, `--cwd`, fallback and limit flags you'd pass to a run. It sends no model request and writes nothing. It prints which config file, model, provider, fallbacks, working directory and limits a run would use, and where each came from, then `ok` (exit 0). A problem a run would hit, such as an unknown provider, a bad config key or a missing API key, is printed the same way a run prints it, with its `hint:`, and exits 2. Key values are never printed, only whether the variable is set.

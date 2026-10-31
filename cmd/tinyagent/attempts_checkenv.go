@@ -68,7 +68,7 @@ func attemptCheckEnv(fs *flag.FlagSet, o options, cfg config.AgentConfig, stderr
 			}
 			sb, err := tools.NewSandboxBackend(cfg.SandboxBackend, root, writable, cfg.SandboxNetwork, cfg.SandboxAllowedDomains)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, sandboxUnavailable(cfg.SandboxBackend, err)
 			}
 			return tools.Local{Sandbox: sb, CommandEnv: ce}, sb.Cleanup, nil
 		default:

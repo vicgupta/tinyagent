@@ -469,11 +469,11 @@ func run() int {
 	announceTaskImages(os.Stderr, taskImages, o.verbose)
 	hookRunner, err := hooks.New(cfg.Hooks, cfgPath)
 	if err != nil {
-		return fail(err)
+		return fail(inConfig(cfgPath, err))
 	}
 	policy, err := permissions.New(cfg.Permissions)
 	if err != nil {
-		return configFail(err)
+		return configFail(inConfig(cfgPath, err))
 	}
 	otelCfg, err := otelSettings(fs, o, cfg)
 	if err != nil {
@@ -681,7 +681,9 @@ func run() int {
 	}
 	cmdTools, err := commandTools(os.Stderr, cfg, root)
 	if err != nil {
+		err = inConfig(cfgPath, err)
 		fmt.Fprintln(os.Stderr, "error:", err)
+		printSetupHint(os.Stderr, err)
 		return 2
 	}
 	if cfg.ReadOnly {
@@ -1074,11 +1076,11 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	}
 	hookRunner, err := hooks.New(cfg.Hooks, cfgPath)
 	if err != nil {
-		return fail(err)
+		return fail(inConfig(cfgPath, err))
 	}
 	policy, err := permissions.New(cfg.Permissions)
 	if err != nil {
-		return configFail(err)
+		return configFail(inConfig(cfgPath, err))
 	}
 	if src.MCPEnabled || len(src.ExternalTools) > 0 {
 		return fail(errors.New("resume: MCP-enabled runs cannot be resumed; start a fresh task"))
@@ -1214,7 +1216,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	fileAccess.AddDirs(extraDirs)
 	cmdTools, err := commandTools(os.Stderr, cfg, root)
 	if err != nil {
+		err = inConfig(cfgPath, err)
 		fmt.Fprintln(os.Stderr, "error: resume:", err)
+		printSetupHint(os.Stderr, err)
 		return 2
 	}
 	if cur := agent.AdditionalDirsInfo(extraDirs, cfg.ReadOnly); len(cur)+len(src.AdditionalDirs) > 0 && fmt.Sprint(cur) != fmt.Sprint(src.AdditionalDirs) {
@@ -1536,6 +1540,7 @@ func configFail(err error) int {
 	var invalid *config.InvalidError
 	if errors.As(err, &invalid) {
 		fmt.Fprintln(os.Stderr, "error:", err)
+		printSetupHint(os.Stderr, err)
 		return 2
 	}
 	return fail(err)
@@ -1793,7 +1798,7 @@ func startEnvironment(ctx context.Context, cfg config.AgentConfig, root string, 
 	}
 	sb, err := tools.NewSandboxBackend(cfg.SandboxBackend, root, writable, cfg.SandboxNetwork, cfg.SandboxAllowedDomains)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, sandboxUnavailable(cfg.SandboxBackend, err)
 	}
 	fmt.Fprintln(os.Stderr, sb.Describe())
 	for _, w := range sb.Warnings {
@@ -2186,6 +2191,7 @@ func defaultModel() string {
 
 func fail(err error) int {
 	fmt.Fprintln(os.Stderr, "error:", err)
+	printSetupHint(os.Stderr, err)
 	return 1
 }
 
