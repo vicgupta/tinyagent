@@ -120,7 +120,7 @@ tinyagent --read-only --cwd ~/src/project -t "Review error handling in pkg/api"
 cat review-task.md | tinyagent --read-only -t - -o review.json
 ```
 
-Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: usage, two examples, the common options (`-t/--task`, including `-t -` for stdin; `-m/--model` with its providers and default; `-c`, `--cwd`, `--resume`, `--read-only`, `-o`, `--json`, `--check`, `--update`, `-V`) and the subcommands, and `tinyagent --help --verbose` for every flag. Subcommands are shortcuts for common flags: `tinyagent sandbox`, `tinyagent memory list`, `tinyagent ratchet list`, `tinyagent planner --first`, `tinyagent plugins list`, `tinyagent tinygo status` (see [CLI reference](docs/subcommands.md)); each one alone, such as `tinyagent sandbox`, prints its help.
+Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: usage, two examples, the common options (`-t/--task`, including `-t -` for stdin; `-m/--model` with its providers and default; `-c`, `--cwd`, `--resume`, `--read-only`, `-o`, `--json`, `--check`, `--update`, `-V`) and the subcommands, and `tinyagent --help --verbose` for every flag. Subcommands are shortcuts for common flags: `tinyagent sandbox`, `tinyagent memory list`, `tinyagent ratchet list`, `tinyagent planner --first`, `tinyagent plugins list`, `tinyagent triage issues.json`, `tinyagent tinygo status` (see [CLI reference](docs/subcommands.md)); each one alone, such as `tinyagent sandbox`, prints its help.
 
 ## Features
 
@@ -137,6 +137,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 - Run budgets: turn cap, cost limit and token limit (`--token-limit`), with an 80% warning to the model; delegates, workers and `--attempts` share the budget, and a run that hits it can be resumed.
 - Verify before stop (`--verify-on-stop`): a run that changed files isn't accepted until a test or build command passes; otherwise it is marked unverified. Optional computational checks (`--verify-check`, e.g. lint, type check, tests) run in order, cheapest first, before the run may finish; see [Computational checks](docs/verify.md#computational-checks). An optional inferential review (`--verify-review`) runs last, once every check passes, and reports the model's findings; see [Inferential review](docs/verify.md#inferential-review).
 - Spec gate for skill workflows (`gate: spec`): a plan whose tasks lack acceptance criteria or a runnable `Verify:` command is re-planned once, then surfaced instead of reaching generate-code; see [Spec gate](docs/project-context.md#spec-gate).
+- Issue triage (`tinyagent triage issues.json`): ranks `gh issue list` output by value against effort with fixed, explainable rules, flags likely duplicates, stale and blocked items without dropping them, and writes a deterministic next-up JSON list an outside loop can work from; offline, no model call. See [Issue triage](docs/triage.md).
 - Blocked tasks for skill workflows: a stage whose check keeps failing on its merits ends the run as `Blocked` (exit 5) rather than `Failed`, with no further attempts, so an outside loop can park the task until a person fixes it; see [Blocked tasks](docs/project-context.md#blocked-tasks).
 - Behavior verification for skill workflows: a `verify-behavior` stage (`behavior:` in the workflow file) runs the built program and passes or fails on its observed exit code and output against the task's behavioral acceptance criteria, records that output as evidence, and is skipped when the task has none; see [Verifying behavior](docs/project-context.md#verifying-behavior).
 - `tinyagent skills validate <path>...`: check skill-workflow skill files, skills directories and workflow files without a model call (exit 1 names an invalid skill), for CI or a pre-commit hook; see [Skill workflows](docs/project-context.md#skill-workflows).
@@ -198,6 +199,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 | Built-in tool notes | [docs/tools.md](docs/tools.md) |
 | Editor integration (ACP) and GitHub Actions | [docs/integrations.md](docs/integrations.md) |
 | Evaluation framework | [docs/eval-framework.md](docs/eval-framework.md) |
+| Issue triage: ranking open issues into a next-up list | [docs/triage.md](docs/triage.md) |
 | Malformed tool calls, output truncation, troubleshooting | [docs/troubleshooting.md](docs/troubleshooting.md) |
 
 ### Evaluate changes in GitHub Actions

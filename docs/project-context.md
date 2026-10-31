@@ -103,7 +103,7 @@ When a stage runs out of retries, the workflow tells apart a task that can't be 
 
 Either way nothing more runs: no further attempts and no later stages, so a blocked task spends no more tokens. The status, stage and reason are in the stderr summary line (`workflow <name> Blocked at stage <stage>: <reason>`, followed by a re-run hint), the `-o` record's `status`, `failed_stage` and `reason`, and the `workflow.finished` event (`status: "Blocked"`, `blocked: true`).
 
-**Re-queueing.** tinyagent keeps no list of blocked tasks; one run handles one task. To re-queue, fix the task or its acceptance criteria and run the same `tinyagent --workflow ... -t ...` command again. An outside loop that feeds tasks to tinyagent can park a task on exit 5; the suggested convention for an issue-label loop is to swap the issue's `amf:ready` label for `amf:blocked`, and have a person re-add `amf:ready` once the issue is fixed. tinyagent itself makes no GitHub calls.
+**Re-queueing.** tinyagent keeps no list of blocked tasks; one run handles one task. To re-queue, fix the task or its acceptance criteria and run the same `tinyagent --workflow ... -t ...` command again. An outside loop that feeds tasks to tinyagent can park a task on exit 5; the suggested convention for an issue-label loop is to swap the issue's `amf:ready` label for `amf:blocked`, and have a person re-add `amf:ready` once the issue is fixed. [`tinyagent triage`](triage.md) flags issues with that label as `blocked` and ranks them last. tinyagent itself makes no GitHub calls.
 
 #### Spec gate
 
