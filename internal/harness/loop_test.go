@@ -204,3 +204,121 @@ func TestModelVerdict(t *testing.T) {
 		t.Errorf("reason = %q", c.Reason)
 	}
 }
+
+const gated = "version: 1\nworkflows:\n  build:\n    stages:\n      - skill: plan-tasks\n        gate: spec\n      - skill: run-tests\n"
+
+const okPlan = "Task 1: build it\nAcceptance criteria:\n- it works\nVerify: `go test ./...`\nSUCCESS CHECK: PASS"
+
+const thinPlan = "Task 1: build it\nSUCCESS CHECK: PASS"
+
+func gateEvents(events []map[string]any) []map[string]any {
+	var out []map[string]any
+	for _, e := range events {
+		if e["type"] == "stage.gate" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func TestSpecGateAccepts(t *testing.T) {
+	w := loadTestWorkflow(t, gated)
+	var prompts []string
+	res, events := runTest(t, w, "build", fakeAgent(t, [][2]string{
+		{"Submitted", okPlan},
+		{"Submitted", "SUCCESS CHECK: PASS"},
+	}, &prompts))
+	if res.Status != StatusPassed || len(prompts) != 2 || len(res.Gates) != 1 || !res.Gates[0].Passed {
+		t.Fatalf("result = %+v", res)
+	}
+	g := gateEvents(events)
+	if len(g) != 1 || g[0]["passed"] != true || g[0]["gate"] != "spec" || g[0]["attempt"] != 1 {
+		t.Errorf("gate events = %v", g)
+	}
+}
+
+func TestSpecGateReplansOnce(t *testing.T) {
+	w := loadTestWorkflow(t, gated)
+	var prompts []string
+	res, events := runTest(t, w, "build", fakeAgent(t, [][2]string{
+		{"Submitted", thinPlan},
+		{"Submitted", okPlan},
+		{"Submitted", "SUCCESS CHECK: PASS"},
+	}, &prompts))
+	if res.Status != StatusPassed || len(prompts) != 3 {
+		t.Fatalf("result = %+v, calls %d", res, len(prompts))
+	}
+	if !strings.Contains(prompts[1], "spec gate rejected") || !strings.Contains(prompts[1], "Skill: plan-tasks") {
+		t.Errorf("re-plan prompt lacks the gate reason:\n%s", prompts[1])
+	}
+	if !strings.Contains(prompts[2], "Skill: run-tests") {
+		t.Errorf("stage 2 not run after re-plan")
+	}
+	if g := gateEvents(events); len(g) != 2 || g[0]["passed"] != false || g[1]["passed"] != true || g[1]["attempt"] != 2 {
+		t.Errorf("gate events = %v", g)
+	}
+	if res.Attempts[1].Attempt != 2 {
+		t.Errorf("re-plan attempt number = %d", res.Attempts[1].Attempt)
+	}
+}
+
+func TestSpecGateSurfacesAfterSecondReject(t *testing.T) {
+	w := loadTestWorkflow(t, gated)
+	var prompts []string
+	res, events := runTest(t, w, "build", fakeAgent(t, [][2]string{
+		{"Submitted", thinPlan},
+		{"Submitted", thinPlan},
+	}, &prompts))
+	if res.Status != StatusFailed || res.ExitCode() != 1 || res.FailedStage != "plan-tasks" || !strings.HasPrefix(res.Reason, "spec gate:") {
+		t.Fatalf("result = %+v", res)
+	}
+	for _, p := range prompts {
+		if strings.Contains(p, "Skill: run-tests") {
+			t.Fatal("next stage ran after the gate rejected twice")
+		}
+	}
+	if len(prompts) != 2 || len(res.Gates) != 2 || len(gateEvents(events)) != 2 {
+		t.Errorf("calls %d, gates %+v", len(prompts), res.Gates)
+	}
+}
+
+func TestSpecGateInterruptDuringReplan(t *testing.T) {
+	w := loadTestWorkflow(t, gated)
+	r, _ := w.Route("", "build")
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := 0
+	agent := func(_ context.Context, args []string, _ io.Writer) error {
+		calls++
+		if calls == 2 {
+			cancel()
+			return context.Canceled
+		}
+		for i := range args {
+			if args[i] == "-o" {
+				b, _ := json.Marshal(map[string]any{"exit_status": "Submitted", "submission": thinPlan})
+				os.WriteFile(args[i+1], b, 0o600)
+			}
+		}
+		return nil
+	}
+	res := Run(ctx, Options{Route: r, Task: "t", Cwd: t.TempDir(), Dir: t.TempDir(), RunAgent: agent})
+	if res.Status != StatusInterrupted {
+		t.Fatalf("result = %+v", res)
+	}
+}
+
+func TestNoGateUnchanged(t *testing.T) {
+	w := loadTestWorkflow(t, twoStage)
+	var prompts []string
+	res, events := runTest(t, w, "build", fakeAgent(t, [][2]string{
+		{"Submitted", thinPlan},
+		{"Submitted", "SUCCESS CHECK: PASS"},
+	}, &prompts))
+	if res.Status != StatusPassed || len(res.Gates) != 0 || len(gateEvents(events)) != 0 {
+		t.Fatalf("result = %+v", res)
+	}
+	b, _ := json.Marshal(res)
+	if strings.Contains(string(b), `"gates"`) {
+		t.Error("ungated result has a gates field")
+	}
+}
