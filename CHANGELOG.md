@@ -1,10 +1,14 @@
 # Changelog
 
-## Unreleased
+## [v0.14.0] - 2026-10-31
 
 ### Features
 
-- OpenCode handoff provider: `-m opencode/<provider>/<model>` (or `opencode/default`) runs your installed `opencode run --format json` in `--cwd` and returns its final answer, tokens and cost; `--read-only` maps to OpenCode's `plan` agent plus an inline permission config denying edits, commands and network tools. Binary from PATH or `opencode.path`; `tinyagent --check` shows the binary and its version. OpenCode's credentials are never read or copied. See [docs/models.md](docs/models.md#opencode).
+- OpenCode handoff provider (#341): `-m opencode/<provider>/<model>` (or `opencode/default`) runs your installed `opencode run --format json` in `--cwd` and returns its final answer, tokens and cost; `--read-only` maps to OpenCode's `plan` agent plus an inline permission config denying edits, commands and network tools. Binary from PATH or `opencode.path`; `tinyagent --check` shows the binary and its version. OpenCode's credentials are never read or copied. See [docs/models.md](docs/models.md#opencode).
+
+### Other
+
+- Internal refactor with no behavior change: fresh runs, `--resume` and chat/ACP sessions build their tool executor through one shared builder, so MCP, plugin and command-tool wiring can't drift between them (#340, closes #310).
 
 ## [v0.13.0] - 2026-10-31
 
