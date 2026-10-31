@@ -39,7 +39,7 @@ internal/model/       providers, price table, context windows
 internal/cwdpath/     the shared path guard: resolves paths inside --cwd, refusing absolute paths, .. and symlink escapes
 internal/playbooks/   playbook discovery and parsing (TinyAgent and pstack formats), routing, the embedded sample pack
 internal/harness/     skill-workflow routing and keyword matching (match.go, shared with playbooks)
-internal/resume/      what a --resume must match in its checkpoint (flag table, root, tool fingerprint, tool names)
+internal/resume/      what a --resume must match in its checkpoint (flag table, root, tool fingerprint, tool names); loads the checkpoint and pins its recorded settings onto the run config
 internal/tools/       the six tools (read_file, write_file, edit_file, list_files, grep, bash)
 internal/trajectory/  the -o JSON output
 internal/skills/      Agent Skills discovery (./skills only) and the skill tool
