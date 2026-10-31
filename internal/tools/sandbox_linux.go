@@ -150,6 +150,9 @@ func (s *Sandbox) listenProxy() (net.Listener, string, error) {
 // mode the helper starts in its own network namespace, which has only
 // loopback, and forwards proxyPort there to the proxy's Unix socket.
 func (s *Sandbox) wrap(ctx context.Context, argv []string) *exec.Cmd {
+	if s.bwrap != "" {
+		return s.wrapBwrap(ctx, argv)
+	}
 	network, proxy, _ := s.netState()
 	mode := "net-deny"
 	if network {

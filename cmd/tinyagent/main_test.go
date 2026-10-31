@@ -403,6 +403,7 @@ Output:
       --add-dir-write path                let the file tools, --sandbox commands and a container read and write this directory outside --cwd; repeatable; with --add-dir-read, replaces config additional_dirs
       --sandbox                           confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths
       --sandbox-network                   with --sandbox, allow commands to use the network
+      --sandbox-backend name              with --sandbox on Linux, the engine: auto (bwrap with Landlock inside, else Landlock), landlock or bwrap (default: config's sandbox_backend, else auto)
       --sandbox-allow-domain host         with --sandbox, let commands reach only this host (name, *.domain or IP, optional :port) over HTTP(S) via a filtering proxy; repeatable, replaces sandbox_allowed_domains
       --env name                          where bash and start_process run: local or container (default: config's environment, else local)
       --command-env mode                  environment bash and start_process inherit: all, core or none (default: config's command_env.inherit, else all)

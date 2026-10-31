@@ -30,6 +30,8 @@ func TestSubcommandsMatchFlags(t *testing.T) {
 		{[]string{"sandbox", "-t", "x"}, []string{"--sandbox", "-t", "x"}},
 		{[]string{"sandbox", "network", "-t", "x"}, []string{"--sandbox", "--sandbox-network", "-t", "x"}},
 		{[]string{"sandbox", "--network", "--allowed-domains", "a.com", "--allow-domain=b.com", "-t", "x"}, []string{"--sandbox", "--sandbox-network", "--sandbox-allow-domain", "a.com", "--sandbox-allow-domain", "b.com", "-t", "x"}},
+		{[]string{"sandbox", "--backend", "bwrap", "-t", "x"}, []string{"--sandbox", "--sandbox-backend", "bwrap", "-t", "x"}},
+		{[]string{"sandbox", "network", "--backend=landlock", "-t", "x"}, []string{"--sandbox", "--sandbox-network", "--sandbox-backend", "landlock", "-t", "x"}},
 		{[]string{"memory", "-t", "x", "--cwd", "d"}, []string{"--memory", "-t", "x", "--cwd", "d"}},
 		{[]string{"memory", "list", "--json"}, []string{"--memory-list", "--json"}},
 		{[]string{"memory", "path"}, []string{"--memory-path"}},

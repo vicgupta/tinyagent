@@ -66,7 +66,7 @@ func attemptCheckEnv(fs *flag.FlagSet, o options, cfg config.AgentConfig, stderr
 					writable = append(writable, d.Path)
 				}
 			}
-			sb, err := tools.NewSandbox(root, writable, cfg.SandboxNetwork, cfg.SandboxAllowedDomains)
+			sb, err := tools.NewSandboxBackend(cfg.SandboxBackend, root, writable, cfg.SandboxNetwork, cfg.SandboxAllowedDomains)
 			if err != nil {
 				return nil, nil, err
 			}

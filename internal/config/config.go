@@ -35,6 +35,9 @@ type AgentConfig struct {
 	// hosts (exact, "*.domain" or IP, optional ":port"), over HTTP and HTTPS
 	// through a filtering proxy. Empty keeps the network denied.
 	SandboxAllowedDomains []string `yaml:"sandbox_allowed_domains,omitempty"`
+	// SandboxBackend picks the Linux sandbox engine: auto (default; bwrap
+	// with Landlock stacked inside, else Landlock alone), landlock or bwrap.
+	SandboxBackend string `yaml:"sandbox_backend,omitempty"`
 	// TinyGo is an existing tinygo executable to build Go plugin modules
 	// with, instead of the pinned release TinyAgent downloads on first use.
 	// TinyGo is a separate project, never bundled with TinyAgent.
@@ -678,6 +681,12 @@ func (c CommandEnv) Configured() bool {
 }
 
 // ValidInherit reports whether mode is a known command_env.inherit value.
+// ValidSandboxBackend reports whether b is a sandbox_backend value: auto
+// (or empty), landlock or bwrap.
+func ValidSandboxBackend(b string) bool {
+	return b == "" || b == "auto" || b == "landlock" || b == "bwrap"
+}
+
 func ValidInherit(mode string) bool {
 	return mode == "" || mode == "all" || mode == "core" || mode == "none"
 }
@@ -1268,6 +1277,9 @@ func loadFile(path, profile string) (AgentConfig, error) {
 	}
 	if _, err := sandboxnet.ParseRules(cfg.SandboxAllowedDomains); err != nil {
 		return cfg, fmt.Errorf("config %s: sandbox_allowed_domains %v", src, err)
+	}
+	if !ValidSandboxBackend(cfg.SandboxBackend) {
+		return cfg, fmt.Errorf("config %s: sandbox_backend %q must be auto, landlock or bwrap", src, cfg.SandboxBackend)
 	}
 	return cfg, nil
 }

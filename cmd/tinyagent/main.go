@@ -82,6 +82,7 @@ type options struct {
 	verbose, noStream, noAgentsMD, noCompact         bool
 	readOnly, sandbox, sandboxNetwork                bool
 	sandboxAllowDomains                              domainList
+	sandboxBackend                                   string
 	addDirRead, addDirWrite                          dirList
 	jsonOutput                                       bool
 	logDB                                            optionalPath
@@ -152,6 +153,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.readOnly, "read-only", false, "allow only read_file, list_files, and grep; blocks edits and commands")
 	fs.BoolVar(&o.sandbox, "sandbox", false, "confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths")
 	fs.BoolVar(&o.sandboxNetwork, "sandbox-network", false, "with --sandbox, allow commands to use the network")
+	fs.StringVar(&o.sandboxBackend, "sandbox-backend", "", "with --sandbox on Linux, the engine: auto (bwrap with Landlock inside, else Landlock), landlock or bwrap (default: config's sandbox_backend, else auto)")
 	fs.Var(&o.sandboxAllowDomains, "sandbox-allow-domain", "with --sandbox, let commands reach only this host (name, *.domain or IP, optional :port) over HTTP(S) via a filtering proxy; repeatable, replaces sandbox_allowed_domains")
 	fs.Var(&o.addDirRead, "add-dir-read", "let the file tools (and a container) read this directory outside --cwd; repeatable; with --add-dir-write, replaces config additional_dirs")
 	fs.Var(&o.addDirWrite, "add-dir-write", "let the file tools, --sandbox commands and a container read and write this directory outside --cwd; repeatable; with --add-dir-read, replaces config additional_dirs")
@@ -309,6 +311,10 @@ func run() int {
 	}
 	if !config.ValidEnvironment(o.execEnv) {
 		fmt.Fprintf(fs.Output(), "error: --env %q must be local or container\n", o.execEnv)
+		return 2
+	}
+	if flagWasSet(fs, "sandbox-backend") && (o.sandboxBackend == "" || !config.ValidSandboxBackend(o.sandboxBackend)) {
+		fmt.Fprintf(fs.Output(), "error: --sandbox-backend %q must be auto, landlock or bwrap\n", o.sandboxBackend)
 		return 2
 	}
 	if flagWasSet(fs, "command-env") && (o.commandEnv == "" || !config.ValidInherit(o.commandEnv)) {
@@ -1477,7 +1483,7 @@ func canonicalRoot(path string) (string, error) {
 	return filepath.EvalSymlinks(root)
 }
 
-// applySandboxFlags lets --sandbox, --sandbox-network,
+// applySandboxFlags lets --sandbox, --sandbox-network, --sandbox-backend,
 // --sandbox-allow-domain, --env and --command-env override the config.
 func applySandboxFlags(fs *flag.FlagSet, cfg *config.AgentConfig, o options) {
 	if flagWasSet(fs, "env") {
@@ -1488,6 +1494,9 @@ func applySandboxFlags(fs *flag.FlagSet, cfg *config.AgentConfig, o options) {
 	}
 	if flagWasSet(fs, "sandbox-network") {
 		cfg.SandboxNetwork = o.sandboxNetwork
+	}
+	if flagWasSet(fs, "sandbox-backend") {
+		cfg.SandboxBackend = o.sandboxBackend
 	}
 	if flagWasSet(fs, "command-env") {
 		cfg.CommandEnv.Inherit = o.commandEnv
@@ -1758,11 +1767,14 @@ func startEnvironment(ctx context.Context, cfg config.AgentConfig, root string, 
 			writable = append(writable, d.Path)
 		}
 	}
-	sb, err := tools.NewSandbox(root, writable, cfg.SandboxNetwork, cfg.SandboxAllowedDomains)
+	sb, err := tools.NewSandboxBackend(cfg.SandboxBackend, root, writable, cfg.SandboxNetwork, cfg.SandboxAllowedDomains)
 	if err != nil {
 		return nil, nil, err
 	}
 	fmt.Fprintln(os.Stderr, sb.Describe())
+	for _, w := range sb.Warnings {
+		fmt.Fprintln(os.Stderr, "sandbox: warning:", w)
+	}
 	describeCommandEnv(os.Stderr, ce, verbose)
 	return tools.Local{Sandbox: sb, CommandEnv: ce}, sb.Cleanup, nil
 }
@@ -1800,7 +1812,7 @@ var usageGroups = []struct {
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "profile", "name"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}, {"", "ask-user", ""}, {"", "acp", ""}}},
 	{"Review", [][3]string{{"", "review", ""}, {"", "review-base", "ref"}, {"", "review-commit", "rev"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "token-limit", "n"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
-	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "otel", ""}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
+	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "otel", ""}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-backend", "name"}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "list-profiles", ""}, {"", "list-plugins", ""}, {"", "plugins-prune", ""}, {"", "plugins-keep", "n"}, {"", "plugins-rollback", "module@sha256"}, {"", "tinygo-install", ""}, {"", "tinygo-update", ""}, {"", "tinygo-status", ""}, {"", "transcript", "path"}, {"", "init-config", ""}, {"", "completion", "shell"}}},
 }

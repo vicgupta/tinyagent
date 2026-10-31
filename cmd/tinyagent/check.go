@@ -233,6 +233,11 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 		}
 		add("tools", fmt.Sprintf("%d command tools (%s)", n, strings.Join(names, ", ")))
 	}
+	if sb, err := checkSandbox(fs, *o, cfg); err != nil {
+		return nil, err
+	} else if sb != "" {
+		add("sandbox", sb)
+	}
 	if mem := checkMemory(fs, o, cfg.Memory, root); mem != "" {
 		add("memory", mem)
 	}
@@ -332,3 +337,29 @@ func checkRoutes(cfg config.AgentConfig, main string) []routing.Route {
 	}
 	return out
 }
+
+// checkSandbox returns the --check sandbox line: the engine a run would
+// use (such as "bwrap + landlock (ABI 6)") and any fallback warning, or the
+// error a run would stop on. Empty when --sandbox is off.
+func checkSandbox(fs *flag.FlagSet, o options, cfg config.AgentConfig) (string, error) {
+	applySandboxFlags(fs, &cfg, o)
+	if !cfg.Sandbox || cfg.ReadOnly || cfg.Environment == "container" {
+		return "", nil
+	}
+	backend := cfg.SandboxBackend
+	if backend == "" {
+		backend = "auto"
+	}
+	desc, warnings, err := probeSandbox(backend, cfg.SandboxNetwork, cfg.SandboxAllowedDomains)
+	if err != nil {
+		return "", err
+	}
+	line := desc + " (sandbox_backend " + backend + ")"
+	for _, w := range warnings {
+		line += "; warning: " + w
+	}
+	return line, nil
+}
+
+// probeSandbox is tools.ProbeSandbox; tests replace it.
+var probeSandbox = tools.ProbeSandbox

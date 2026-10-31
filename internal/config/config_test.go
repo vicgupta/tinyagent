@@ -219,6 +219,16 @@ func TestSandboxConfig(t *testing.T) {
 			t.Errorf("%q: err=%v", body, err)
 		}
 	}
+	for _, b := range []string{"auto", "landlock", "bwrap"} {
+		if cfg, err := Load(write("sandbox: true\nsandbox_backend: " + b + "\n")); err != nil || cfg.SandboxBackend != b {
+			t.Errorf("sandbox_backend %s: cfg=%q err=%v", b, cfg.SandboxBackend, err)
+		}
+	}
+	if p := write("sandbox_backend: firejail\n"); true {
+		if _, err := Load(p); err == nil || !strings.Contains(err.Error(), p) || !strings.Contains(err.Error(), `sandbox_backend "firejail" must be auto, landlock or bwrap`) {
+			t.Errorf("bad sandbox_backend: err=%v", err)
+		}
+	}
 	cfg, err = Load(write("sandbox: true\nsandbox_allowed_domains: [proxy.golang.org, \"*.npmjs.org\", \"api.example.com:8443\"]\n"))
 	if err != nil || len(cfg.SandboxAllowedDomains) != 3 {
 		t.Fatalf("cfg=%+v err=%v", cfg, err)

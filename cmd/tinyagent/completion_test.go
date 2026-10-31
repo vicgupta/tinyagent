@@ -144,8 +144,8 @@ func TestCompletionBashCandidates(t *testing.T) {
 		want  []string
 	}{
 		{[]string{"--tool-out"}, []string{"--tool-output-files"}},
-		{[]string{"--sandbox-"}, []string{"--sandbox-allow-domain", "--sandbox-network"}},
-		{[]string{"-v", "--sandbox"}, []string{"--sandbox", "--sandbox-allow-domain", "--sandbox-network"}},
+		{[]string{"--sandbox-"}, []string{"--sandbox-allow-domain", "--sandbox-backend", "--sandbox-network"}},
+		{[]string{"-v", "--sandbox"}, []string{"--sandbox", "--sandbox-allow-domain", "--sandbox-backend", "--sandbox-network"}},
 		{[]string{"-t"}, []string{"-t"}},
 		{[]string{"--he"}, []string{"--help"}},
 		{[]string{"--nope-"}, nil},
@@ -274,8 +274,8 @@ func TestCompletionZshCandidates(t *testing.T) {
 		want []string
 	}{
 		{"tinyagent --tool-out", []string{"--tool-output-files"}},
-		{"tinyagent --sandbox-", []string{"--sandbox-allow-domain", "--sandbox-network"}},
-		{"tinyagent -v --sandbox", []string{"--sandbox", "--sandbox-allow-domain", "--sandbox-network"}},
+		{"tinyagent --sandbox-", []string{"--sandbox-allow-domain", "--sandbox-backend", "--sandbox-network"}},
+		{"tinyagent -v --sandbox", []string{"--sandbox", "--sandbox-allow-domain", "--sandbox-backend", "--sandbox-network"}},
 		{"tinyagent -t", []string{"-t"}},
 		{"tinyagent --he", []string{"--help"}},
 		{"tinyagent --nope-", nil},
@@ -368,8 +368,8 @@ func TestCompletionFishCandidates(t *testing.T) {
 		want []string
 	}{
 		{"tinyagent --tool-out", []string{"--tool-output-files"}},
-		{"tinyagent --sandbox-", []string{"--sandbox-allow-domain", "--sandbox-network"}},
-		{"tinyagent -v --sandbox", []string{"--sandbox", "--sandbox-allow-domain", "--sandbox-network"}},
+		{"tinyagent --sandbox-", []string{"--sandbox-allow-domain", "--sandbox-backend", "--sandbox-network"}},
+		{"tinyagent -v --sandbox", []string{"--sandbox", "--sandbox-allow-domain", "--sandbox-backend", "--sandbox-network"}},
 		{"tinyagent -", completionFlags(newFlagSet(&options{}))},
 		{"tinyagent --he", []string{"--help"}},
 		{"tinyagent --nope-", nil},
