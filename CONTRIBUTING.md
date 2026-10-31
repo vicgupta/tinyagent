@@ -85,6 +85,12 @@ behavior in the executor. Don't build a second list elsewhere. The signature of
 existing selections must not change, or older checkpoints stop resuming;
 `TestSelectionSignaturePinned` guards this.
 
+Fresh runs, `--resume` and chat/ACP turns all build their `tools.Executor` with
+`newRunExecutor` (`cmd/tinyagent/run_tools.go`), so a new executor field or a change
+to MCP and command-tool wiring goes there once and reaches every entry point.
+Don't construct a `tools.Executor` literal anywhere else in `cmd/tinyagent`;
+`TestExecutorBuiltInOnePlace` guards this.
+
 ## Testing
 
 - Unit tests live next to code as `_test.go` files. Run `go test ./...`.
