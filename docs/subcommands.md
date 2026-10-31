@@ -123,7 +123,7 @@ Six subcommands are shortcuts for existing flags. They rewrite the command line 
 | `--command-env` | config `command_env.inherit`, else `all` | Environment `bash`/`start_process` inherit: `all`, `core` or `none`. See [Command environment](sandbox.md#command-environment) |
 | `--redact-secrets` | config `redact_secrets.enabled`, else off | Mask known secret values as `[REDACTED]` in `bash`, process, MCP, `web_fetch` and hook output before the model sees it; `--redact-secrets=false` turns the config setting off. See [Redacting secrets from tool output](permissions.md#redacting-secrets-from-tool-output) |
 | `--workers` | config `subagents.workers.enabled`, else off | Add the `worker` and `apply_worker` tools: a worker subagent edits files in its own Git worktree on branch `tinyagent/<run>-w<n>`. See [Workers](long-runs.md#workers) |
-| `--workflow <file.yaml>` | | Run a skill workflow on the task. See [Skill workflows](project-context.md#skill-workflows) |
+| `--workflow <file.yaml>` | | Run a skill workflow on the task: `file.yaml` is the YAML workflow file (stages, checks, limits), and each stage's skill is a Markdown file in its `skills_dir`. See [Skill workflows](project-context.md#skill-workflows) |
 | `--workflow-name <name>` | | With `--workflow`: run this workflow or skill instead of routing by intent |
 | `--eval <suite.yaml>` | | Run an eval suite and report pass rates; with `--dry-run`, print the trial matrix and a cost bound. See [eval-framework.md](eval-framework.md) |
 | `--eval-out <dir>` | | With `--eval`: directory for `results.jsonl`, `report.json`, `report.md` and trajectories |

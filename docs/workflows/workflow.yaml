@@ -1,4 +1,5 @@
 # Example skill-harness workflow: tinyagent --workflow docs/workflows/workflow.yaml -t "..."
+# The workflow file is YAML; each stage's skill is a Markdown file in skills/ (<name>.md or <name>/SKILL.md).
 version: 1
 skills_dir: skills
 default: implement
