@@ -143,29 +143,52 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 
 ## Documentation
 
+### Getting started
+
 | Topic | Doc |
 |---|---|
 | Tasks: passing a task, task types, task-based routing | [docs/tasks.md](docs/tasks.md) |
 | Models: choosing a model, providers, roles, fallback chains, usage by role | [docs/models.md](docs/models.md) |
 | Every flag, subcommands and exit status | [docs/subcommands.md](docs/subcommands.md) |
 | Config file, profiles, MCP and command tools | [docs/config.md](docs/config.md) |
-| Providers, ChatGPT subscription, reasoning and fallback | [docs/providers.md](docs/providers.md) |
-| `--json`, streaming, structured output, event log, OpenTelemetry | [docs/json-output.md](docs/json-output.md) |
+
+### Running tasks
+
+| Topic | Doc |
+|---|---|
 | Reviews, worktrees, best-of-N, resume, transcripts, follow-ups, asking for input, token and cost budgets | [docs/runs.md](docs/runs.md) |
+| Long runs, session handoff, images, tool output files, apply_patch, subagents, workers, web fetch, LSP | [docs/long-runs.md](docs/long-runs.md) |
+| Planner (`update_plan`, `--plan-first`) | [docs/planner.md](docs/planner.md) |
 | Verify before stop (`--verify-on-stop`) | [docs/verify.md](docs/verify.md) |
 | `undo_file` and `--rewind` | [docs/undo.md](docs/undo.md) |
 | Project memory | [docs/memory.md](docs/memory.md) |
 | Project rules from agent failures (`ratchet`) | [docs/ratchet.md](docs/ratchet.md) |
-| Planner (`update_plan`, `--plan-first`) | [docs/planner.md](docs/planner.md) |
 | AGENTS.md, skills and skill workflows | [docs/project-context.md](docs/project-context.md) |
-| Plugins, WebAssembly modules, version store and TinyGo | [docs/plugins.md](docs/plugins.md) |
+
+### Models
+
+| Topic | Doc |
+|---|---|
+| Providers, ChatGPT subscription, reasoning and fallback | [docs/providers.md](docs/providers.md) |
+| `--json`, streaming, structured output, event log, OpenTelemetry | [docs/json-output.md](docs/json-output.md) |
+
+### Safety
+
+| Topic | Doc |
+|---|---|
 | Sandboxing, network allowlist, command environment, execution environments | [docs/sandbox.md](docs/sandbox.md) |
 | Permissions, hooks, lockdown, secret redaction, file access, extra directories | [docs/permissions.md](docs/permissions.md) |
-| Long runs, session handoff, images, tool output files, apply_patch, subagents, workers, web fetch, LSP | [docs/long-runs.md](docs/long-runs.md) |
-| Editor integration (ACP) and GitHub Actions | [docs/integrations.md](docs/integrations.md) |
+
+### Extending
+
+| Topic | Doc |
+|---|---|
+| Plugins, WebAssembly modules, version store and TinyGo | [docs/plugins.md](docs/plugins.md) |
+| WebAssembly code plugins: manifests, deny-by-default permissions, hot swap | [docs/wasm-plugins.md](docs/wasm-plugins.md) |
 | Built-in tool notes | [docs/tools.md](docs/tools.md) |
-| Malformed tool calls, output truncation, troubleshooting | [docs/troubleshooting.md](docs/troubleshooting.md) |
+| Editor integration (ACP) and GitHub Actions | [docs/integrations.md](docs/integrations.md) |
 | Evaluation framework | [docs/eval-framework.md](docs/eval-framework.md) |
+| Malformed tool calls, output truncation, troubleshooting | [docs/troubleshooting.md](docs/troubleshooting.md) |
 
 ### Evaluate changes in GitHub Actions
 
