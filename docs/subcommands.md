@@ -8,6 +8,7 @@ Six subcommands are shortcuts for existing flags. They rewrite the command line 
 |---|---|
 | `tinyagent sandbox -t "..."` | `--sandbox` |
 | `tinyagent sandbox network [--allow-domain host]... -t "..."` | `--sandbox --sandbox-network [--sandbox-allow-domain host]` (`--allowed-domains` is an alias) |
+| `tinyagent sandbox --backend auto\|landlock\|bwrap -t "..."` | `--sandbox --sandbox-backend auto\|landlock\|bwrap` |
 | `tinyagent memory -t "..."` | `--memory` |
 | `tinyagent memory list` / `path` / `config` | `--memory-list` / `--memory-path` / `--memory-help` |
 | `tinyagent memory approve <id\|all>` | `--memory-approve <id\|all>` |
@@ -116,6 +117,7 @@ Six subcommands are shortcuts for existing flags. They rewrite the command line 
 | `--add-dir-write` | config `additional_dirs`, else none | Let the file tools read and write an existing directory outside `--cwd`; repeatable. See [Additional directories](permissions.md#additional-directories) |
 | `--sandbox` | config `sandbox`, else off | Confine `bash`/`start_process` at the OS level: writes only under `--cwd`, a temp dir and `sandbox_writable_paths`, network off. See [Sandboxing commands](sandbox.md#sandboxing-commands) |
 | `--sandbox-network` | config `sandbox_network`, else off | With `--sandbox`, allow network access |
+| `--sandbox-backend <name>` | config `sandbox_backend`, else `auto` | With `--sandbox` on Linux, the engine: `auto` (Bubblewrap with Landlock stacked inside, else Landlock alone), `landlock` or `bwrap`. `bwrap` fails if Bubblewrap is missing or blocked (on Ubuntu 24.04, by AppArmor; the error gives the fix). See [Bubblewrap backend](sandbox.md#bubblewrap-backend) |
 | `--sandbox-allow-domain <host>` | config `sandbox_allowed_domains`, else none | With `--sandbox`, let commands reach only the listed hosts over HTTP(S) through a filtering proxy. Repeatable; replaces the config list. See [Network allowlist](sandbox.md#network-allowlist) |
 | `--env` | config `environment`, else `local` | Where `bash`/`start_process` run: `local` (on the host) or `container` (Docker/Podman). See [Execution environments](sandbox.md#execution-environments) |
 | `--command-env` | config `command_env.inherit`, else `all` | Environment `bash`/`start_process` inherit: `all`, `core` or `none`. See [Command environment](sandbox.md#command-environment) |

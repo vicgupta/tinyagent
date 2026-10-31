@@ -14,11 +14,42 @@ sandbox_writable_paths:        # absolute paths to existing directories
 Toolchains that cache outside the repo (Go, npm, pip) fail under the sandbox with `Permission denied` until their cache directories are listed in `sandbox_writable_paths`.
 
 - **Linux:** Landlock, applied by a re-executed helper to the command only (tinyagent itself is unrestricted). Needs Linux 6.2+ (Landlock ABI 3) to confine writes, and 6.7+ (ABI 4) to deny TCP. Landlock cannot restrict UDP before ABI 10 and does not cover Unix sockets, so "network denied" means TCP connect and bind. WSL2 counts as Linux.
+- **Linux engines:** `sandbox_backend` (or `--sandbox-backend`, or `tinyagent sandbox --backend`) picks `auto` (default), `landlock` or `bwrap`. See [Bubblewrap backend](#bubblewrap-backend).
 - **macOS:** Seatbelt through `/usr/bin/sandbox-exec` (deprecated by Apple but still shipped). This backend has not been tested in CI.
 - **Windows:** not supported.
 - **Fail closed:** if the host cannot enforce the requested policy, tinyagent exits before the first model request and says what is missing. It never runs commands unsandboxed.
 - On start, one `sandbox:` line (backend, writable roots, network) goes to stderr, and `-o` trajectories record it as `sandbox`. With `--resume`, the current invocation's settings apply. With `--read-only` there are no command tools, so nothing is sandboxed.
 - **Not covered:** [`web_fetch`](long-runs.md#web-fetch), which has its own allowlist and is unaffected by `--sandbox`, the in-process file tools (`read_file`, `write_file`, ... and their symlink behavior; see [Restricting file access](permissions.md#restricting-file-access) for rules on them), MCP servers, and provider requests. Commands can still read anything you can, including credentials, and inherit your environment variables (API keys included) unless you set a [command environment](#command-environment) policy. With `--sandbox-network` they can send it to any host; prefer a [network allowlist](#network-allowlist). The sandbox reduces risk; it does not make untrusted code safe.
+
+### Bubblewrap backend
+
+On Linux, when [Bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`) is installed and allowed to create unprivileged user namespaces, `sandbox_backend: auto` runs each command under `bwrap` with the Landlock helper stacked inside it, so either layer alone still confines the command:
+
+- `bwrap` mounts the whole filesystem read-only (`--ro-bind / /`), binds `--cwd`, the per-run temp dir, `sandbox_writable_paths` and `write` additional directories read-write, and gives the command a private `/proc` and `/dev`; the rest of `/tmp` stays readable but not writable. It runs in new user, PID, IPC and UTS namespaces with `--die-with-parent`, and in a new network namespace (loopback only) unless `--sandbox-network` is set. The working directory and environment pass through unchanged.
+- Inside it, the same Landlock helper as the `landlock` backend applies the write rules, `no_new_privs` and the TCP policy, then execs the command.
+- The startup `sandbox:` line and `tinyagent --check` show the engine, e.g. `sandbox: bwrap + landlock (ABI 6)`.
+
+```yaml
+sandbox: true
+sandbox_backend: auto     # auto (default) | landlock | bwrap
+```
+
+| `sandbox_backend` | bwrap works, Landlock works | bwrap works, no Landlock | bwrap missing or blocked |
+| --- | --- | --- | --- |
+| `auto` | bwrap + landlock | bwrap alone, with a warning (not for the allowlist) | Landlock alone (a warning if bwrap is installed but blocked); fails as before if Landlock is missing too |
+| `landlock` | Landlock alone | fails | Landlock alone |
+| `bwrap` | bwrap + landlock | bwrap alone, with a warning (not for the allowlist) | fails, saying why |
+
+- **Network allowlist under bwrap:** commands get bwrap's network namespace instead of the helper's, and the Landlock helper inside forwards the proxy port there and allows TCP connections only to it, so it needs Landlock ABI 4 (Linux 6.7+). Without it, the allowlist fails rather than running bwrap alone.
+- **Ubuntu 24.04 (and 23.10+):** AppArmor restricts unprivileged user namespaces by default (`kernel.apparmor_restrict_unprivileged_userns = 1`), so `bwrap` fails. tinyagent then explains this; with `auto` it warns and uses Landlock alone, with `bwrap` it exits. To allow bwrap, install its AppArmor profile (tinyagent never changes AppArmor or sysctls itself):
+
+  ```bash
+  sudo apt install apparmor-profiles apparmor-utils
+  sudo install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict
+  sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict
+  ```
+
+- On macOS only `auto` (Seatbelt) applies; `landlock` and `bwrap` are errors there.
 
 ### Network allowlist
 

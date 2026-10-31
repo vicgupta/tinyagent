@@ -14,6 +14,7 @@ import (
 // spellings set the same options.
 //
 //	tinyagent sandbox --network -t "fix it"   == tinyagent --sandbox --sandbox-network -t "fix it"
+//	tinyagent sandbox --backend bwrap -t "x"  == tinyagent --sandbox --sandbox-backend bwrap -t "x"
 //	tinyagent memory list                     == tinyagent --memory-list
 //	tinyagent planner --first -- fix the bug  == tinyagent --plan --plan-first -t "fix the bug"
 //
@@ -51,7 +52,7 @@ var subcommands = []subcommand{
 		name: "sandbox", brief: "run a task with commands confined to --cwd", summary: "run with commands confined to --cwd (same as --sandbox)",
 		base:    []string{"--sandbox"},
 		actions: map[string]subAction{"network": {flag: "sandbox-network", withBase: true, desc: "also allow commands network access (--sandbox-network)"}},
-		options: map[string]string{"network": "sandbox-network", "allow-domain": "sandbox-allow-domain", "allowed-domains": "sandbox-allow-domain"},
+		options: map[string]string{"network": "sandbox-network", "allow-domain": "sandbox-allow-domain", "allowed-domains": "sandbox-allow-domain", "backend": "sandbox-backend"},
 	},
 	{
 		name: "memory", brief: "run with project memory, or list|path|approve|forget|config", summary: "run with project memory, or manage the memory store (same as --memory*)",

@@ -62,7 +62,7 @@ It ends with the received size, the verified SHA-256, the install step and `upda
 
 ### Shell completion (Bash, Zsh and Fish)
 
-`tinyagent --completion bash`, `tinyagent --completion zsh` and `tinyagent --completion fish` print a script that completes flag names (`--sandbox-<Tab>`, `--tool-out<Tab>`, short aliases such as `-t`). After `--env`, `--command-env`, `--reasoning-effort`, `--openai-api` and `--completion` (as `--flag <Tab>` or `--flag=<Tab>`) they also complete that flag's fixed values, so `--env <Tab>` offers `local` and `container`. Other flag values, such as models and profiles, are not completed; those words fall back to filenames.
+`tinyagent --completion bash`, `tinyagent --completion zsh` and `tinyagent --completion fish` print a script that completes flag names (`--sandbox-<Tab>`, `--tool-out<Tab>`, short aliases such as `-t`). After `--env`, `--command-env`, `--reasoning-effort`, `--openai-api`, `--sandbox-backend` and `--completion` (as `--flag <Tab>` or `--flag=<Tab>`) they also complete that flag's fixed values, so `--env <Tab>` offers `local` and `container`. Other flag values, such as models and profiles, are not completed; those words fall back to filenames.
 
 **Bash.** Load it for the current session:
 
@@ -137,7 +137,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 - Help everywhere: `tinyagent` or `tinyagent <subcommand>` alone at a terminal prints help (the top-level one shows how to pass the task, pick the model and the common options); `--help --verbose` lists every flag by section.
 - `tinyagent --update`: checksum-verified self-update with step-by-step progress and a `#` download bar.
 - Undo for file edits, workspace rewind, resume and follow-up runs.
-- Sandboxed commands with a network allowlist, permission rules, hooks, untrusted-content lockdown and file-access rules.
+- Sandboxed commands (Linux: Bubblewrap with Landlock stacked inside, or Landlock alone, via `--sandbox-backend`; macOS: Seatbelt) with a network allowlist, permission rules, hooks, untrusted-content lockdown and file-access rules.
 - WebAssembly plugin modules run through Extism with permission checks, a version store, rollback and prune. Go source modules are built with TinyGo, an external dependency that tinyagent downloads on first use (pinned version, checksum-verified, cached locally, `tinyagent tinygo update` to update); TinyGo is never embedded in tinyagent.
 - AGENTS.md, Agent Skills, plugins, skill workflows, ACP editor integration and a GitHub Action.
 

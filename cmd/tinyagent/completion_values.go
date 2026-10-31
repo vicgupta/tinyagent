@@ -18,6 +18,7 @@ var completionValues = map[string][]string{
 	"env":              {"local", "container"},
 	"openai-api":       model.OpenAIAPIs,
 	"reasoning-effort": model.ReasoningEfforts,
+	"sandbox-backend":  {"auto", "landlock", "bwrap"},
 }
 
 // completionValueFlags returns the flag names in completionValues, sorted, so

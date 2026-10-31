@@ -26,11 +26,12 @@ func TestCompletionValuesMatchAccepted(t *testing.T) {
 		"env":              func(v string) bool { return v != "" && config.ValidEnvironment(v) },
 		"openai-api":       model.ValidOpenAIAPI,
 		"reasoning-effort": model.ValidReasoningEffort,
+		"sandbox-backend":  func(v string) bool { return v != "" && config.ValidSandboxBackend(v) },
 		"completion": func(v string) bool {
 			return v != "" && runCompletionQuiet(v) == 0
 		},
 	}
-	if got, want := completionValueFlags(), []string{"command-env", "completion", "env", "openai-api", "reasoning-effort"}; !reflect.DeepEqual(got, want) {
+	if got, want := completionValueFlags(), []string{"command-env", "completion", "env", "openai-api", "reasoning-effort", "sandbox-backend"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("value flags = %v, want %v", got, want)
 	}
 	var universe []string

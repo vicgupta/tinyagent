@@ -21,13 +21,20 @@ const SandboxHelperArg = "__sandbox_exec"
 // network is denied unless Network is set, or limited to AllowedDomains
 // through a filtering proxy. Reads stay unrestricted.
 type Sandbox struct {
-	Backend  string   // e.g. "landlock (ABI 6)" or "seatbelt"
+	Backend  string   // e.g. "bwrap + landlock (ABI 6)", "landlock (ABI 6)" or "seatbelt"
 	Writable []string // directories commands may write, including Tmp
 	Network  bool
 	// AllowedDomains, when set, are the only hosts commands may reach, over
 	// HTTP and HTTPS through a proxy tinyagent runs outside the sandbox.
 	AllowedDomains []string
 	Tmp            string // per-run temporary directory, exported as TMPDIR
+
+	// Warnings are notes about the backend choice, such as auto falling
+	// back to Landlock alone because AppArmor blocks bwrap.
+	Warnings []string
+
+	bwrap    string // bwrap path when commands run under Bubblewrap (Linux)
+	landlock bool   // commands run through the Landlock helper (Linux)
 
 	proxy    *sandboxnet.Proxy
 	proxyDir string   // private directory holding the proxy's Unix socket (Linux)
@@ -66,6 +73,22 @@ func proxyVars(url string) []string {
 // (sandbox_allowed_domains entries) starts the filtering proxy; it can't be
 // combined with network.
 func NewSandbox(root string, extra []string, network bool, allowed []string) (*Sandbox, error) {
+	return NewSandboxBackend("auto", root, extra, network, allowed)
+}
+
+// SandboxBackends are the sandbox_backend values. auto prefers Bubblewrap
+// with Landlock stacked inside and falls back to Landlock alone; landlock
+// and bwrap insist on one. On macOS only auto (Seatbelt) applies.
+var SandboxBackends = []string{"auto", "landlock", "bwrap"}
+
+// ValidSandboxBackend reports whether b is a sandbox_backend value ("" is
+// auto).
+func ValidSandboxBackend(b string) bool {
+	return b == "" || b == "auto" || b == "landlock" || b == "bwrap"
+}
+
+// NewSandboxBackend is NewSandbox with the sandbox_backend setting.
+func NewSandboxBackend(backend, root string, extra []string, network bool, allowed []string) (*Sandbox, error) {
 	rules, err := sandboxnet.ParseRules(allowed)
 	if err != nil {
 		return nil, fmt.Errorf("sandbox: sandbox_allowed_domains %v", err)
@@ -74,7 +97,7 @@ func NewSandbox(root string, extra []string, network bool, allowed []string) (*S
 	if network && proxied {
 		return nil, errors.New("sandbox: sandbox_allowed_domains can't be combined with sandbox_network")
 	}
-	backend, err := probeSandbox(network, proxied)
+	engine, err := selectSandbox(backend, network, proxied)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +105,7 @@ func NewSandbox(root string, extra []string, network bool, allowed []string) (*S
 	if err != nil {
 		return nil, fmt.Errorf("sandbox: creating temp directory: %w", err)
 	}
-	s := &Sandbox{Backend: backend, Network: network, AllowedDomains: allowed}
+	s := &Sandbox{Backend: engine.desc, Warnings: engine.warnings, bwrap: engine.bwrap, landlock: engine.landlock, Network: network, AllowedDomains: allowed}
 	for _, d := range append([]string{root, tmp}, extra...) {
 		r, err := filepath.EvalSymlinks(d)
 		if err != nil {

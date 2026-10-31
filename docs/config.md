@@ -26,6 +26,7 @@ system_prompt: |          # {{cwd}} and {{os}} are substituted
   You are a coding agent...
 read_only: true            # expose only read_file, list_files, and grep
 sandbox: false             # OS-confine bash/start_process; see Sandboxing commands
+# sandbox_backend: auto    # Linux engine: auto (bwrap + Landlock, else Landlock), landlock or bwrap
 # sandbox_allowed_domains: [proxy.golang.org]  # with sandbox, the only hosts commands may reach
 environment: local         # or container; see Execution environments
 command_env:               # omitted by default (inherit everything); see Command environment
