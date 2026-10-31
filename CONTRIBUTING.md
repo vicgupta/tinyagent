@@ -35,12 +35,28 @@ cmd/tinyagent/        CLI entrypoint, flag parsing, main loop glue
 internal/agent/       the run loop, compaction, tool dispatch; build an Agent with agent.New (it validates the options)
 internal/config/      YAML config + built-in defaults
 internal/model/       providers, price table, context windows
+internal/cwdpath/     the shared path guard: resolves paths inside --cwd, refusing absolute paths, .. and symlink escapes
+internal/playbooks/   playbook discovery and parsing (TinyAgent and pstack formats), routing, the embedded sample pack
+internal/harness/     skill-workflow routing and keyword matching (match.go, shared with playbooks)
 internal/resume/      what a --resume must match in its checkpoint (flag table, root, tool fingerprint, tool names)
 internal/tools/       the six tools (read_file, write_file, edit_file, list_files, grep, bash)
 internal/trajectory/  the -o JSON output
+internal/skills/      Agent Skills discovery (./skills only) and the skill tool
 internal/update/      --update self-update
 embed/prompts/        system prompt templates
 ```
+
+`cmd/tinyagent/playbooks.go` holds the playbook flags, the `tinyagent playbooks`
+subcommand and the hooks into a run; samples live in
+`internal/playbooks/samples/` with identical copies in `docs/playbooks/`.
+
+**Paths for playbooks and skills.** Playbooks and skills are read only from
+inside the current working directory: `./playbooks` and `./skills` in `--cwd`,
+never the home folder, parent folders or plugin directories outside `--cwd`.
+Resolve every such path through `internal/cwdpath`, which cleans it, follows
+symlinks and refuses an absolute path, `..` or a symlink that escapes `--cwd`
+(with a warning). Don't read these files with a plain `os.ReadFile` on a
+joined path.
 
 ## Development workflow
 

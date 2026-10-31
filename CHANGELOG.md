@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Breaking Changes
+
+- **BREAKING:** `--skills` reads Agent Skills only from `./skills` in `--cwd`. `.agents/skills`, `~/.agents/skills`, the parent-folder walk-up and plugin skills outside `--cwd` are no longer read (hard cut). When `./.agents/skills` exists in `--cwd`, a one-line hint says to move those skills to `./skills`; a plugin whose skills are outside `--cwd` gets a warning. Resume uses the same rule.
+
+### Features
+
+- Playbook router (`--playbooks`, config `playbooks: true`; off by default): a task is matched to a Markdown playbook in `./playbooks` by keywords, then one auxiliary-model call on a tie or miss (`--no-playbook-fallback` or config `playbook_fallback: false` turns it off). `--playbook <name>` picks one directly. The choice shows on stderr, as a `playbook.selected` JSON event, in the `-o` trajectory and in `--check`. A chosen playbook's steps join the system prompt as a checklist, its named skills load from `./skills`, and its done-check commands join verify-on-stop; `workflow:` hands off to a skill workflow (needs `--trust-config`). When a playbook and a `--workflow` both match, it asks `[p/w]` at a terminal and exits 2 otherwise. Chat gets `/playbook <name>`, and `--resume` refuses when the playbook changed. See [docs/playbooks.md](docs/playbooks.md).
+- `tinyagent playbooks list | validate <path> | install samples [--force]` (flags `--playbooks-list`, `--playbooks-validate`, `--playbooks-install`, `--playbooks-force`): no model call; bare `tinyagent playbooks` prints help.
+- Sample playbook pack: `bug-fix`, `feature`, `refactor`, `open-pr`, `babysit-pr` and `investigate`, embedded and installed on request, with copies in `docs/playbooks/`.
+- pstack support: a pstack checkout under `./playbooks` is read as-is (never copied), with skills from the checkout's `skills/`; unreadable files are skipped with a warning, and a playbook you wrote wins a name clash.
+- Cwd-only discovery: playbooks and skills are read only from inside the current working directory; absolute paths, `..` and symlinks that escape `--cwd` are refused with a warning.
+
 ## [v0.12.0] - 2026-10-31
 
 ### Breaking Changes
