@@ -168,7 +168,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.planFirst, "plan-first", false, "require a plan (update_plan) before the first workspace-changing tool call; implies --plan (default off; config plan.require_first)")
 	registerVerifyFlags(fs, &o.verify)
 	fs.BoolVar(&o.plan, "plan", false, "enable the update_plan tool: a task plan saved in the checkpoint and pinned in every request (default off; config plan.enabled)")
-	fs.BoolVar(&o.toolOutputFiles, "tool-output-files", false, "save the full text of over-limit tool results under .tinyagent/tool-output so the model can page it with read_file and grep (default off; config tool_output_files.enabled)")
+	fs.BoolVar(&o.toolOutputFiles, "tool-output-files", false, "save the full text of over-limit tool results under .tinyagent/tool-output so the model can page it with read_file and grep; MCP tool and resource results are capped at 256 KiB before saving (default off; config tool_output_files.enabled)")
 	fs.BoolVar(&o.applyPatch, "apply-patch", false, "add the apply_patch tool: multi-file, multi-hunk edits in the *** Begin Patch format, checked before any write (default off; config apply_patch)")
 	fs.BoolVar(&o.webFetch, "web-fetch", false, "add the web_fetch tool: read an allowlisted http(s) URL as text, in tinyagent's own process, separate from command network access (default off; config web_fetch.enabled)")
 	fs.Var(&o.webFetchAllowDomains, "web-fetch-allow-domain", "with --web-fetch, let web_fetch read this host (name, *.domain or IP, optional :port); repeatable, replaces web_fetch.allowed_domains")
