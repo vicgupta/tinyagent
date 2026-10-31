@@ -19,6 +19,29 @@ func DelegateSpec() model.ToolSpec {
 		}, "task")
 }
 
+// WithTaskType adds the optional task_type argument, one of types, to a
+// delegate or worker spec; with no types it returns s unchanged.
+func WithTaskType(s model.ToolSpec, types []string) model.ToolSpec {
+	if len(types) == 0 {
+		return s
+	}
+	params := map[string]any{}
+	for k, v := range s.Function.Parameters {
+		params[k] = v
+	}
+	props := map[string]any{}
+	if p, ok := params["properties"].(map[string]any); ok {
+		for k, v := range p {
+			props[k] = v
+		}
+	}
+	enum := append([]string(nil), types...)
+	props["task_type"] = map[string]any{"type": "string", "enum": enum, "description": "optional kind of task; picks the model that runs it"}
+	params["properties"] = props
+	s.Function.Parameters = params
+	return s
+}
+
 // LimitResult bounds out like any other tool result: truncated to
 // MaxOutputChars, or saved to a per-run file when OutputFiles is set.
 func (e *Executor) LimitResult(call model.ToolCall, out string, isErr bool) Result {

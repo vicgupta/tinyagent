@@ -29,7 +29,11 @@ func newSubagents(cfg config.AgentConfig, parentModel, reasoningEffort string) (
 		}
 		return nil, err
 	}
-	return &agent.Subagents{Model: m, ModelName: r.Model, MaxSteps: cfg.Subagents.MaxSteps}, nil
+	routes, err := childRoutes(cfg, parentModel, routing.TaskDelegate, reasoningEffort)
+	if err != nil {
+		return nil, err
+	}
+	return &agent.Subagents{Model: m, ModelName: r.Model, Routes: routes, MaxSteps: cfg.Subagents.MaxSteps}, nil
 }
 
 // newChildModel builds a child agent's model for spec. A child on another

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/vicgupta/tinyagent/internal/routing"
 	"io"
 	"strings"
 
@@ -24,6 +25,8 @@ type Subagents struct {
 	MaxSteps int
 	// Streamed reports whether Model writes text to the terminal itself.
 	Streamed bool
+	// Routes pick another model per task (models.delegated.routes).
+	Routes []ChildRoute
 }
 
 func (s *Subagents) maxSteps() int {
@@ -58,8 +61,9 @@ func (a *Agent) takeDelegateStop() string {
 // its history is kept in t.Subagents and its usage is added to t.
 func (a *Agent) delegate(ctx context.Context, t *trajectory.Trajectory, call model.ToolCall) tools.Result {
 	var args struct {
-		Task  string `json:"task"`
-		Label string `json:"label"`
+		Task     string `json:"task"`
+		Label    string `json:"label"`
+		TaskType string `json:"task_type"`
 	}
 	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
 		return tools.Result{Text: "error: invalid delegate arguments: " + err.Error(), IsError: true}
@@ -95,9 +99,13 @@ func (a *Agent) delegate(ctx context.Context, t *trajectory.Trajectory, call mod
 	if a.Verbose {
 		out = a.Out
 	}
+	childModel, childName, reason := pickChild(a.Subagents.Routes, a.Subagents.Model, a.Subagents.ModelName, args.Task, args.TaskType)
+	if reason != "" {
+		a.routeEvent(routing.RoleDelegated, routing.TaskDelegate, childName, reason, "")
+	}
 	child := &Agent{
-		Model:     a.Subagents.Model,
-		ModelName: a.Subagents.ModelName,
+		Model:     childModel,
+		ModelName: childName,
 		Tools: &tools.Executor{
 			Root:           a.Tools.Root,
 			ReadOnly:       true,

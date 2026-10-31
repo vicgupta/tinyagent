@@ -136,3 +136,31 @@ func TestRunStartedDelegatedFallbacks(t *testing.T) {
 		t.Errorf("delegate route = %v", d)
 	}
 }
+
+func TestCheckListsTaskRoutes(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test")
+	cfg := writeCfg(t, "models:\n  delegated:\n    routes:\n      - match: [schema, migration]\n        type: db\n        model: openai/gpt-5-mini\n")
+	code, out, _ := runCLI(t, "--check", "-c", cfg, "--cwd", t.TempDir(), "--subagents")
+	if code != 0 || !strings.Contains(out, "1: match schema, migration or type db -> openai/gpt-5-mini") {
+		t.Errorf("exit %d, --check:\n%s", code, out)
+	}
+	code, out, _ = runCLI(t, "--check", "-c", cfg, "--cwd", t.TempDir(), "--subagents", "--no-routing", "--delegate-model", "openai/gpt-5-nano")
+	if code != 0 || strings.Contains(out, "gpt-5-mini") || strings.Contains(out, "gpt-5-nano") {
+		t.Errorf("--no-routing: exit %d, --check:\n%s", code, out)
+	}
+}
+
+func TestNoRoutingKeepsAliases(t *testing.T) {
+	cfg := writeCfg(t, "subagents:\n  enabled: true\n  model: openai/gpt-5-mini\nmodels:\n  auxiliary:\n    model: openai/gpt-5-nano\n")
+	m := runStartedModels(t, "-c", cfg, "--no-routing", "--route", "review=openai/gpt-5-nano")
+	if _, ok := m["review"]; ok {
+		t.Errorf("--no-routing kept review: %v", m)
+	}
+	if _, ok := m["compaction"]; ok {
+		t.Errorf("--no-routing kept compaction: %v", m)
+	}
+	d, _ := m["delegate"].(map[string]any)
+	if d["model"] != "openai/gpt-5-mini" {
+		t.Errorf("delegate = %v", d)
+	}
+}

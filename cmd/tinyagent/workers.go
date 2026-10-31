@@ -47,7 +47,11 @@ func newWorkers(cfg config.AgentConfig, parentModel, reasoningEffort string) (*a
 		}
 		return nil, err
 	}
-	return &agent.Workers{Model: m, ModelName: r.Model, MaxSteps: w.MaxSteps, Tools: w.Tools, MaxConcurrent: w.MaxConcurrent}, nil
+	routes, err := childRoutes(cfg, parentModel, routing.TaskWorker, reasoningEffort)
+	if err != nil {
+		return nil, err
+	}
+	return &agent.Workers{Model: m, ModelName: r.Model, Routes: routes, MaxSteps: w.MaxSteps, Tools: w.Tools, MaxConcurrent: w.MaxConcurrent}, nil
 }
 
 // checkWorkers rejects --workers when its preconditions can't hold, before

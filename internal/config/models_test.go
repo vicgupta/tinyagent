@@ -69,3 +69,30 @@ func TestRoleFallbackModelsConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestDelegatedRoutesConfig(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	write(t, p, "models:\n  delegated:\n    routes:\n      - match: [schema]\n        model: a/b\n      - type: docs\n        model: c/d\n      - type: docs\n        match: [x]\n        model: e/f\n")
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := cfg.Models.Delegated.Routes; len(r) != 3 || r[0].Match[0] != "schema" || r[1].Type != "docs" {
+		t.Errorf("routes = %+v", r)
+	}
+	if got := cfg.Models.TaskTypes(); len(got) != 1 || got[0] != "docs" {
+		t.Errorf("TaskTypes = %v", got)
+	}
+	for _, c := range []struct{ body, want string }{
+		{"models:\n  delegated:\n    routes:\n      - match: [x]\n", "routes[0]: model is required"},
+		{"models:\n  delegated:\n    routes:\n      - model: a/b\n", "set match keywords, a type, or both"},
+		{"models:\n  delegated:\n    routes:\n      - match: [\"\"]\n        model: a/b\n", "empty keyword"},
+		{"models:\n  delegated:\n    routes:\n      - type: \"two words\"\n        model: a/b\n", "single word"},
+		{"models:\n  auxiliary:\n    routes:\n      - type: x\n        model: a/b\n", "only supported under models.delegated"},
+	} {
+		write(t, p, c.body)
+		if _, err := Load(p); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: err = %v, want %q", c.body, err, c.want)
+		}
+	}
+}
