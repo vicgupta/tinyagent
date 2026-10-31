@@ -24,7 +24,7 @@ var workflowConflicts = []string{"resume", "rewind", "to", "dry-run", "transcrip
 
 // workflowOwn are flags --workflow consumes; every other flag set on the
 // command line is forwarded to each stage's run.
-var workflowOwn = []string{"workflow", "workflow-name", "t", "task", "o", "output", "cwd", "json"}
+var workflowOwn = []string{"workflow", "workflow-name", "workflow-observe", "t", "task", "o", "output", "cwd", "json"}
 
 // runWorkflowAgent runs one stage; tests replace it with a fake.
 var runWorkflowAgent = func() (harness.RunAgent, error) {
@@ -115,6 +115,9 @@ func runWorkflow(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.
 			fmt.Fprintln(stderr, "error: write --output:", err)
 			return 1
 		}
+	}
+	if o.workflowObserve {
+		observeWorkflow(res, cwd, jl, stderr)
 	}
 	if jl != nil && jl.Err() != nil && !errors.Is(jl.Err(), io.ErrClosedPipe) {
 		fmt.Fprintln(stderr, "error: write events:", jl.Err())

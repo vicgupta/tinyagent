@@ -105,6 +105,24 @@ Either way nothing more runs: no further attempts and no later stages, so a bloc
 
 **Re-queueing.** tinyagent keeps no list of blocked tasks; one run handles one task. To re-queue, fix the task or its acceptance criteria and run the same `tinyagent --workflow ... -t ...` command again. An outside loop that feeds tasks to tinyagent can park a task on exit 5; the suggested convention for an issue-label loop is to swap the issue's `amf:ready` label for `amf:blocked`, and have a person re-add `amf:ready` once the issue is fixed. [`tinyagent triage`](triage.md) flags issues with that label as `blocked` and ranks them last. tinyagent itself makes no GitHub calls.
 
+#### Learning from failures
+
+`--workflow-observe` (off by default) adds an observer step after a `--workflow` run that ends `Failed` or `Blocked`. It turns the failure into one concrete artifact, a proposed [project rule](ratchet.md#observer-proposals), instead of leaving the lesson to be written by hand:
+
+```sh
+tinyagent --workflow docs/workflows/feature.yaml -t "add CSV export" --workflow-observe
+# observer: proposed project rule p-3f2a9c1b7d4e for stage generate-code in .tinyagent/observer/proposals.jsonl; apply it with:
+#   tinyagent ratchet add 'Before finishing the generate-code stage, run `go test ./...` yourself ...' --incident '...' --cwd '...'
+```
+
+- **Signature.** Each failure is identified by a SHA-256 of the failed stage, its check argv and the first failing line of the check output (the reason when there is none), with paths, hashes, numbers and durations normalized away, so the same failure in another temp dir or with other timings gets the same signature.
+- **Proposal.** The first time a signature is seen, one JSON line goes to `.tinyagent/observer/proposals.jsonl` in `--cwd`: `id`, `signature`, `created`, `workflow`, `status`, `stage`, `reason`, `check_method`, `check_argv`, `check_output_excerpt` (secret values from the environment and token-shaped strings masked, capped at 2,000 bytes), `rule`, `incident` and `suggested_command`. The command is printed on stderr too. The observer never applies the rule: a person reviews it and runs the command.
+- **Recurrence.** `.tinyagent/observer/ledger.jsonl` keeps `signature`, `stage`, `first_seen`, `last_seen`, `count` and `artifact_id` (one appended line per observation; the latest line per signature wins). When a signature is seen again, the observer writes no new proposal, bumps the count and warns `gate did not hold`, naming the project rule applied from the proposal if there is one (found by the `observer <signature prefix>` tag in its incident).
+- **Safety.** Passed and interrupted runs write nothing, and without the flag nothing is written. A corrupt ledger line is skipped with a warning, and a write error is a warning; neither changes the exit code. Each file write is one `O_APPEND` line, so concurrent runs in the same `--cwd` don't interleave.
+- **Events.** With `--json`, `observer.proposed` or `observer.recurrence` follows `workflow.finished`; see [JSON output](json-output.md#machine-readable-output).
+
+The observer makes no model call. Model-written skill edits, generated verify checks and eval-suite generation are not part of it.
+
 #### Spec gate
 
 A thin plan wastes a whole generate-code stage before anyone notices it can't be built or checked. `gate: spec` on a stage (normally `plan-tasks`) checks that stage's output after it passes its success check and before the next stage starts. The plan passes the gate when it has at least one task and every task has:

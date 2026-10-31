@@ -23,7 +23,7 @@ import (
 // chatConflicts are the flags --interactive can't be combined with: other
 // modes, and output formats meant for scripts.
 var chatConflicts = []string{
-	"acp", "json", "workflow", "workflow-name", "eval", "review", "review-base", "review-commit",
+	"acp", "json", "workflow", "workflow-name", "workflow-observe", "eval", "review", "review-base", "review-commit",
 	"rewind", "to", "dry-run", "transcript", "output-schema", "check", "init-config", "completion",
 	"update", "version", "V", "worktree", "image",
 }
