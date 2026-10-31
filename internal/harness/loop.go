@@ -71,6 +71,10 @@ type Check struct {
 	ExitCode int      `json:"exit_code,omitempty"`
 	TimedOut bool     `json:"timed_out,omitempty"`
 	Output   string   `json:"output,omitempty"`
+	// Skipped is set when a behavior stage found no behavioral criteria.
+	Skipped bool `json:"skipped,omitempty"`
+	// Evidence is each behavior case's observed output.
+	Evidence []BehaviorResult `json:"evidence,omitempty"`
 }
 
 // Attempt is one run of one stage.
@@ -149,7 +153,9 @@ func Run(ctx context.Context, o Options) *Result {
 			emit("stage.finished", attemptFields(last))
 			if o.Progress != nil {
 				verdict := "passed"
-				if !last.Check.Passed {
+				if last.Check.Skipped {
+					verdict = "skipped: " + oneLine(last.Check.Reason)
+				} else if !last.Check.Passed {
 					verdict = "failed: " + oneLine(last.Check.Reason)
 				}
 				fmt.Fprintf(o.Progress, "workflow %s: stage %d/%d %s attempt %d %s\n", p.Name, i+1, len(p.Stages), st.Skill.Name, a, verdict)
@@ -231,6 +237,13 @@ func runAttempt(ctx context.Context, o Options, st Stage, idx, n int, input stri
 		args = append(args, "--time-limit", strconv.Itoa(st.TimeLimit))
 	}
 	args = append(args, "--cwd", o.Cwd, "-o", at.Trajectory, "-t", input)
+	if st.Behavior != "" {
+		// A behavior file left by an earlier attempt or run must not decide this one.
+		if err := os.Remove(behaviorPath(o.Cwd, st.Behavior)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			at.Check = Check{Method: "behavior", Reason: err.Error()}
+			return at
+		}
+	}
 	lf, err := os.OpenFile(at.Log, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		at.Check = Check{Method: "run", Reason: err.Error()}
@@ -256,9 +269,16 @@ func runAttempt(ctx context.Context, o Options, st Stage, idx, n int, input stri
 		at.Check = Check{Method: "run", Reason: "stage run ended " + ts.ExitStatus + ": " + oneLine(ts.Submission)}
 		return at
 	}
-	if len(st.Check) > 0 {
+	switch {
+	case st.Behavior != "":
+		at.Check = runBehavior(ctx, o.Cwd, st.Behavior, st.CheckTimeout)
+		if lf, err := os.OpenFile(at.Log, os.O_APPEND|os.O_WRONLY, 0o600); err == nil {
+			writeEvidence(lf, at.Check)
+			lf.Close()
+		}
+	case len(st.Check) > 0:
 		at.Check = runCheck(ctx, o.Cwd, st.Check, st.CheckTimeout)
-	} else {
+	default:
 		at.Check = modelVerdict(ts.Submission)
 	}
 	return at
@@ -293,7 +313,13 @@ func Prompt(idx, n int, st Stage, task, prev, prevName, cwd, feedback string) st
 		fmt.Fprintf(&b, "### %s\n\n%s\n\n", in, v)
 	}
 	b.WriteString("## Finishing\n\n")
-	if len(st.Check) > 0 {
+	if st.Behavior != "" {
+		fmt.Fprintf(&b, "Write the behavior cases to `%s` (relative to %s), as YAML:\n\n%s\nThe harness then runs each case's `run` argv in %s without a shell and the stage passes only if every case's observed exit code and output meet its `expect`. Expected strings must come from the task's acceptance criteria, not from what the program happens to print. If the task has no behavioral acceptance criteria, write no file (or `cases: []`) and the stage is skipped.", st.Behavior, cwd, behaviorExample, cwd)
+		if st.Skill.SuccessCheck != "" {
+			fmt.Fprintf(&b, " Success check: %s", st.Skill.SuccessCheck)
+		}
+		b.WriteString("\nEnd with your stage output: what the next stage needs to know.\n")
+	} else if len(st.Check) > 0 {
 		fmt.Fprintf(&b, "When you finish, the harness runs `%s` in %s; the stage passes only if it exits 0.", strings.Join(st.Check, " "), cwd)
 		if st.Skill.SuccessCheck != "" {
 			fmt.Fprintf(&b, " Success check: %s", st.Skill.SuccessCheck)
@@ -307,6 +333,8 @@ func Prompt(idx, n int, st Stage, task, prev, prevName, cwd, feedback string) st
 	}
 	return b.String()
 }
+
+const behaviorExample = "```yaml\nversion: 1\ncases:\n  - name: prints-greeting\n    criterion: the CLI prints hello for --name world\n    run: [go, run, ./cmd/app, --name, world]\n    timeout: 60            # seconds, optional\n    expect:\n      exit_code: 0         # default 0\n      stdout_contains: [\"hello world\"]\n      stdout_not_contains: [panic]\n      stdout_matches: [\"^hello\"]\n      stderr_contains: []\n```\n"
 
 var reVerdict = regexp.MustCompile(`(?im)^[ \t>*` + "`" + `]*SUCCESS CHECK:[ \t]*(PASS|FAIL)\b[ \t:*` + "`" + `-]*(.*?)[ \t\r]*$`)
 

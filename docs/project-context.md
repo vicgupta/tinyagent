@@ -66,9 +66,11 @@ workflows:
       - skill: run-tests
         check: [go, test, -count=1, ./...]
         check_timeout: 600
+      - skill: verify-behavior
+        behavior: .tinyagent/behavior.yaml
 ```
 
-Settings in `defaults` or on a stage: `model`, `profile`, `step_limit`, `cost_limit`, `token_limit`, `time_limit`, `retries`, and `check_timeout` (seconds). The defaults are 1 retry (at most 5), 50 steps, a 300 second check timeout, and otherwise your usual config. Flags you pass with `--workflow` (such as `--sandbox` or `-m`) are forwarded to every stage, and stage settings override them. Workflows are sequential and have at most 20 stages. A complete example is in [docs/workflows](workflows).
+Settings in `defaults` or on a stage: `model`, `profile`, `step_limit`, `cost_limit`, `token_limit`, `time_limit`, `retries`, and `check_timeout` (seconds). A stage can also have `check` (a command) or `behavior` (a behavior file; see [Verifying behavior](#verifying-behavior)), but not both. The defaults are 1 retry (at most 5), 50 steps, a 300 second check timeout, and otherwise your usual config. Flags you pass with `--workflow` (such as `--sandbox` or `-m`) are forwarded to every stage, and stage settings override them. Workflows are sequential and have at most 20 stages. A complete example is in [docs/workflows](workflows).
 
 **Skill files (Markdown).** Each stage's skill is a Markdown file with three required parts: a heading, an intent line, and a list of inputs. A one-line success check is required too, unless the workflow gives that stage a `check` command.
 
@@ -89,6 +91,34 @@ Skills live in the workflow's `skills_dir` (default `skills/` next to the workfl
 
 **Success checks.** A stage with `check` (an argv list, run in `--cwd` without a shell) passes when the command exits 0. Otherwise the model is told the skill's success check and must end its answer with `SUCCESS CHECK: PASS` or `SUCCESS CHECK: FAIL - <reason>`. The last such line decides, and a missing line fails. A stage run that ends without submitting (for example on a step, cost or time limit) also fails. A failed stage is retried with the failure reason in its prompt. When its retries run out, the workflow stops, prints the stage and reason, and exits 1 without running later stages. Earlier stages are not re-run.
 
-**Output and exit status.** Progress lines go to stderr, and the last stage's output goes to stdout. `-o run.json` writes a workflow record (`"kind": "workflow"`) with the route, status, failed stage and reason, total cost, and one entry per attempt with its input, output, exit status, check result, and paths to that attempt's trajectory and log under `run.json.stages/`. Without `-o`, the per-stage files are temporary. `--json` prints JSONL events `workflow.started`, `stage.started` (with the input), `stage.finished` (input, output and `check`), and `workflow.finished`. Exit status is 0 when every stage passes, 1 when a stage fails, 2 for an invalid skill or workflow file, a routing error or a conflicting flag (all before any model request), and 130 when interrupted. `--workflow` can't be combined with flags for one interactive or resumed run, such as `--resume`, `--review`, `--worktree`, `--eval` or `--ask-user`.
+#### Verifying behavior
+
+Tests passing doesn't prove the built program does what the task asked. A stage with `behavior: <path>` checks that from the outside: the stage's run translates the task's behavioral acceptance criteria (what a command prints, which exit code it returns) into cases in that file, and the harness then runs each case itself and decides the stage on the observed output alone, not on the model's opinion. The example `implement` workflow ends with a `verify-behavior` stage that does this after `run-tests`.
+
+The path is relative to `--cwd` and must stay inside it; `.tinyagent/` is a good place, since it is usually ignored by Git. The harness deletes any old file at that path before each attempt, so a file left by an earlier run never decides a new one. The file is YAML (JSON also works):
+
+```yaml
+version: 1
+cases:
+  - name: prints-greeting
+    criterion: the CLI prints hello for --name world   # the acceptance criterion it checks
+    run: [go, run, ./cmd/app, --name, world]           # argv, run in --cwd without a shell
+    stdin: ""                                         # optional
+    timeout: 60                                       # seconds, optional
+    expect:
+      exit_code: 0                 # default 0
+      stdout_contains: ["hello world"]
+      stdout_not_contains: [panic]
+      stdout_matches: ["^hello"]   # Go regular expressions
+      stderr_contains: []
+```
+
+Each case needs a non-empty `run` and at least one expectation. A case passes when its exit code matches and every string and pattern holds; the stage passes when every case passes. At most 20 cases; a case's timeout defaults to 60 seconds and is capped by the stage's `check_timeout`. An invalid file fails the stage with the reason, and a failing case's unmet expectations are handed to the retry like any failed check.
+
+When the task has no behavioral criteria, the stage writes no file (or `cases: []`) and is **skipped**: it counts as passed, the progress line says `skipped`, and the check records `skipped: true` with the reason. The model decides whether criteria are behavioral, so a skipped stage is worth a look when you expected cases.
+
+**Evidence.** Each case's observed output (argv, exit code, stdout and stderr, each capped at 4 KiB, and its failures) is recorded in the check's `evidence` list in the `-o` workflow record and the `stage.finished` event, and is appended to that attempt's log under `== verify-behavior evidence ==`.
+
+**Output and exit status.** Progress lines go to stderr, and the last stage's output goes to stdout. `-o run.json` writes a workflow record (`"kind": "workflow"`) with the route, status, failed stage and reason, total cost, and one entry per attempt with its input, output, exit status, check result, and paths to that attempt's trajectory and log under `run.json.stages/`. Without `-o`, the per-stage files are temporary. `--json` prints JSONL events `workflow.started`, `stage.started` (with the input), `stage.finished` (input, output and `check`, which for a [behavior stage](#verifying-behavior) has `method: "behavior"`, `skipped` and `evidence`), and `workflow.finished`. Exit status is 0 when every stage passes, 1 when a stage fails, 2 for an invalid skill or workflow file, a routing error or a conflicting flag (all before any model request), and 130 when interrupted. `--workflow` can't be combined with flags for one interactive or resumed run, such as `--resume`, `--review`, `--worktree`, `--eval` or `--ask-user`.
 
 **Trust:** workflow skills are prompt input, and `check` commands run with your permissions, just like a project's AGENTS.md or Agent Skills. Only run workflow files you trust.
