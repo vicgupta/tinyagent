@@ -142,6 +142,7 @@ Eight subcommands are shortcuts for existing flags. They rewrite the command lin
 | `--transcript <trajectory>` | | Print that trajectory as a redacted Markdown transcript on stdout and exit. Makes no model request and needs no API key; see [View a run as a transcript](runs.md#view-a-run-as-a-transcript) |
 | `-v, --verbose` | off | Print tool calls and their outputs |
 | `--json` | off | Write machine-readable run events as JSONL to stdout; with `--check`, print the setup summary as one JSON object (see [`--check --json`](json-output.md#check---json)) |
+| `--color=<when>` | `auto` | Color and styling for human-readable output: `auto` styles a stream only when it is a terminal and `NO_COLOR` is unset or empty ([no-color.org](https://no-color.org)); `always` styles even when piped and overrides `NO_COLOR`; `never` prints plain text. Any other value exits 2. `--json` and `--acp` output are never styled |
 | `--output-schema` | | End the run with a JSON result validated against this JSON Schema file (printed to stdout) |
 | `--log-db[=path]` | off | Also record run events in a local SQLite database (default `<cwd>/.tinyagent/tinyagent.db`); see [Event log database](json-output.md#event-log-database) |
 | `--otel` | config `otel.enabled`, else off | Export the run as an OpenTelemetry trace over OTLP/HTTP; `--otel=false` turns the config setting off. `OTEL_*` variables alone never enable it. See [OpenTelemetry export](json-output.md#opentelemetry-export) |

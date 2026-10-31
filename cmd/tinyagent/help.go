@@ -97,7 +97,7 @@ var helpGroups = []flagGroup{
 	{"Verify before stop", verifyGroup.flags},
 	{"Attempts (best of N)", attemptsGroup.flags},
 	{"Review", [][3]string{{"", "review", ""}, {"", "review-base", "ref"}, {"", "review-commit", "rev"}}},
-	{"Output and logging", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "otel", ""}, {"", "tool-output-files", ""}, {"", "redact-secrets", ""}, {"", "transcript", "path"}}},
+	{"Output and logging", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "color", "when"}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "otel", ""}, {"", "tool-output-files", ""}, {"", "redact-secrets", ""}, {"", "transcript", "path"}}},
 	{"Sandbox and permissions", [][3]string{{"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-backend", "name"}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "lockdown", ""}, {"", "web-fetch", ""}, {"", "web-fetch-allow-domain", "host"}}},
 	{"Context and tools", [][3]string{{"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "skills", ""}, {"", "no-skills", ""}, {"", "apply-patch", ""}, {"", "lsp", ""}, {"", "snapshots", ""}}},
 	ratchetGroup,
