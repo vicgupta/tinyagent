@@ -28,6 +28,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/outschema"
 	"github.com/vicgupta/tinyagent/internal/permissions"
 	"github.com/vicgupta/tinyagent/internal/plugins"
+	"github.com/vicgupta/tinyagent/internal/resume"
 	"github.com/vicgupta/tinyagent/internal/sandboxnet"
 	"github.com/vicgupta/tinyagent/internal/skills"
 	"github.com/vicgupta/tinyagent/internal/telemetry"
@@ -1014,7 +1015,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return fail(errors.New("resume: an explicit --cwd matching the checkpoint root is required"))
 	}
 
-	src, err := trajectory.Load(o.resume)
+	src, err := resume.Load(o.resume)
 	if err != nil {
 		return fail(fmt.Errorf("resume: %w", err))
 	}
@@ -1145,14 +1146,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if code := checkResumeFlags(fs, *o, src); code != 0 {
 		return code
 	}
-	cfg.ReadOnly = src.ReadOnly
-	cfg.Plan.Enabled = src.PlanEnabled
-	cfg.Images.Enabled = src.ImagesEnabled
-	cfg.ApplyPatch = src.ApplyPatchEnabled
-	cfg.Subagents.Enabled = src.SubagentsEnabled
-	setWorkers(&cfg, src.WorkersEnabled)
-	cfg.AskUser.Enabled = src.AskUserEnabled
-	cfg.WebFetch.Enabled = src.WebFetchEnabled
+	// The checkpoint's recorded settings win; from here on the run is
+	// assembled from cfg exactly like a fresh run.
+	resume.Apply(src, &cfg)
 	webFetch, err := newWebFetcher(fs, *o, &cfg)
 	if err != nil {
 		return configFail(err)
@@ -1160,10 +1156,6 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if err := checkPlugins(&cfg, os.Stderr, o.verbose, false); err != nil {
 		return configFail(err)
 	}
-	cfg.LSP.Enabled = src.LSPEnabled
-	cfg.ScopedAgentsMD = src.ScopedAgentsMDEnabled
-	cfg.Skills = src.SkillsEnabled
-	cfg.Memory.Enabled = src.MemoryEnabled
 	// Snapshots are per invocation: config or --snapshots decides for this
 	// resume, and earlier snapshots stay in the trajectory either way.
 	if flagWasSet(fs, "snapshots") {
@@ -1350,19 +1342,19 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		ProviderBaseURL: providerBaseURL,
 		Tools: &tools.Executor{
 			Root:           root,
-			ReadOnly:       src.ReadOnly,
+			ReadOnly:       cfg.ReadOnly,
 			Env:            env,
 			BashTimeout:    time.Duration(cfg.BashTimeoutSec) * time.Second,
 			MaxOutputChars: cfg.MaxOutputChars,
 			MaxProcesses:   cfg.MaxBackgroundProcesses,
 			Stream:         jsonStream(o.jsonOutput),
-			Plan:           src.PlanEnabled,
-			Images:         src.ImagesEnabled,
-			ApplyPatch:     src.ApplyPatchEnabled,
-			Delegate:       src.SubagentsEnabled,
+			Plan:           cfg.Plan.Enabled,
+			Images:         cfg.Images.Enabled,
+			ApplyPatch:     cfg.ApplyPatch,
+			Delegate:       cfg.Subagents.Enabled,
 			TaskTypes:      taskTypes(cfg, subagents, workers),
 			Workers:        workers != nil,
-			AskUser:        src.AskUserEnabled,
+			AskUser:        cfg.AskUser.Enabled,
 			WebFetch:       webFetch,
 			LSP:            lspTools,
 			OutputFiles:    outputFiles,
@@ -1382,7 +1374,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		Verbose:        o.verbose,
 		Streamed:       !o.noStream,
 		SkipAgentsMD:   src.SkipAgentsMD,
-		ScopedAgentsMD: src.ScopedAgentsMDEnabled,
+		ScopedAgentsMD: cfg.ScopedAgentsMD,
 		NoCompact:      o.noCompact,
 		Resume:         src,
 		ResumeSource:   o.resume,
