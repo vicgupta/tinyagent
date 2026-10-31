@@ -1,10 +1,22 @@
 # Changelog
 
-## Unreleased
+## [v0.15.0] - 2026-10-31
 
 ### Features
 
-- Prettier interactive chat: replies render Markdown for the terminal (headings, bold/italic, inline and fenced code with a language label and light highlighting, nested and task lists, blockquotes, links with their URL (OSC 8 hyperlinks where the terminal supports them), rules and tables), wrapped to the terminal width and rendered block by block as they stream. New `/raw` command and `chat_markdown` config key to show raw Markdown instead. Also: a clearer banner, a `›` prompt, a thinking spinner and a one-line tool activity summary per step, readable errors with a retry hint, formatted `/help` and `/cost`, and an exit summary with the saved path and resume command. Respects `--color` and `NO_COLOR` (plain ASCII structure, no escape codes); enables VT processing on Windows. `--json` output and saved transcripts are unchanged (raw Markdown). New package `internal/termmd`, no new dependencies.
+- Prettier interactive chat: replies render Markdown for the terminal (headings, bold/italic, inline and fenced code with a language label and light highlighting, nested and task lists, blockquotes, links with their URL (OSC 8 hyperlinks where the terminal supports them), rules and tables), wrapped to the terminal width and rendered block by block as they stream. New `/raw` command and `chat_markdown` config key to show raw Markdown instead. Also: a clearer banner, a `›` prompt, a thinking spinner and a one-line tool activity summary per step, readable errors with a retry hint, formatted `/help` and `/cost`, and an exit summary with the saved path and resume command. Respects `--color` and `NO_COLOR` (plain ASCII structure, no escape codes); enables VT processing on Windows. `--json` output and saved transcripts are unchanged (raw Markdown). New package `internal/termmd`, no new dependencies (#346).
+
+### Fixes
+
+- Tool output truncation is rune-safe: multibyte output (CJK, emoji) is no longer cut mid-character, and the elided count is in characters; one shared implementation in `internal/tools/truncate.go` (#344, closes #312).
+
+### Documentation
+
+- README and CONTRIBUTING list all ten base tools and current dependencies, in sync with the code (#345, closes #313).
+
+### Other
+
+- Internal refactor with no behavior change: provider HTTP client, retries and price table move from package globals onto an injected `model.Runtime` (#343, closes #311).
 
 ## [v0.14.0] - 2026-10-31
 
