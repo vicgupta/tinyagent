@@ -23,16 +23,44 @@ tinyagent --help --verbose for every flag, or see docs/subcommands.md.
 // helpBrief is the default --help output: usage, one sentence, every
 // subcommand with a one-line description (built from subcommands, so none
 // can be left out), and pointers to the detailed views.
-var helpBrief = helpHeader + "\n" + helpFooter
+var helpBrief = helpIntro + "\n" + helpEssentials + helpSubcommands() + "\n" + helpFooter
+
+// helpEssentials is the brief help's Examples and Common options: how to
+// pass the task, pick the model and provider, and the most-used flags.
+// TestBriefHelpShowsEssentials checks each flag named here exists.
+var helpEssentials = `Examples:
+  tinyagent -t "fix the failing test in ./pkg"
+  git diff | tinyagent -t - -m anthropic/claude-sonnet-4-5 --read-only
+
+Common options:
+  -t, --task string    the task/prompt; "-" reads it from stdin
+  -m, --model string   provider/model: openai, anthropic, openrouter or ollama
+                       (default $AGENT_MODEL, else config model, else ` + builtinModel + `)
+  -c, --config path    YAML config (default: user config if present)
+      --cwd dir        working directory (default .)
+      --resume path    continue or follow up a run saved with -o <path>
+      --read-only      only read files; no edits or commands
+  -o, --output path    write the trajectory JSON
+      --json           write run events as JSONL to stdout
+      --check          show resolved config, model and key status; no model call
+      --update         update to the latest release, showing each step
+  -V, --version        print the version
+
+`
 
 // helpHeader is helpIntro plus the Subcommands section; --help --verbose
 // prints it before the flag sections and helpFooter after them.
 var helpHeader = buildHelpHeader()
 
 func buildHelpHeader() string {
+	return helpIntro + "\n" + helpSubcommands()
+}
+
+// helpSubcommands is the Subcommands section: every subcommand with its
+// one-line description.
+func helpSubcommands() string {
 	var b strings.Builder
-	b.WriteString(helpIntro)
-	b.WriteString("\nSubcommands:\n")
+	b.WriteString("Subcommands:\n")
 	width := 0
 	for _, s := range subcommands {
 		width = max(width, len(s.name))

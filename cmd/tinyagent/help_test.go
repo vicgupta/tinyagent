@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -21,8 +22,8 @@ func TestDefaultHelpIsBrief(t *testing.T) {
 			t.Fatalf("%v exit = %d", args, code)
 		}
 		lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
-		if len(lines) > 15 {
-			t.Errorf("%v: %d lines, want <= 15:\n%s", args, len(lines), got)
+		if len(lines) > 40 {
+			t.Errorf("%v: %d lines, want <= 40:\n%s", args, len(lines), got)
 		}
 		for _, l := range lines {
 			if len(l) > helpWidth {
@@ -34,6 +35,32 @@ func TestDefaultHelpIsBrief(t *testing.T) {
 		}
 		if tail := strings.Join(lines[len(lines)-2:], " "); !strings.Contains(tail, "--help --verbose") || !strings.Contains(tail, "docs/subcommands.md") {
 			t.Errorf("%v: want pointers to --help --verbose and docs/subcommands.md last:\n%s", args, got)
+		}
+	}
+}
+
+// TestBriefHelpShowsEssentials checks the brief help shows how to pass the
+// task (including stdin), the model/provider and its default, and the
+// common options, and that every flag it names is a real flag.
+func TestBriefHelpShowsEssentials(t *testing.T) {
+	_, got, _ := runWith(t, "--help")
+	for _, want := range []string{
+		"Examples:\n", "Common options:\n", "-t, --task", `"-" reads it from stdin`,
+		"-m, --model", "openai, anthropic, openrouter or ollama", "$AGENT_MODEL", builtinModel,
+		"-c, --config", "--cwd", "--resume", "--read-only", "-o, --output", "--json",
+		"--check", "--update", "-V, --version",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("brief help lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Index(got, "Common options:") > strings.Index(got, "Subcommands:") {
+		t.Errorf("want Common options before Subcommands:\n%s", got)
+	}
+	fs := newFlagSet(&options{})
+	for _, name := range regexp.MustCompile(`(?:^|[\s|(/])--?([a-zA-Z][a-z-]*)`).FindAllStringSubmatch(helpEssentials, -1) {
+		if fs.Lookup(name[1]) == nil {
+			t.Errorf("brief help names unknown flag -%s", name[1])
 		}
 	}
 }

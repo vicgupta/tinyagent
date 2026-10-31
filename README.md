@@ -120,7 +120,7 @@ tinyagent --read-only --cwd ~/src/project -t "Review error handling in pkg/api"
 cat review-task.md | tinyagent --read-only -t - -o review.json
 ```
 
-Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview and `tinyagent --help --verbose` for every flag. Subcommands are shortcuts for common flags: `tinyagent sandbox`, `tinyagent memory list`, `tinyagent ratchet list`, `tinyagent planner --first`, `tinyagent plugins list`, `tinyagent tinygo status` (see [CLI reference](docs/subcommands.md)); each one alone, such as `tinyagent sandbox`, prints its help.
+Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: usage, two examples, the common options (`-t/--task`, including `-t -` for stdin; `-m/--model` with its providers and default; `-c`, `--cwd`, `--resume`, `--read-only`, `-o`, `--json`, `--check`, `--update`, `-V`) and the subcommands, and `tinyagent --help --verbose` for every flag. Subcommands are shortcuts for common flags: `tinyagent sandbox`, `tinyagent memory list`, `tinyagent ratchet list`, `tinyagent planner --first`, `tinyagent plugins list`, `tinyagent tinygo status` (see [CLI reference](docs/subcommands.md)); each one alone, such as `tinyagent sandbox`, prints its help.
 
 ## Features
 
@@ -133,7 +133,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview and
 - A task planner that can require a plan before any change.
 - Run budgets: turn cap, cost limit and token limit (`--token-limit`), with an 80% warning to the model; delegates, workers and `--attempts` share the budget, and a run that hits it can be resumed.
 - Verify before stop (`--verify-on-stop`): a run that changed files isn't accepted until a test or build command passes; otherwise it is marked unverified. Optional computational checks (`--verify-check`, e.g. lint, type check, tests) run in order, cheapest first, before the run may finish; see [Computational checks](docs/verify.md#computational-checks). An optional inferential review (`--verify-review`) runs last, once every check passes, and reports the model's findings; see [Inferential review](docs/verify.md#inferential-review).
-- Help everywhere: `tinyagent` or `tinyagent <subcommand>` alone at a terminal prints help; `--help --verbose` lists every flag by section.
+- Help everywhere: `tinyagent` or `tinyagent <subcommand>` alone at a terminal prints help (the top-level one shows how to pass the task, pick the model and the common options); `--help --verbose` lists every flag by section.
 - `tinyagent --update`: checksum-verified self-update with step-by-step progress and a `#` download bar.
 - Undo for file edits, workspace rewind, resume and follow-up runs.
 - Sandboxed commands with a network allowlist, permission rules, hooks, untrusted-content lockdown and file-access rules.
