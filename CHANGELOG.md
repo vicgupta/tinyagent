@@ -1,5 +1,24 @@
 # Changelog
 
+## [v0.12.0] - 2026-10-31
+
+### Breaking Changes
+
+- Config is now per project (#294): tinyagent reads `-c <file>`, else `./tinyagent.yaml` in `--cwd`, else built-in defaults. The old user config is no longer read (hard cut); a one-line note points to `tinyagent init --migrate`, which copies it to `./tinyagent.yaml` once and never deletes it. An invalid project file is an error, with no fallback.
+- Skill workflows: a stage whose check keeps failing on its merits now ends the run `Blocked` with exit code 5 instead of `Failed`/exit 1 (#289). Scripts that test for exit 1 on a failed stage should also handle 5.
+
+### Features
+
+- Per-project config (#294): `tinyagent init` writes a commented `./tinyagent.yaml` (`--force`, `--migrate`; `--init-config` stays as an alias). Settings that launch programs or loosen security (`mcp_servers`, `hooks`, `command_tools`, `permissions`, ...) are honored from a project file only with `--trust-config`; a `-c` file is always trusted. `--check` and `-v` show the config source: `<path> (from -c)`, `<path> (cwd)` or `none (built-in defaults)`.
+- CLI handoff providers (#287): `-m claude-code/<model>` and `-m codex-exec/<model>` run the Claude Code or Codex CLI you installed and signed in to, and return its final answer. Binary from PATH or `claude_code.path` / `codex_exec.path`; credentials are never read or copied.
+- Spec gate for skill workflows (#288, closes #275): `gate: spec` on a stage re-plans once, then stops a plan whose tasks lack acceptance criteria or a runnable `Verify:` command; new `stage.gate` event.
+- Blocked workflow status (#289, closes #276): unsatisfiable checks end the run `Blocked` (exit 5), with `blocked: true` on `workflow.finished`.
+- `tinyagent skills validate <path>...` / `--skills-validate` (#290, closes #279): check skill files, skills directories and workflow files without a model call, for CI or pre-commit.
+- `verify-behavior` workflow stage (#286, closes #274): the harness runs behavioral cases from a `behavior:` file and passes the stage only on observed exit code and output.
+- Color output (#295, closes #291): `--color auto|always|never` (default `auto`), honoring `NO_COLOR`; piped, redirected and `--json` output stays plain.
+- `--check` summary (#296, closes #292): a setup summary table (config source, model, provider and key set/missing, sandbox, permissions, lockdown, limits), and `--check --json` with a versioned schema for CI and scripts.
+- Setup hints (#297, closes #293): known setup failures (invalid config setting, unavailable sandbox, missing API key, missing `claude`/`codex` CLI) print one `hint:` line with the next action; config errors found after loading name the config file and rule. `--check --json` reports the hint in `error.hint`.
+
 ## [v0.11.1] - 2026-10-31
 
 ### Documentation
