@@ -3,8 +3,9 @@
 > **Status: experimental; v1 implemented.** `tinyagent --eval suite.yaml --eval-out dir` runs the suite sequentially (code in `internal/eval/` and `cmd/tinyagent/eval.go`). What v1 ships and how it differs from the target design below:
 >
 > - **Shipped:** strict `version: 1` suite files (`version`, `models`, `profiles`, `trials`, and per task `id`, `repo`, `base`, `task`/`task_file`, `model`, `profile`, `checks`, `checks_on_limit`, `limits`, `tags`); a detached worktree per trial at `base`, removed afterwards (also on Ctrl-C) unless `--eval-keep`; one child tinyagent run per trial with `-o` written to `<eval-out>/trajectories/<trial_id>.json` and its output to `logs/<trial_id>.log`; `results.jsonl`, `report.json`, `report.md` (pass rate, pass@k and pass^k, cost, tokens, steps, wall time, outcome counts, per-task passes); suite-level `--cost-limit` / `--time-limit`; `--dry-run`; `--eval-min-pass-rate` (exit 1); per-task `limits.token_limit`, forwarded to each trial as `--token-limit`. Other flags on the command line (e.g. `-c`, `--no-stream`, `--ask-user`, `--step-limit`) are forwarded to every trial.
+> - **GitHub Action:** experimental `eval`, `eval-out`, `eval-min-pass-rate`, `cost-limit` and `time-limit` inputs use the verified installer and expose report paths; see §9.
 > - **Differences:** `trials` is required. `--time-limit` takes seconds (as in single runs), not `30m`. Check output kept in `results.jsonl` is capped to the last 4096 bytes. Checks run on the host in the worktree. A trial's `--profile` is passed only for names other than `default` (unless the config defines a profile called `default`).
-> - **Not yet implemented:** `--eval-jobs` (trials are sequential), `--json` eval events, `output_schema` / `expected_json` (rejected as unknown keys), `profile_digest`, the GitHub Action `eval` input.
+> - **Not yet implemented:** `--eval-jobs` (trials are sequential), `--json` eval events, `output_schema` / `expected_json` (rejected as unknown keys), `profile_digest`.
 
 ## Contents
 
@@ -328,22 +329,33 @@ Records contain no message content by default.
 
 ## 9. CI usage and pass-rate gating
 
-The planned rollout includes a GitHub Action input for eval mode (PR 4 in the split below); the existing `action.yml` has no such input today. Until then, the target CI pattern is to run the binary directly with a threshold, which makes the job fail when quality regresses:
+The experimental Action `eval` input runs the suite through the checksum-verified
+installer and gates CI with `eval-min-pass-rate`. Use an Action ref and binary
+release containing eval support (`v0.10.3` supports the CLI); `version: latest`
+selects the latest binary when running the Action from `main`. Pin both for
+reproducible CI after this Action change is released.
 
 ```yaml
-# Target design — the action has no eval input yet; call the binary directly
 on: pull_request
 permissions:
   contents: read
 jobs:
   eval:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }           # base commits must be reachable
-      - run: |
-          tinyagent --eval evals/suite.yaml --eval-out evals/out \
-            --cost-limit 5 --eval-min-pass-rate 0.8
+      - uses: vicgupta/tinyagent@main
+        id: eval
+        with:
+          version: latest
+          eval: evals/suite.yaml
+          eval-out: evals/out
+          eval-min-pass-rate: '0.8'
+          cost-limit: '5'
+          time-limit: '600'
+          job-summary: 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       - uses: actions/upload-artifact@v4
@@ -351,7 +363,32 @@ jobs:
         with: { name: eval-results, path: evals/out }
 ```
 
-Guidance: use `fetch-depth: 0` so every `base` exists; always set a `--cost-limit`; upload `evals/out` as an artifact; don't run eval suites on untrusted fork PRs with secrets (see the README's "Untrusted input" section).
+Use `fetch-depth: 0` so every `base` exists; always set `cost-limit` (omitting it
+allows unlimited spend). Do not give secrets to untrusted fork PRs or run their
+suites with `pull_request_target`. Review suite changes before running them:
+checks execute commands on the runner.
+
+`eval` cannot be combined with `task`, `task-file`, `review-base`,
+`review-commit`, `attempts`, `model` or `profile`; define the model/profile matrix
+in the suite. `config` and trial flags in `args` are forwarded by the CLI.
+`working-directory` selects the directory where the eval command runs, so
+relative suite/output paths resolve there. `cost-limit` and `time-limit` are
+suite budgets; both inputs are also available to ordinary task/review runs.
+
+`eval-out` defaults to a fresh directory under `RUNNER_TEMP`. The `eval-out`
+output gives its absolute path; `eval-report` gives `report.json` when present.
+The `eval-results` output provides compact JSON with per-configuration
+pass rates and costs (`configs`) and failing configurations (`below_threshold`). The directory also contains `results.jsonl`, `report.md`, logs
+and trajectories. Artifact upload is the workflow's responsibility. Ordinary
+result-event outputs (`status`, `submission`, `steps`, `cost-usd`, etc.) are empty
+for eval runs. `exit-code` preserves the CLI exit status, including threshold
+failure (1); `fail-on-error: false` tolerates failures except usage errors (2).
+
+`job-summary: true` appends `report.md`, including on threshold failure, up to
+1 MiB. Report text can contain suite-authored content; treat it as untrusted.
+Use `args: --dry-run` to validate and print the trial matrix without model
+requests; dry runs do not create report files. A missing or invalid suite fails
+with exit 2 before any model request.
 
 ## 10. Cost control, security and privacy
 

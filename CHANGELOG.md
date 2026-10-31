@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Features
+
+- Experimental GitHub Action eval mode (#260): `eval`, `eval-out`, `eval-min-pass-rate`, `cost-limit` and `time-limit` inputs run suites with the existing verified installer, expose report paths, gate CI via `fail-on-error`, and optionally append `report.md` to the job summary. Artifact uploads remain workflow-managed.
+
 ## [v0.10.3] - 2026-10-30
 
 ### Features
