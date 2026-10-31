@@ -35,7 +35,7 @@ cmd/tinyagent/        CLI entrypoint, flag parsing, main loop glue
 internal/agent/       the run loop, compaction, tool dispatch; build an Agent with agent.New (it validates the options)
 internal/config/      YAML config + built-in defaults
 internal/model/       providers, price table, context windows
-internal/resume/      what a --resume must match in its checkpoint (the flag-versus-checkpoint table)
+internal/resume/      what a --resume must match in its checkpoint (flag table, root, tool fingerprint, tool names)
 internal/tools/       the six tools (read_file, write_file, edit_file, list_files, grep, bash)
 internal/trajectory/  the -o JSON output
 internal/update/      --update self-update

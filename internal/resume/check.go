@@ -7,6 +7,7 @@ package resume
 import (
 	"fmt"
 
+	"github.com/vicgupta/tinyagent/internal/skills"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
 )
 
@@ -39,6 +40,15 @@ type Flags struct {
 // Request is the CLI-derived input a resume is checked against.
 type Request struct {
 	Flags Flags
+	// Root is the canonical execution root of this invocation. When it is
+	// set, Check also verifies the checkpoint's root, its tool fingerprint,
+	// and its tool-name list (including the remember and skills tools).
+	// Leave it empty to check only the flags.
+	Root string
+	// Skills, when non-nil, is the skills set the checkpoint's tools are
+	// rebuilt with; nil means Check discovers skills under Root itself.
+	// It is ignored when the checkpoint had skills off.
+	Skills *skills.Set
 }
 
 // Remedy is the advice every recorded-setting conflict carries.
@@ -55,9 +65,15 @@ type Incompatibility struct {
 	// Usage marks conflicts the CLI reports as usage errors (exit 2);
 	// the others exit 1, as they did before this table existed.
 	Usage bool
+	// Message, when set, is the whole error text. The root, fingerprint,
+	// and tool-set checks use it to keep their established wording.
+	Message string
 }
 
 func (e *Incompatibility) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
 	return fmt.Sprintf("%s conflicts with the checkpoint's %s; %s", e.Flag, e.Recorded, e.Remedy)
 }
 
@@ -108,7 +124,8 @@ var settings = []setting{
 		func(f *Flags) Opt { return f.NoAgentsMD }, func(t *trajectory.Trajectory) bool { return t.SkipAgentsMD }},
 }
 
-// Check compares every explicitly set flag in req with the checkpoint and
+// Check compares every explicitly set flag in req with the checkpoint and,
+// when req.Root is set, the root, tool fingerprint, and tool names. It
 // returns the first conflict as an *Incompatibility, or nil.
 func Check(t *trajectory.Trajectory, req Request) error {
 	for _, s := range settings {
@@ -126,6 +143,9 @@ func Check(t *trajectory.Trajectory, req Request) error {
 			Remedy:   Remedy,
 			Usage:    s.usage,
 		}
+	}
+	if req.Root != "" {
+		return checkWorkspace(t, req)
 	}
 	return nil
 }
