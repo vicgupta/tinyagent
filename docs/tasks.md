@@ -21,8 +21,8 @@ git diff | tinyagent --read-only -t - # review what is piped in, changing nothin
 | Type | Started by | Role / task | Details |
 |---|---|---|---|
 | Main run | `-t` | `main` / `main` | [CLI reference](subcommands.md) |
-| Subagent | the `delegate` tool (`--subagents`) | `delegated` / `delegate` | Read-only child with a fresh context; [Subagents](long-runs.md#subagents) |
-| Worker | the `worker` tool (`--workers`) | `delegated` / `worker` | Edits in its own Git worktree; [Workers](long-runs.md#workers) |
+| Subagent | the `delegate` tool (`--subagents`) | `delegated` / `delegate` | Read-only researcher: investigates and reports back with a fresh context, cannot change files; [Subagents](long-runs.md#subagents) |
+| Worker | the `worker` tool (`--workers`) | `delegated` / `worker` | Read-write builder: makes changes in its own Git worktree, and the parent applies them with `apply_worker`; [Workers](long-runs.md#workers) |
 | Review | `--review`, `--review-base`, `--review-commit` | `main` / `main` | Read-only review of a diff; [Reviewing changes](runs.md#reviewing-changes) |
 | Inferential review | `--verify-review` | `auxiliary` / `review` | Model review before stop; [Inferential review](verify.md#inferential-review) |
 | Compaction | long runs, automatically | `auxiliary` / `compaction` | Context summary; [Long runs](long-runs.md#long-runs) |
