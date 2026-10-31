@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/vicgupta/tinyagent/internal/routing"
 	"io"
 	"path/filepath"
 	"strings"
@@ -30,6 +31,8 @@ type Workers struct {
 	// Tools are the configured worker tools; nil means
 	// config.DefaultWorkerTools. A worker gets only those the parent has.
 	Tools []string
+	// Routes pick another model per task (models.delegated.routes).
+	Routes []ChildRoute
 	// RunName prefixes worker branch and worktree names
 	// (tinyagent/<RunName>-w<n>); "" generates one per process.
 	RunName string
@@ -185,8 +188,9 @@ type workerJob struct {
 // child agent; ok is false with the error result when it did not start.
 func (a *Agent) prepareWorker(t *trajectory.Trajectory, call model.ToolCall, id string) (*workerJob, tools.Result, bool) {
 	var args struct {
-		Task  string `json:"task"`
-		Label string `json:"label"`
+		Task     string `json:"task"`
+		Label    string `json:"label"`
+		TaskType string `json:"task_type"`
 	}
 	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
 		return nil, toolErr("invalid worker arguments: %s", err), false
@@ -257,9 +261,13 @@ func (a *Agent) prepareWorker(t *trajectory.Trajectory, call model.ToolCall, id 
 	if a.Verbose {
 		out = a.Out
 	}
+	childModel, childName, reason := pickChild(a.Workers.Routes, a.Workers.Model, a.Workers.ModelName, args.Task, args.TaskType)
+	if reason != "" {
+		a.routeEvent(routing.RoleDelegated, routing.TaskWorker, childName, reason, "")
+	}
 	child := &Agent{
-		Model:     a.Workers.Model,
-		ModelName: a.Workers.ModelName,
+		Model:     childModel,
+		ModelName: childName,
 		Tools: &tools.Executor{
 			Root:               root,
 			Env:                env,

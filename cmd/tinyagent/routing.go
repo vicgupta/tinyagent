@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/vicgupta/tinyagent/internal/agent"
 	"os"
 	"sort"
 	"strings"
@@ -116,4 +117,34 @@ func routedModel(cfg config.AgentConfig, r routing.Route, main, reasoningEffort 
 		effort = reasoningEffort
 	}
 	return withFallbacks(m, r.Model, r.Fallbacks, nil, cfg, effort, os.Stderr)
+}
+
+// childRoutes builds models.delegated.routes for one delegated task;
+// nil without routes.
+func childRoutes(cfg config.AgentConfig, main, task, reasoningEffort string) ([]agent.ChildRoute, error) {
+	base := routing.Delegated(cfg, main, task)
+	var out []agent.ChildRoute
+	for i, mr := range cfg.Models.Delegated.Routes {
+		r := routing.Route{Role: routing.RoleDelegated, Task: task, Model: strings.TrimSpace(mr.Model), Source: fmt.Sprintf("models.delegated.routes[%d]", i)}
+		for _, f := range base.Fallbacks {
+			if f != r.Model {
+				r.Fallbacks = append(r.Fallbacks, f)
+			}
+		}
+		m, err := routedModel(cfg, r, main, reasoningEffort)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, agent.ChildRoute{Match: mr.Match, Type: mr.Type, Model: m, ModelName: r.Model})
+	}
+	return out, nil
+}
+
+// taskTypes is the task_type enum for the delegate and worker tools: the
+// route types, when either tool is on.
+func taskTypes(cfg config.AgentConfig, s *agent.Subagents, w *agent.Workers) []string {
+	if s == nil && w == nil {
+		return nil
+	}
+	return cfg.Models.TaskTypes()
 }

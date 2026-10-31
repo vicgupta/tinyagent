@@ -177,6 +177,23 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 		}
 		add(r.Task, line)
 	}
+	if cfg.Subagents.Enabled || workersEnabled(cfg) {
+		if _, err := childRoutes(cfg, spec, routing.TaskDelegate, cfg.ReasoningEffort); err != nil {
+			return nil, err
+		}
+		for i, mr := range cfg.Models.Delegated.Routes {
+			var when []string
+			if len(mr.Match) > 0 {
+				when = append(when, "match "+strings.Join(mr.Match, ", "))
+			}
+			if mr.Type != "" {
+				when = append(when, "type "+mr.Type)
+			}
+			add("route", fmt.Sprintf("%d: %s -> %s", i+1, strings.Join(when, " or "), mr.Model))
+		}
+	} else if cfg.Models.Flags.NoRouting {
+		add("route", "off (--no-routing)")
+	}
 	cwdSource := "default"
 	if flagWasSet(fs, "cwd") {
 		cwdSource = "from --cwd"

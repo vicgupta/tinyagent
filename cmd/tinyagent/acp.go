@@ -489,6 +489,7 @@ func (s *acpSession) Prompt(ctx context.Context, p acp.Prompt, u *acp.Updates) (
 			Images:             cfg.Images.Enabled,
 			ApplyPatch:         cfg.ApplyPatch,
 			Delegate:           s.subagents != nil,
+			TaskTypes:          taskTypes(s.cfg, s.subagents, s.workers),
 			Workers:            s.workers != nil,
 			WebFetch:           s.webFetch,
 			LSP:                newLSP(cfg, s.root), // a turn's end stops them

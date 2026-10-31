@@ -68,6 +68,7 @@ type options struct {
 	fallbackModels                                   specList
 	auxModel                                         string
 	delegateModel                                    string
+	noRouting                                        bool
 	routes                                           routeList
 	noFallback                                       bool
 	openaiAPI                                        string
@@ -174,6 +175,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.Var(&o.fallbackModels, "fallback-model", "provider/model to switch to when requests still fail with 429/5xx/network errors after retries (repeatable, tried in order; replaces fallback_models)")
 	fs.StringVar(&o.auxModel, "aux-model", "", "provider/model for auxiliary helper calls (context compaction, verify review); replaces models.auxiliary.model")
 	fs.StringVar(&o.delegateModel, "delegate-model", "", "provider/model for delegated children (delegate subagents, workers); replaces models.delegated.model")
+	fs.BoolVar(&o.noRouting, "no-routing", false, "ignore the models: section, --aux-model, --delegate-model and --route: every task uses the main model (subagents.model and subagents.workers.model still apply)")
 	fs.Var(&o.routes, "route", "route one task to its own model, task=provider/model (repeatable; tasks: compaction, review, delegate, worker); beats models.<role>.tasks")
 	fs.BoolVar(&o.noFallback, "no-fallback", false, "don't fall back to other models (clears fallback_models)")
 	fs.StringVar(&o.openaiAPI, "openai-api", "", "openai provider transport: auto, responses, or chat")
@@ -762,6 +764,7 @@ func run() int {
 			Images:             cfg.Images.Enabled,
 			ApplyPatch:         cfg.ApplyPatch,
 			Delegate:           subagents != nil,
+			TaskTypes:          taskTypes(cfg, subagents, workers),
 			Workers:            workers != nil,
 			AskUser:            cfg.AskUser.Enabled,
 			WebFetch:           webFetch,
@@ -1328,6 +1331,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 			Images:         src.ImagesEnabled,
 			ApplyPatch:     src.ApplyPatchEnabled,
 			Delegate:       src.SubagentsEnabled,
+			TaskTypes:      taskTypes(cfg, subagents, workers),
 			Workers:        workers != nil,
 			AskUser:        src.AskUserEnabled,
 			WebFetch:       webFetch,
@@ -2080,6 +2084,9 @@ func applyFlagOverrides(fs *flag.FlagSet, cfg *config.AgentConfig, stepLimit int
 			}
 		}
 	})
+	if f := fs.Lookup("no-routing"); f != nil && f.Value.String() == "true" {
+		cfg.Models = config.Models{Flags: config.RouteFlags{NoRouting: true, NoFallback: cfg.Models.Flags.NoFallback}}
+	}
 }
 
 // resolveModel picks the model: an explicit -m/--model, else $AGENT_MODEL,

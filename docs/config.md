@@ -285,5 +285,24 @@ The `models:` section picks models per role. Every key is optional and nothing c
 
 Each role may set `fallback_models`, its own [fallback chain](providers.md#model-fallback) (at most 3, no duplicates) used when the role's model keeps failing with `429`, `5xx` or network errors; it is checked like the main chain before any request and never inherits the top-level `fallback_models`. `--no-fallback` clears every role's chain too.
 
+### Task-based routes
+
+`models.delegated.routes` sends individual delegated tasks to other models. Each route has a `model` and at least one of `match` (keywords; the route matches when the task brief contains any of them, case-insensitive) and `type` (a single word). When a route sets a `type`, the `delegate` and `worker` tools get an optional `task_type` argument listing the configured types, and a route also matches when the model passes its type. Routes are checked in order and the first match wins; a task that matches none uses the delegated model resolved above. A routed child keeps the role's `fallback_models` chain.
+
+```yaml
+models:
+  delegated:
+    model: openai/gpt-5-mini
+    routes:
+      - match: [migration, schema]
+        model: anthropic/claude-sonnet-4
+      - type: docs
+        model: openai/gpt-5-nano
+```
+
+With routes configured, every delegated task emits a `model.route` event (`role`, `task`, `model`, `reason`: `type <name>`, `match "<keyword>"` or `default`), and an auxiliary helper that falls back to the main model emits one with `reason: fallback` and `fallback_from`. Without routes the tool schemas and events are unchanged. `--check` prints one `route:` line per route. Routes are only accepted under `models.delegated`.
+
+`--no-routing` turns all of this off for one run: the `models:` section and the `--aux-model`, `--delegate-model` and `--route` flags are ignored and every task uses the main model; `subagents.model` and `subagents.workers.model` still apply.
+
 `subagents.model` and `subagents.workers.model` remain supported as aliases of the task keys; setting an alias and its task key to different models is a config error. Unknown task names, empty values and specs containing whitespace are rejected. `--check` prints a `compaction:` and `review:` line when those tasks are routed away from the main model, and a `delegate:` and `worker:` line when those tools are on (each with the model, role, the key or flag it came from and any fallback chain); `run.started` lists the resolved routes as `models` (keyed by task: `role`, `model`, `source`).
 

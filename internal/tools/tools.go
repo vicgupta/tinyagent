@@ -71,6 +71,9 @@ type Executor struct {
 	// Delegate offers the opt-in delegate tool (also in read-only mode).
 	// The agent loop runs its calls; the executor never does.
 	Delegate bool
+	// TaskTypes, when set, adds an optional task_type argument to the
+	// delegate and worker tools (the models.delegated.routes types).
+	TaskTypes []string
 	// WebFetch, when set, offers the opt-in web_fetch tool (also in
 	// read-only mode). nil leaves it off.
 	WebFetch *WebFetcher
@@ -410,10 +413,10 @@ func (e *Executor) catalog() []model.ToolSpec {
 		out = append(out, ApplyPatchSpec())
 	}
 	if e.Delegate {
-		out = append(out, DelegateSpec())
+		out = append(out, WithTaskType(DelegateSpec(), e.TaskTypes))
 	}
 	if e.Workers && !e.ReadOnly {
-		out = append(out, WorkerSpec(), ApplyWorkerSpec())
+		out = append(out, WithTaskType(WorkerSpec(), e.TaskTypes), ApplyWorkerSpec())
 	}
 	if e.WebFetch != nil {
 		out = append(out, WebFetchSpec())

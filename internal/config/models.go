@@ -28,6 +28,7 @@ type RouteFlags struct {
 	DelegateModel string            // --delegate-model
 	Routes        map[string]string // --route task=spec
 	NoFallback    bool              // --no-fallback also clears every role's fallback_models
+	NoRouting     bool              // --no-routing: ignore models: and the routing flags
 }
 
 // RoleModels is one role's models: a default for the role and optional
@@ -41,6 +42,18 @@ type RoleModels struct {
 	// when its model keeps failing; empty means none. It never inherits
 	// the main model's fallback_models.
 	FallbackModels []string `yaml:"fallback_models,omitempty"`
+	// Routes pick a model per child task by its brief or declared type;
+	// only models.delegated accepts them. The first matching route wins.
+	Routes []ModelRoute `yaml:"routes,omitempty"`
+}
+
+// ModelRoute sends matching delegated tasks to Model. A task matches when
+// its brief contains any Match keyword (case-insensitive) or the model
+// passed task_type equal to Type.
+type ModelRoute struct {
+	Match []string `yaml:"match,omitempty"`
+	Type  string   `yaml:"type,omitempty"`
+	Model string   `yaml:"model"`
 }
 
 // AuxiliaryTasks are the task names models.auxiliary.tasks accepts.
@@ -58,6 +71,12 @@ func validateModels(cfg *AgentConfig) error {
 		return err
 	}
 	if err := validateRole("delegated", cfg.Models.Delegated, DelegatedTasks); err != nil {
+		return err
+	}
+	if len(cfg.Models.Auxiliary.Routes) > 0 {
+		return fmt.Errorf("models.auxiliary.routes: routes are only supported under models.delegated")
+	}
+	if err := validateRoutes(cfg.Models.Delegated.Routes); err != nil {
 		return err
 	}
 	d := cfg.Models.Delegated
@@ -110,6 +129,42 @@ func validateRole(role string, r RoleModels, tasks []string) error {
 		}
 	}
 	return nil
+}
+
+// validateRoutes checks models.delegated.routes.
+func validateRoutes(routes []ModelRoute) error {
+	for i, r := range routes {
+		key := fmt.Sprintf("models.delegated.routes[%d]", i)
+		if strings.TrimSpace(r.Model) == "" {
+			return fmt.Errorf("%s: model is required", key)
+		}
+		if err := checkSpec(key+".model", r.Model); err != nil {
+			return err
+		}
+		if len(r.Match) == 0 && strings.TrimSpace(r.Type) == "" {
+			return fmt.Errorf("%s: set match keywords, a type, or both", key)
+		}
+		for _, m := range r.Match {
+			if strings.TrimSpace(m) == "" {
+				return fmt.Errorf("%s.match: empty keyword", key)
+			}
+		}
+		if t := r.Type; t != "" && (strings.TrimSpace(t) != t || strings.ContainsAny(t, " \t\n")) {
+			return fmt.Errorf("%s.type %q must be a single word", key, t)
+		}
+	}
+	return nil
+}
+
+// TaskTypes lists the distinct route types, in order.
+func (m Models) TaskTypes() []string {
+	var out []string
+	for _, r := range m.Delegated.Routes {
+		if r.Type != "" && !contains(out, r.Type) {
+			out = append(out, r.Type)
+		}
+	}
+	return out
 }
 
 // checkSpec rejects a model spec containing whitespace.
