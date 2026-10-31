@@ -338,7 +338,8 @@ func checkRoutes(cfg config.AgentConfig, main string) []routing.Route {
 	return out
 }
 
-// checkSandbox returns the --check sandbox line: the engine a run would
+// checkSandbox returns the --check sandbox line (an unavailable engine is
+// reported in the line rather than failing --check): the engine a run would
 // use (such as "bwrap + landlock (ABI 6)") and any fallback warning, or the
 // error a run would stop on. Empty when --sandbox is off.
 func checkSandbox(fs *flag.FlagSet, o options, cfg config.AgentConfig) (string, error) {
@@ -352,7 +353,9 @@ func checkSandbox(fs *flag.FlagSet, o options, cfg config.AgentConfig) (string, 
 	}
 	desc, warnings, err := probeSandbox(backend, cfg.SandboxNetwork, cfg.SandboxAllowedDomains)
 	if err != nil {
-		return "", err
+		// Reported, not fatal: --check describes the host; the run itself
+		// still fails closed before the first model request.
+		return fmt.Sprintf("unavailable (sandbox_backend %s): %v", backend, err), nil
 	}
 	line := desc + " (sandbox_backend " + backend + ")"
 	for _, w := range warnings {

@@ -77,8 +77,8 @@ func TestCheckSandboxLine(t *testing.T) {
 	}
 
 	fakeSandboxProbe(t, "", nil, errors.New("sandbox: bwrap can't create its sandbox: AppArmor restricts unprivileged user namespaces"))
-	code, _, stderr = runCLI(t, append(args, "-c", cfg)...)
-	if code != 2 || !strings.Contains(stderr, "AppArmor") {
-		t.Errorf("bwrap blocked: exit %d, stderr %q", code, stderr)
+	code, stdout, stderr = runCLI(t, append(args, "-c", cfg)...)
+	if got := reportLine(t, stdout, "sandbox"); code != 0 || !strings.HasPrefix(got, "unavailable (sandbox_backend bwrap): ") || !strings.Contains(got, "AppArmor") {
+		t.Errorf("bwrap blocked: exit %d, sandbox line %q, stderr %q", code, got, stderr)
 	}
 }
