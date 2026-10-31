@@ -32,7 +32,7 @@ it that way unless there is a very good reason to add one.
 
 ```
 cmd/tinyagent/        CLI entrypoint, flag parsing, main loop glue
-internal/agent/       the run loop, compaction, tool dispatch
+internal/agent/       the run loop, compaction, tool dispatch; build an Agent with agent.New (it validates the options)
 internal/config/      YAML config + built-in defaults
 internal/model/       providers, price table, context windows
 internal/tools/       the six tools (read_file, write_file, edit_file, list_files, grep, bash)

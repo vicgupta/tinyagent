@@ -236,9 +236,13 @@ func (s *acpSession) Prompt(ctx context.Context, p acp.Prompt, u *acp.Updates) (
 		}
 	}
 	o := s.o
-	a := s.turnAgent(cfg, images)
+	var r turnResume
 	if prev != nil {
-		a.Resume, a.ResumeSource, a.FollowUp, a.Continue = prev, "acp session "+s.id, p.Text, true
+		r = turnResume{prev: prev, source: "acp session " + s.id, followUp: p.Text, cont: true}
+	}
+	a, err := s.turnAgent(cfg, images, r)
+	if err != nil {
+		return "", err
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

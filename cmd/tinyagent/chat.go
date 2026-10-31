@@ -312,14 +312,22 @@ func (c *chat) turn(msg string, asFollowUp bool) {
 	c.turns++
 	prev := s.traj
 	cfg := s.turnConfig(prev)
-	a := s.turnAgent(cfg, nil)
-	a.Out, a.Err = errw, errw
+	var r turnResume
 	if prev != nil {
-		a.Resume, a.ResumeSource, a.Continue = prev, c.source, c.cont
+		r = turnResume{prev: prev, source: c.source, cont: c.cont}
 		if asFollowUp {
-			a.FollowUp = msg
+			r.followUp = msg
 		}
 	}
+	a, err := s.turnAgent(cfg, nil, r)
+	if err != nil {
+		// Nothing ran: the conversation stays where it was.
+		s.turn--
+		c.turns--
+		fmt.Fprintln(errw, c.st.Red("error: ")+err.Error())
+		return
+	}
+	a.Out, a.Err = errw, errw
 	a.CompactFirst, c.compact = c.compact, false
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

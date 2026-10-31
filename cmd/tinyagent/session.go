@@ -56,6 +56,7 @@ type session struct {
 	lockdown                     *lockdown.State
 	extSpecs                     []model.ToolSpec // MCP plus plugin wasm tools
 	extCall                      func(ctx context.Context, name, raw string) (string, bool, bool)
+	cmdTools                     []*tools.CommandTool
 	remember                     *memory.Writer
 	traj                         *trajectory.Trajectory
 	turn                         int
@@ -212,6 +213,9 @@ func (s *session) setup(ctx context.Context, m sessionMode) (err error) {
 	if cfg.ReadOnly {
 		fmt.Fprintln(os.Stderr, "read-only mode: only read_file, list_files, and grep are available")
 	}
+	if s.cmdTools, err = commandTools(os.Stderr, cfg, root); err != nil {
+		return inConfig(cfgPath, err)
+	}
 	mcpDefs, err := m.mcpServers(cfg)
 	if err != nil {
 		return err
@@ -225,6 +229,9 @@ func (s *session) setup(ctx context.Context, m sessionMode) (err error) {
 		return err
 	}
 	if s.extSpecs, s.extCall, err = externalTools(s.mcp, startWasmTools(ctx, cfg, root, s.fileAccess, s.lockdown, os.Stderr)); err != nil {
+		return err
+	}
+	if err := checkCommandToolNames(s.cmdTools, s.extSpecs); err != nil {
 		return err
 	}
 	m.startLockdown()
@@ -275,10 +282,19 @@ func (s *session) turnConfig(prev *trajectory.Trajectory) config.AgentConfig {
 	return cfg
 }
 
-// turnAgent builds the Agent for one turn with cfg and images.
-func (s *session) turnAgent(cfg config.AgentConfig, images []model.Image) *agent.Agent {
+// turnResume is what a turn continues: the previous turn's trajectory (nil
+// for the first turn), its audit source, the follow-up message, and whether
+// prev is this process's own earlier turn (agent.Options.Continue).
+type turnResume struct {
+	prev             *trajectory.Trajectory
+	source, followUp string
+	cont             bool
+}
+
+// turnAgent builds the Agent for one turn with cfg and images, continuing r.
+func (s *session) turnAgent(cfg config.AgentConfig, images []model.Image, r turnResume) (*agent.Agent, error) {
 	o := s.o
-	return &agent.Agent{
+	return agent.New(agent.Options{
 		Model:           s.model,
 		ModelName:       s.modelName,
 		FallbackModels:  s.fallbacks,
@@ -311,6 +327,8 @@ func (s *session) turnAgent(cfg config.AgentConfig, images []model.Image) *agent
 			MaxImageBytes:      cfg.MaxImageBytes,
 			ExternalCallImages: s.mcp.CallImages(cfg.MaxImageBytes),
 			Redactor:           s.redactor,
+			CommandTools:       s.cmdTools,
+			CommandLog:         commandLog(o.verbose),
 		},
 		RedactSecrets:  s.redactInfo,
 		Config:         cfg,
@@ -328,7 +346,11 @@ func (s *session) turnAgent(cfg config.AgentConfig, images []model.Image) *agent
 		Helpers:        s.helpers,
 		TaskImages:     images,
 		Lockdown:       s.lockdown,
-	}
+		Resume:         r.prev,
+		ResumeSource:   r.source,
+		FollowUp:       r.followUp,
+		Continue:       r.cont,
+	})
 }
 
 // streamed forwards the model's streamed text to the running turn.

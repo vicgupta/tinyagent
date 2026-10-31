@@ -44,6 +44,7 @@ Use the full path to the binary. Pass `-m`, `-c`, `--profile` and any policy fla
 - Stop reasons: `Submitted`/`Completed` → `end_turn`, `StepLimitExceeded` → `max_turn_requests`, `OutputTruncated` → `max_tokens`, `session/cancel` → `cancelled`. Any other status (`CostLimitExceeded`, `TokenLimitExceeded`, `TimeLimitExceeded`, `RepeatedFormatError`, `VerificationFailed`, `Error`) ends with a final message naming it and `end_turn`, and the session stays usable. A provider error a headless run would print a setup `hint:` for is returned as a JSON-RPC error instead.
 - `session/cancel` stops the turn the way Ctrl-C does: in-flight requests and commands are cancelled, and background processes and language servers are stopped, as at the end of every turn. Closing stdin cancels running turns, stops MCP servers and exits 0.
 - `--step-limit` and `--cost-limit` apply to each prompt (on top of what the session has already used), and `--time-limit` limits each prompt's wall-clock time.
+- Every prompt gets the run's full tool set, including your config's [command tools](config.md#command-tools) (not offered in read-only sessions).
 - `--log-db` records each prompt as a run, with an `acp.turn` event naming the session id and turn number. No trajectory files are written.
 - stdout carries only ACP messages. Warnings, the per-turn summary and `-v` traces go to stderr, which editors show in their agent logs.
 
