@@ -86,7 +86,8 @@ func TestApplyPatchAllOperations(t *testing.T) { // AC3
 *** Delete File: e.txt
 *** End Patch`
 	e := &Executor{Root: root, ApplyPatch: true}
-	out, isErr := e.RunWithError(context.Background(), patchCall(patch))
+	r := e.RunResult(context.Background(), patchCall(patch))
+	out, isErr := r.Text, r.IsError
 	if isErr {
 		t.Fatal(out)
 	}
@@ -115,7 +116,8 @@ func TestApplyPatchFailedCheckWritesNothing(t *testing.T) { // AC4
 	before := snapshot(t, root)
 	patch := "*** Begin Patch\n*** Update File: a.txt\n-one\n+ONE\n*** Update File: b.txt\n missing line\n-three\n+THREE\n*** Add File: new.txt\n+x\n*** End Patch"
 	e := &Executor{Root: root, ApplyPatch: true}
-	out, isErr := e.RunWithError(context.Background(), patchCall(patch))
+	r := e.RunResult(context.Background(), patchCall(patch))
+	out, isErr := r.Text, r.IsError
 	if !isErr || !strings.Contains(out, "operation 2 (update b.txt)") || !strings.Contains(out, "context not found") ||
 		!strings.Contains(out, "missing line\nthree") || !strings.Contains(out, "Nothing was written") {
 		t.Errorf("out = %q", out)
@@ -279,8 +281,8 @@ func TestApplyPatchOptIn(t *testing.T) { // AC2, AC9
 	if on.FormatError(model.ToolCall{Function: model.FunctionCall{Name: ApplyPatchToolName, Arguments: `{}`}}) == "" {
 		t.Error("missing input is not a format error")
 	}
-	if out, isErr := off.RunWithError(context.Background(), patchCall("*** Begin Patch\n*** Add File: x\n+x\n*** End Patch")); !isErr || !strings.Contains(out, "unknown tool") {
-		t.Errorf("off: %q", out)
+	if r := off.RunResult(context.Background(), patchCall("*** Begin Patch\n*** Add File: x\n+x\n*** End Patch")); !r.IsError || !strings.Contains(r.Text, "unknown tool") {
+		t.Errorf("off: %q", r.Text)
 	}
 	ro := &Executor{Root: t.TempDir(), ApplyPatch: true, ReadOnly: true}
 	if strings.Contains(names(ro), ApplyPatchToolName) || ro.Permits(ApplyPatchToolName) {
@@ -290,8 +292,8 @@ func TestApplyPatchOptIn(t *testing.T) { // AC2, AC9
 	if ro.FormatError(call) != "" {
 		t.Error("read-only apply_patch call is a format error, want the read-only denial")
 	}
-	if out, isErr := ro.RunWithError(context.Background(), call); !isErr || !strings.Contains(out, "read-only mode") {
-		t.Errorf("read-only: %q", out)
+	if r := ro.RunResult(context.Background(), call); !r.IsError || !strings.Contains(r.Text, "read-only mode") {
+		t.Errorf("read-only: %q", r.Text)
 	}
 	if len(snapshot(t, ro.Root)) != 0 {
 		t.Error("read-only call wrote files")

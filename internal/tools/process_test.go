@@ -22,7 +22,7 @@ import (
 func runTool(t *testing.T, e *Executor, name string, args map[string]any) string {
 	t.Helper()
 	b, _ := json.Marshal(args)
-	return e.Run(context.Background(), model.ToolCall{ID: "1", Function: model.FunctionCall{Name: name, Arguments: string(b)}})
+	return e.RunResult(context.Background(), model.ToolCall{ID: "1", Function: model.FunctionCall{Name: name, Arguments: string(b)}}).Text
 }
 
 var procIDRe = regexp.MustCompile(`<process_id>(p\d+)</process_id>`)

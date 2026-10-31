@@ -236,27 +236,6 @@ func spec(name, desc string, p props, required ...string) model.ToolSpec {
 	}
 }
 
-// Run executes one tool call and returns text for the model. Tool failures are
-// reported as text so the model can recover; Run never returns an error.
-func (e *Executor) Run(ctx context.Context, call model.ToolCall) string {
-	out, _ := e.RunWithError(ctx, call)
-	return out
-}
-
-// RunWithError executes a tool call and reports whether execution failed.
-// The returned text is still suitable for passing back to the model.
-func (e *Executor) RunWithError(ctx context.Context, call model.ToolCall) (string, bool) {
-	out, _, isErr := e.RunWithImages(ctx, call)
-	return out, isErr
-}
-
-// RunWithImages is RunWithError plus any images the result carries (only
-// with Images on). The text already holds a placeholder for each image.
-func (e *Executor) RunWithImages(ctx context.Context, call model.ToolCall) (string, []model.Image, bool) {
-	r := e.RunResult(ctx, call)
-	return r.Text, r.Images, r.IsError
-}
-
 // Result is one tool call's outcome for the model.
 type Result struct {
 	Text    string
@@ -283,7 +262,11 @@ type Result struct {
 	Redactions int
 }
 
-// RunResult is RunWithImages plus where an over-limit result was saved.
+// RunResult executes one tool call and returns its outcome for the model:
+// the text, any images (only with Images on), whether it failed, and where an
+// over-limit result was saved. Tool failures are reported in the Result so the
+// model can recover; RunResult never returns an error. It is the Executor's
+// only public run entry point.
 func (e *Executor) RunResult(ctx context.Context, call model.ToolCall) Result {
 	if !e.onlyAllows(call.Function.Name) {
 		return notOffered(call.Function.Name)

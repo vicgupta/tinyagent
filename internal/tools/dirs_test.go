@@ -38,7 +38,8 @@ func dirsExecutor(t *testing.T, root, readDir, writeDir string) *Executor {
 }
 
 func dirTool(e *Executor, name string, args map[string]any) (string, bool) {
-	return e.RunWithError(context.Background(), toolCall("c", name, args))
+	r := e.RunResult(context.Background(), toolCall("c", name, args))
+	return r.Text, r.IsError
 }
 
 func TestResolveExtraDirsValidation(t *testing.T) {
