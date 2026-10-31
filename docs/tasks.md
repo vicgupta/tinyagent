@@ -27,7 +27,7 @@ git diff | tinyagent --read-only -t - # review what is piped in, changing nothin
 | Inferential review | `--verify-review` | `auxiliary` / `review` | Model review before stop; [Inferential review](verify.md#inferential-review) |
 | Compaction | long runs, automatically | `auxiliary` / `compaction` | Context summary; [Long runs](long-runs.md#long-runs) |
 | Attempts | `--attempts N` | `main` / `main` | Up to 4 tries, each in a worktree; [Best-of-N attempts](runs.md#best-of-n-attempts) |
-| Workflow | `--workflow file.yaml` | `main` / `main` | Skill steps; [Skill workflows](project-context.md#skill-workflows) |
+| Workflow | `--workflow file.yaml` | `main` / `main` | A YAML workflow file whose stages run Markdown skills; [Skill workflows](project-context.md#skill-workflows) |
 
 ## Task-based routing
 

@@ -43,22 +43,9 @@ With `--skills` (or `skills: true`), tinyagent discovers [Agent Skills](https://
 
 `--workflow file.yaml` runs a sequence of small skills on the task (`-t`) as one automatic pipeline, for example plan, then generate, then validate, then test. Each stage is a fresh, unattended tinyagent run in `--cwd` that gets the original task and the previous stage's output. As soon as a stage passes its success check the next one starts; there is no pause or approval between stages. Without `--workflow`, tinyagent behaves exactly as before, and `--skills` Agent Skills are unaffected.
 
-**Skill format.** A workflow skill is a Markdown file with three required parts: a heading, an intent line, and a list of inputs. A one-line success check is required too, unless the workflow gives that stage a `check` command.
+A workflow has two layers: **one YAML workflow file** (the pipeline: stages, checks and limits), passed with `--workflow`, and **one Markdown file per skill** (each stage's instructions), kept in the workflow's `skills_dir`. The two formats don't compete; the file you pass to `--workflow` is always YAML.
 
-```markdown
-# Skill: plan-tasks
-> Intent: Break a spec into small, ordered tasks before writing any code.
-
-**Inputs**
-- spec
-- repo_path
-
-**Success check:** every task has acceptance criteria and a verification step, in dependency order.
-```
-
-Skills live in the workflow's `skills_dir` (default `skills/` next to the workflow file) as `<name>.md` or `<name>/SKILL.md`. Names are lowercase letters, digits, `.`, `_` and `-`. A `SKILL.md` with `name`/`description` frontmatter can use the description as its intent. The whole file (frontmatter removed) is the stage's instructions. These input names are filled automatically: `task` and `spec` (the `-t` task), `repo_path` and `cwd` (the absolute `--cwd`), `previous_output` or the previous skill's name (the previous stage's output). Any other input comes from the stage's `inputs:` map or is marked as not provided.
-
-**Workflow format.**
+**Workflow file (YAML).** The workflow file is always YAML. It names the skills directory and lists each workflow's stages in order, with optional checks and limits:
 
 ```yaml
 version: 1
@@ -82,6 +69,21 @@ workflows:
 ```
 
 Settings in `defaults` or on a stage: `model`, `profile`, `step_limit`, `cost_limit`, `token_limit`, `time_limit`, `retries`, and `check_timeout` (seconds). The defaults are 1 retry (at most 5), 50 steps, a 300 second check timeout, and otherwise your usual config. Flags you pass with `--workflow` (such as `--sandbox` or `-m`) are forwarded to every stage, and stage settings override them. Workflows are sequential and have at most 20 stages. A complete example is in [docs/workflows](workflows).
+
+**Skill files (Markdown).** Each stage's skill is a Markdown file with three required parts: a heading, an intent line, and a list of inputs. A one-line success check is required too, unless the workflow gives that stage a `check` command.
+
+```markdown
+# Skill: plan-tasks
+> Intent: Break a spec into small, ordered tasks before writing any code.
+
+**Inputs**
+- spec
+- repo_path
+
+**Success check:** every task has acceptance criteria and a verification step, in dependency order.
+```
+
+Skills live in the workflow's `skills_dir` (default `skills/` next to the workflow file) as `<name>.md` or `<name>/SKILL.md`. Names are lowercase letters, digits, `.`, `_` and `-`. A `SKILL.md` with `name`/`description` frontmatter can use the description as its intent. The whole file (frontmatter removed) is the stage's instructions. These input names are filled automatically: `task` and `spec` (the `-t` task), `repo_path` and `cwd` (the absolute `--cwd`), `previous_output` or the previous skill's name (the previous stage's output). Any other input comes from the stage's `inputs:` map or is marked as not provided.
 
 **Routing.** `--workflow-name name` runs that workflow, or a single skill, directly. Otherwise the router matches the task against each workflow's intent and each skill's intent line. A clear best match runs. A tie or no match falls back to `default`, or exits 2 with an error suggesting `--workflow-name`, before any model call.
 
