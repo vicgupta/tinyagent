@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/vicgupta/tinyagent/internal/config"
+	"github.com/vicgupta/tinyagent/internal/resume"
 	"github.com/vicgupta/tinyagent/internal/skills"
 	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
@@ -48,25 +49,10 @@ func ApplyPatchToolSignature(readOnly, plan, images, applyPatch bool) string {
 	return tools.Selection{ReadOnly: readOnly, Plan: plan, Images: images, ApplyPatch: applyPatch}.Signature()
 }
 
-// checkpointSelection is the tool selection a checkpoint recorded. set is
-// the rediscovered skills (nil when skills were off). Command and external
-// tools are not part of it: t.Tools omits command tools, and checkpoints
-// with external tools are refused before this.
+// checkpointSelection is the tool selection a checkpoint recorded; see
+// resume.Selection.
 func checkpointSelection(t *trajectory.Trajectory, set *skills.Set) tools.Selection {
-	return tools.Selection{
-		ReadOnly:    t.ReadOnly,
-		Plan:        t.PlanEnabled,
-		Images:      t.ImagesEnabled,
-		ApplyPatch:  t.ApplyPatchEnabled,
-		Delegate:    t.SubagentsEnabled,
-		Workers:     t.WorkersEnabled,
-		WebFetch:    t.WebFetchEnabled,
-		LSP:         t.LSPEnabled,
-		AskUser:     t.AskUserEnabled,
-		Remember:    RememberOffered(t),
-		MemoryTools: MemoryToolsOffered(t),
-		Skills:      set,
-	}
+	return resume.Selection(t, set)
 }
 
 // ValidateResume runs before provider setup, using only the explicit execution
@@ -76,25 +62,12 @@ func ValidateResume(t *trajectory.Trajectory, cfg config.AgentConfig, root strin
 	if err := t.Validate(); err != nil {
 		return err
 	}
-	if root != t.Root {
-		return errors.New("--cwd does not match the checkpoint's canonical root")
-	}
 	var set *skills.Set
 	if t.SkillsEnabled {
 		set, _ = skills.Discover(root)
 	}
-	sel := checkpointSelection(t, set)
-	if t.ToolSignature != sel.Signature() {
-		return errors.New("tool compatibility has changed; start a fresh task")
-	}
-	names := sel.Names()
-	if len(names) != len(t.Tools) {
-		return errors.New("tool set has changed; start a fresh task")
-	}
-	for i, name := range names {
-		if t.Tools[i] != name {
-			return errors.New("tool set has changed; start a fresh task")
-		}
+	if err := resume.Check(t, resume.Request{Root: root, Skills: set}); err != nil {
+		return err
 	}
 	system := strings.NewReplacer("{{cwd}}", root, "{{os}}", runtime.GOOS).Replace(cfg.SystemPrompt)
 	if !t.SkipAgentsMD {

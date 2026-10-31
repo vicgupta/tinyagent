@@ -2,6 +2,7 @@ package agent
 
 import (
 	"github.com/vicgupta/tinyagent/internal/memory"
+	"github.com/vicgupta/tinyagent/internal/resume"
 	"github.com/vicgupta/tinyagent/internal/tools"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
 )
@@ -67,30 +68,14 @@ func checkpointMemory(t *trajectory.Trajectory) *ProjectMemory {
 // tool, so the resumed run offers the same tool set. Checkpoints written
 // before the tool existed resume without it.
 func RememberOffered(t *trajectory.Trajectory) bool {
-	if !t.MemoryEnabled || t.ReadOnly {
-		return false
-	}
-	for _, name := range t.Tools {
-		if name == tools.RememberToolName {
-			return true
-		}
-	}
-	return false
+	return resume.RememberOffered(t)
 }
 
 // MemoryToolsOffered reports whether a resumed checkpoint offered the
 // read-only memory_search and memory_list tools (checkpoints from before
 // they existed resume without them).
 func MemoryToolsOffered(t *trajectory.Trajectory) bool {
-	if !RememberOffered(t) {
-		return false
-	}
-	for _, name := range t.Tools {
-		if name == tools.MemorySearchToolName {
-			return true
-		}
-	}
-	return false
+	return resume.MemoryToolsOffered(t)
 }
 
 // ResumeUntrusted reports whether a checkpoint's conversation already holds
