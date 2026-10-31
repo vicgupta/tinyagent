@@ -312,6 +312,16 @@ func providerStatus(spec string, m model.Model) string {
 			return "codex, login found at " + c.AuthFile
 		}
 		return "codex, login found"
+	case model.ClaudeCodeProvider:
+		if c, ok := m.(*model.ClaudeCode); ok {
+			return "claude-code, runs " + c.Path + " (its own sign-in; not checked)"
+		}
+		return "claude-code"
+	case model.CodexExecProvider:
+		if c, ok := m.(*model.CodexExec); ok {
+			return "codex-exec, runs " + c.Path + " (its own sign-in; not checked)"
+		}
+		return "codex-exec"
 	}
 	env := map[string]string{"openai": "OPENAI_API_KEY", "openrouter": "OPENROUTER_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}[provider]
 	if os.Getenv(env) == "" {

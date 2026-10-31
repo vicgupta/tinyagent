@@ -720,7 +720,7 @@ func run() int {
 	}
 	announceProfile(os.Stderr, o.profile, cfgPath, o.verbose)
 	announceProvider(os.Stderr, o.modelName, o.verbose)
-	m, err := model.NewWith(o.modelName, onText, model.Options{OpenAIAPI: openaiAPI})
+	m, err := model.NewWith(o.modelName, onText, model.Options{OpenAIAPI: openaiAPI, Handoff: model.HandoffOptions{Dir: root, ReadOnly: cfg.ReadOnly}})
 	if err != nil {
 		code := fail(err)
 		printHint(os.Stderr, o.modelName, err.Error())
@@ -1270,7 +1270,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	}
 	announceProfile(os.Stderr, o.profile, cfgPath, o.verbose)
 	announceProvider(os.Stderr, modelName, o.verbose)
-	m, err := model.NewWith(modelName, onText, model.Options{OpenAIAPI: openaiAPI})
+	m, err := model.NewWith(modelName, onText, model.Options{OpenAIAPI: openaiAPI, Handoff: model.HandoffOptions{Dir: root, ReadOnly: cfg.ReadOnly}})
 	if err != nil {
 		code := fail(err)
 		printHint(os.Stderr, modelName, err.Error())

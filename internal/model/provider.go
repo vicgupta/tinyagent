@@ -192,6 +192,9 @@ type Options struct {
 	// OpenAIAPI is the openai provider's transport: auto (or ""), responses,
 	// or chat. Other providers ignore it.
 	OpenAIAPI string
+	// Handoff is what the claude-code and codex-exec providers map onto
+	// the CLI they run. Other providers ignore it.
+	Handoff HandoffOptions
 }
 
 // NewWith is New with provider options.
@@ -221,6 +224,10 @@ func NewWith(spec string, onText func(string), opts Options) (Model, error) {
 		return m, nil
 	case "codex":
 		return NewCodex(name, onText)
+	case ClaudeCodeProvider:
+		return NewClaudeCode(name, opts.Handoff)
+	case CodexExecProvider:
+		return NewCodexExec(name, opts.Handoff)
 	default:
 		if d, ok := ConfiguredProvider(spec); ok {
 			return newConfigured(d, spec, name, onText)

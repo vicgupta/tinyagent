@@ -59,6 +59,20 @@ func Hint(spec, errMsg string) string {
 		case strings.Contains(errMsg, "codex login"):
 			return "sign in once with the Codex CLI: run `codex login`, choose ChatGPT, then rerun tinyagent"
 		}
+	case ClaudeCodeProvider:
+		switch {
+		case strings.Contains(errMsg, "not found on PATH") || strings.Contains(errMsg, "is not an executable"):
+			return "install Claude Code (https://code.claude.com/docs/en/setup), run `claude` and /login once, or set claude_code.path in your config"
+		case authFailure(errMsg, claudeAuthMarkers):
+			return "sign in to Claude Code: run `claude`, then /login, then rerun tinyagent"
+		}
+	case CodexExecProvider:
+		switch {
+		case strings.Contains(errMsg, "not found on PATH") || strings.Contains(errMsg, "is not an executable"):
+			return "install the Codex CLI (https://github.com/openai/codex), run `codex login` once, or set codex_exec.path in your config"
+		case authFailure(errMsg, codexAuthMarkers):
+			return "sign in to the Codex CLI: run `codex login`, then rerun tinyagent"
+		}
 	}
 	return ""
 }

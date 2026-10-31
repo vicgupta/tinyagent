@@ -316,7 +316,7 @@ func newACPSession(ctx context.Context, o *options, fs *flag.FlagSet, id, cwd st
 	}
 	announceProfile(os.Stderr, o.profile, cfgPath, o.verbose)
 	announceProvider(os.Stderr, s.modelName, o.verbose)
-	if s.model, err = model.NewWith(s.modelName, onText, model.Options{OpenAIAPI: s.openaiAPI}); err != nil {
+	if s.model, err = model.NewWith(s.modelName, onText, model.Options{OpenAIAPI: s.openaiAPI, Handoff: model.HandoffOptions{Dir: root, ReadOnly: cfg.ReadOnly}}); err != nil {
 		return nil, withHint(s.modelName, err.Error(), err.Error())
 	}
 	if err := model.SetReasoningEffort(s.model, s.modelName, cfg.ReasoningEffort); err != nil {
