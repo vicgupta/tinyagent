@@ -26,6 +26,15 @@ To check your setup before a run, use `tinyagent --check` with the same `-m`, `-
 
 ```
 $ tinyagent --check -m anthropic/claude-sonnet-4
+summary
+  model        anthropic/claude-sonnet-4
+  provider     anthropic
+  api key      ANTHROPIC_API_KEY set
+  sandbox      off
+  permissions  none configured
+  lockdown     off
+  config       none (built-in defaults)
+
 config:    none (built-in defaults)
 model:     anthropic/claude-sonnet-4 (from -m)
 provider:  anthropic, ANTHROPIC_API_KEY is set

@@ -33,15 +33,27 @@ func runCheck(o *options, fs *flag.FlagSet, w io.Writer) int {
 		fmt.Fprintln(os.Stderr, "error: --to and --dry-run apply only to --rewind")
 		return 2
 	}
-	r, err := resolveCheck(o, fs)
+	sum := newCheckSummary()
+	r, err := resolveCheck(o, fs, sum)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
+		sum.Error = &checkError{Message: err.Error()}
 		var hint checkHint
 		if errors.As(err, &hint) {
 			printHint(os.Stderr, hint.spec, hint.msg)
+			sum.Error.Hint = model.Hint(hint.spec, hint.msg)
+		}
+		if o.jsonOutput {
+			sum.writeJSON(w)
 		}
 		return 2
 	}
+	sum.OK = true
+	if o.jsonOutput {
+		sum.writeJSON(w)
+		return 0
+	}
+	sum.writeTable(w)
 	for _, l := range r {
 		fmt.Fprintf(w, "%-10s %s\n", l[0]+":", l[1])
 	}
@@ -60,7 +72,10 @@ func (h checkHint) Error() string { return h.err.Error() }
 
 // resolveCheck returns the --check report lines, or the first error a run
 // would stop on before its first request.
-func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
+//
+// It fills sum as it goes, so a failed check still reports what it
+// resolved before the error.
+func resolveCheck(o *options, fs *flag.FlagSet, sum *checkSummary) ([][2]string, error) {
 	cfgPath := config.Find(o.configPath)
 	cfg, err := config.LoadProfile(cfgPath, o.profile)
 	if err == nil {
@@ -103,6 +118,10 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 	if err := checkOpenAIAPI(cfg.OpenAIAPI); err != nil {
 		return nil, err
 	}
+	sum.Profile = o.profile
+	sum.Model = checkModel{Spec: spec, Source: strings.TrimPrefix(specSource, "from ")}
+	sum.setProvider(spec)
+	sum.Limits = checkLimits{Steps: cfg.StepLimit, CostUSD: cfg.CostLimit, Tokens: cfg.TokenLimit, TimeSec: cfg.WallTimeSec}
 	if err := model.CheckProviderEnv(spec); err != nil {
 		return nil, err
 	}
@@ -144,6 +163,7 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 	default:
 		add("config", "none (built-in defaults)")
 	}
+	sum.setConfigLine(lines[len(lines)-1][1])
 	if o.profile != "" {
 		add("profile", o.profile)
 	}
@@ -199,6 +219,7 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 		cwdSource = "from --cwd"
 	}
 	add("cwd", root+" ("+cwdSource+")")
+	sum.Cwd = root
 	add("limits", strings.Join([]string{
 		"steps " + limitText(fs, "step-limit", cfg.StepLimit > 0, fmt.Sprint(cfg.StepLimit)),
 		"cost " + limitText(fs, "cost-limit", cfg.CostLimit > 0, formatCost(cfg.CostLimit)),
@@ -237,6 +258,7 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 		return nil, err
 	} else if sb != "" {
 		add("sandbox", sb)
+		sum.Sandbox = checkSandboxInfo{Enabled: true, Backend: sandboxBackendName(cfg, fs, *o), Available: !strings.HasPrefix(sb, "unavailable"), Detail: sb}
 	}
 	if mem := checkMemory(fs, o, cfg.Memory, root); mem != "" {
 		add("memory", mem)
@@ -247,6 +269,7 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 	}
 	if lock != "" {
 		add("lockdown", lock)
+		sum.Lockdown = checkLockdownSum{Enabled: !strings.HasPrefix(lock, "off"), Detail: lock}
 	}
 	att, err := checkAttempts(fs, o, cfg)
 	if err != nil {
@@ -256,6 +279,8 @@ func resolveCheck(o *options, fs *flag.FlagSet) ([][2]string, error) {
 		add("attempts", att)
 	}
 	if policy != nil {
+		ps := policy.Summary()
+		sum.Permissions = checkPermissions{Configured: true, Rules: policy.RuleCount(), Default: ps.Default, NonInteractive: ps.NonInteractive}
 		add("permissions", fmt.Sprintf("%d rules, default %s, non-interactive %s", policy.RuleCount(), policy.Summary().Default, policy.Summary().NonInteractive))
 	}
 	return lines, nil
@@ -372,6 +397,16 @@ func checkSandbox(fs *flag.FlagSet, o options, cfg config.AgentConfig) (string, 
 		line += "; warning: " + w
 	}
 	return line, nil
+}
+
+// sandboxBackendName is the sandbox_backend a run would use, "auto" when
+// unset.
+func sandboxBackendName(cfg config.AgentConfig, fs *flag.FlagSet, o options) string {
+	applySandboxFlags(fs, &cfg, o)
+	if cfg.SandboxBackend == "" {
+		return "auto"
+	}
+	return cfg.SandboxBackend
 }
 
 // probeSandbox is tools.ProbeSandbox; tests replace it.

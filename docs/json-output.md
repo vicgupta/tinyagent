@@ -63,6 +63,44 @@ The limit flags must be >= 0, and `--cost-limit` must also be finite. A typo suc
 
 Environment: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (any OpenAI-compatible endpoint), `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `OPENROUTER_API_KEY`, `OLLAMA_HOST`, `CODEX_HOME`.
 
+### `--check --json`
+
+`tinyagent --check --json` prints the setup summary as a single JSON object on stdout, for CI and scripts. Like `--check`, it makes no model request and writes nothing. It exits 0 when a run would start and 2 on a setup error; on an error the object still comes out, with `ok: false` and the fields resolved so far, and stderr keeps the `error:` and `hint:` lines. It never contains a secret: an API key is only reported as `set`, `missing` or `n/a`.
+
+```json
+{
+  "schema_version": 1,
+  "ok": true,
+  "config": {"path": "/home/me/.config/tinyagent/config.yaml", "source": "user config"},
+  "profile": "",
+  "model": {"spec": "anthropic/claude-sonnet-4-5", "source": "-m"},
+  "provider": {"name": "anthropic", "api_key_env": "ANTHROPIC_API_KEY", "api_key": "set"},
+  "fallbacks": [],
+  "sandbox": {"enabled": true, "backend": "auto", "available": true, "detail": "bwrap + landlock (ABI 6) (sandbox_backend auto)"},
+  "permissions": {"configured": true, "rules": 3, "default": "allow", "non_interactive": "deny"},
+  "lockdown": {"enabled": false, "detail": ""},
+  "cwd": "/home/me/project",
+  "limits": {"steps": 0, "cost_usd": 0, "tokens": 0, "time_sec": 0},
+  "error": null
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `schema_version` | `1`; bumped on any incompatible change |
+| `ok` | `true` when a run would start (exit 0) |
+| `config.path`, `config.source` | The config file (`""` for none) and where it came from, the same label as the text `config:` line without its parentheses or `from ` (`-c`, `user config`, `built-in defaults`) |
+| `profile` | `--profile`, or `""` |
+| `model.spec`, `model.source` | The model and where it came from (`-m`, `$AGENT_MODEL`, `config`, `default`, or `attempt 1, from --attempt-model`) |
+| `provider.name`, `provider.api_key_env`, `provider.api_key` | The provider, the key variable it reads (`""` if none) and `set`, `missing` or `n/a` |
+| `fallbacks` | Fallback model specs, in order |
+| `sandbox` | `enabled`, the `backend` (`auto`, `landlock`, `bwrap`), whether the engine is `available` on this host, and the text `detail` |
+| `permissions` | Whether rules are `configured`, the rule count and the `default` and `non_interactive` decisions |
+| `lockdown` | Whether untrusted-content lockdown is `enabled`, and the text `detail` |
+| `cwd` | The resolved working directory |
+| `limits` | `steps`, `cost_usd`, `tokens`, `time_sec`; `0` means unlimited |
+| `error` | `null`, or `{"message", "hint"}` (`hint` is `""` when there is none) |
+
 ### Structured output
 
 `--output-schema schema.json` makes the run end with one JSON object that conforms to a JSON Schema, for scripts and CI:
