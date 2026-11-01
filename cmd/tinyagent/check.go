@@ -229,7 +229,7 @@ func resolveCheck(o *options, fs *flag.FlagSet, sum *checkSummary) ([][2]string,
 	for _, s := range cfg.MCPServers {
 		add("mcp", fmt.Sprintf("%s: %d tools, %d resource patterns", s.Alias, len(s.Tools), len(s.Resources)))
 	}
-	pl, err := checkPluginsLine(cfg, os.Stderr)
+	pl, err := checkPluginsLine(cfg, o.cwd, os.Stderr)
 	if err != nil {
 		return nil, err
 	}

@@ -1,15 +1,15 @@
 package config
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/vicgupta/tinyagent/internal/cwdpath"
 )
 
 // MemoryConfigEnv names an explicit memory.toml file.
@@ -183,36 +183,74 @@ type MemorySource struct {
 	Local bool
 	// Env lists the TINYAGENT_MEMORY_* keys that were applied.
 	Env []string
-	// Warnings are settings that were ignored, one line each.
+	// Warnings are settings and paths that were ignored, one line each.
 	Warnings []string
+	// Hint is a one-line "hint: ..." about a memory.toml left in the old
+	// user config location, or "".
+	Hint string
 }
 
-// FindMemoryConfig returns the memory.toml to read and whether it is
-// repository-local: $TINYAGENT_MEMORY_CONFIG if set (it must exist), else
-// ./memory.toml in cwd, else tinyagent/memory.toml under the user config
-// directory, else "".
-func FindMemoryConfig(cwd string, getenv func(string) string) (string, bool, error) {
+// MemoryLookup is the result of FindMemoryConfig.
+type MemoryLookup struct {
+	// Path is the memory.toml to read, or "" for none.
+	Path string
+	// Local is true for ./memory.toml in cwd (repository-local).
+	Local bool
+	// Warnings are refused paths, one line each.
+	Warnings []string
+	// Hint is a single "hint: ..." line when a memory.toml exists in the
+	// old user config location (which is no longer read), else "".
+	Hint string
+}
+
+// FindMemoryConfig returns the memory.toml to read. Only files inside cwd
+// are used (issue #336): $TINYAGENT_MEMORY_CONFIG if set (relative to cwd,
+// or absolute inside it; it must exist), else ./memory.toml in cwd, else
+// none. A path that leaves cwd (through "..", an absolute path elsewhere or
+// a symlink) is refused with a warning. The old user config location
+// (tinyagent/memory.toml under the user config directory) is never read;
+// when nothing was found and a file exists there, Hint points at the new
+// location.
+func FindMemoryConfig(cwd string, getenv func(string) string) (MemoryLookup, error) {
+	var l MemoryLookup
 	if p := getenv(MemoryConfigEnv); p != "" {
-		if _, err := os.Stat(p); err != nil {
-			return "", false, fmt.Errorf("%s=%s: %w", MemoryConfigEnv, p, err)
-		}
-		return p, false, nil
-	}
-	if cwd != "" {
-		p := filepath.Join(cwd, "memory.toml")
-		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-			return p, true, nil
-		}
-	}
-	if dir, err := os.UserConfigDir(); err == nil {
-		p := filepath.Join(dir, "tinyagent", "memory.toml")
-		if _, err := os.Stat(p); err == nil {
-			return p, false, nil
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			return p, false, nil // let the read report it
+		r, err := cwdpath.Resolve(cwd, p)
+		if err != nil {
+			l.Warnings = append(l.Warnings, fmt.Sprintf("%s=%s ignored: %v", MemoryConfigEnv, p, err))
+		} else if _, err := os.Stat(r); err != nil {
+			return l, fmt.Errorf("%s=%s: %w", MemoryConfigEnv, p, err)
+		} else {
+			l.Path = r
+			return l, nil
 		}
 	}
-	return "", false, nil
+	if r, err := cwdpath.Resolve(cwd, "memory.toml"); err != nil {
+		if _, lerr := os.Lstat(filepath.Join(cwd, "memory.toml")); lerr == nil {
+			l.Warnings = append(l.Warnings, fmt.Sprintf("./memory.toml ignored: %v", err))
+		}
+	} else if fi, err := os.Stat(r); err == nil && !fi.IsDir() {
+		l.Path, l.Local = r, true
+		return l, nil
+	}
+	if old := LegacyMemoryConfig(); old != "" {
+		l.Hint = fmt.Sprintf("hint: %s is no longer read; memory.toml is read only from --cwd (move it to ./memory.toml, or set %s to a file inside --cwd)", old, MemoryConfigEnv)
+	}
+	return l, nil
+}
+
+// LegacyMemoryConfig returns the old per-user memory.toml
+// (tinyagent/memory.toml under the user config directory) when a file
+// exists there, else "". It is only stat'ed, for the hint; never read.
+func LegacyMemoryConfig() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	p := filepath.Join(dir, "tinyagent", "memory.toml")
+	if _, err := os.Stat(p); err != nil {
+		return ""
+	}
+	return p
 }
 
 // ApplyMemoryOverlay layers memory.toml and then TINYAGENT_MEMORY_* over m
@@ -222,10 +260,13 @@ func FindMemoryConfig(cwd string, getenv func(string) string) (string, bool, err
 // validated. getenv is os.Getenv outside tests.
 func ApplyMemoryOverlay(m *Memory, cwd string, getenv func(string) string) (MemorySource, error) {
 	var src MemorySource
-	path, local, err := FindMemoryConfig(cwd, getenv)
+	look, err := FindMemoryConfig(cwd, getenv)
+	src.Warnings = append(src.Warnings, look.Warnings...)
+	src.Hint = look.Hint
 	if err != nil {
 		return src, &InvalidError{err}
 	}
+	path, local := look.Path, look.Local
 	if path != "" {
 		src.File, src.Local = path, local
 		var raw map[string]any
@@ -295,8 +336,8 @@ func memoryKey(name string) *MemoryKey {
 func MemoryHelp() string {
 	var b strings.Builder
 	b.WriteString("# memory.toml: project memory settings for tinyagent.\n")
-	b.WriteString("# Lookup (first found wins): $" + MemoryConfigEnv + ", ./memory.toml in --cwd,\n")
-	b.WriteString("# then tinyagent/memory.toml in the user config directory.\n")
+	b.WriteString("# Lookup (first found wins): $" + MemoryConfigEnv + " (a file inside --cwd), then\n")
+	b.WriteString("# ./memory.toml in --cwd. Nothing outside --cwd is read.\n")
 	b.WriteString("# Precedence: " + MemoryEnvPrefix + "<KEY> env vars > memory.toml > memory: in config.yaml > defaults;\n")
 	b.WriteString("# --memory/--memory=false overrides auto_write. A ./memory.toml in --cwd can't turn\n")
 	b.WriteString("# memory or auto-approval on, raise limits, or point outside --cwd.\n")

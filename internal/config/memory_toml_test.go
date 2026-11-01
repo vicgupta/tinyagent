@@ -58,9 +58,10 @@ func TestMemoryHelpDefaultsMatchLoader(t *testing.T) {
 			}
 		}
 	}
-	p := writeTOML(t, t.TempDir(), body.String())
+	cwd := t.TempDir()
+	p := writeTOML(t, cwd, body.String())
 	m := DefaultMemory()
-	if _, err := ApplyMemoryOverlay(&m, t.TempDir(), envMap(map[string]string{MemoryConfigEnv: p})); err != nil {
+	if _, err := ApplyMemoryOverlay(&m, cwd, envMap(map[string]string{MemoryConfigEnv: p})); err != nil {
 		t.Fatal(err)
 	}
 	d := DefaultMemory()
@@ -73,11 +74,12 @@ func TestMemoryHelpDefaultsMatchLoader(t *testing.T) {
 func TestMemoryPrecedenceEnvOverTOMLOverYAML(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir()) // os.UserConfigDir ignores XDG_CONFIG_HOME on macOS
-	user := writeTOML(t, t.TempDir(), "backend = \"sqlite\"\nmax_entries_per_project = 20\nmax_entry_size = 300\nauto_write = true\nrequire_approval = false\ndefault_tags = [\"Proj\"]\n")
+	cwd := t.TempDir()
+	user := writeTOML(t, cwd, "backend = \"sqlite\"\nmax_entries_per_project = 20\nmax_entry_size = 300\nauto_write = true\nrequire_approval = false\ndefault_tags = [\"Proj\"]\n")
 	m := DefaultMemory()
 	m.MaxEntries = 10 // from the memory: YAML section
 	m.MaxWritesPerRun = 3
-	src, err := ApplyMemoryOverlay(&m, t.TempDir(), envMap(map[string]string{
+	src, err := ApplyMemoryOverlay(&m, cwd, envMap(map[string]string{
 		MemoryConfigEnv:                            user,
 		"TINYAGENT_MEMORY_MAX_ENTRY_SIZE":          "200",
 		"TINYAGENT_MEMORY_DEFAULT_TAGS":            "a, b",
@@ -102,34 +104,103 @@ func TestMemoryPrecedenceEnvOverTOMLOverYAML(t *testing.T) {
 }
 
 func TestMemoryConfigLookupOrder(t *testing.T) {
-	cfgHome := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", cfgHome)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 	cwd := t.TempDir()
-	if p, _, _ := FindMemoryConfig(cwd, envMap(nil)); p != "" {
-		t.Fatalf("found %s with no config", p)
-	}
-	if err := os.MkdirAll(filepath.Join(cfgHome, "tinyagent"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	user := writeTOML(t, filepath.Join(cfgHome, "tinyagent"), "")
-	if dir, err := os.UserConfigDir(); err != nil || filepath.Join(dir, "tinyagent", "memory.toml") != user {
-		t.Skip("user config dir does not follow XDG_CONFIG_HOME here")
-	}
-	if p, local, _ := FindMemoryConfig(cwd, envMap(nil)); p != user || local {
-		t.Errorf("user: %s %v", p, local)
+	if l, _ := FindMemoryConfig(cwd, envMap(nil)); l.Path != "" || l.Hint != "" {
+		t.Fatalf("found %+v with no config", l)
 	}
 	repo := writeTOML(t, cwd, "")
-	if p, local, _ := FindMemoryConfig(cwd, envMap(nil)); p != repo || !local {
-		t.Errorf("repo: %s %v", p, local)
+	if l, _ := FindMemoryConfig(cwd, envMap(nil)); !sameFile(l.Path, repo) || !l.Local {
+		t.Errorf("repo: %+v", l)
 	}
-	explicit := writeTOML(t, t.TempDir(), "")
-	if p, local, _ := FindMemoryConfig(cwd, envMap(map[string]string{MemoryConfigEnv: explicit})); p != explicit || local {
-		t.Errorf("env: %s %v", p, local)
+	if err := os.MkdirAll(filepath.Join(cwd, "cfg"), 0o700); err != nil {
+		t.Fatal(err)
 	}
-	if _, _, err := FindMemoryConfig(cwd, envMap(map[string]string{MemoryConfigEnv: filepath.Join(cwd, "nope.toml")})); err == nil {
+	explicit := writeTOML(t, filepath.Join(cwd, "cfg"), "")
+	for _, p := range []string{explicit, "cfg/memory.toml"} {
+		if l, _ := FindMemoryConfig(cwd, envMap(map[string]string{MemoryConfigEnv: p})); !sameFile(l.Path, explicit) || l.Local {
+			t.Errorf("env %s: %+v", p, l)
+		}
+	}
+	if _, err := FindMemoryConfig(cwd, envMap(map[string]string{MemoryConfigEnv: filepath.Join(cwd, "nope.toml")})); err == nil {
 		t.Error("missing TINYAGENT_MEMORY_CONFIG accepted")
 	}
+}
+
+// TestMemoryConfigOnlyFromCwd covers issue #336: memory.toml in the old
+// user config location (with HOME, XDG_* and the user config dir pointed at
+// a temp dir that holds it) is never used, only hinted at once, and paths
+// that leave cwd are refused with a warning.
+func TestMemoryConfigOnlyFromCwd(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "tinyagent"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := writeTOML(t, filepath.Join(dir, "tinyagent"), "auto_write = true\nmax_entry_size = 300\n")
+	for _, d := range []string{"XDG_STATE_HOME", "XDG_CACHE_HOME"} {
+		if err := os.MkdirAll(filepath.Join(os.Getenv(d), "tinyagent"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		writeTOML(t, filepath.Join(os.Getenv(d), "tinyagent"), "auto_write = true\n")
+	}
+
+	cwd := t.TempDir()
+	m := DefaultMemory()
+	src, err := ApplyMemoryOverlay(&m, cwd, envMap(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if src.File != "" || m.Enabled || m.MaxEntrySize != DefaultMemory().MaxEntrySize {
+		t.Errorf("old user memory.toml was used: %+v, %+v", src, m)
+	}
+	if !strings.HasPrefix(src.Hint, "hint: ") || !strings.Contains(src.Hint, old) || strings.Contains(src.Hint, "\n") {
+		t.Errorf("hint %q, want one line naming %s", src.Hint, old)
+	}
+
+	// A memory.toml in cwd wins and the hint is not printed.
+	writeTOML(t, cwd, "")
+	if src, err := ApplyMemoryOverlay(&m, cwd, envMap(nil)); err != nil || src.Hint != "" || !src.Local {
+		t.Errorf("with ./memory.toml: %+v, %v", src, err)
+	}
+
+	// TINYAGENT_MEMORY_CONFIG outside cwd is refused with a warning, not read.
+	outside := writeTOML(t, t.TempDir(), "auto_write = true\n")
+	for _, p := range []string{outside, "../memory.toml", old} {
+		m := DefaultMemory()
+		src, err := ApplyMemoryOverlay(&m, cwd, envMap(map[string]string{MemoryConfigEnv: p}))
+		if err != nil || m.Enabled || len(src.Warnings) != 1 || !strings.Contains(src.Warnings[0], "ignored") {
+			t.Errorf("env %s: %+v, %+v, %v; want it refused with a warning", p, src, m, err)
+		}
+	}
+
+	// ./memory.toml that is a symlink to a file outside cwd is refused.
+	cwd = t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(cwd, "memory.toml")); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	m = DefaultMemory()
+	src, err = ApplyMemoryOverlay(&m, cwd, envMap(nil))
+	if err != nil || src.File != "" || m.Enabled || len(src.Warnings) != 1 {
+		t.Errorf("symlinked ./memory.toml: %+v, %+v, %v; want it refused with a warning", src, m, err)
+	}
+}
+
+// sameFile compares two paths after resolving symlinks (macOS temp dirs
+// live under /var, a symlink to /private/var).
+func sameFile(a, b string) bool {
+	ra, err1 := filepath.EvalSymlinks(a)
+	rb, err2 := filepath.EvalSymlinks(b)
+	return err1 == nil && err2 == nil && ra == rb
 }
 
 func TestRepoLocalMemoryTOMLOnlyMakesMemorySafer(t *testing.T) {
@@ -169,9 +240,10 @@ func TestRepoLocalMemoryTOMLOnlyMakesMemorySafer(t *testing.T) {
 
 func TestMemoryTOMLErrors(t *testing.T) {
 	for _, body := range []string{"bogus = 1\n", "backend = \"redis\"\n", "max_entry_size = 99999\n", "auto_write = \"maybe\"\n", "not toml ="} {
-		p := writeTOML(t, t.TempDir(), body)
+		cwd := t.TempDir()
+		p := writeTOML(t, cwd, body)
 		m := DefaultMemory()
-		_, err := ApplyMemoryOverlay(&m, t.TempDir(), envMap(map[string]string{MemoryConfigEnv: p}))
+		_, err := ApplyMemoryOverlay(&m, cwd, envMap(map[string]string{MemoryConfigEnv: p}))
 		var ie *InvalidError
 		if err == nil || !asInvalid(err, &ie) {
 			t.Errorf("%q: err %v", body, err)

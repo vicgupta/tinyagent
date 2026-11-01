@@ -69,7 +69,7 @@ func runListPlugins(o *options, fs *flag.FlagSet, w io.Writer) int {
 		if l.Err != nil {
 			fmt.Fprintf(w, "%s: rejected: %v\n", l.Path, l.Err)
 			code = 1
-			if _, err := plugins.Servers(l, cfg.Plugins[i], false); err != nil {
+			if _, err := plugins.Servers(l, cfg.Plugins[i], o.cwd, false); err != nil {
 				fmt.Fprintf(w, "  error: %v\n", err)
 			}
 			continue
@@ -98,7 +98,7 @@ func runListPlugins(o *options, fs *flag.FlagSet, w io.Writer) int {
 			fmt.Fprintf(w, "  skill %s (shadowed by %s)\n", sh[0], sh[1])
 		}
 		listPluginServers(w, l, cfg.Plugins[i])
-		if _, err := plugins.Servers(l, cfg.Plugins[i], false); err != nil {
+		if _, err := plugins.Servers(l, cfg.Plugins[i], o.cwd, false); err != nil {
 			fmt.Fprintf(w, "  error: %v\n", err)
 			code = 1
 		}

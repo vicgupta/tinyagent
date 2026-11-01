@@ -22,8 +22,10 @@ import (
 // Authorized plugin MCP servers are checked against the configured ones
 // (alias collisions, the server cap) and, with startMCP, appended to
 // cfg.MCPServers so every existing MCP rule applies to them. Their
-// PLUGIN_DATA directories are created unless the run is read-only.
-func checkPlugins(cfg *config.AgentConfig, w io.Writer, verbose, startMCP bool) error {
+// PLUGIN_DATA directories (./.tinyagent/plugin-data/<name> in cwd) are
+// created unless the run is read-only. Plugin data left in the old user
+// config location gets a single hint line; it is never used.
+func checkPlugins(cfg *config.AgentConfig, cwd string, w io.Writer, verbose, startMCP bool) error {
 	if len(cfg.Plugins) == 0 {
 		return nil
 	}
@@ -36,8 +38,15 @@ func checkPlugins(cfg *config.AgentConfig, w io.Writer, verbose, startMCP bool) 
 		aliases[s.Alias] = fmt.Sprintf("mcp_servers alias %q", s.Alias)
 	}
 	var defs []config.MCPServer
+	hinted := false
 	for i, l := range ls {
-		servers, err := plugins.Servers(l, cfg.Plugins[i], startMCP && !cfg.ReadOnly)
+		if len(cfg.Plugins[i].MCPServers) > 0 && !hinted {
+			hinted = true
+			if h := plugins.LegacyDataHint(); h != "" {
+				fmt.Fprintln(w, h)
+			}
+		}
+		servers, err := plugins.Servers(l, cfg.Plugins[i], cwd, startMCP && !cfg.ReadOnly)
 		if err != nil {
 			return &config.InvalidError{Err: err}
 		}

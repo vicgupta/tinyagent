@@ -30,7 +30,7 @@ func TestMemoryHelpFlag(t *testing.T) {
 func TestMemoryTOMLSelectsBackend(t *testing.T) {
 	cwd, _ := memoryEnv(t)
 	root, _ := canonicalRoot(cwd)
-	user := filepath.Join(t.TempDir(), "memory.toml")
+	user := filepath.Join(cwd, "settings.toml") // TINYAGENT_MEMORY_CONFIG must be inside --cwd (#336)
 	if err := os.WriteFile(user, []byte("backend = \"sqlite\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

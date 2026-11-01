@@ -91,13 +91,21 @@ func TestPluginMCPServer(t *testing.T) { // AC8, AC9, AC11
 	dir := mcpPlugin(t, fmt.Sprintf(fixtureServer, os.Args[0])+`,"other":{"type":"stdio","command":"node"},"remote":{"type":"sse","url":"https://x"}`)
 	root, _ := filepath.EvalSymlinks(dir)
 	cfg := pluginConfig(t, "plugins:\n  - path: "+dir+"\n    mcp_servers:\n      - server: validator\n        alias: kit\n        tools: [echo]\n")
-	code, _, stderr := runSkills(t, t.TempDir(), "-c", cfg)
+	old := filepath.Join(userConfigDir(t), "plugin-data", "kit")
+	if err := os.MkdirAll(old, 0o700); err != nil { // data in the old location is never used (#336)
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	code, _, stderr := runSkills(t, cwd, "-c", cfg)
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
-	data := filepath.Join(userConfigDir(t), "plugin-data", "kit")
+	data := filepath.Join(cwd, ".tinyagent", "plugin-data", "kit")
 	if fi, err := os.Stat(data); err != nil || fi.Mode().Perm() != 0o700 {
 		t.Errorf("PLUGIN_DATA %v, %v", fi, err)
+	}
+	if n := strings.Count(stderr, "hint: plugin data in "); n != 1 || !strings.Contains(stderr, filepath.Dir(old)) {
+		t.Errorf("want one hint naming %s, stderr %q", filepath.Dir(old), stderr)
 	}
 	first, last := (*bodies)[0], (*bodies)[len(*bodies)-1]
 	if !strings.Contains(first, `"kit__echo"`) || strings.Contains(first, "kit__hidden") {
