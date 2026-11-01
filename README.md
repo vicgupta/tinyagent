@@ -138,6 +138,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 - A task planner that can require a plan before any change.
 - Run budgets: turn cap, cost limit and token limit (`--token-limit`), with an 80% warning to the model; delegates, workers and `--attempts` share the budget, and a run that hits it can be resumed.
 - Verify before stop (`--verify-on-stop`): a run that changed files isn't accepted until a test or build command passes; otherwise it is marked unverified. On by default for every `--workflow` stage (`--verify-on-stop=false` opts out); see [Default on for workflow runs](docs/verify.md#default-on-for-workflow-runs). Optional computational checks (`--verify-check`, e.g. lint, type check, tests) run in order, cheapest first, before the run may finish; see [Computational checks](docs/verify.md#computational-checks). An optional inferential review (`--verify-review`) runs last, once every check passes, and reports the model's findings; see [Inferential review](docs/verify.md#inferential-review).
+- Skill workflows (`--workflow file.yaml -t ...`): run a task through fixed stages (plan, code, vet, test, verify behavior), each gated by a success check, with intent routing or `--workflow-name`; `tinyagent help workflows` at the terminal, full guide in [docs/workflows.md](docs/workflows.md).
 - Spec gate for skill workflows (`gate: spec`): a plan whose tasks lack acceptance criteria or a runnable `Verify:` command is re-planned once, then surfaced instead of reaching generate-code; see [Spec gate](docs/project-context.md#spec-gate).
 - Issue triage (`tinyagent triage issues.json`): ranks `gh issue list` output by value against effort with fixed, explainable rules, flags likely duplicates, stale and blocked items without dropping them, and writes a deterministic next-up JSON list an outside loop can work from; offline, no model call. See [Issue triage](docs/triage.md).
 - Blocked tasks for skill workflows: a stage whose check keeps failing on its merits ends the run as `Blocked` (exit 5) rather than `Failed`, with no further attempts, so an outside loop can park the task until a person fixes it; see [Blocked tasks](docs/project-context.md#blocked-tasks).
@@ -177,7 +178,8 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 | `undo_file` and `--rewind` | [docs/undo.md](docs/undo.md) |
 | Project memory | [docs/memory.md](docs/memory.md) |
 | Project rules from agent failures (`ratchet`) | [docs/ratchet.md](docs/ratchet.md) |
-| AGENTS.md, skills and skill workflows | [docs/project-context.md](docs/project-context.md) |
+| Workflows: multi-stage skill pipelines (`--workflow`), routing, `--workflow-observe`, events | [docs/workflows.md](docs/workflows.md) |
+| AGENTS.md, skills and skill workflows (reference) | [docs/project-context.md](docs/project-context.md) |
 
 ### Models
 

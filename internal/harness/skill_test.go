@@ -103,3 +103,54 @@ func TestLoadSkillFile(t *testing.T) {
 		t.Fatal("bad name accepted")
 	}
 }
+
+// TestParseSkillBackticks: inline code spans survive in the intent and
+// success check, bold around a code span is removed without eating the
+// backticks, and lines inside fenced code blocks are never parsed as the
+// skill's heading, intent, inputs or success check, while the fence stays
+// verbatim in Body (the stage prompt).
+func TestParseSkillBackticks(t *testing.T) {
+	src := "# Skill: tests\n> **Intent:** Run `go test ./...` and fix `--json` output\n\n" +
+		"```md\n# not the title\n> Intent: fake\n**Inputs**\n- fake\n**Success check:** fake check\n```\n\n" +
+		"~~~sh\n- also-fake\n~~~\n\n" +
+		"**Inputs**\n- `spec`: the `-t` task\n- `repo_path`\n\n" +
+		"**Success check:** **`make test`** passes and `a__b` is kept\n"
+	s, err := ParseSkill("tests", "tests.md", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Title != "tests" {
+		t.Errorf("title = %q", s.Title)
+	}
+	if s.Intent != "Run `go test ./...` and fix `--json` output" {
+		t.Errorf("intent = %q", s.Intent)
+	}
+	if strings.Join(s.Inputs, ",") != "spec,repo_path" {
+		t.Errorf("inputs = %q", s.Inputs)
+	}
+	if s.SuccessCheck != "`make test` passes and `a__b` is kept" {
+		t.Errorf("success check = %q", s.SuccessCheck)
+	}
+	for _, want := range []string{"```md\n# not the title", "- fake\n", "~~~sh\n- also-fake\n~~~"} {
+		if !strings.Contains(s.Body, want) {
+			t.Errorf("body lost %q", want)
+		}
+	}
+	st := Stage{Skill: s}
+	if p := Prompt(1, 1, st, "fix `x`", "", "", "/w", ""); !strings.Contains(p, "```md\n# not the title") || !strings.Contains(p, "fix `x`") || !strings.Contains(p, "`make test` passes") {
+		t.Errorf("prompt lost backtick content:\n%s", p)
+	}
+}
+
+// TestParseSkillFenceBeforeHeading: a "# comment" in a fence before the
+// heading doesn't become the title, so frontmatter name is used.
+func TestParseSkillFenceBeforeHeading(t *testing.T) {
+	src := "---\nname: setup\ndescription: Install deps with `go mod download`\n---\n```sh\n# install deps\ngo mod download\n```\n\n**Inputs**\n- spec\n"
+	s, err := ParseSkill("setup", "SKILL.md", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Title != "setup" || s.Intent != "Install deps with `go mod download`" {
+		t.Errorf("title %q intent %q", s.Title, s.Intent)
+	}
+}
