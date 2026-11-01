@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Interactive chat (`tinyagent chat` / `-i`): typing at the `›` prompt no longer prints a new line on every keystroke. The prompt starts with a blank line, and the line editor rewrote that newline on each redraw; it is now written once and only the prompt line is redrawn in place. Redraw also measures the prompt and input in terminal columns (escape codes stripped, CJK/emoji widths), so the cursor lands correctly after wide characters, and lines longer than the terminal wrap and redraw correctly. Regression in v0.15.0 (#346); `--color` and `NO_COLOR` are unchanged.
+
 ## [v0.15.0] - 2026-10-31
 
 ### Features
