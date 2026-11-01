@@ -30,6 +30,9 @@ func confine(p, cwd string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// The returned path keeps cwd as given (so callers see the same prefix
+	// they passed); the containment check uses cwd with symlinks resolved.
+	out := filepath.Join(abs, filepath.Clean(p))
 	if r, err := filepath.EvalSymlinks(abs); err == nil {
 		abs = r
 	}
@@ -52,7 +55,7 @@ func confine(p, cwd string) (string, error) {
 	resolved, err := filepath.EvalSymlinks(existing)
 	if errors.Is(err, fs.ErrNotExist) && existing == abs {
 		// cwd itself doesn't exist yet: there is nothing to follow.
-		return filepath.Clean(full), nil
+		return out, nil
 	}
 	if err != nil {
 		return "", err
@@ -60,7 +63,7 @@ func confine(p, cwd string) (string, error) {
 	if !within(resolved, abs) {
 		return "", fmt.Errorf("%w: %q resolves through a symlink to %s", ErrOutsideCwd, p, resolved)
 	}
-	return filepath.Clean(full), nil
+	return out, nil
 }
 
 // within reports whether path is dir or below it.
