@@ -46,7 +46,7 @@ If you add or remove a direct dependency, update this list too;
 ## Layout
 
 ```
-cmd/tinyagent/        CLI entrypoint, flag parsing, main loop glue
+cmd/tinyagent/        CLI entrypoint, flag parsing, main loop glue; help.go holds --help and help topics (help workflows)
 internal/agent/       the run loop, compaction, tool dispatch; build an Agent with agent.New (it validates the options)
 internal/config/      YAML config + built-in defaults
 internal/memory/      project memory stores (markdown and SQLite), always under ./.tinyagent/memory in --cwd; confine.go refuses paths that leave --cwd
@@ -210,6 +210,13 @@ Before opening a PR, confirm:
 - [ ] `README.md` or `docs/` updated for any user-visible change (flag, config key, env var,
       provider, hint).
 - [ ] Tests cover the new behavior, including any golden-output expectations.
+- [ ] Workflow changes (a `--workflow*` flag, a workflow file key, a stage or
+      observer event) update all three together: the `tinyagent help workflows` topic
+      (`helpWorkflows` in `cmd/tinyagent/help.go`), [`docs/workflows.md`](docs/workflows.md),
+      and the reference rows in `docs/subcommands.md`, `docs/json-output.md` and
+      `docs/project-context.md`. `TestWorkflowHelpCoversEveryFlag`
+      (`cmd/tinyagent/workflow_help_test.go`) fails when a workflow flag or event is
+      missing from the topic or the page.
 - [ ] PR body follows [`.github/pull_request_template.md`](.github/pull_request_template.md):
       three sections, under ~200 words, no transcripts or run logs.
 

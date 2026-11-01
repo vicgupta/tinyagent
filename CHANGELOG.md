@@ -6,6 +6,14 @@
 
 - Project memory lives only in `./.tinyagent/memory` inside `--cwd` (SQLite default `./.tinyagent/memory/memory.sqlite`). **Hard cut:** the old `./memory` folder and the old per-user JSON store (`$XDG_STATE_HOME/tinyagent/memory`, `~/.local/state/tinyagent/memory`, or the user config directory on macOS and Windows) are no longer read or imported. If the new store doesn't exist and `./memory` holds entries, one stderr `hint:` line names the new location; nothing is moved. Nothing outside `--cwd` is stat'ed, read or written for memory. Store paths that are absolute, contain `..` or resolve through a symlink outside `--cwd` are refused with a warning. `import_legacy` is still accepted but does nothing. See [Project memory](docs/memory.md#store-location) (#335).
 
+### Fixes
+
+- Workflow skill files: backticks and fenced code blocks are handled correctly. The skill parser used to read lines inside ```` ``` ```` / `~~~` fences as the skill's heading, `Intent:`, `Inputs` or `Success check:`, so a fenced example could replace the real inputs or success check, and a `# comment` in a fence could become the title. Fenced lines are now skipped by the parser (and still sent verbatim to the model), and bold around an inline code span (`` **`make test`** passes ``) no longer leaves stray `**` in the intent or success check. See [Markdown and backticks](docs/workflows.md#skill-files-markdown).
+
+### Documentation
+
+- Workflows are documented in the CLI and in a new [docs/workflows.md](docs/workflows.md) guide (what they are, quick start, file format and cwd-relative paths, routing, flags and settings, `--workflow-observe`, JSON events, interaction with chat and other flags, troubleshooting, examples). New `tinyagent help workflows` help topic; brief `--help` shows a workflow example and points at it; `--workflow`, `--workflow-name` and `tinyagent skills` help gain examples. Linked from the README, `docs/subcommands.md`, `docs/config.md`, `docs/json-output.md` and `docs/project-context.md`. `TestWorkflowHelpCoversEveryFlag` keeps the topic and page in sync with the workflow flags and events.
+
 ## [v0.15.1] - 2026-10-31
 
 ### Fixes
