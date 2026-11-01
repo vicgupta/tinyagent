@@ -32,6 +32,8 @@ Workflows are opt-in. Without `--workflow`, tinyagent behaves as before. Workflo
 
 The repository ships a complete example in [docs/workflows](workflows): [`workflow.yaml`](workflows/workflow.yaml) and its [skills](workflows/skills).
 
+New to workflows? [Setting up workflows](workflow-guide.md) walks through three examples (one stage, a few stages with checks and retries, and the full plan-to-behavior pipeline), with every file you need.
+
 ```sh
 # 1. Check the files (no model call, no credentials needed)
 tinyagent skills validate docs/workflows/workflow.yaml

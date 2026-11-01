@@ -243,7 +243,10 @@ Before opening a PR, confirm:
       observer event) update all three together: the `tinyagent help workflows` topic
       (`helpWorkflows` in `cmd/tinyagent/help.go`), [`docs/workflows.md`](docs/workflows.md),
       and the reference rows in `docs/subcommands.md`, `docs/json-output.md` and
-      `docs/project-context.md`. `TestWorkflowHelpCoversEveryFlag`
+      `docs/project-context.md`. A workflow file or skill-format change also updates the
+      examples in [`docs/workflow-guide.md`](docs/workflow-guide.md);
+      `TestWorkflowGuideExamples` (`internal/harness/guide_test.go`) loads them.
+      `TestWorkflowHelpCoversEveryFlag`
       (`cmd/tinyagent/workflow_help_test.go`) fails when a workflow flag or event is
       missing from the topic or the page.
 - [ ] PR body follows [`.github/pull_request_template.md`](.github/pull_request_template.md):

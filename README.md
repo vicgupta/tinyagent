@@ -186,6 +186,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 | Project memory | [docs/memory.md](docs/memory.md) |
 | Project rules from agent failures (`ratchet`) | [docs/ratchet.md](docs/ratchet.md) |
 | Workflows: multi-stage skill pipelines (`--workflow`), routing, `--workflow-observe`, events | [docs/workflows.md](docs/workflows.md) |
+| Setting up workflows: required fields, how to run, three worked examples (simple, medium, complex), limits | [docs/workflow-guide.md](docs/workflow-guide.md) |
 | AGENTS.md, skills and skill workflows (reference) | [docs/project-context.md](docs/project-context.md) |
 
 ### Models
