@@ -2,7 +2,12 @@
 
 ## [Unreleased]
 
+## [v0.16.0] - 2026-10-31
+
 ### Breaking
+
+Migration in short: move `./memory` contents into `./.tinyagent/memory`; move `memory.toml` into the project (or point `$TINYAGENT_MEMORY_CONFIG` inside `--cwd`) and copy plugin data to `./.tinyagent/plugin-data/<name>`; re-download TinyGo with `tinyagent tinygo install`. Consider adding `.tinyagent/` to `.gitignore`.
+
 
 - Project memory lives only in `./.tinyagent/memory` inside `--cwd` (SQLite default `./.tinyagent/memory/memory.sqlite`). **Hard cut:** the old `./memory` folder and the old per-user JSON store (`$XDG_STATE_HOME/tinyagent/memory`, `~/.local/state/tinyagent/memory`, or the user config directory on macOS and Windows) are no longer read or imported. If the new store doesn't exist and `./memory` holds entries, one stderr `hint:` line names the new location; nothing is moved. Nothing outside `--cwd` is stat'ed, read or written for memory. Store paths that are absolute, contain `..` or resolve through a symlink outside `--cwd` are refused with a warning. `import_legacy` is still accepted but does nothing. See [Project memory](docs/memory.md#store-location) (#335).
 - **BREAKING (hard cut):** `memory.toml` and plugin data are read only from inside `--cwd`. `memory.toml` is `$TINYAGENT_MEMORY_CONFIG` (now relative to `--cwd`, or absolute inside it) or `./memory.toml`; `tinyagent/memory.toml` in the user config directory is no longer read. A plugin's `PLUGIN_DATA` is now `./.tinyagent/plugin-data/<name>` instead of `<user config dir>/tinyagent/plugin-data/<name>`. Nothing is migrated: when a file or folder exists in an old location, one stderr `hint:` line names the new one. Paths that leave `--cwd` (absolute paths elsewhere, `..`, symlinks) are refused with a warning (`memory.toml`) or a config error (`PLUGIN_DATA`). The unused `config.Find` (per-user `config.yaml` lookup) is removed. See [Memory settings](docs/memory.md#project-memory) and [Plugins](docs/plugins.md) (#336).
@@ -10,12 +15,18 @@
 
 ### Fixes
 
-- `opencode` provider: works with OpenCode v2. tinyagent passed `opencode run --dir <cwd>`, which the v2 CLI rejects (`Unrecognized flag: --dir in command opencode run`) and which OpenCode before v1.2.0 never had; it now passes no `--dir` and runs `opencode` in `--cwd` instead. If `--format json` is rejected by an old OpenCode, the run is retried once without it and the plain-text answer is used. A single name after `opencode/` is now an OpenCode [Zen](https://opencode.ai/docs/zen/) model (`-m opencode/big-pickle` sends `--model opencode/big-pickle`; `opencode/opencode/big-pickle` works too). A non-zero exit now reports the `opencode --version` and path and suggests upgrading OpenCode or setting `opencode.path`. See [opencode](docs/models.md#opencode) and [OpenCode CLI](https://opencode.ai/docs/cli/).
-- Workflow skill files: backticks and fenced code blocks are handled correctly. The skill parser used to read lines inside ```` ``` ```` / `~~~` fences as the skill's heading, `Intent:`, `Inputs` or `Success check:`, so a fenced example could replace the real inputs or success check, and a `# comment` in a fence could become the title. Fenced lines are now skipped by the parser (and still sent verbatim to the model), and bold around an inline code span (`` **`make test`** passes ``) no longer leaves stray `**` in the intent or success check. See [Markdown and backticks](docs/workflows.md#skill-files-markdown).
+- `opencode` provider: works with OpenCode v2. tinyagent passed `opencode run --dir <cwd>`, which the v2 CLI rejects (`Unrecognized flag: --dir in command opencode run`) and which OpenCode before v1.2.0 never had; it now passes no `--dir` and runs `opencode` in `--cwd` instead. If `--format json` is rejected by an old OpenCode, the run is retried once without it and the plain-text answer is used. A single name after `opencode/` is now an OpenCode [Zen](https://opencode.ai/docs/zen/) model (`-m opencode/big-pickle` sends `--model opencode/big-pickle`; `opencode/opencode/big-pickle` works too). A non-zero exit now reports the `opencode --version` and path and suggests upgrading OpenCode or setting `opencode.path`. See [opencode](docs/models.md#opencode) and [OpenCode CLI](https://opencode.ai/docs/cli/) (#355).
+- Workflow skill files: backticks and fenced code blocks are handled correctly. The skill parser used to read lines inside ```` ``` ```` / `~~~` fences as the skill's heading, `Intent:`, `Inputs` or `Success check:`, so a fenced example could replace the real inputs or success check, and a `# comment` in a fence could become the title. Fenced lines are now skipped by the parser (and still sent verbatim to the model), and bold around an inline code span (`` **`make test`** passes ``) no longer leaves stray `**` in the intent or success check. See [Markdown and backticks](docs/workflows.md#skill-files-markdown) (#353).
 
 ### Documentation
 
-- Workflows are documented in the CLI and in a new [docs/workflows.md](docs/workflows.md) guide (what they are, quick start, file format and cwd-relative paths, routing, flags and settings, `--workflow-observe`, JSON events, interaction with chat and other flags, troubleshooting, examples). New `tinyagent help workflows` help topic; brief `--help` shows a workflow example and points at it; `--workflow`, `--workflow-name` and `tinyagent skills` help gain examples. Linked from the README, `docs/subcommands.md`, `docs/config.md`, `docs/json-output.md` and `docs/project-context.md`. `TestWorkflowHelpCoversEveryFlag` keeps the topic and page in sync with the workflow flags and events.
+- Workflows are documented in the CLI and in a new [docs/workflows.md](docs/workflows.md) guide (what they are, quick start, file format and cwd-relative paths, routing, flags and settings, `--workflow-observe`, JSON events, interaction with chat and other flags, troubleshooting, examples). New `tinyagent help workflows` help topic; brief `--help` shows a workflow example and points at it; `--workflow`, `--workflow-name` and `tinyagent skills` help gain examples. Linked from the README, `docs/subcommands.md`, `docs/config.md`, `docs/json-output.md` and `docs/project-context.md`. `TestWorkflowHelpCoversEveryFlag` keeps the topic and page in sync with the workflow flags and events (#353).
+
+### Other
+
+- CI also runs build, vet and tests on macOS (`build-vet-test-macos`) and the full suite with the race detector (`race`) (#314, #348).
+- Internal: the telemetry exporter is split into span, transport and API modules with a transport seam; no behavior change (#319, #351).
+- Makefile matches CI: `make test` runs `go test -count=1 ./...`; new `make test-race`, `make fmt` (fails on unformatted files) and `make lint` (`go vet` plus `staticcheck` when installed) targets; staticcheck findings fixed; `makefile_test.go` keeps targets in sync with CI (#318, #357).
 
 ## [v0.15.1] - 2026-10-31
 
