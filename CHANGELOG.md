@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Behaviour changes
+
+- **Behaviour change:** [Agent Skills](docs/project-context.md#agent-skills) discovery is hybrid. It is on by default in interactive runs (stdin and stdout on a terminal, including chat) and off by default in hardened modes: non-TTY runs, `CI` or `GITHUB_ACTIONS` set (including the GitHub Action), `--eval`, `--attempts`, `--lockdown` and `--read-only`. Precedence is flag > config > mode default: `--skills` turns it on in any mode, `--no-skills` or `skills: false` turns it off. The `skills` config key is now tri-state (unset means the mode default). In hardened modes `skills: true` from a repository `./tinyagent.yaml` is ignored unless `--trust-config` is set. `--check` prints a `skills:` line with the decision and its source, `--check --json` adds a `skills` object (`enabled`, `source`, `detail`), and `-v` prints it at run start. Checkpoints that recorded skills off (including those from before skills existed) still resume with skills off (#359).
+- **Behaviour change:** Agent Skills are discovered only in `./skills/<name>/SKILL.md` under `--cwd`. `.agents/skills` in `--cwd` and its parents and the per-user `~/.agents/skills` are no longer scanned; when `.agents/skills` or `.claude/skills` exists in `--cwd`, a warning suggests moving or symlinking its skills into `./skills`. Plugin skills are unchanged (#359).
+
 ## [v0.16.0] - 2026-10-31
 
 ### Breaking

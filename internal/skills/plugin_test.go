@@ -28,7 +28,7 @@ func TestDiscoverPluginSkills(t *testing.T) {
 	if err := os.Symlink(filepath.Join(outside, "evil"), filepath.Join(root, "skills/evil")); err != nil {
 		t.Skip(err)
 	}
-	set, warnings := DiscoverWith(cwd, "", []PluginSource{{Plugin: "kit", Root: root, Dir: filepath.Join(root, "skills")}})
+	set, warnings := DiscoverWith(cwd, []PluginSource{{Plugin: "kit", Root: root, Dir: filepath.Join(root, "skills")}})
 	if got := strings.Join(set.Names(), ","); got != "a" {
 		t.Fatalf("names %q, warnings %q", got, warnings)
 	}
@@ -49,17 +49,17 @@ func TestDiscoverPluginSkills(t *testing.T) {
 
 func TestDiscoverPluginPrecedence(t *testing.T) {
 	_, cwd := repo(t)
-	user := t.TempDir()
-	write(t, filepath.Join(user, "review/SKILL.md"), skillMD("review", "User review.", ""))
+	user := filepath.Join(cwd, "skills")
+	write(t, filepath.Join(user, "review/SKILL.md"), skillMD("review", "Project review.", ""))
 	p1, p2 := pluginRoot(t), pluginRoot(t)
 	write(t, filepath.Join(p1, "skills/review/SKILL.md"), skillMD("review", "Plugin review.", ""))
 	write(t, filepath.Join(p1, "skills/lint/SKILL.md"), skillMD("lint", "First lint.", ""))
 	write(t, filepath.Join(p2, "skills/lint/SKILL.md"), skillMD("lint", "Second lint.", ""))
-	set, warnings := DiscoverWith(cwd, user, []PluginSource{
+	set, warnings := DiscoverWith(cwd, []PluginSource{
 		{Plugin: "one", Root: p1, Dir: filepath.Join(p1, "skills")},
 		{Plugin: "two", Root: p2, Dir: filepath.Join(p2, "skills")},
 	})
-	if k, _ := set.Get("review"); k.Scope != ScopeUser {
+	if k, _ := set.Get("review"); k.Scope != ScopeProject {
 		t.Errorf("review from %+v", k)
 	}
 	if k, _ := set.Get("lint"); k.Plugin != "one" {
@@ -80,7 +80,7 @@ func TestDiscoverPluginSkillsDirProblems(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(root2, "skills")); err != nil {
 		t.Skip(err)
 	}
-	set, warnings := DiscoverWith(cwd, "", []PluginSource{
+	set, warnings := DiscoverWith(cwd, []PluginSource{
 		{Plugin: "file", Root: root, Dir: filepath.Join(root, "skills")},
 		{Plugin: "link", Root: root2, Dir: filepath.Join(root2, "skills")},
 		{Plugin: "none", Root: root, Dir: filepath.Join(root, "missing")},

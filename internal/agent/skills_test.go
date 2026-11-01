@@ -19,7 +19,7 @@ const skillBody = "# Release\nAlways run make release-check first."
 
 func writeSkill(t *testing.T, root, name, desc string) {
 	t.Helper()
-	dir := filepath.Join(root, ".agents", "skills", name)
+	dir := filepath.Join(root, "skills", name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func enableSkills(t *testing.T, a *Agent) {
 	t.Helper()
 	t.Setenv("HOME", t.TempDir())
 	writeSkill(t, a.Tools.Root, "release", "Cut a release of this repo.")
-	set, warns := skills.Discover(a.Tools.Root, skills.UserDir())
+	set, warns := skills.Discover(a.Tools.Root)
 	if set.Len() != 1 || len(warns) != 0 {
 		t.Fatalf("discover: %v %v", set.Names(), warns)
 	}
@@ -88,7 +88,7 @@ func TestNoSkillsLeavesPromptAndToolsUnchanged(t *testing.T) {
 		a := newAgent(t, f)
 		t.Setenv("HOME", t.TempDir())
 		if enable {
-			set, _ := skills.Discover(a.Tools.Root, skills.UserDir())
+			set, _ := skills.Discover(a.Tools.Root)
 			a.Tools.Skills, a.SkillsEnabled = set, true
 		}
 		a.Run(context.Background(), "task")

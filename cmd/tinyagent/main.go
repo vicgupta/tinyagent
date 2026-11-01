@@ -179,8 +179,8 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.askUser, "ask-user", false, "add the ask_user tool: the model may end the run with one question (status NeedsInput, exit 4), answered with --resume <trajectory> -t \"<answer>\"; requires -o (default off; config ask_user.enabled)")
 	fs.BoolVar(&o.images, "images", false, "let vision-capable models see images: the view_image tool and MCP image pass-through (default off; config images.enabled)")
 	fs.Var(&o.imagePaths, "image", fmt.Sprintf("attach this PNG, JPEG, GIF or WebP file to the task message (or a --resume follow-up); repeatable, at most %d; independent of --images", model.MaxTaskImages))
-	fs.BoolVar(&o.skills, "skills", false, "discover Agent Skills in .agents/skills (project, up to the repo root, and ~/.agents/skills) and add the skill tool (default off; config skills)")
-	fs.BoolVar(&o.noSkills, "no-skills", false, "turn Agent Skills discovery off, overriding config skills; --no-skills=false turns it on")
+	fs.BoolVar(&o.skills, "skills", false, "discover Agent Skills in ./skills under --cwd and add the skill tool (default on in interactive runs, off in non-interactive, CI, --eval, lockdown and --read-only runs; config skills)")
+	fs.BoolVar(&o.noSkills, "no-skills", false, "turn Agent Skills discovery off, overriding config skills and the interactive default; --no-skills=false turns it on")
 	fs.StringVar(&o.planFile, "plan-file", "", "with the plan enabled, also export the current plan as Markdown to this file after each save")
 	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "provider reasoning effort: none, minimal, low, medium, high, xhigh, or max")
 	fs.Var(&o.fallbackModels, "fallback-model", "provider/model to switch to when requests still fail with 429/5xx/network errors after retries (repeatable, tried in order; replaces fallback_models)")
@@ -588,11 +588,9 @@ func run() int {
 	if code := checkLSP(cfg, cfgPath, ""); code != 0 {
 		return code
 	}
-	if on, set, err := skillsFlag(fs, o); err != nil {
+	if _, _, err := skillsFlag(fs, o); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
-	} else if set {
-		cfg.Skills = on
 	}
 	if flagWasSet(fs, "memory") {
 		cfg.Memory.Enabled = o.memory.enabled
@@ -603,6 +601,13 @@ func run() int {
 	lock, code := setupLockdown(fs, o.lockdown, &cfg, review != nil, false, os.Stderr)
 	if code != 0 {
 		return code
+	}
+	skillsDec := applySkillsDefault(fs, o, &cfg, cfgSrc, skillsMode{
+		Interactive: runIsInteractive(),
+		Hardened:    hardenedReason(false, false, cfg.UntrustedContent.Enabled, cfg.ReadOnly),
+	})
+	if o.verbose {
+		fmt.Fprintln(os.Stderr, "skills:", skillsDec)
 	}
 	if flagWasSet(fs, "snapshots") {
 		cfg.Snapshots.Enabled = o.snapshots
@@ -883,7 +888,7 @@ func run() int {
 	}
 	startOutputFiles(outputFiles, cfg.ToolOutputFiles.MaxRuns, warn)
 	rules.start(a, events, warn)
-	if cfg.Skills {
+	if cfg.SkillsOn() {
 		loadSkills(a, root, pluginSkillSources(cfg), warn)
 	}
 	if cfg.Memory.Enabled {
@@ -2814,7 +2819,7 @@ func skillsFlag(fs *flag.FlagSet, o options) (on, set bool, err error) {
 // loadSkills discovers skills for a run rooted at root, reporting each
 // problem through warn and, with -v, one line per skill.
 func loadSkills(a *agent.Agent, root string, plugins []skills.PluginSource, warn func(string)) {
-	set, warnings := skills.DiscoverWith(root, skills.UserDir(), plugins)
+	set, warnings := skills.DiscoverWith(root, plugins)
 	for _, w := range warnings {
 		warn(w)
 	}

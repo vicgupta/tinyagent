@@ -138,6 +138,7 @@ func runChatIO(o *options, fs *flag.FlagSet, cio chatIO) int {
 	s := &session{o: o, fs: fs, root: root, closeEnv: func() {}}
 	defer s.Close()
 	if err := s.setup(context.Background(), sessionMode{
+		interactive: true,
 		setupLockdown: func(cfg *config.AgentConfig) (*lockdown.State, error) {
 			return acpSetupLockdown(fs, o.lockdown, cfg)
 		},
@@ -370,7 +371,7 @@ func (c *chat) turn(msg string, asFollowUp bool) {
 		emitStartTaints(s.lockdown, events)
 		startOutputFiles(s.outputFiles, cfg.ToolOutputFiles.MaxRuns, warn)
 	}
-	if cfg.Skills {
+	if cfg.SkillsOn() {
 		loadSkills(a, s.root, pluginSkillSources(cfg), warn)
 	}
 	s.memoryTurn(a, prev, events, warn, false)
