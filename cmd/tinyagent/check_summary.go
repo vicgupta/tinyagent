@@ -26,6 +26,7 @@ type checkSummary struct {
 	Sandbox       checkSandboxInfo `json:"sandbox"`
 	Permissions   checkPermissions `json:"permissions"`
 	Lockdown      checkLockdownSum `json:"lockdown"`
+	Skills        skillsDecision   `json:"skills"`
 	Cwd           string           `json:"cwd"`
 	Limits        checkLimits      `json:"limits"`
 	Error         *checkError      `json:"error"`

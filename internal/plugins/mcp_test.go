@@ -85,6 +85,8 @@ func TestLoadMCPTopLevel(t *testing.T) {
 
 func TestServers(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir()) // os.UserConfigDir ignores XDG_CONFIG_HOME on macOS
+	cwd := t.TempDir()
 	root := mcpRoot(t, `{`+schemaField+`,"mcpServers":{"v":{"type":"stdio","command":"./bin/server","cwd":"${PLUGIN_DATA}"},"h":{"type":"sse","url":"https://x"}}}`)
 	os.WriteFile(filepath.Join(root, ManifestFile), []byte(`{"$schema":"`+SchemaV1+`","name":"kit"}`), 0o644)
 	ls, err := Load([]config.Plugin{{Path: root}})
@@ -97,13 +99,16 @@ func TestServers(t *testing.T) {
 	auth := func(s string) config.Plugin {
 		return config.Plugin{Path: root, MCPServers: []config.PluginServer{{Server: s, Alias: "kit", Tools: []string{"x"}}}}
 	}
-	data, _ := DataDir("kit")
-	if _, err := Servers(ls[0], auth("v"), false); err != nil {
+	data, _ := DataDir(cwd, "kit")
+	if want := filepath.Join(cwd, ".tinyagent", "plugin-data", "kit"); data != want {
+		t.Errorf("DataDir = %q, want %q", data, want)
+	}
+	if _, err := Servers(ls[0], auth("v"), cwd, false); err != nil {
 		t.Fatal(err)
 	} else if _, err := os.Stat(data); err == nil {
 		t.Error("data dir created without create")
 	}
-	defs, err := Servers(ls[0], auth("v"), true)
+	defs, err := Servers(ls[0], auth("v"), cwd, true)
 	if err != nil || len(defs) != 1 || defs[0].Dir != data {
 		t.Fatalf("%+v, %v", defs, err)
 	}
@@ -111,11 +116,56 @@ func TestServers(t *testing.T) {
 		t.Errorf("data dir %v, %v", fi, err)
 	}
 	for _, s := range []string{"missing", "h"} {
-		if _, err := Servers(ls[0], auth(s), false); err == nil || !strings.Contains(err.Error(), "plugin kit") {
+		if _, err := Servers(ls[0], auth(s), cwd, false); err == nil || !strings.Contains(err.Error(), "plugin kit") {
 			t.Errorf("%s: %v", s, err)
 		}
 	}
-	if _, err := Servers(Loaded{Path: root, Err: errors.New("bad")}, auth("v"), false); err == nil {
+	if _, err := Servers(Loaded{Path: root, Err: errors.New("bad")}, auth("v"), cwd, false); err == nil {
 		t.Error("rejected plugin with mcp_servers: no error")
+	}
+}
+
+// TestDataDirOnlyInCwd covers issue #336: with HOME, XDG_* and the user
+// config dir pointed at a temp dir that holds plugin data in the old
+// location, PLUGIN_DATA is inside cwd, the old data is untouched and only
+// hinted at, and a data folder that would escape cwd is refused.
+func TestDataDirOnlyInCwd(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, ".local", "state"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	if LegacyDataHint() != "" {
+		t.Fatal("hint printed with no old plugin data")
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(dir, "tinyagent", "plugin-data", "kit")
+	if err := os.MkdirAll(old, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(old, "state.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	data, err := DataDir(cwd, "kit")
+	if err != nil || data != filepath.Join(cwd, ".tinyagent", "plugin-data", "kit") {
+		t.Errorf("DataDir = %q, %v; want it under cwd", data, err)
+	}
+	if h := LegacyDataHint(); !strings.HasPrefix(h, "hint: ") || !strings.Contains(h, filepath.Dir(old)) || strings.Contains(h, "\n") {
+		t.Errorf("hint %q", h)
+	}
+	if _, err := DataDir(cwd, "../kit"); err == nil {
+		t.Error("plugin name with .. accepted")
+	}
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(cwd, ".tinyagent")); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	if d, err := DataDir(cwd, "kit"); err == nil {
+		t.Errorf("DataDir through a symlink outside cwd = %q, want refused", d)
 	}
 }

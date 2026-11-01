@@ -26,6 +26,7 @@ func malformedOpenAI(t *testing.T, requests *atomic.Int32) {
 	t.Setenv("OPENAI_BASE_URL", srv.URL)
 	t.Setenv("OPENAI_API_KEY", "fake")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir()) // os.UserConfigDir ignores XDG_CONFIG_HOME on macOS
 }
 
 func TestMaxFormatErrorsFlagValidation(t *testing.T) { // AC8

@@ -17,10 +17,10 @@ func skillCall(name, args string) model.ToolCall {
 
 func TestSkillToolCatalogAndReadOnly(t *testing.T) {
 	root := t.TempDir()
-	userSkill := filepath.Join(root, "skills", "mine", "SKILL.md")
-	os.MkdirAll(filepath.Dir(userSkill), 0o755)
-	os.WriteFile(userSkill, []byte("---\nname: mine\ndescription: Mine.\n---\nuser body\n"), 0o644)
 	os.Mkdir(filepath.Join(root, ".git"), 0o755)
+	projSkill := filepath.Join(root, "skills", "mine", "SKILL.md")
+	os.MkdirAll(filepath.Dir(projSkill), 0o755)
+	os.WriteFile(projSkill, []byte("---\nname: mine\ndescription: Mine.\n---\nuser body\n"), 0o644)
 	set, _ := skills.Discover(root)
 
 	for _, ro := range []bool{false, true} {

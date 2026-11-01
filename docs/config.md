@@ -20,7 +20,7 @@ A `tinyagent.yaml` that exists but can't be read or parsed is an error naming th
 
 A `tinyagent.yaml` found in `--cwd` usually comes with the repository, so by default it can't make tinyagent run programs or loosen your security settings. These keys are **ignored with a warning** naming them, unless you pass `--trust-config`:
 
-`mcp_servers`, `hooks`, `command_tools`, `lsp.servers`, `plugins`, `tinygo`, `claude_code.path`, `codex_exec.path`, `handoff.startup_command`, `verify_on_stop.checks`, `attempts.checks`, `acp.client_mcp_servers`, `container.run_args`, `permissions`, `file_access`, `command_env`, `redact_secrets`, `untrusted_content`, `memory`.
+`mcp_servers`, `hooks`, `command_tools`, `lsp.servers`, `plugins`, `tinygo`, `claude_code.path`, `codex_exec.path`, `opencode.path`, `handoff.startup_command`, `verify_on_stop.checks`, `attempts.checks`, `acp.client_mcp_servers`, `container.run_args`, `permissions`, `file_access`, `command_env`, `redact_secrets`, `untrusted_content`, `memory`.
 
 There is no prompt, so `--trust-config` works the same in CI. Pass it only for a repository you trust, after reading its `tinyagent.yaml`. A file given with `-c` is always trusted (you chose it), even if it is the same file. Command-line flags such as `--verify-check` and `--attempt-check` still work without `--trust-config`. Elsewhere in these docs, "read only from `-c`, never from the repository" means: from `-c`, or from `./tinyagent.yaml` with `--trust-config`.
 
@@ -28,7 +28,7 @@ There is no prompt, so `--trust-config` works the same in CI. Pass it only for a
 
 Every key is optional, but an unrecognized key (a typo like `step_limt`) is an error naming the file and the key, rather than silently ignored. Command-line flags override the file.
 
-Set `read_only: true` to make repository analysis the default. `--read-only` overrides the config value, including `--read-only=false`. In this mode, executor dispatch allows only `read_file`, `list_files`, and `grep`; writes, edits, shell commands, and background process tools are denied even if task text or repository instructions request them. Denials are returned to the model as tool errors. The restriction is model tool authority, not an OS sandbox (for that, see `--sandbox` under Sandboxing commands): an explicit `-o` trajectory destination can be written by the CLI, provider requests still send their context to the selected service, the Codex provider may refresh its credential file, the [`claude-code` and `codex-exec`](models.md#cli-handoff-providers) providers map read-only onto their CLI's own restriction (see there), and the opt-in [`web_fetch`](long-runs.md#web-fetch) tool, which only reads allowlisted URLs, stays available when enabled, as does the read-only [`lsp`](long-runs.md#language-servers-lsp) tool (its servers are still started and write logs under `.tinyagent/lsp`). `--update` is an administrative action outside task-tool policy. Readable secrets (unless hidden with [`file_access`](permissions.md#restricting-file-access) rules), symlinks that point outside `--cwd`, existing lexical path behavior, and AGENTS.md discovery retain their existing limitations; read-only mode does not make an untrusted repository safe.
+Set `read_only: true` to make repository analysis the default. `--read-only` overrides the config value, including `--read-only=false`. In this mode, executor dispatch allows only `read_file`, `list_files`, and `grep`; writes, edits, shell commands, and background process tools are denied even if task text or repository instructions request them. Denials are returned to the model as tool errors. The restriction is model tool authority, not an OS sandbox (for that, see `--sandbox` under Sandboxing commands): an explicit `-o` trajectory destination can be written by the CLI, provider requests still send their context to the selected service, the Codex provider may refresh its credential file, the [`claude-code`, `codex-exec` and `opencode`](models.md#cli-handoff-providers) providers map read-only onto their CLI's own restriction (see there), and the opt-in [`web_fetch`](long-runs.md#web-fetch) tool, which only reads allowlisted URLs, stays available when enabled, as does the read-only [`lsp`](long-runs.md#language-servers-lsp) tool (its servers are still started and write logs under `.tinyagent/lsp`). `--update` is an administrative action outside task-tool policy. Readable secrets (unless hidden with [`file_access`](permissions.md#restricting-file-access) rules), symlinks that point outside `--cwd`, existing lexical path behavior, and AGENTS.md discovery retain their existing limitations; read-only mode does not make an untrusted repository safe.
 
 `model` saves a default model, so `tinyagent -t "fix the failing test"` needs no `-m`. The model is chosen in this order: `-m`/`--model` if given (even `-m openai/gpt-4o`), then a nonempty `$AGENT_MODEL`, then a nonempty `model` in the config, then `openai/gpt-4o`.
 
@@ -69,7 +69,7 @@ token_limit: 0            # max input+output tokens per run, delegates and worke
 wall_time_seconds: 1800
 max_format_errors: 3      # consecutive malformed-call steps before RepeatedFormatError (>= 1)
 bash_timeout_seconds: 120
-max_output_chars: 30000   # tool output is truncated, keeping head and tail
+max_output_chars: 30000   # tool output is truncated (bytes, cut on UTF-8 boundaries), keeping head and tail
 max_output_tokens: 0      # per-request model output budget; 0 = provider default (8192 on anthropic)
 max_truncations: 3        # consecutive cut-off responses before OutputTruncated (>= 1)
 max_background_processes: 4   # start_process processes running at once (0 uses 4)
@@ -78,7 +78,8 @@ output_price_per_mtok: 15
 context_window: 200000    # tokens; overrides the built-in table, used for compaction
 plan:
   enabled: false          # give the model the update_plan tool (same as --plan)
-skills: false             # discover Agent Skills in ./skills and offer the skill tool (same as --skills)
+# skills:                 # unset: on in interactive runs, off in hardened modes; true/false force it
+                          # (a ./tinyagent.yaml true is ignored in hardened modes without --trust-config)
 playbooks: false          # route tasks to playbooks in ./playbooks (same as --playbooks); see docs/playbooks.md
 playbook_fallback: true   # with playbooks: one aux-model call when keywords tie or miss (false = --no-playbook-fallback)
 apply_patch: false        # offer the apply_patch tool (same as --apply-patch)
@@ -89,6 +90,9 @@ memory:                   # project memory; see Project memory (-c, or ./tinyage
   max_writes_per_run: 5   # entries one run may add, replace or forget; >= 1
   max_entries: 50         # active entries kept per project; >= 1
   max_bytes: 8192         # cap on the Project memory prompt section; 1 to 65536
+  backend: markdown       # markdown or sqlite
+  path: .tinyagent/memory # markdown folder; relative to --cwd, must stay inside it
+  sqlite_path: .tinyagent/memory/memory.sqlite  # relative to --cwd, must stay inside it
 handoff:                  # session handoff file; see Session handoff (-c, or ./tinyagent.yaml with --trust-config)
   enabled: false          # read the file at start and rewrite it at the end (same as --handoff)
   path: .tinyagent/handoff.md  # relative to --cwd; must stay inside it
@@ -110,6 +114,7 @@ models:                  # per-role model routing; see Model roles (all optional
     tasks: {}             # per-task override: delegate, worker (e.g. worker: openai/gpt-5-mini)
     fallback_models: []   # the role's own fallback chain for children, at most 3
 chat_history: true       # record chat input in <cwd>/history/chat_history (false is the same as --no-chat-history); see Interactive chat
+chat_markdown: true      # render Markdown in chat replies (false shows raw Markdown, like /raw); see Interactive chat
 ask_user:
   enabled: false          # offer the ask_user tool (same as --ask-user); see Asking for input
   max_questions: 3        # questions per run, counted across resumes; 1 to 20
@@ -158,6 +163,8 @@ claude_code:              # optional; claude-code provider, see CLI handoff prov
   path: ""                # claude binary; empty looks up `claude` on PATH; ~/ is expanded
 codex_exec:               # optional; codex-exec provider
   path: ""                # codex binary; empty looks up `codex` on PATH
+opencode:                 # optional; opencode provider
+  path: ""                # opencode binary; empty looks up `opencode` on PATH (use it to pick a newer OpenCode)
 providers:                # omitted by default; see Named providers
   - id: gateway           # use as -m gateway/<model>
     api: chat             # chat, responses, or anthropic
@@ -222,6 +229,10 @@ profiles:                    # omitted by default; named overlays selected with 
     model: openai/gpt-5-mini
     read_only: true
 ```
+### Workflows
+
+`tinyagent.yaml` has no workflow-specific keys. Stage settings (`model`, `profile`, `step_limit`, `cost_limit`, `token_limit`, `time_limit`, `retries`, `check_timeout`) live in the workflow file passed to `--workflow`, and each stage otherwise uses this config, including `profiles` and `verify_on_stop`. See [Workflows](workflows.md#flags-and-settings).
+
 ### Verify before stop
 
 `verify_on_stop` (or `--verify-on-stop`, `--verify-command`, `--verify-check`, `--max-verify-reprompts`) keeps a run that changed files from finishing until a test or build command has passed, re-prompting the model up to `max_reprompts` times and otherwise marking the run unverified. `verify_on_stop.checks` lists computational checks (lint, type check, tests) that tinyagent runs itself, in order, when the model finishes with unverified changes; see [Computational checks](verify.md#computational-checks). `verify_on_stop.review` (or `--verify-review`) then asks the model once to review the changes, report only; see [Inferential review](verify.md#inferential-review). See [Verify before stop](verify.md#verify-before-stop) for the full rules.

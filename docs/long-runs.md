@@ -49,7 +49,7 @@ tinyagent -t "make current.png match reference.png" --image current.png --image 
 
 ### Tool output files
 
-Tool results longer than `max_output_chars` are cut to a head and tail with a `... [N characters elided] ...` marker, and the middle is lost. `--tool-output-files` (or `tool_output_files.enabled: true`) keeps it: the full result text is saved to a file and the model-visible result becomes a shorter head/tail preview ending in one notice, for example:
+Tool results longer than `max_output_chars` are cut to a head and tail with a `... [N characters elided] ...` marker, and the middle is lost. The limit is measured in bytes, cuts always land on UTF-8 character boundaries (so multibyte text such as CJK or emoji stays valid), and `N` counts the characters removed. `--tool-output-files` (or `tool_output_files.enabled: true`) keeps it: the full result text is saved to a file and the model-visible result becomes a shorter head/tail preview ending in one notice, for example:
 
 ```
 [full output: 184,213 bytes, 2,941 lines, saved to .tinyagent/tool-output/20261025T140307.123Z-a1b2c3/call_abc.txt; use read_file with offset/limit or grep on that path]

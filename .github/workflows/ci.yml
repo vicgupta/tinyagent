@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+# Jobs run in parallel. Expected wall time is a few minutes each; the macOS
+# runner and the -race job are the slowest. The Linux job keeps the
+# build-vet-test name so existing required checks and tooling still match.
 jobs:
   build-vet-test:
     runs-on: ubuntu-latest
@@ -34,3 +37,47 @@ jobs:
         env:
           TINYAGENT_REQUIRE_FISH: "1"
         run: go test -count=1 ./...
+      - name: Tests left the user config directory alone
+        run: |
+          if [ -e "$HOME/.config/tinyagent" ]; then
+            echo "tests wrote into $HOME/.config/tinyagent"
+            ls -la "$HOME/.config/tinyagent"
+            exit 1
+          fi
+
+  build-vet-test-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      # Fish is not installed here; the Fish completion tests skip themselves
+      # when fish is missing and TINYAGENT_REQUIRE_FISH is unset. The Linux job
+      # runs them for real.
+      - name: Test
+        run: go test -count=1 ./...
+      - name: Tests left the user config directory alone
+        run: |
+          dir="$HOME/Library/Application Support/tinyagent"
+          if [ -e "$dir" ]; then
+            echo "tests wrote into $dir"
+            ls -la "$dir"
+            exit 1
+          fi
+
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test with the race detector
+        run: go test -race -count=1 ./...

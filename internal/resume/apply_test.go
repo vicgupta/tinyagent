@@ -39,7 +39,7 @@ func TestApplyPinsRecordedSettings(t *testing.T) {
 				"web_fetch":        cfg.WebFetch.Enabled,
 				"lsp":              cfg.LSP.Enabled,
 				"scoped_agents_md": cfg.ScopedAgentsMD,
-				"skills":           cfg.Skills,
+				"skills":           cfg.SkillsOn(),
 				"memory":           cfg.Memory.Enabled,
 			}
 			for k, v := range got {
@@ -53,7 +53,7 @@ func TestApplyPinsRecordedSettings(t *testing.T) {
 
 func allOnConfig() config.AgentConfig {
 	var c config.AgentConfig
-	c.ReadOnly, c.ApplyPatch, c.ScopedAgentsMD, c.Skills = true, true, true, true
+	c.ReadOnly, c.ApplyPatch, c.ScopedAgentsMD, c.Skills = true, true, true, config.BoolPtr(true)
 	c.Plan.Enabled, c.Images.Enabled, c.Subagents.Enabled = true, true, true
 	c.Subagents.Workers = &config.Workers{Enabled: true}
 	c.AskUser.Enabled, c.WebFetch.Enabled, c.LSP.Enabled, c.Memory.Enabled = true, true, true, true

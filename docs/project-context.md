@@ -24,26 +24,38 @@ Monorepos often keep instructions next to the code they cover, such as `services
 
 ### Agent Skills
 
-With `--skills` (or `skills: true`), tinyagent discovers [Agent Skills](https://agentskills.io): folders containing a `SKILL.md` with YAML frontmatter (`name` and `description`) and Markdown instructions, optionally with `scripts/`, `references/`, or `assets/`. Skills are off by default.
+tinyagent discovers [Agent Skills](https://agentskills.io): folders containing a `SKILL.md` with YAML frontmatter (`name` and `description`) and Markdown instructions, optionally with `scripts/`, `references/`, or `assets/`.
 
-Playbooks and skills are read only from inside the current working directory.
+**When skills are on.** Discovery is on by default only in an interactive run (stdin and stdout are both terminals: `tinyagent` chat, or a one-shot `-t` run typed at a terminal). It is off by default in hardened modes, where untrusted repository content is likely:
 
-- **Location:** `./skills/<name>/SKILL.md` in `--cwd`, nothing else. Parent directories, `.agents/skills` and the home folder (`~/.agents/skills`) are not read. Symlinked skill folders are followed only when they resolve inside `--cwd`; an absolute reference, `..` or a symlink that escapes `--cwd` is refused with a warning. `.claude/skills` is not scanned.
-- **Moving from `.agents/skills`:** earlier versions read `.agents/skills` in `--cwd` and each parent up to the repository root, then `~/.agents/skills`. That was a hard cut: if `./.agents/skills` exists in `--cwd`, tinyagent prints a one-line hint on stderr and doesn't read it. Move those skills to `./skills`.
-- **Locations (plugins):** a configured [plugin](plugins.md#plugins) contributes `<plugin>/skills/<name>/SKILL.md` only when the plugin directory is inside `--cwd`. Plugin skills outside `--cwd` are not read (a warning names the plugin).
-- **Precedence:** on a name clash `./skills` beats plugin skills (earlier plugins beat later ones); each shadowed skill produces a warning naming both paths.
+| Mode | Default |
+| --- | --- |
+| Interactive terminal (chat or `-t`) | on |
+| stdin or stdout not a terminal (piped, scripted, ACP) | off |
+| `CI` or `GITHUB_ACTIONS` set (including the GitHub Action) | off |
+| `--eval` runs and `--attempts` runs | off |
+| `--lockdown` (or `untrusted_content.enabled`) | off |
+| `--read-only` | off |
+
+Precedence is flag > config > mode default: `--skills` turns discovery on in any mode and `--no-skills` turns it off; otherwise `skills: true` or `skills: false` in the config wins; otherwise the mode default above applies. `skills` is tri-state, so leaving it out means "use the mode default". In a hardened mode, `skills: true` from a repository `./tinyagent.yaml` is ignored unless you pass `--trust-config` (it must come from `-c`, a trusted config or `--skills`); `skills: false` is always honored. `tinyagent --check` prints the decision and where it came from (for example `skills:    off (hardened default: CI is set)`), `--check --json` has it as `skills` (`enabled`, `source`, `detail`), and `-v` prints it at the start of a run.
+
+- **Locations:** only `./skills/<name>/SKILL.md` under `--cwd`. Parent directories and your home directory are not scanned. Symlinked skill folders are followed. `.agents/skills` and `.claude/skills` are not scanned; when one exists in `--cwd`, a warning suggests moving or symlinking its skills into `./skills`.
+- **Locations (plugins):** each configured [plugin](plugins.md#plugins) contributes `<plugin>/skills/<name>/SKILL.md`.
+- **Precedence:** on a name clash project skills beat plugin skills (earlier plugins beat later ones); each shadowed skill produces a warning naming both paths.
 - **Validation:** a skill with no description or unparseable frontmatter is skipped with a warning. Name problems (wrong format, mismatch with its folder) only warn. A `SKILL.md` over 1 MiB is skipped.
 - **Progressive disclosure:** only the names and descriptions go into the system prompt (a "Skills" section, capped at 8,000 characters: descriptions are shortened first, then skills are omitted with a warning). The `skill` tool loads one skill's instructions (frontmatter stripped) wrapped in `<skill_content name="...">`, with its directory and up to 100 bundled file paths. `{"name": ..., "file": "references/x.md"}` reads one bundled text file (1 MiB cap; no absolute paths, `..`, or symlinks that leave the skill folder; binaries refused). Results also honor `max_output_chars`. Loading a skill that is still in context returns a short note instead of a second copy.
-- **Other tools are unchanged:** `read_file` and friends stay confined to `--cwd`, and they still honor `file_access`. Run bundled scripts with `bash` as usual.
+- **Other tools are unchanged:** `read_file` and friends stay confined to `--cwd`, so plugin skills outside it are reachable only through the `skill` tool. Run bundled scripts with `bash` as usual.
 - **Read-only and hooks:** the `skill` tool only reads, so it is available with `--read-only`. `pre_tool`/`post_tool` hooks match it as `skill`.
 - **Compaction:** loaded skill instructions are never elided by stage-1 compaction. When old turns are summarized, the latest instructions of each loaded skill are re-attached after the summary (up to 32 KiB combined; any skill left out is named so the model can reload it).
 - **Resume:** the checkpoint records whether skills were enabled and which were found. `--resume` keeps that setting (passing a conflicting `--skills`/`--no-skills` is an error) and refuses to continue if the skills catalog changed. Checkpoints from before this feature resume with skills off.
 - **Playbooks:** a [playbook](playbooks.md) can name skills in `skills:`; they load with the playbook from `./skills` without `--skills`.
 - With no skills found, the prompt and tool list are exactly as without `--skills`. `-v` prints each loaded skill and its path; warnings go to stderr and, with `--json`, as `warning` events.
 
-**Trust:** skill instructions are prompt input. A project skill from a repository you don't trust can steer the agent like a malicious AGENTS.md, and bundled scripts run with your permissions if the agent invokes them. Skill text sent to the model goes to your model provider like any other prompt, and the trajectory records loaded skill content.
+**Trust:** skill instructions are prompt input; that is why discovery is off by default in hardened modes. A project skill from a repository you don't trust can steer the agent like a malicious AGENTS.md, and bundled scripts run with your permissions if the agent invokes them. Skill text sent to the model goes to your model provider like any other prompt, and the trajectory records loaded skill content.
 
 ### Skill workflows
+
+For a task-oriented guide (quick start, paths, routing, flags, events, troubleshooting and examples), see [Workflows](workflows.md). This section is the detailed reference.
 
 For a lighter option, a [playbook](playbooks.md) puts a checklist for one kind of task in the system prompt of a single run, and can hand off to a workflow with `workflow:`.
 

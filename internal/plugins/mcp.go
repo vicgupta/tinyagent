@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/vicgupta/tinyagent/internal/config"
+	"github.com/vicgupta/tinyagent/internal/cwdpath"
 )
 
 // MCPSchemaV1 is the only mcp.json $schema value recognized.
@@ -270,14 +271,42 @@ func resolveCwd(cwd, root, data string) (string, error) {
 	return p, nil
 }
 
-// DataDir returns the plugin's persistent PLUGIN_DATA directory, under the
-// user config directory. It is not created here.
-func DataDir(name string) (string, error) {
+// DataRoot is where plugins keep PLUGIN_DATA, relative to --cwd.
+const DataRoot = ".tinyagent/plugin-data"
+
+// DataDir returns the plugin's persistent PLUGIN_DATA directory,
+// ./.tinyagent/plugin-data/<name> inside cwd (issue #336). A location that
+// would leave cwd (through a symlinked .tinyagent or plugin-data folder) is
+// refused. It is not created here.
+func DataDir(cwd, name string) (string, error) {
+	if !ValidName(name) {
+		return "", fmt.Errorf("invalid plugin name %q", name)
+	}
+	return cwdpath.Resolve(cwd, filepath.Join(filepath.FromSlash(DataRoot), name))
+}
+
+// LegacyDataRoot returns the old PLUGIN_DATA root (tinyagent/plugin-data
+// under the user config directory) when it exists, else "". It is only
+// stat'ed, for a one-line hint; nothing there is read, used or copied.
+func LegacyDataRoot() string {
 	dir, err := os.UserConfigDir()
 	if err != nil {
-		return "", err
+		return ""
 	}
-	return filepath.Join(dir, "tinyagent", "plugin-data", name), nil
+	p := filepath.Join(dir, "tinyagent", "plugin-data")
+	if _, err := os.Stat(p); err != nil {
+		return ""
+	}
+	return p
+}
+
+// LegacyDataHint is the one-line stderr hint for LegacyDataRoot, or "".
+func LegacyDataHint() string {
+	old := LegacyDataRoot()
+	if old == "" {
+		return ""
+	}
+	return fmt.Sprintf("hint: plugin data in %s is no longer used; PLUGIN_DATA is now ./%s/<name> in --cwd (copy a plugin's folder there to keep it)", old, DataRoot)
 }
 
 // Server maps an authorized stdio entry to a tinyagent MCP server

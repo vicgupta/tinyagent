@@ -121,6 +121,8 @@ type AgentConfig struct {
 	// handoff providers (docs/models.md). Unset looks the CLI up on PATH.
 	ClaudeCode HandoffCLI `yaml:"claude_code,omitempty"`
 	CodexExec  HandoffCLI `yaml:"codex_exec,omitempty"`
+	// OpenCode configures the opencode handoff provider the same way.
+	OpenCode HandoffCLI `yaml:"opencode,omitempty"`
 
 	MCPServers []MCPServer `yaml:"mcp_servers,omitempty"`
 
@@ -160,6 +162,9 @@ type AgentConfig struct {
 	// ChatHistory records interactive chat input in <cwd>/history/chat_history
 	// (default on; false or --no-chat-history keeps it in memory only).
 	ChatHistory *bool `yaml:"chat_history,omitempty"`
+	// ChatMarkdown renders chat replies as formatted Markdown (headings,
+	// lists, code blocks, tables); false shows them raw. nil means on.
+	ChatMarkdown *bool `yaml:"chat_markdown,omitempty"`
 	// ScopedAgentsMD also delivers AGENTS.md files in directories below
 	// --cwd with the results of file tools touching paths there (off by
 	// default; --scoped-agents-md overrides it).
@@ -182,9 +187,13 @@ type AgentConfig struct {
 	// results and the read-only lsp tool (off by default; --lsp overrides
 	// Enabled). It comes only from -c or a trusted ./tinyagent.yaml (--trust-config).
 	LSP LSP `yaml:"lsp"`
-	// Skills turns on Agent Skills discovery from ./skills in --cwd (off by
-	// default; --skills / --no-skills override it).
-	Skills bool `yaml:"skills"`
+	// Skills turns Agent Skills discovery from ./skills in the cwd on or
+	// off. It is tri-state: nil (unset) uses the run's mode default (on in
+	// interactive runs, off in non-interactive and hardened runs), and an
+	// explicit true or false overrides it. --skills / --no-skills override
+	// the config; hardened runs ignore skills: true from an untrusted
+	// ./tinyagent.yaml. Use SkillsOn for the resolved value.
+	Skills *bool `yaml:"skills"`
 	// Playbooks turns on playbook routing from ./playbooks in --cwd (off by
 	// default; --playbooks). See docs/playbooks.md.
 	Playbooks bool `yaml:"playbooks"`
@@ -999,7 +1008,7 @@ type HandoffCLI struct {
 }
 
 // BuiltinProviders are reserved and can't be used as a providers[].id.
-var BuiltinProviders = []string{"openai", "openrouter", "anthropic", "ollama", "codex", "claude-code", "codex-exec"}
+var BuiltinProviders = []string{"openai", "openrouter", "anthropic", "ollama", "codex", "claude-code", "codex-exec", "opencode"}
 
 // ErrInvalidProvider wraps every providers validation error, so callers can
 // exit 2 for them.
@@ -1033,31 +1042,15 @@ func Default() AgentConfig {
 	}
 }
 
-// DefaultPath returns the per-user config file, tinyagent/config.yaml under
-// os.UserConfigDir, whether or not it exists.
+// DefaultPath returns the old per-user config file, tinyagent/config.yaml
+// under os.UserConfigDir, whether or not it exists. It is never loaded:
+// Locate only stats it for a hint and tinyagent init --migrate copies it.
 func DefaultPath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(dir, "tinyagent", "config.yaml"), nil
-}
-
-// Find returns the config file to Load: explicit if set, else the per-user
-// config if it exists, else "" for the defaults. A user config that exists
-// but can't be read is still returned, so Load reports it by name.
-func Find(explicit string) string {
-	if explicit != "" {
-		return explicit
-	}
-	p, err := DefaultPath()
-	if err != nil {
-		return ""
-	}
-	if _, err := os.Stat(p); errors.Is(err, fs.ErrNotExist) {
-		return ""
-	}
-	return p
 }
 
 // Load returns the defaults overlaid with the YAML file at path. An empty path
@@ -1469,3 +1462,10 @@ func validEnvName(s string) bool {
 	}
 	return true
 }
+
+// SkillsOn reports whether Agent Skills discovery is on: Skills is set and
+// true. Runs resolve the mode default into Skills before reading it.
+func (c AgentConfig) SkillsOn() bool { return c.Skills != nil && *c.Skills }
+
+// BoolPtr returns a pointer to b, for tri-state settings such as Skills.
+func BoolPtr(b bool) *bool { return &b }

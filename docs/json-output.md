@@ -36,7 +36,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 | `verify.check` | `index` (1-based position in `verify_on_stop.checks`), `command`, `passed`; one per [computational check](verify.md#computational-checks) tinyagent runs when the model finishes with unverified changes, emitted before any `verify.reprompt` |
 | `verify.review` | `findings` (the review text), or `error` when the request failed; the [inferential review](verify.md#inferential-review) that runs once after every computational check passed, report only |
 | `verify.unverified` | `reason`, `reprompts`; the run finishes with unverified changes |
-| `workflow.started` / `stage.started` / `stage.finished` / `workflow.finished` | `--workflow` runs only; see [Skill workflows](project-context.md#skill-workflows). `workflow.finished` has `status` `Passed`, `Failed`, `Blocked` (with `blocked: true`; see [Blocked tasks](project-context.md#blocked-tasks)) or `Interrupted`, plus `failed_stage` and `reason` when a stage stopped the run. `stage.finished` has `unverified: true` when that stage's run ended with [unverified changes](verify.md#default-on-for-workflow-runs). A [behavior stage](project-context.md#verifying-behavior)'s `stage.finished` `check` has `method` `behavior`, `skipped` (no behavioral criteria) and `evidence` (per case: `name`, `criterion`, `argv`, `passed`, `exit_code`, `timed_out`, `stdout`, `stderr`, `failures`) |
+| `workflow.started` / `stage.started` / `stage.finished` / `workflow.finished` | `--workflow` runs only; see [Workflows](workflows.md#output-json-events-and-exit-status) and [Skill workflows](project-context.md#skill-workflows). `workflow.finished` has `status` `Passed`, `Failed`, `Blocked` (with `blocked: true`; see [Blocked tasks](project-context.md#blocked-tasks)) or `Interrupted`, plus `failed_stage` and `reason` when a stage stopped the run. `stage.finished` has `unverified: true` when that stage's run ended with [unverified changes](verify.md#default-on-for-workflow-runs). A [behavior stage](project-context.md#verifying-behavior)'s `stage.finished` `check` has `method` `behavior`, `skipped` (no behavioral criteria) and `evidence` (per case: `name`, `criterion`, `argv`, `passed`, `exit_code`, `timed_out`, `stdout`, `stderr`, `failures`) |
 | `stage.gate` | `--workflow` runs with `gate: spec` on a stage: `stage`, `skill`, `gate` (`spec`), `attempt` (1 for the first plan, 2 for the re-plan), `passed`, `reason` and `missing`; see [Spec gate](project-context.md#spec-gate) |
 | `observer.proposed` / `observer.recurrence` | `--workflow` runs with `--workflow-observe` only, after `workflow.finished` of a `Failed` or `Blocked` run. `observer.proposed` (first time a failure is seen): `id`, `signature`, `stage`, `status`, `rule`, `incident`, `suggested_command` and `file`. `observer.recurrence` (the same failure again): `signature`, `stage`, `count`, `first_seen`, `artifact_id` and, when the proposal was applied, `rule_id`; see [Learning from failures](project-context.md#learning-from-failures) |
 | `memory.saved` | `op` (`add`, `replace` or `forget`), `id`, `status` (`active`, `pending` or `forgotten`), `redacted`, `untrusted_context`; one per successful `remember` write, emitted before its `tool.result`. Never includes entry text |
@@ -80,6 +80,7 @@ Environment: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (any OpenAI-compatible endpoint
   "sandbox": {"enabled": true, "backend": "auto", "available": true, "detail": "bwrap + landlock (ABI 6) (sandbox_backend auto)"},
   "permissions": {"configured": true, "rules": 3, "default": "allow", "non_interactive": "deny"},
   "lockdown": {"enabled": false, "detail": ""},
+  "skills": {"enabled": true, "source": "interactive default"},
   "cwd": "/home/me/project",
   "limits": {"steps": 0, "cost_usd": 0, "tokens": 0, "time_sec": 0},
   "error": null
@@ -98,6 +99,7 @@ Environment: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (any OpenAI-compatible endpoint
 | `sandbox` | `enabled`, the `backend` (`auto`, `landlock`, `bwrap`), whether the engine is `available` on this host, and the text `detail` |
 | `permissions` | Whether rules are `configured`, the rule count and the `default` and `non_interactive` decisions |
 | `lockdown` | Whether untrusted-content lockdown is `enabled`, and the text `detail` |
+| `skills` | Whether [Agent Skills](project-context.md#agent-skills) discovery is `enabled`, its `source` (`flag`, `config`, `interactive default` or `hardened default`) and, when there is one, a `detail` such as `--no-skills` or `CI is set` (added without a schema bump) |
 | `cwd` | The resolved working directory |
 | `limits` | `steps`, `cost_usd`, `tokens`, `time_sec`; `0` means unlimited |
 | `error` | `null`, or `{"message", "hint"}` (`hint` is `""` when there is none) |

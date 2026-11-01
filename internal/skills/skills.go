@@ -1,7 +1,7 @@
 // Package skills discovers Agent Skills (folders holding a SKILL.md) in the
-// ./skills directory inside the working directory, renders the catalog
-// added to the system prompt, and loads a skill's instructions or one of its
-// bundled files for the skill tool.
+// project's ./skills directory (relative to the run's cwd) and in plugins,
+// renders the catalog added to the system prompt, and loads a skill's
+// instructions or one of its bundled files for the skill tool.
 package skills
 
 import (
@@ -18,7 +18,6 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/vicgupta/tinyagent/internal/cwdpath"
 	"github.com/vicgupta/tinyagent/internal/model"
 )
 
@@ -43,7 +42,6 @@ const (
 // Scopes.
 const (
 	ScopeProject = "project"
-	ScopeUser    = "user"
 	ScopePlugin  = "plugin"
 )
 
@@ -54,7 +52,7 @@ const ContentPrefix = "<skill_content name=\""
 type Skill struct {
 	Name        string
 	Description string
-	Scope       string // ScopeProject or ScopePlugin (ScopeUser only in old checkpoints)
+	Scope       string // ScopeProject or ScopePlugin
 	Plugin      string // the plugin's name, for ScopePlugin
 	Dir         string // absolute skill directory
 	Path        string // absolute SKILL.md path
@@ -99,22 +97,19 @@ func (s *Set) Names() []string {
 	return out
 }
 
-// Dir returns the one directory Agent Skills are discovered from: ./skills
-// in root (--cwd). Nothing above root, in .agents or in the home folder is
-// read.
-func Dir(root string) string { return filepath.Join(root, "skills") }
+// Dir is the project skills directory, relative to the run's cwd.
+const Dir = "skills"
 
-// LegacyHint returns a one-line hint when ./.agents/skills exists in root:
-// it is no longer read. Only that directory inside root is stat'ed; nothing
-// outside root (the home folder included) is checked, and nothing in it is
-// read.
-func LegacyHint(root string) string {
-	old := filepath.Join(root, ".agents", "skills")
-	if fi, err := os.Lstat(old); err != nil || !fi.IsDir() {
-		return ""
-	}
-	return fmt.Sprintf("note: skills in %s are no longer read; move them to %s", old, Dir(root))
+// ProjectDirs returns the directories scanned for project skills: only
+// ./skills in root (the run's --cwd). There is no walk up to the
+// repository root and no home-folder scope (#359).
+func ProjectDirs(root string) []string {
+	return []string{filepath.Join(root, Dir)}
 }
+
+// legacyDirs are earlier or other tools' skill locations, relative to the
+// cwd. They are never scanned; finding one only produces a hint.
+var legacyDirs = []string{filepath.Join(".agents", "skills"), filepath.Join(".claude", "skills")}
 
 // Discover scans ./skills in root. Problems never fail discovery: each is
 // returned as a warning and the affected skill is skipped (or loaded, for
@@ -139,30 +134,24 @@ func DiscoverWith(root string, plugins []PluginSource) (*Set, []string) {
 	warn := func(format string, a ...any) { warnings = append(warnings, fmt.Sprintf(format, a...)) }
 	type scan struct{ dir, scope, plugin, root string }
 	var scans []scan
-	scans = append(scans, scan{dir: Dir(root), scope: ScopeProject})
-	for _, p := range plugins {
-		// Skills are read only from inside the working directory: a
-		// plugin whose skills live outside it is skipped.
-		if _, err := cwdpath.Resolve(root, p.Dir); err != nil {
-			if _, statErr := os.Lstat(p.Dir); statErr != nil {
-				continue // no skills folder: nothing to report
-			}
-			warn("skills: plugin %s: %s is outside the working directory; its skills are not read", p.Plugin, p.Dir)
-			continue
+	for _, d := range ProjectDirs(root) {
+		scans = append(scans, scan{dir: d, scope: ScopeProject})
+	}
+	for _, d := range legacyDirs {
+		if fi, err := os.Stat(filepath.Join(root, d)); err == nil && fi.IsDir() {
+			warn("skills: %s is not scanned; move or symlink its skills into ./%s", filepath.ToSlash(d), Dir)
 		}
+	}
+	for _, p := range plugins {
 		scans = append(scans, scan{dir: p.Dir, scope: ScopePlugin, plugin: p.Plugin, root: p.Root})
 	}
 	byName := map[string]int{}
 	var found []Skill
 	seenDir := map[string]bool{}
 	for _, sc := range scans {
-		if _, err := os.Lstat(sc.dir); err != nil {
-			continue // missing scope directory
-		}
-		real, err := cwdpath.Resolve(root, sc.dir)
+		real, err := filepath.EvalSymlinks(sc.dir)
 		if err != nil {
-			warn("skills: %v", err)
-			continue
+			continue // missing (or broken) scope directory
 		}
 		if sc.scope == ScopePlugin {
 			if !within(sc.root, real) {
@@ -175,7 +164,7 @@ func DiscoverWith(root string, plugins []PluginSource) (*Set, []string) {
 			}
 		}
 		if seenDir[real] {
-			continue // the same directory listed twice
+			continue // e.g. a plugin's skills directory is ./skills
 		}
 		seenDir[real] = true
 		entries, err := os.ReadDir(sc.dir)
@@ -191,10 +180,6 @@ func DiscoverWith(root string, plugins []PluginSource) (*Set, []string) {
 			}
 			path := filepath.Join(dir, "SKILL.md")
 			if fi, err := os.Stat(path); err != nil || !fi.Mode().IsRegular() {
-				continue
-			}
-			if _, err := cwdpath.Resolve(root, path); err != nil {
-				warn("skills: skipping %s: %v", dir, err)
 				continue
 			}
 			if sc.scope == ScopePlugin {

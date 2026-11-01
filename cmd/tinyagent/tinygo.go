@@ -9,13 +9,20 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/vicgupta/tinyagent/internal/tinygo"
 	"github.com/vicgupta/tinyagent/internal/tools"
 )
 
-// newTinygoManager is replaced in tests.
-var newTinygoManager = tinygo.Default
+// newTinygoManager and tinygoLegacyHint are replaced in tests.
+var (
+	newTinygoManager = tinygo.Default
+	tinygoLegacyHint = tinygo.LegacyCacheHint
+)
+
+// tinygoHintOnce keeps the old-cache hint to one line per process.
+var tinygoHintOnce sync.Once
 
 // runTinygo handles --tinygo-install, --tinygo-update and --tinygo-status.
 func runTinygo(o *options, stdout, stderr io.Writer) int {
@@ -26,10 +33,15 @@ func runTinygo(o *options, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error:", err)
 		return 2
 	}
-	m, err := newTinygoManager(override)
+	m, err := newTinygoManager(o.cwd, override)
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
+	}
+	if m.Override == "" {
+		if h := tinygoLegacyHint(); h != "" {
+			fmt.Fprintln(stderr, h)
+		}
 	}
 	ctx := context.Background()
 	switch {
@@ -101,12 +113,20 @@ func sandboxRunner(ctx context.Context, writable, workdir string, argv, env []st
 }
 
 // goModuleCompiler builds Go plugin source with TinyGo (resolving the
-// override, the cache or a first-use download) under the OS sandbox.
-func goModuleCompiler(override string, w io.Writer) func(context.Context, map[string][]byte) ([]byte, error) {
+// override, the ./.tinyagent/cache/toolchains cache in root or a first-use
+// download) under the OS sandbox.
+func goModuleCompiler(root, override string, w io.Writer) func(context.Context, map[string][]byte) ([]byte, error) {
 	return func(ctx context.Context, files map[string][]byte) ([]byte, error) {
-		m, err := newTinygoManager(override)
+		m, err := newTinygoManager(root, override)
 		if err != nil {
 			return nil, err
+		}
+		if m.Override == "" {
+			tinygoHintOnce.Do(func() {
+				if h := tinygoLegacyHint(); h != "" {
+					fmt.Fprintln(w, h)
+				}
+			})
 		}
 		bin, from, err := m.Resolve(ctx, true)
 		if err != nil {

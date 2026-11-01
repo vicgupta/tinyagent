@@ -1,25 +1,15 @@
 package skills
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-var pluginN int
-
-// pluginRoot returns a fresh plugin root inside cwd: plugin skills are read
-// only from inside the working directory.
-func pluginRoot(t *testing.T, cwd string) string {
+func pluginRoot(t *testing.T) string {
 	t.Helper()
-	pluginN++
-	dir := filepath.Join(cwd, "plugins", fmt.Sprint(pluginN))
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	root, err := filepath.EvalSymlinks(dir)
+	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +18,7 @@ func pluginRoot(t *testing.T, cwd string) string {
 
 func TestDiscoverPluginSkills(t *testing.T) {
 	_, cwd := repo(t)
-	root := pluginRoot(t, cwd)
+	root := pluginRoot(t)
 	write(t, filepath.Join(root, "skills/a/SKILL.md"), skillMD("a", "Skill a.", "body a"))
 	write(t, filepath.Join(root, "skills/a/notes.txt"), "notes")
 	write(t, filepath.Join(root, "skills/b/SKILL.md"), "---\nname: b\n---\nno description\n")
@@ -46,7 +36,7 @@ func TestDiscoverPluginSkills(t *testing.T) {
 	if k.Scope != ScopePlugin || k.Plugin != "kit" {
 		t.Errorf("skill %+v", k)
 	}
-	if countContaining(warnings, "skipping "+filepath.Join(root, "skills/b")) != 1 || countContaining(warnings, "evil") != 1 || countContaining(warnings, "outside the working directory") != 1 {
+	if countContaining(warnings, "skipping "+filepath.Join(root, "skills/b")) != 1 || countContaining(warnings, "evil") != 1 || countContaining(warnings, "outside the plugin root") != 1 {
 		t.Errorf("warnings %q", warnings)
 	}
 	if got, err := set.Load("a", "notes.txt"); err != nil || got != "notes" {
@@ -59,8 +49,9 @@ func TestDiscoverPluginSkills(t *testing.T) {
 
 func TestDiscoverPluginPrecedence(t *testing.T) {
 	_, cwd := repo(t)
-	write(t, filepath.Join(cwd, "skills/review/SKILL.md"), skillMD("review", "Project review.", ""))
-	p1, p2 := pluginRoot(t, cwd), pluginRoot(t, cwd)
+	user := filepath.Join(cwd, "skills")
+	write(t, filepath.Join(user, "review/SKILL.md"), skillMD("review", "Project review.", ""))
+	p1, p2 := pluginRoot(t), pluginRoot(t)
 	write(t, filepath.Join(p1, "skills/review/SKILL.md"), skillMD("review", "Plugin review.", ""))
 	write(t, filepath.Join(p1, "skills/lint/SKILL.md"), skillMD("lint", "First lint.", ""))
 	write(t, filepath.Join(p2, "skills/lint/SKILL.md"), skillMD("lint", "Second lint.", ""))
@@ -74,31 +65,18 @@ func TestDiscoverPluginPrecedence(t *testing.T) {
 	if k, _ := set.Get("lint"); k.Plugin != "one" {
 		t.Errorf("lint from %+v", k)
 	}
-	if countContaining(warnings, "shadowed by "+filepath.Join(cwd, "skills/review")) != 1 || countContaining(warnings, "shadowed by "+filepath.Join(p1, "skills/lint")) != 1 {
+	if countContaining(warnings, "shadowed by "+filepath.Join(user, "review")) != 1 || countContaining(warnings, "shadowed by "+filepath.Join(p1, "skills/lint")) != 1 {
 		t.Errorf("warnings %q", warnings)
-	}
-}
-
-func TestDiscoverPluginOutsideCwdNotRead(t *testing.T) {
-	_, cwd := repo(t)
-	outside, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	write(t, filepath.Join(outside, "skills/far/SKILL.md"), skillMD("far", "Far.", ""))
-	set, warnings := DiscoverWith(cwd, []PluginSource{{Plugin: "far", Root: outside, Dir: filepath.Join(outside, "skills")}})
-	if set.Len() != 0 || countContaining(warnings, "outside the working directory") != 1 {
-		t.Errorf("set %v, warnings %q", set.Names(), warnings)
 	}
 }
 
 func TestDiscoverPluginSkillsDirProblems(t *testing.T) {
 	_, cwd := repo(t)
-	root := pluginRoot(t, cwd)
+	root := pluginRoot(t)
 	write(t, filepath.Join(root, "skills"), "not a dir")
 	outside := t.TempDir()
 	write(t, filepath.Join(outside, "x/SKILL.md"), skillMD("x", "X.", ""))
-	root2 := pluginRoot(t, cwd)
+	root2 := pluginRoot(t)
 	if err := os.Symlink(outside, filepath.Join(root2, "skills")); err != nil {
 		t.Skip(err)
 	}

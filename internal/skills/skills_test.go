@@ -46,40 +46,45 @@ func countContaining(ws []string, sub string) int {
 	return n
 }
 
-func TestDiscoverReadsOnlyCwdSkills(t *testing.T) {
+func TestDiscoverScansOnlyCwdSkills(t *testing.T) {
 	root, cwd := repo(t)
-	write(t, filepath.Join(cwd, "skills/local/SKILL.md"), skillMD("local", "Local skill.", "x"))
-	// Never scanned: the repo root above cwd, the old .agents/skills, and
-	// the home folder.
-	write(t, filepath.Join(root, "skills/release/SKILL.md"), skillMD("release", "Cut a release.", "Steps"))
-	write(t, filepath.Join(cwd, ".agents/skills/old/SKILL.md"), skillMD("old", "Old.", "x"))
+	write(t, filepath.Join(cwd, "skills/release/SKILL.md"), skillMD("release", "Cut a release.", "Steps"))
+	write(t, filepath.Join(cwd, "skills/notaskill/README.md"), "no SKILL.md")
+	// Never scanned (#359): parents up to the repository root, .agents and
+	// .claude skill folders, and the home folder.
+	write(t, filepath.Join(root, "skills/up/SKILL.md"), skillMD("up", "Parent.", "x"))
+	write(t, filepath.Join(root, ".agents/skills/agents-root/SKILL.md"), skillMD("agents-root", "no", "x"))
+	write(t, filepath.Join(cwd, ".agents/skills/agents/SKILL.md"), skillMD("agents", "no", "x"))
+	write(t, filepath.Join(cwd, ".claude/skills/claude/SKILL.md"), skillMD("claude", "no", "x"))
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	write(t, filepath.Join(home, ".agents/skills/mine/SKILL.md"), skillMD("mine", "Mine.", "x"))
-	write(t, filepath.Join(home, "skills/mine2/SKILL.md"), skillMD("mine2", "Mine.", "x"))
-	write(t, filepath.Join(cwd, "skills/notaskill/README.md"), "no SKILL.md")
+	t.Setenv("USERPROFILE", home)
+	write(t, filepath.Join(home, ".agents/skills/home/SKILL.md"), skillMD("home", "no", "x"))
+	write(t, filepath.Join(home, "skills/home2/SKILL.md"), skillMD("home2", "no", "x"))
 	set, warns := Discover(cwd)
-	if got := strings.Join(set.Names(), ","); got != "local" {
+	if got := strings.Join(set.Names(), ","); got != "release" {
 		t.Errorf("names = %s, warnings %v", got, warns)
 	}
-	k, _ := set.Get("local")
-	if k.Scope != ScopeProject || k.Path != filepath.Join(cwd, "skills/local/SKILL.md") || k.Description != "Local skill." {
-		t.Errorf("local = %+v", k)
+	k, _ := set.Get("release")
+	if k.Scope != ScopeProject || k.Path != filepath.Join(cwd, "skills/release/SKILL.md") || k.Description != "Cut a release." {
+		t.Errorf("release = %+v", k)
+	}
+	if countContaining(warns, ".agents/skills is not scanned") != 1 || countContaining(warns, ".claude/skills is not scanned") != 1 || len(warns) != 2 {
+		t.Errorf("warnings = %q", warns)
+	}
+	if got := ProjectDirs(cwd); len(got) != 1 || got[0] != filepath.Join(cwd, "skills") {
+		t.Errorf("ProjectDirs = %q", got)
 	}
 }
 
-func TestLegacyHint(t *testing.T) {
-	_, cwd := repo(t)
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	write(t, filepath.Join(home, ".agents/skills/mine/SKILL.md"), skillMD("mine", "Mine.", "x"))
-	if h := LegacyHint(cwd); h != "" {
-		t.Errorf("home folder checked: %q", h)
-	}
-	write(t, filepath.Join(cwd, ".agents/skills/old/SKILL.md"), skillMD("old", "Old.", "x"))
-	h := LegacyHint(cwd)
-	if !strings.Contains(h, "no longer read") || !strings.Contains(h, filepath.Join(cwd, "skills")) || strings.Contains(h, home) {
-		t.Errorf("hint = %q", h)
+func TestDiscoverWithoutGitScansOnlyRoot(t *testing.T) {
+	parent := t.TempDir()
+	cwd := filepath.Join(parent, "sub")
+	write(t, filepath.Join(parent, "skills/up/SKILL.md"), skillMD("up", "d", "x"))
+	write(t, filepath.Join(cwd, "skills/here/SKILL.md"), skillMD("here", "d", "x"))
+	set, _ := Discover(cwd)
+	if got := strings.Join(set.Names(), ","); got != "here" {
+		t.Errorf("names = %s", got)
 	}
 }
 
@@ -112,7 +117,7 @@ func TestLenientNameValidation(t *testing.T) {
 
 func TestSymlinkedSkillDirAndSizeCap(t *testing.T) {
 	_, cwd := repo(t)
-	target := filepath.Join(cwd, "elsewhere", "linked")
+	target := filepath.Join(t.TempDir(), "linked")
 	write(t, filepath.Join(target, "SKILL.md"), skillMD("linked", "via symlink", "b"))
 	if err := os.MkdirAll(filepath.Join(cwd, "skills"), 0o755); err != nil {
 		t.Fatal(err)
@@ -120,18 +125,12 @@ func TestSymlinkedSkillDirAndSizeCap(t *testing.T) {
 	if err := os.Symlink(target, filepath.Join(cwd, "skills/linked")); err != nil {
 		t.Skip("symlinks unsupported:", err)
 	}
-	// A symlink that escapes cwd is refused with a warning.
-	escape := filepath.Join(t.TempDir(), "escape")
-	write(t, filepath.Join(escape, "SKILL.md"), skillMD("escape", "outside", "b"))
-	if err := os.Symlink(escape, filepath.Join(cwd, "skills/escape")); err != nil {
-		t.Fatal(err)
-	}
 	write(t, filepath.Join(cwd, "skills/huge/SKILL.md"), skillMD("huge", "big", strings.Repeat("x", MaxSkillFileBytes)))
 	set, warns := Discover(cwd)
 	if got := strings.Join(set.Names(), ","); got != "linked" {
 		t.Errorf("names = %s", got)
 	}
-	if len(warns) != 2 || countContaining(warns, "byte limit") != 1 || countContaining(warns, "outside the working directory") != 1 {
+	if len(warns) != 1 || !strings.Contains(warns[0], "byte limit") {
 		t.Errorf("warnings = %q", warns)
 	}
 }

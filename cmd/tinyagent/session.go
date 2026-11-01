@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/vicgupta/tinyagent/internal/agent"
 	"github.com/vicgupta/tinyagent/internal/config"
@@ -66,6 +65,9 @@ type session struct {
 
 // sessionMode holds what a front end (ACP) changes in session setup.
 type sessionMode struct {
+	// interactive is a chat session on a terminal: skills default on there
+	// (#359); ACP sessions are driven by an editor and default off.
+	interactive    bool
 	setupLockdown  func(cfg *config.AgentConfig) (*lockdown.State, error)
 	beforeWebFetch func(cfg *config.AgentConfig)
 	beforeEnvCheck func(cfg *config.AgentConfig)
@@ -139,7 +141,7 @@ func (s *session) setup(ctx context.Context, m sessionMode) (err error) {
 	if s.webFetch, err = newWebFetcher(fs, *o, &cfg); err != nil {
 		return err
 	}
-	if err := checkPlugins(&cfg, os.Stderr, o.verbose, true); err != nil {
+	if err := checkPlugins(&cfg, o.cwd, os.Stderr, o.verbose, true); err != nil {
 		return err
 	}
 	if flagWasSet(fs, "lsp") {
@@ -151,8 +153,12 @@ func (s *session) setup(ctx context.Context, m sessionMode) (err error) {
 	if err := lspError(cfg, cfgPath); err != nil {
 		return err
 	}
-	if on, set, _ := skillsFlag(fs, *o); set {
-		cfg.Skills = on
+	skillsDec := applySkillsDefault(fs, *o, &cfg, cfgSrc, skillsMode{
+		Interactive: m.interactive,
+		Hardened:    hardenedReason(false, false, cfg.UntrustedContent.Enabled, cfg.ReadOnly),
+	})
+	if o.verbose {
+		fmt.Fprintln(os.Stderr, "skills:", skillsDec)
 	}
 	if flagWasSet(fs, "memory") {
 		cfg.Memory.Enabled = o.memory.enabled
@@ -199,7 +205,7 @@ func (s *session) setup(ctx context.Context, m sessionMode) (err error) {
 	if s.helpers, err = newHelpers(cfg, s.modelName, cfg.ReasoningEffort); err != nil {
 		return err
 	}
-	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
+	model.DefaultRuntime.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 	if s.outputFiles, err = toolOutputFiles(fs, *o, cfg, root); err != nil {
 		return err
 	}
@@ -303,33 +309,25 @@ func (s *session) turnAgent(cfg config.AgentConfig, images []model.Image, r turn
 		Profile:         o.profile,
 		ProviderAPI:     s.providerAPI,
 		ProviderBaseURL: s.providerBaseURL,
-		Tools: &tools.Executor{
-			Root:               s.root,
-			ReadOnly:           cfg.ReadOnly,
-			Env:                s.env,
-			BashTimeout:        time.Duration(cfg.BashTimeoutSec) * time.Second,
-			MaxOutputChars:     cfg.MaxOutputChars,
-			MaxProcesses:       cfg.MaxBackgroundProcesses,
-			ExternalSpecs:      s.extSpecs,
-			ExternalCall:       s.extCall,
-			Plan:               cfg.Plan.Enabled,
-			Images:             cfg.Images.Enabled,
-			ApplyPatch:         cfg.ApplyPatch,
-			Delegate:           s.subagents != nil,
-			TaskTypes:          taskTypes(s.cfg, s.subagents, s.workers),
-			Workers:            s.workers != nil,
-			AskUser:            cfg.AskUser.Enabled, // always off in ACP sessions
-			WebFetch:           s.webFetch,
-			LSP:                newLSP(cfg, s.root), // a turn's end stops them
-			OutputFiles:        s.outputFiles,
-			FileAccess:         s.fileAccess,
-			ExtraDirs:          s.extraDirs,
-			MaxImageBytes:      cfg.MaxImageBytes,
-			ExternalCallImages: s.mcp.CallImages(cfg.MaxImageBytes),
-			Redactor:           s.redactor,
-			CommandTools:       s.cmdTools,
-			CommandLog:         commandLog(o.verbose),
-		},
+		// AskUser is always off in ACP sessions; a turn's end stops its LSP
+		// servers, so each turn starts its own.
+		Tools: newRunExecutor(cfg, toolWiring{
+			root:        s.root,
+			env:         s.env,
+			cmdTools:    s.cmdTools,
+			commandLog:  commandLog(o.verbose),
+			extSpecs:    s.extSpecs,
+			extCall:     s.extCall,
+			mcp:         s.mcp,
+			subagents:   s.subagents,
+			workers:     s.workers,
+			webFetch:    s.webFetch,
+			lsp:         newLSP(cfg, s.root),
+			outputFiles: s.outputFiles,
+			fileAccess:  s.fileAccess,
+			extraDirs:   s.extraDirs,
+			redactor:    s.redactor,
+		}),
 		RedactSecrets:  s.redactInfo,
 		Config:         cfg,
 		Hooks:          s.hooks,

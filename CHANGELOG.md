@@ -1,10 +1,10 @@
 # Changelog
 
-## Unreleased
+## [Unreleased]
 
-### Breaking Changes
+### Docs
 
-- **BREAKING:** `--skills` reads Agent Skills only from `./skills` in `--cwd`. `.agents/skills`, `~/.agents/skills`, the parent-folder walk-up and plugin skills outside `--cwd` are no longer read (hard cut). When `./.agents/skills` exists in `--cwd`, a one-line hint says to move those skills to `./skills`; a plugin whose skills are outside `--cwd` gets a warning. Resume uses the same rule.
+- New [Setting up workflows](docs/workflow-guide.md) guide. It covers where the files live, required and defaulted fields, how to run a workflow (`-t`, `--workflow-name`, `-o`, `--workflow-observe`) and its limits, with three worked examples: one stage, a few stages with checks and retries, and the full plan → code → vet → test → verify-behavior pipeline. `TestWorkflowGuideExamples` loads every example so the guide can't drift from the loader. Linked from the README and docs/workflows.md.
 
 ### Features
 
@@ -12,7 +12,98 @@
 - `tinyagent playbooks list | validate <path> | install samples [--force]` (flags `--playbooks-list`, `--playbooks-validate`, `--playbooks-install`, `--playbooks-force`): no model call; bare `tinyagent playbooks` prints help.
 - Sample playbook pack: `bug-fix`, `feature`, `refactor`, `open-pr`, `babysit-pr` and `investigate`, embedded and installed on request, with copies in `docs/playbooks/`.
 - pstack support: a pstack checkout under `./playbooks` is read as-is (never copied), with skills from the checkout's `skills/`; unreadable files are skipped with a warning, and a playbook you wrote wins a name clash.
-- Cwd-only discovery: playbooks and skills are read only from inside the current working directory; absolute paths, `..` and symlinks that escape `--cwd` are refused with a warning.
+- Cwd-only playbook discovery: playbooks are read only from `./playbooks` inside `--cwd`; absolute paths, `..` and symlinks that escape `--cwd` are refused with a warning, and a playbook's `workflow:` must be a relative path inside `--cwd`. Playbook skills load from `./skills`, following the Agent Skills rules above.
+
+### Behaviour changes
+
+- **Behaviour change:** [Agent Skills](docs/project-context.md#agent-skills) discovery is hybrid. It is on by default in interactive runs (stdin and stdout on a terminal, including chat) and off by default in hardened modes: non-TTY runs, `CI` or `GITHUB_ACTIONS` set (including the GitHub Action), `--eval`, `--attempts`, `--lockdown` and `--read-only`. Precedence is flag > config > mode default: `--skills` turns it on in any mode, `--no-skills` or `skills: false` turns it off. The `skills` config key is now tri-state (unset means the mode default). In hardened modes `skills: true` from a repository `./tinyagent.yaml` is ignored unless `--trust-config` is set. `--check` prints a `skills:` line with the decision and its source, `--check --json` adds a `skills` object (`enabled`, `source`, `detail`), and `-v` prints it at run start. Checkpoints that recorded skills off (including those from before skills existed) still resume with skills off (#359).
+- **Behaviour change:** Agent Skills are discovered only in `./skills/<name>/SKILL.md` under `--cwd`. `.agents/skills` in `--cwd` and its parents and the per-user `~/.agents/skills` are no longer scanned; when `.agents/skills` or `.claude/skills` exists in `--cwd`, a warning suggests moving or symlinking its skills into `./skills`. Plugin skills are unchanged (#359).
+
+## [v0.16.0] - 2026-10-31
+
+### Breaking
+
+Migration in short: move `./memory` contents into `./.tinyagent/memory`; move `memory.toml` into the project (or point `$TINYAGENT_MEMORY_CONFIG` inside `--cwd`) and copy plugin data to `./.tinyagent/plugin-data/<name>`; re-download TinyGo with `tinyagent tinygo install`. Consider adding `.tinyagent/` to `.gitignore`.
+
+
+- Project memory lives only in `./.tinyagent/memory` inside `--cwd` (SQLite default `./.tinyagent/memory/memory.sqlite`). **Hard cut:** the old `./memory` folder and the old per-user JSON store (`$XDG_STATE_HOME/tinyagent/memory`, `~/.local/state/tinyagent/memory`, or the user config directory on macOS and Windows) are no longer read or imported. If the new store doesn't exist and `./memory` holds entries, one stderr `hint:` line names the new location; nothing is moved. Nothing outside `--cwd` is stat'ed, read or written for memory. Store paths that are absolute, contain `..` or resolve through a symlink outside `--cwd` are refused with a warning. `import_legacy` is still accepted but does nothing. See [Project memory](docs/memory.md#store-location) (#335).
+- **BREAKING (hard cut):** `memory.toml` and plugin data are read only from inside `--cwd`. `memory.toml` is `$TINYAGENT_MEMORY_CONFIG` (now relative to `--cwd`, or absolute inside it) or `./memory.toml`; `tinyagent/memory.toml` in the user config directory is no longer read. A plugin's `PLUGIN_DATA` is now `./.tinyagent/plugin-data/<name>` instead of `<user config dir>/tinyagent/plugin-data/<name>`. Nothing is migrated: when a file or folder exists in an old location, one stderr `hint:` line names the new one. Paths that leave `--cwd` (absolute paths elsewhere, `..`, symlinks) are refused with a warning (`memory.toml`) or a config error (`PLUGIN_DATA`). The unused `config.Find` (per-user `config.yaml` lookup) is removed. See [Memory settings](docs/memory.md#project-memory) and [Plugins](docs/plugins.md) (#336).
+- **BREAKING (hard cut):** the TinyGo toolchain used to build Go plugin modules is cached in `./.tinyagent/cache/toolchains` inside `--cwd` instead of `os.UserCacheDir()/tinyagent/toolchains` (for example `~/.cache/tinyagent/toolchains`). A toolchain in the old cache is not reused or copied: when that folder exists, `tinyagent tinygo` and the first Go module build of a run print one stderr `hint:` line naming the new location, and the next build downloads the pinned release again (or run `tinyagent tinygo install`). A `.tinyagent` or cache folder that resolves through a symlink outside `--cwd` is refused. The `tinygo` config key and `TINYAGENT_TINYGO` are unchanged and may still point at a TinyGo installed anywhere. See [Managing TinyGo](docs/wasm-plugins.md#managing-tinygo) (#337).
+
+### Fixes
+
+- `opencode` provider: works with OpenCode v2. tinyagent passed `opencode run --dir <cwd>`, which the v2 CLI rejects (`Unrecognized flag: --dir in command opencode run`) and which OpenCode before v1.2.0 never had; it now passes no `--dir` and runs `opencode` in `--cwd` instead. If `--format json` is rejected by an old OpenCode, the run is retried once without it and the plain-text answer is used. A single name after `opencode/` is now an OpenCode [Zen](https://opencode.ai/docs/zen/) model (`-m opencode/big-pickle` sends `--model opencode/big-pickle`; `opencode/opencode/big-pickle` works too). A non-zero exit now reports the `opencode --version` and path and suggests upgrading OpenCode or setting `opencode.path`. See [opencode](docs/models.md#opencode) and [OpenCode CLI](https://opencode.ai/docs/cli/) (#355).
+- Workflow skill files: backticks and fenced code blocks are handled correctly. The skill parser used to read lines inside ```` ``` ```` / `~~~` fences as the skill's heading, `Intent:`, `Inputs` or `Success check:`, so a fenced example could replace the real inputs or success check, and a `# comment` in a fence could become the title. Fenced lines are now skipped by the parser (and still sent verbatim to the model), and bold around an inline code span (`` **`make test`** passes ``) no longer leaves stray `**` in the intent or success check. See [Markdown and backticks](docs/workflows.md#skill-files-markdown) (#353).
+
+### Documentation
+
+- Workflows are documented in the CLI and in a new [docs/workflows.md](docs/workflows.md) guide (what they are, quick start, file format and cwd-relative paths, routing, flags and settings, `--workflow-observe`, JSON events, interaction with chat and other flags, troubleshooting, examples). New `tinyagent help workflows` help topic; brief `--help` shows a workflow example and points at it; `--workflow`, `--workflow-name` and `tinyagent skills` help gain examples. Linked from the README, `docs/subcommands.md`, `docs/config.md`, `docs/json-output.md` and `docs/project-context.md`. `TestWorkflowHelpCoversEveryFlag` keeps the topic and page in sync with the workflow flags and events (#353).
+
+### Other
+
+- CI also runs build, vet and tests on macOS (`build-vet-test-macos`) and the full suite with the race detector (`race`) (#314, #348).
+- Internal: the telemetry exporter is split into span, transport and API modules with a transport seam; no behavior change (#319, #351).
+- Makefile matches CI: `make test` runs `go test -count=1 ./...`; new `make test-race`, `make fmt` (fails on unformatted files) and `make lint` (`go vet` plus `staticcheck` when installed) targets; staticcheck findings fixed; `makefile_test.go` keeps targets in sync with CI (#318, #357).
+
+## [v0.15.1] - 2026-10-31
+
+### Fixes
+
+- Interactive chat (`tinyagent chat` / `-i`): typing at the `›` prompt no longer prints a new line on every keystroke. The prompt starts with a blank line, and the line editor rewrote that newline on each redraw; it is now written once and only the prompt line is redrawn in place. Redraw also measures the prompt and input in terminal columns (escape codes stripped, CJK/emoji widths), so the cursor lands correctly after wide characters, and lines longer than the terminal wrap and redraw correctly. Regression in v0.15.0 (#346); `--color` and `NO_COLOR` are unchanged.
+
+## [v0.15.0] - 2026-10-31
+
+### Features
+
+- Prettier interactive chat: replies render Markdown for the terminal (headings, bold/italic, inline and fenced code with a language label and light highlighting, nested and task lists, blockquotes, links with their URL (OSC 8 hyperlinks where the terminal supports them), rules and tables), wrapped to the terminal width and rendered block by block as they stream. New `/raw` command and `chat_markdown` config key to show raw Markdown instead. Also: a clearer banner, a `›` prompt, a thinking spinner and a one-line tool activity summary per step, readable errors with a retry hint, formatted `/help` and `/cost`, and an exit summary with the saved path and resume command. Respects `--color` and `NO_COLOR` (plain ASCII structure, no escape codes); enables VT processing on Windows. `--json` output and saved transcripts are unchanged (raw Markdown). New package `internal/termmd`, no new dependencies (#346).
+
+### Fixes
+
+- Tool output truncation is rune-safe: multibyte output (CJK, emoji) is no longer cut mid-character, and the elided count is in characters; one shared implementation in `internal/tools/truncate.go` (#344, closes #312).
+
+### Documentation
+
+- README and CONTRIBUTING list all ten base tools and current dependencies, in sync with the code (#345, closes #313).
+
+### Other
+
+- Internal refactor with no behavior change: provider HTTP client, retries and price table move from package globals onto an injected `model.Runtime` (#343, closes #311).
+
+## [v0.14.0] - 2026-10-31
+
+### Features
+
+- OpenCode handoff provider (#341): `-m opencode/<provider>/<model>` (or `opencode/default`) runs your installed `opencode run --format json` in `--cwd` and returns its final answer, tokens and cost; `--read-only` maps to OpenCode's `plan` agent plus an inline permission config denying edits, commands and network tools. Binary from PATH or `opencode.path`; `tinyagent --check` shows the binary and its version. OpenCode's credentials are never read or copied. See [docs/models.md](docs/models.md#opencode).
+
+### Other
+
+- Internal refactor with no behavior change: fresh runs, `--resume` and chat/ACP sessions build their tool executor through one shared builder, so MCP, plugin and command-tool wiring can't drift between them (#340, closes #310).
+
+## [v0.13.0] - 2026-10-31
+
+### Features
+
+- Interactive chat mode (#302, closes #300): `tinyagent chat` / `-i, --interactive` with a built-in line editor and Up/Down history (`<cwd>/history/chat_history`, `--no-chat-history` / `chat_history: false`), checkpoints auto-saved to `.tinyagent/chats/`, `--resume`, per-turn limits, Ctrl-C to cancel a turn, and slash commands `/help /exit /quit /cost /new /clear /save /compact`. Refuses without a TTY or with conflicting flags (exit 2).
+- Issue triage (#303, closes #277): `tinyagent triage <issues.json>` / `--triage` ranks `gh issue list --json` output into a deterministic next-up list (`schema_version: 1` JSON plus a Markdown table) with reasons per entry and `stale`, `duplicate-of:#N`, `blocked` and `pull-request` flags. Offline, no model call; `--triage-out`, `--triage-stale-days`.
+- Workflow observer (#305, closes #278): `--workflow-observe` turns a `Failed` or `Blocked` `--workflow` run into one proposed ratchet rule with a ready-to-run `tinyagent ratchet add` command, keeps a ledger in `.tinyagent/observer/`, and flags recurring failures; new `observer.proposed` and `observer.recurrence` events. Rules are never applied automatically.
+- Contract docs in skill workflows (#315, closes #281): new `write-contract` skill and `contract` workflow; `plan-tasks` reads contract docs from `contracts_dir` and flags stale ones.
+- Workflow stage attempts record `unverified` in the `-o` record and `stage.finished` event (#321), report only.
+
+### Changes
+
+- **Behavior change for `--workflow` (#321, closes #284):** verify-on-stop is now on by default for every workflow stage; pass `--verify-on-stop=false` to opt out. Plain interactive and headless runs are unchanged (still off by default).
+- Chat and ACP sessions now offer the config's `command_tools` on every turn (#324); read-only sessions still don't.
+- Checkpoints taken with workers on now resume instead of failing with "tool set has changed" (#322, closes #306).
+- `--resume` compatibility checks have one owner, `internal/resume` (#333, #334, #338, part of #310). Messages and exit codes are unchanged, except that `--no-agents-md` now reads "conflicts with the checkpoint's recorded loading mode" and, with several conflicts, a different one may be reported first.
+
+### Documentation
+
+- The 256 KiB MCP result cap is documented for `--tool-output-files` (#316, closes #282).
+- Short PR body template in `.github/pull_request_template.md` (#320, closes #283).
+
+### Other
+
+- Internal refactors with no behavior change: shared session setup for ACP and chat (#301, closes #299), `tools.Selection` owns the tool catalog and resume fingerprint (#322), a single `Executor.RunResult` entry point (#323, closes #307), `agent.New(Options)` validates construction invariants (#324, closes #308), and `Executor.Child(ChildSpec)` for delegate and worker executors (#325, closes #309).
 
 ## [v0.12.0] - 2026-10-31
 

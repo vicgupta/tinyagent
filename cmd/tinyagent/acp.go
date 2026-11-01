@@ -268,7 +268,7 @@ func (s *acpSession) Prompt(ctx context.Context, p acp.Prompt, u *acp.Updates) (
 	if s.turn == 1 {
 		startOutputFiles(s.outputFiles, cfg.ToolOutputFiles.MaxRuns, warn)
 	}
-	if cfg.Skills {
+	if cfg.SkillsOn() {
 		loadSkills(a, s.root, pluginSkillSources(cfg), warn)
 	}
 	s.memoryTurn(a, prev, events, warn, s.clientMCP)

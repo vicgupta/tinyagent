@@ -7,8 +7,9 @@
 // and never committed to the repository. TinyAgent downloads the pinned
 // release below on first use (or with `tinyagent tinygo install`), checks
 // it against the SHA-256 pinned in this file before extracting anything,
-// and caches it under the user cache directory. An existing TinyGo can be
-// used instead with the tinygo config key or TINYAGENT_TINYGO.
+// and caches it in ./.tinyagent/cache/toolchains inside --cwd (see
+// CacheSubdir). An existing TinyGo can be used instead with the tinygo
+// config key or TINYAGENT_TINYGO.
 //
 // Bumping the pinned version: set Version, replace every Checksums entry
 // with the sha256 of the matching tinygo<ver>.<os>-<arch>.tar.gz release
@@ -30,6 +31,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/vicgupta/tinyagent/internal/cwdpath"
 )
 
 // Version is the pinned TinyGo release.
@@ -70,22 +73,53 @@ type Manager struct {
 	HTTP      *http.Client
 }
 
+// CacheSubdir is where the toolchain is cached, relative to --cwd.
+const CacheSubdir = ".tinyagent/cache/toolchains"
+
 // Default is the Manager for this build: the pinned release, cached under
-// os.UserCacheDir()/tinyagent/toolchains, with override (config) or
-// TINYAGENT_TINYGO taking precedence.
-func Default(override string) (*Manager, error) {
-	dir, err := os.UserCacheDir()
+// ./.tinyagent/cache/toolchains in cwd, with override (config) or
+// TINYAGENT_TINYGO taking precedence. The override is an executable and is
+// used as given (it may be a system-wide install). A cache directory that
+// would leave cwd (for example .tinyagent being a symlink to elsewhere) is
+// refused. Nothing in the user cache directory is used.
+func Default(cwd, override string) (*Manager, error) {
+	dir, err := cwdpath.Resolve(cwd, CacheSubdir)
 	if err != nil {
-		return nil, fmt.Errorf("tinygo: no user cache directory: %w", err)
+		return nil, fmt.Errorf("tinygo: toolchain cache %s: %w", CacheSubdir, err)
 	}
 	if override == "" {
 		override = os.Getenv(EnvOverride)
 	}
 	return &Manager{
-		CacheDir: filepath.Join(dir, "tinyagent", "toolchains"),
+		CacheDir: dir,
 		BaseURL:  DefaultBaseURL, Version: Version, Checksums: Checksums,
 		GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, Override: override,
 	}, nil
+}
+
+// LegacyCacheDir returns the old toolchain cache,
+// os.UserCacheDir()/tinyagent/toolchains, when something exists there,
+// else "". It is only stat'ed, for a hint; its contents are never read,
+// reused or copied.
+func LegacyCacheDir() string {
+	dir, err := os.UserCacheDir()
+	if err != nil || dir == "" {
+		return ""
+	}
+	old := filepath.Join(dir, "tinyagent", "toolchains")
+	if _, err := os.Lstat(old); err != nil {
+		return ""
+	}
+	return old
+}
+
+// LegacyCacheHint is the one-line stderr hint for LegacyCacheDir, or "".
+func LegacyCacheHint() string {
+	old := LegacyCacheDir()
+	if old == "" {
+		return ""
+	}
+	return fmt.Sprintf("hint: the TinyGo cache in %s is no longer used; toolchains are now cached in ./%s in --cwd (run tinyagent tinygo install there, or delete the old folder)", old, CacheSubdir)
 }
 
 func (m *Manager) platform() string { return m.GOOS + "/" + m.GOARCH }

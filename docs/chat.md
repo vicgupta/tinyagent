@@ -11,6 +11,46 @@ tinyagent chat --resume .tinyagent/chats/20261031-115411.json --cwd .   # pick a
 
 Press Ctrl-D (or type `/exit`) to quit. tinyagent prints the session's turns and cost, and the command that resumes it.
 
+## What it looks like
+
+Replies are Markdown, rendered for the terminal as each block completes: headings, **bold**, *italic*, `code`, fenced code in a box with its language and light highlighting, nested and task lists, blockquotes, tables, rules, and links with their URL. Text wraps to the terminal width (up to 120 columns). Tool calls collapse into one line per step; a spinner shows while the model thinks.
+
+```text
+tinyagent v0.15.0 · interactive chat
+  model  openai/gpt-4o
+  cwd    ~/src/app
+  saves  .tinyagent/chats/20261031-115411.json
+Type a message and press Enter. /help lists commands, Ctrl-C stops a turn, Ctrl-D quits.
+
+› what does main.go do?
+Let me look.
+  ✓ read_file main.go
+
+Overview
+━━━━━━━━
+
+It parses flags and starts the server on port 8080.
+
+• parse reads --addr and --debug
+• serve calls http.ListenAndServe
+
+╭─ go
+│ func main() {
+│     flag.Parse()
+│     log.Fatal(http.ListenAndServe(*addr, nil))
+│ }
+╰─
+
+turn 1 · 2 steps · 1,204 in / 96 out tokens · $0.0040 (session $0.0040) · 3s
+
+› ^D
+chat ended · 1 turn · 2 steps · 1,204 in / 96 out tokens · $0.0040 · 5s
+  saved  .tinyagent/chats/20261031-115411.json
+  resume tinyagent chat --resume /home/me/src/app/.tinyagent/chats/20261031-115411.json --cwd /home/me/src/app
+```
+
+Without color (`--color never`, `NO_COLOR`, or output that isn't a terminal) the structure stays and no escape codes are written: headings keep their `#`, bullets are `-`, code blocks use `+--` and `|`, and the tool line starts with `#`. `/raw`, or config `chat_markdown: false`, shows replies as raw Markdown. Saved checkpoints and `--json` always hold the raw Markdown.
+
 ## Keys
 
 | Key | Action |
@@ -38,6 +78,7 @@ Line editing works on Linux and macOS. Elsewhere chat reads plain lines (no arro
 | `/new`, `/clear` | Start a fresh conversation with a new checkpoint |
 | `/save [path]` | Save the checkpoint now, or a copy to `path` |
 | `/compact` | Compact the conversation before the next request (refused with `--no-compact`) |
+| `/raw` | Toggle rendered Markdown off and on for this session |
 | `/playbook <name>` | Follow [playbook](playbooks.md) `<name>` from `./playbooks` for the next message only (`tinyagent chat --playbook <name>` does the same for the first message) |
 
 A message that really starts with `/` is sent with a doubled slash: `//etc/hosts is empty?` sends `/etc/hosts is empty?`.

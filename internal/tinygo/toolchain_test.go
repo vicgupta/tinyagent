@@ -248,3 +248,59 @@ func TestNoEmbed(t *testing.T) {
 		t.Fatal("no sources found")
 	}
 }
+
+// TestDefaultCacheInCwd covers issue #337: the cache defaults to
+// ./.tinyagent/cache/toolchains in cwd, a .tinyagent symlink that leads
+// outside cwd is refused, and the override is kept as given (it may be a
+// system-wide install outside cwd).
+func TestDefaultCacheInCwd(t *testing.T) {
+	t.Setenv(EnvOverride, "")
+	cwd := t.TempDir()
+	m, err := Default(cwd, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(cwd, ".tinyagent", "cache", "toolchains"); m.CacheDir != want {
+		t.Fatalf("CacheDir = %s, want %s", m.CacheDir, want)
+	}
+	if _, err := os.Stat(filepath.Join(cwd, ".tinyagent")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Default created files: %v", err)
+	}
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(cwd, ".tinyagent")); err != nil {
+		t.Skip("no symlinks:", err)
+	}
+	if _, err := Default(cwd, ""); err == nil || !strings.Contains(err.Error(), "inside --cwd") {
+		t.Errorf("symlinked .tinyagent outside cwd: err = %v", err)
+	}
+	os.Remove(filepath.Join(cwd, ".tinyagent"))
+	exe := filepath.Join(outside, "tinygo")
+	m, err = Default(cwd, exe)
+	if err != nil || m.Override != exe {
+		t.Errorf("override outside cwd: %v %+v", err, m)
+	}
+	t.Setenv(EnvOverride, exe)
+	if m, err = Default(cwd, ""); err != nil || m.Override != exe {
+		t.Errorf("env override: %v %+v", err, m)
+	}
+}
+
+func TestLegacyCacheHint(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "cache"))
+	uc, err := os.UserCacheDir()
+	if err != nil || !strings.HasPrefix(uc, home) {
+		t.Skip("user cache dir isn't under the fake HOME here")
+	}
+	if h := LegacyCacheHint(); h != "" {
+		t.Fatalf("hint with no old cache: %q", h)
+	}
+	old := filepath.Join(uc, "tinyagent", "toolchains")
+	os.MkdirAll(old, 0o755)
+	h := LegacyCacheHint()
+	if !strings.HasPrefix(h, "hint: ") || !strings.Contains(h, old) || !strings.Contains(h, CacheSubdir) || strings.Contains(h, "\n") {
+		t.Fatalf("hint = %q", h)
+	}
+}

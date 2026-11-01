@@ -27,7 +27,7 @@ func pluginRecords(cfg config.AgentConfig, root string, withMCP bool) []trajecto
 		return nil
 	}
 	bySkill := map[string][]string{}
-	if cfg.Skills {
+	if cfg.SkillsOn() {
 		set, _ := skills.DiscoverWith(root, plugins.SkillSources(ls))
 		for _, k := range set.Skills {
 			if k.Plugin != "" {

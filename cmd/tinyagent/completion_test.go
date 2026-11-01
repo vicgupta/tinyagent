@@ -72,7 +72,7 @@ func TestCompletionZshOfflineWithBrokenConfig(t *testing.T) {
 // only the script, ignoring a broken config, task stdin and output flags.
 func testCompletionOfflineWithBrokenConfig(t *testing.T, shell, prefix, register string) {
 	hits := checkEnv(t)
-	cfgDir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "tinyagent")
+	cfgDir := userConfigDir(t)
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

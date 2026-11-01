@@ -180,9 +180,9 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.askUser, "ask-user", false, "add the ask_user tool: the model may end the run with one question (status NeedsInput, exit 4), answered with --resume <trajectory> -t \"<answer>\"; requires -o (default off; config ask_user.enabled)")
 	fs.BoolVar(&o.images, "images", false, "let vision-capable models see images: the view_image tool and MCP image pass-through (default off; config images.enabled)")
 	fs.Var(&o.imagePaths, "image", fmt.Sprintf("attach this PNG, JPEG, GIF or WebP file to the task message (or a --resume follow-up); repeatable, at most %d; independent of --images", model.MaxTaskImages))
-	fs.BoolVar(&o.skills, "skills", false, "discover Agent Skills in ./skills inside --cwd and add the skill tool (default off; config skills)")
+	fs.BoolVar(&o.skills, "skills", false, "discover Agent Skills in ./skills under --cwd and add the skill tool (default on in interactive runs, off in non-interactive, CI, --eval, lockdown and --read-only runs; config skills)")
 	addPlaybookFlags(fs, &o.pb)
-	fs.BoolVar(&o.noSkills, "no-skills", false, "turn Agent Skills discovery off, overriding config skills; --no-skills=false turns it on")
+	fs.BoolVar(&o.noSkills, "no-skills", false, "turn Agent Skills discovery off, overriding config skills and the interactive default; --no-skills=false turns it on")
 	fs.StringVar(&o.planFile, "plan-file", "", "with the plan enabled, also export the current plan as Markdown to this file after each save")
 	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "provider reasoning effort: none, minimal, low, medium, high, xhigh, or max")
 	fs.Var(&o.fallbackModels, "fallback-model", "provider/model to switch to when requests still fail with 429/5xx/network errors after retries (repeatable, tried in order; replaces fallback_models)")
@@ -233,8 +233,8 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.noChatHistory, "no-chat-history", false, "don't write chat input to <cwd>/history/chat_history (config chat_history: false)")
 	fs.BoolVar(&o.acp, "acp", false, "serve the Agent Client Protocol on stdin/stdout for editors such as Zed and JetBrains IDEs (experimental): each session runs in the client's cwd with this config and flags; limits apply per prompt")
 	fs.StringVar(&o.completion, "completion", "", "print a flag-name completion script for this shell (bash, zsh or fish) and exit; load it with: source <(tinyagent --completion bash), or in zsh after compinit: source <(tinyagent --completion zsh), or in fish: tinyagent --completion fish | source; re-source it after --update")
-	fs.StringVar(&o.workflow, "workflow", "", "run the skill workflow in this YAML file on the task (-t): the router picks a workflow or skill by intent, and each stage runs automatically with the previous stage's output, gated by its success check")
-	fs.StringVar(&o.workflowName, "workflow-name", "", "with --workflow: run this workflow or skill instead of routing by the task's intent")
+	fs.StringVar(&o.workflow, "workflow", "", "run the skill workflow in this YAML file (path relative to the current directory) on the task (-t): the router picks a workflow or skill by intent, and each stage runs automatically with the previous stage's output, gated by its success check; e.g. --workflow docs/workflows/workflow.yaml -t \"add CSV export\"; see tinyagent help workflows")
+	fs.StringVar(&o.workflowName, "workflow-name", "", "with --workflow: run this workflow or skill instead of routing by the task's intent; e.g. --workflow-name contract")
 	fs.BoolVar(&o.workflowObserve, "workflow-observe", false, "with --workflow: after a Failed or Blocked run, write one proposed project rule (with a ready-to-run `tinyagent ratchet add` command) to .tinyagent/observer/proposals.jsonl in --cwd, and flag a failure that recurs (default off)")
 	fs.Var(&o.skillsValidate, "skills-validate", "check a skill-workflow skill file (.md), skills directory or workflow file (.yaml) without running anything, then exit; repeatable; not for Agent Skills (--skills)")
 	registerMemoryFlags(fs, &o.memory)
@@ -585,7 +585,7 @@ func run() int {
 	if err != nil {
 		return configFail(err)
 	}
-	if err := checkPlugins(&cfg, os.Stderr, o.verbose, true); err != nil {
+	if err := checkPlugins(&cfg, o.cwd, os.Stderr, o.verbose, true); err != nil {
 		return configFail(err)
 	}
 	if flagWasSet(fs, "lsp") {
@@ -597,11 +597,9 @@ func run() int {
 	if code := checkLSP(cfg, cfgPath, ""); code != 0 {
 		return code
 	}
-	if on, set, err := skillsFlag(fs, o); err != nil {
+	if _, _, err := skillsFlag(fs, o); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
-	} else if set {
-		cfg.Skills = on
 	}
 	if flagWasSet(fs, "memory") {
 		cfg.Memory.Enabled = o.memory.enabled
@@ -612,6 +610,13 @@ func run() int {
 	lock, code := setupLockdown(fs, o.lockdown, &cfg, review != nil, false, os.Stderr)
 	if code != 0 {
 		return code
+	}
+	skillsDec := applySkillsDefault(fs, o, &cfg, cfgSrc, skillsMode{
+		Interactive: runIsInteractive(),
+		Hardened:    hardenedReason(false, false, cfg.UntrustedContent.Enabled, cfg.ReadOnly),
+	})
+	if o.verbose {
+		fmt.Fprintln(os.Stderr, "skills:", skillsDec)
 	}
 	if flagWasSet(fs, "snapshots") {
 		cfg.Snapshots.Enabled = o.snapshots
@@ -674,7 +679,7 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
 	}
-	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
+	model.DefaultRuntime.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 	if code, handoff := applyPlaybook(&o, fs, &cfg, task, os.Stdout, os.Stderr); handoff {
 		return code
 	}
@@ -828,34 +833,24 @@ func run() int {
 		Profile:         o.profile,
 		ProviderAPI:     providerAPI,
 		ProviderBaseURL: providerBaseURL,
-		Tools: &tools.Executor{
-			Root:               root,
-			ReadOnly:           cfg.ReadOnly,
-			Env:                env,
-			BashTimeout:        time.Duration(cfg.BashTimeoutSec) * time.Second,
-			MaxOutputChars:     cfg.MaxOutputChars,
-			MaxProcesses:       cfg.MaxBackgroundProcesses,
-			Stream:             streamTo(jsonStream(o.jsonOutput), progress),
-			CommandTools:       cmdTools,
-			CommandLog:         commandLog(o.verbose),
-			ExternalSpecs:      extSpecs,
-			ExternalCall:       extCall,
-			Plan:               cfg.Plan.Enabled,
-			Images:             cfg.Images.Enabled,
-			ApplyPatch:         cfg.ApplyPatch,
-			Delegate:           subagents != nil,
-			TaskTypes:          taskTypes(cfg, subagents, workers),
-			Workers:            workers != nil,
-			AskUser:            cfg.AskUser.Enabled,
-			WebFetch:           webFetch,
-			LSP:                lspTools,
-			OutputFiles:        outputFiles,
-			FileAccess:         fileAccess,
-			ExtraDirs:          extraDirs,
-			MaxImageBytes:      cfg.MaxImageBytes,
-			ExternalCallImages: mcpRegistry.CallImages(cfg.MaxImageBytes),
-			Redactor:           redactor,
-		},
+		Tools: newRunExecutor(cfg, toolWiring{
+			root:        root,
+			env:         env,
+			stream:      streamTo(jsonStream(o.jsonOutput), progress),
+			cmdTools:    cmdTools,
+			commandLog:  commandLog(o.verbose),
+			extSpecs:    extSpecs,
+			extCall:     extCall,
+			mcp:         mcpRegistry,
+			subagents:   subagents,
+			workers:     workers,
+			webFetch:    webFetch,
+			lsp:         lspTools,
+			outputFiles: outputFiles,
+			fileAccess:  fileAccess,
+			extraDirs:   extraDirs,
+			redactor:    redactor,
+		}),
 		RedactSecrets:  redactInfo,
 		Config:         cfg,
 		Hooks:          hookRunner,
@@ -907,7 +902,7 @@ func run() int {
 	}
 	startOutputFiles(outputFiles, cfg.ToolOutputFiles.MaxRuns, warn)
 	rules.start(a, events, warn)
-	if cfg.Skills {
+	if cfg.SkillsOn() {
 		loadSkills(a, root, pluginSkillSources(cfg), warn)
 	}
 	if cfg.Memory.Enabled {
@@ -1167,7 +1162,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if err != nil {
 		return configFail(err)
 	}
-	if err := checkPlugins(&cfg, os.Stderr, o.verbose, false); err != nil {
+	if err := checkPlugins(&cfg, o.cwd, os.Stderr, o.verbose, false); err != nil {
 		return configFail(err)
 	}
 	// Snapshots are per invocation: config or --snapshots decides for this
@@ -1193,7 +1188,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if code := checkLSP(cfg, cfgPath, "resume: "); code != 0 {
 		return code
 	}
-	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
+	model.DefaultRuntime.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 
 	root, err := canonicalRoot(o.cwd)
 	if err != nil {
@@ -1357,31 +1352,23 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		Profile:         o.profile,
 		ProviderAPI:     providerAPI,
 		ProviderBaseURL: providerBaseURL,
-		Tools: &tools.Executor{
-			Root:           root,
-			ReadOnly:       cfg.ReadOnly,
-			Env:            env,
-			BashTimeout:    time.Duration(cfg.BashTimeoutSec) * time.Second,
-			MaxOutputChars: cfg.MaxOutputChars,
-			MaxProcesses:   cfg.MaxBackgroundProcesses,
-			Stream:         jsonStream(o.jsonOutput),
-			Plan:           cfg.Plan.Enabled,
-			Images:         cfg.Images.Enabled,
-			ApplyPatch:     cfg.ApplyPatch,
-			Delegate:       cfg.Subagents.Enabled,
-			TaskTypes:      taskTypes(cfg, subagents, workers),
-			Workers:        workers != nil,
-			AskUser:        cfg.AskUser.Enabled,
-			WebFetch:       webFetch,
-			LSP:            lspTools,
-			OutputFiles:    outputFiles,
-			FileAccess:     fileAccess,
-			ExtraDirs:      extraDirs,
-			MaxImageBytes:  cfg.MaxImageBytes,
-			Redactor:       redactor,
-			CommandTools:   cmdTools,
-			CommandLog:     commandLog(o.verbose),
-		},
+		// Resumed runs start no MCP servers (see ErrMCPResume above), so the
+		// MCP and plugin fields of the wiring stay empty.
+		Tools: newRunExecutor(cfg, toolWiring{
+			root:        root,
+			env:         env,
+			stream:      jsonStream(o.jsonOutput),
+			cmdTools:    cmdTools,
+			commandLog:  commandLog(o.verbose),
+			subagents:   subagents,
+			workers:     workers,
+			webFetch:    webFetch,
+			lsp:         lspTools,
+			outputFiles: outputFiles,
+			fileAccess:  fileAccess,
+			extraDirs:   extraDirs,
+			redactor:    redactor,
+		}),
 		RedactSecrets:  redactInfo,
 		Config:         cfg,
 		Hooks:          hookRunner,
@@ -2850,9 +2837,6 @@ func skillsFlag(fs *flag.FlagSet, o options) (on, set bool, err error) {
 // loadSkills discovers skills for a run rooted at root, reporting each
 // problem through warn and, with -v, one line per skill.
 func loadSkills(a *agent.Agent, root string, plugins []skills.PluginSource, warn func(string)) {
-	if hint := skills.LegacyHint(root); hint != "" {
-		warn(hint)
-	}
 	set, warnings := skills.DiscoverWith(root, plugins)
 	for _, w := range warnings {
 		warn(w)

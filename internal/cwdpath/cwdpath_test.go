@@ -1,54 +1,61 @@
 package cwdpath
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 )
 
-func TestRef(t *testing.T) {
-	root := t.TempDir()
+func TestResolve(t *testing.T) {
+	cwd := t.TempDir()
 	outside := t.TempDir()
-	os.MkdirAll(filepath.Join(root, "skills", "ok"), 0o755)
-	if got, err := Ref(root, "skills/ok"); err != nil || !strings.HasSuffix(got, filepath.Join("skills", "ok")) {
-		t.Errorf("inside: %q %v", got, err)
+	if err := os.MkdirAll(filepath.Join(cwd, "a"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := Ref(root, "skills/new"); err != nil {
-		t.Errorf("missing but inside: %v", err)
+	for _, p := range []string{"a/b.toml", "new/dir/x", "./c", filepath.Join(cwd, "a", "b")} {
+		got, err := Resolve(cwd, p)
+		if err != nil || !Within(got, cwd) {
+			t.Errorf("Resolve(%q) = %q, %v; want a path inside cwd", p, got, err)
+		}
 	}
-	for _, ref := range []string{"../x", "skills/../../x", "skills/..", filepath.Join(outside, "x"), "/etc/passwd"} {
-		if _, err := Ref(root, ref); err == nil {
-			t.Errorf("%q accepted", ref)
+	for _, p := range []string{"", ".", "..", "../x", "a/../../x", "~/x", filepath.Join(outside, "x")} {
+		if got, err := Resolve(cwd, p); !errors.Is(err, ErrOutside) {
+			t.Errorf("Resolve(%q) = %q, %v; want ErrOutside", p, got, err)
 		}
 	}
 	if runtime.GOOS == "windows" {
 		return
 	}
-	if err := os.Symlink(outside, filepath.Join(root, "skills", "escape")); err != nil {
+	if err := os.Symlink(outside, filepath.Join(cwd, "link")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Ref(root, "skills/escape"); err == nil || !strings.Contains(err.Error(), "outside") {
-		t.Errorf("symlink escape: %v", err)
+	for _, p := range []string{"link", "link/x/y", filepath.Join(cwd, "link", "z")} {
+		if got, err := Resolve(cwd, p); !errors.Is(err, ErrOutside) {
+			t.Errorf("Resolve(%q) through an outside symlink = %q, %v; want ErrOutside", p, got, err)
+		}
 	}
-	if err := os.Symlink(filepath.Join(root, "skills", "ok"), filepath.Join(root, "skills", "alias")); err != nil {
+	if err := os.Symlink(filepath.Join(cwd, "a"), filepath.Join(cwd, "inside")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Ref(root, "skills/alias"); err != nil {
-		t.Errorf("symlink inside: %v", err)
+	if _, err := Resolve(cwd, "inside/x"); err != nil {
+		t.Errorf("symlink inside cwd refused: %v", err)
 	}
 }
 
-func TestResolve(t *testing.T) {
-	root, outside := t.TempDir(), t.TempDir()
-	if _, err := Resolve(root, outside); err == nil {
-		t.Error("outside accepted")
+func TestRef(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "w.yaml"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := Resolve(root, filepath.Join(root, "a", "..", "..", "x")); err == nil {
-		t.Error("cleaned escape accepted")
+	got, err := Ref(root, "w.yaml")
+	if err != nil || filepath.Base(got) != "w.yaml" {
+		t.Fatalf("Ref(w.yaml) = %q, %v", got, err)
 	}
-	if _, err := Resolve(root, root); err != nil {
-		t.Errorf("root itself: %v", err)
+	for _, bad := range []string{filepath.Join(root, "w.yaml"), "/etc/passwd", "../x.yaml", "a/../../x.yaml"} {
+		if _, err := Ref(root, bad); !errors.Is(err, ErrOutside) {
+			t.Errorf("Ref(%q) err = %v, want ErrOutside", bad, err)
+		}
 	}
 }

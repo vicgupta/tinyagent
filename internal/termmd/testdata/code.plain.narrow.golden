@@ -1,0 +1,10 @@
++-- go
+| func main() {
+|     // say hi
+|     fmt.Println("hi", 42)
+| }
++--
+
++--
+| no language
++--

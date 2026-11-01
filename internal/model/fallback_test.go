@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 )
 
 // stubModel returns its errors in turn, then a reply naming itself.
@@ -37,8 +36,8 @@ func outage(reason string) error {
 }
 
 func TestPostReturnsRetryExhausted(t *testing.T) {
-	defer func(b time.Duration) { retryBase = b }(retryBase)
-	retryBase = time.Millisecond
+	t.Parallel()
+	rt := fastRetryRuntime()
 	var n atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n.Add(1)
@@ -47,9 +46,9 @@ func TestPostReturnsRetryExhausted(t *testing.T) {
 	}))
 	defer srv.Close()
 	var out map[string]any
-	err := postJSON(context.Background(), srv.URL, nil, map[string]any{}, &out)
+	err := rt.postJSON(context.Background(), srv.URL, nil, map[string]any{}, &out)
 	var re *RetryExhaustedError
-	if !errors.As(err, &re) || re.Reason != "http_503" || re.Attempts != maxAttempts || int(n.Load()) != maxAttempts {
+	if !errors.As(err, &re) || re.Reason != "http_503" || re.Attempts != defaultMaxAttempts || int(n.Load()) != defaultMaxAttempts {
 		t.Fatalf("err = %v (%#v), %d requests", err, re, n.Load())
 	}
 	if !strings.HasPrefix(err.Error(), "giving up after 6 attempts: HTTP 503") {
@@ -58,13 +57,15 @@ func TestPostReturnsRetryExhausted(t *testing.T) {
 }
 
 func TestPostNonRetryableIsNotExhausted(t *testing.T) {
+	t.Parallel()
+	rt := fastRetryRuntime()
 	for _, code := range []int{400, 401, 403, 404} {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(code)
 			io.WriteString(w, "nope")
 		}))
 		var out map[string]any
-		err := postJSON(context.Background(), srv.URL, nil, map[string]any{}, &out)
+		err := rt.postJSON(context.Background(), srv.URL, nil, map[string]any{}, &out)
 		srv.Close()
 		if err == nil || IsRetryExhausted(err) {
 			t.Errorf("HTTP %d: err = %v, retry-exhausted = %v", code, err, IsRetryExhausted(err))

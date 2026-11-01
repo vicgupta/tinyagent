@@ -1,63 +1,105 @@
-// Package cwdpath confines paths to the working directory (--cwd). Agent
-// Skills and playbooks are read only from inside it: a reference that is
-// absolute, contains "..", or resolves (after filepath.Clean and
-// filepath.EvalSymlinks) outside root is refused.
+// Package cwdpath confines paths to the working directory (--cwd).
+//
+// TinyAgent reads and writes its project state only inside --cwd. Resolve
+// turns a path from config or the environment into one inside cwd, or
+// refuses it: a path that leaves cwd through "..", an absolute path
+// elsewhere, or a symlink that resolves outside cwd. Only cwd itself and
+// the path below it are looked at.
 package cwdpath
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-// Ref resolves ref, a path relative to root, and returns its resolved path.
-// It refuses an absolute ref, a ref with a ".." element, and a ref whose
-// resolved path (symlinks followed) is outside root. A ref that does not
-// exist yet is checked lexically and returned joined to root.
-func Ref(root, ref string) (string, error) {
-	if ref == "" {
-		return "", fmt.Errorf("empty path")
+// ErrOutside marks a path that was refused because it would leave --cwd.
+var ErrOutside = errors.New("path must stay inside --cwd")
+
+// Resolve returns p (relative to cwd, or absolute) as an absolute path
+// inside cwd. It refuses, wrapping ErrOutside, a path with a ".." element,
+// an absolute path outside cwd, cwd itself, and one whose existing part
+// resolves through a symlink to somewhere outside cwd. The path need not
+// exist. The returned path keeps cwd as given (made absolute).
+func Resolve(cwd, p string) (string, error) {
+	if p == "" || strings.HasPrefix(p, "~") {
+		return "", fmt.Errorf("%w: %q is not a path inside it", ErrOutside, p)
 	}
-	if filepath.IsAbs(ref) || strings.HasPrefix(ref, "/") || strings.HasPrefix(ref, `\`) || filepath.VolumeName(ref) != "" {
-		return "", fmt.Errorf("%s: absolute paths are refused; paths must be inside the working directory", ref)
-	}
-	for _, el := range strings.FieldsFunc(filepath.ToSlash(ref), func(r rune) bool { return r == '/' }) {
+	for _, el := range strings.Split(filepath.ToSlash(p), "/") {
 		if el == ".." {
-			return "", fmt.Errorf("%s: paths containing \"..\" are refused", ref)
+			return "", fmt.Errorf("%w: %q contains \"..\"", ErrOutside, p)
 		}
 	}
-	return Resolve(root, filepath.Join(root, filepath.Clean(ref)))
-}
-
-// Resolve checks that path (absolute, or relative to the process) stays
-// inside root after filepath.Clean and filepath.EvalSymlinks, and returns
-// the resolved path. A path that does not exist is checked lexically.
-func Resolve(root, path string) (string, error) {
-	rr, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		rr = filepath.Clean(root)
+	if cwd == "" {
+		cwd = "."
 	}
-	clean := filepath.Clean(path)
-	real, err := filepath.EvalSymlinks(clean)
+	abs, err := filepath.Abs(cwd)
 	if err != nil {
-		if !os.IsNotExist(err) {
+		return "", err
+	}
+	real := abs
+	if r, err := filepath.EvalSymlinks(abs); err == nil {
+		real = r
+	}
+	var out, full string
+	if filepath.IsAbs(p) || filepath.VolumeName(p) != "" {
+		c := filepath.Clean(p)
+		switch {
+		case Within(c, abs):
+			rel, _ := filepath.Rel(abs, c)
+			out, full = c, filepath.Join(real, rel)
+		case Within(c, real):
+			rel, _ := filepath.Rel(real, c)
+			out, full = filepath.Join(abs, rel), c
+		default:
+			return "", fmt.Errorf("%w: %s is outside %s", ErrOutside, p, abs)
+		}
+	} else {
+		out = filepath.Join(abs, filepath.Clean(p))
+		full = filepath.Join(real, filepath.Clean(p))
+	}
+	if full == real {
+		return "", fmt.Errorf("%w: %q is --cwd itself", ErrOutside, p)
+	}
+	// Resolve the longest existing prefix: a symlink inside cwd that points
+	// outside it is refused.
+	existing := full
+	for existing != real {
+		if _, err := os.Lstat(existing); err == nil {
+			break
+		} else if !errors.Is(err, fs.ErrNotExist) {
 			return "", err
 		}
-		// Not there yet: resolve the nearest existing parent.
-		real = clean
-		if parent, perr := filepath.EvalSymlinks(filepath.Dir(clean)); perr == nil {
-			real = filepath.Join(parent, filepath.Base(clean))
-		}
+		existing = filepath.Dir(existing)
 	}
-	if !Within(rr, real) && !Within(filepath.Clean(root), real) {
-		return "", fmt.Errorf("%s resolves outside the working directory %s; refused", path, root)
+	resolved, err := filepath.EvalSymlinks(existing)
+	if errors.Is(err, fs.ErrNotExist) && existing == real {
+		return out, nil // cwd itself doesn't exist yet
 	}
-	return real, nil
+	if err != nil {
+		return "", err
+	}
+	if !Within(resolved, real) {
+		return "", fmt.Errorf("%w: %q resolves through a symlink to %s", ErrOutside, p, resolved)
+	}
+	return out, nil
 }
 
-// Within reports whether path is root or below it (both already clean).
-func Within(root, path string) bool {
-	rel, err := filepath.Rel(root, path)
+// Within reports whether path is dir or below it (lexically).
+func Within(path, dir string) bool {
+	rel, err := filepath.Rel(dir, path)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+
+// Ref resolves ref, a path written relative to cwd (for example a playbook's
+// workflow: file), like Resolve, but also refuses an absolute ref: such
+// references must name a file inside cwd by a relative path.
+func Ref(cwd, ref string) (string, error) {
+	if filepath.IsAbs(ref) || strings.HasPrefix(ref, "/") || strings.HasPrefix(ref, `\`) || filepath.VolumeName(ref) != "" {
+		return "", fmt.Errorf("%w: %q is an absolute path; use a path relative to --cwd", ErrOutside, ref)
+	}
+	return Resolve(cwd, ref)
 }

@@ -32,6 +32,9 @@ type Codex struct {
 	OnText   func(string)
 	// ReasoningEffort, if set, is sent as reasoning.effort.
 	ReasoningEffort string
+	// Runtime supplies the HTTP client, retry policy and prices. nil uses
+	// DefaultRuntime.
+	Runtime *Runtime
 
 	session string // prompt cache key, one per run
 }
@@ -134,7 +137,7 @@ func (c *Codex) refresh(ctx context.Context, a *codexAuth) error {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
 	}
-	if err := postJSON(ctx, c.TokenURL, nil, body, &resp); err != nil {
+	if err := c.Runtime.postJSON(ctx, c.TokenURL, nil, body, &resp); err != nil {
 		var he *httpError
 		if errors.As(err, &he) && he.status < 500 {
 			return fmt.Errorf("codex: login expired; run `codex login` again (%w)", err)
@@ -217,13 +220,13 @@ func (c *Codex) Query(ctx context.Context, messages []Message, tools []ToolSpec)
 	}
 	url := strings.TrimRight(c.BaseURL, "/") + "/responses"
 
-	resp, err := post(ctx, url, c.headers(a), body)
+	resp, err := c.Runtime.post(ctx, url, c.headers(a), body)
 	var he *httpError
 	if errors.As(err, &he) && he.status == http.StatusUnauthorized {
 		if err := c.refresh(ctx, a); err != nil {
 			return Message{}, Cost{}, err
 		}
-		resp, err = post(ctx, url, c.headers(a), body)
+		resp, err = c.Runtime.post(ctx, url, c.headers(a), body)
 	}
 	if err != nil {
 		return Message{}, Cost{}, err

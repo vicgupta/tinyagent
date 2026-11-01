@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 )
 
 var testTools = []ToolSpec{{Type: "function", Function: FunctionSpec{
@@ -55,7 +54,7 @@ func typeName(v any) string {
 }
 
 func TestOpenAIQueryWithRetry(t *testing.T) {
-	retryBase = time.Millisecond
+	t.Parallel()
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if calls.Add(1) == 1 {
@@ -76,7 +75,7 @@ func TestOpenAIQueryWithRetry(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	m := &OpenAI{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "gpt-4o"}
+	m := &OpenAI{BaseURL: srv.URL + "/v1", APIKey: "k", Model: "gpt-4o", Runtime: fastRetryRuntime()}
 	msg, cost, err := m.Query(context.Background(), []Message{{Role: "user", Content: "hi"}}, testTools)
 	if err != nil {
 		t.Fatal(err)
@@ -170,10 +169,12 @@ func TestAnthropicQuery(t *testing.T) {
 }
 
 func TestPricePrefix(t *testing.T) {
-	if c := price("gpt-4o-mini-2024-07-18", 1e6, 0); c.USD != 0.15 {
+	t.Parallel()
+	rt := NewRuntime()
+	if c := rt.price("gpt-4o-mini-2024-07-18", 1e6, 0); c.USD != 0.15 {
 		t.Errorf("gpt-4o-mini price = %v (longest prefix should win)", c.USD)
 	}
-	if c := price("unknown", 1e6, 1e6); c.USD != 0 {
+	if c := rt.price("unknown", 1e6, 1e6); c.USD != 0 {
 		t.Errorf("unknown price = %v", c.USD)
 	}
 }
@@ -333,6 +334,7 @@ func TestAnthropicStreamError(t *testing.T) {
 }
 
 func TestUnpriced(t *testing.T) {
+	t.Parallel()
 	cases := map[string]bool{
 		"openai/gpt-4o":                   false,
 		"gpt-4o-mini-2024-07-18":          false,
@@ -346,14 +348,14 @@ func TestUnpriced(t *testing.T) {
 		"nope/model":                      false,
 	}
 	for spec, want := range cases {
-		if got := Unpriced(spec); got != want {
+		if got := NewRuntime().Unpriced(spec); got != want {
 			t.Errorf("Unpriced(%q) = %v, want %v", spec, got, want)
 		}
 	}
-	t.Cleanup(func() { PriceOverride = [2]float64{} })
 	for _, o := range [][2]float64{{1, 2}, {1, 0}, {0, 2}} {
-		PriceOverride = o
-		if Unpriced("openai/unlisted-model") {
+		rt := NewRuntime()
+		rt.PriceOverride = o
+		if rt.Unpriced("openai/unlisted-model") {
 			t.Errorf("override %v: want priced", o)
 		}
 	}

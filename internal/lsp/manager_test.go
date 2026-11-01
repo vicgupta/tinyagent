@@ -149,7 +149,14 @@ func TestCrashRestartsOnce(t *testing.T) {
 	m := newManager(t, root, lsptest.Server(t, "go", []string{".go"}, "crash", "log="+log))
 	a := filepath.Join(root, "a.go")
 	write(t, a, "package a\n")
-	for i := range 4 {
+	// A call can reach a server that is dying but not yet reaped (common
+	// on macOS), so call until the manager gives up on the server rather
+	// than a fixed number of times.
+	var unavail *lsp.UnavailableError
+	for i := 0; unavail == nil; i++ {
+		if i == 20 {
+			t.Fatal("server never became unavailable")
+		}
 		done := make(chan error, 1)
 		go func() {
 			_, err := m.References(context.Background(), a, lsp.Position{})
@@ -160,6 +167,7 @@ func TestCrashRestartsOnce(t *testing.T) {
 			if err == nil {
 				t.Fatalf("call %d: no error", i)
 			}
+			errors.As(err, &unavail)
 		case <-time.After(5 * time.Second):
 			t.Fatalf("call %d hung", i)
 		}

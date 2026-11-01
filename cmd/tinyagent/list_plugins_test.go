@@ -18,6 +18,7 @@ func TestListPlugins(t *testing.T) { // AC2, AC11, AC18
 	hits := checkEnv(t)
 	cfgHome := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", cfgHome)
+	t.Setenv("HOME", t.TempDir()) // os.UserConfigDir ignores XDG_CONFIG_HOME on macOS
 	min := t.TempDir()
 	os.WriteFile(filepath.Join(min, "plugin.json"), []byte(`{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"demo"}`), 0o644)
 	code, stdout, stderr := runCLI(t, "--list-plugins", "-c", pluginConfig(t, "plugins:\n  - path: "+min+"\n"))
@@ -29,8 +30,7 @@ func TestListPlugins(t *testing.T) { // AC2, AC11, AC18
 	os.MkdirAll(filepath.Join(dir, "skills", "lint"), 0o755)
 	os.WriteFile(filepath.Join(dir, "skills", "lint", "SKILL.md"), []byte("---\nname: lint\ndescription: Lint.\n---\n"), 0o644)
 	cfg := pluginConfig(t, "plugins:\n  - path: "+dir+"\n    mcp_servers:\n      - server: validator\n        alias: kit\n        tools: [echo]\n")
-	// Plugin skills are read only from inside --cwd.
-	code, stdout, stderr = runCLI(t, "--list-plugins", "--cwd", filepath.Dir(dir), "-c", cfg)
+	code, stdout, stderr = runCLI(t, "--list-plugins", "-c", cfg)
 	if code != 0 {
 		t.Fatalf("kit: exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
@@ -88,12 +88,13 @@ func TestPluginRecords(t *testing.T) { // AC1, AC16
 	}
 	pluginToolServer(t, "kit__echo")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir()) // os.UserConfigDir ignores XDG_CONFIG_HOME on macOS
 	dir := mcpPlugin(t, fmt.Sprintf(fixtureServer, os.Args[0]))
 	os.MkdirAll(filepath.Join(dir, "skills", "lint"), 0o755)
 	os.WriteFile(filepath.Join(dir, "skills", "lint", "SKILL.md"), []byte("---\nname: lint\ndescription: Lint.\n---\n"), 0o644)
 	cfg := pluginConfig(t, "plugins:\n  - path: "+dir+"\n    mcp_servers:\n      - server: validator\n        alias: kit\n        tools: [echo]\n")
 	out := filepath.Join(t.TempDir(), "run.json")
-	code, stdout, stderr := runSkills(t, filepath.Dir(dir), "-c", cfg, "--skills", "--json", "-o", out)
+	code, stdout, stderr := runSkills(t, t.TempDir(), "-c", cfg, "--skills", "--json", "-o", out)
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
