@@ -33,7 +33,7 @@ Ten subcommands are shortcuts for existing flags. They rewrite the command line 
 - `plugins rollback` and `plugins prune` manage the plugin module version store; see [Plugins](plugins.md#webassembly-plugin-modules).
 - `tinyagent help workflows` (or `help workflow`) is a help topic rather than a subcommand: it prints every workflow flag with examples, the workflow file format and where paths resolve, the JSON events and exit status. See [Workflows](workflows.md).
 - `skills validate` checks [skill-workflow](project-context.md#skill-workflows) skill files, skills directories and workflow files without a model call; see [Validating skills](project-context.md#skill-workflows). With no path it exits 2 (`skills validate needs at least one value`). It doesn't check Agent Skills (`--skills`).
-- `tinygo` manages the TinyGo compiler used to build Go plugin modules. **TinyGo is an external dependency, not part of tinyagent:** it is never embedded in the tinyagent binary or repository. tinyagent downloads a pinned TinyGo release on first use (or with `tinygo install`), verifies its SHA-256 checksum and caches it locally; `tinygo update` moves to the version pinned in the current build.
+- `tinygo` manages the TinyGo compiler used to build Go plugin modules. **TinyGo is an external dependency, not part of tinyagent:** it is never embedded in the tinyagent binary or repository. tinyagent downloads a pinned TinyGo release on first use (or with `tinygo install`), verifies its SHA-256 checksum and caches it in `./.tinyagent/cache/toolchains` inside `--cwd`; `tinygo update` moves to the version pinned in the current build.
 
 ## Flags
 
@@ -66,7 +66,7 @@ Ten subcommands are shortcuts for existing flags. They rewrite the command line 
 | `--plugins-rollback <module>@<sha256>` | | Point a stored plugin module at an older stored version, then exit; refused when that version needs wider permissions than the first load. See [Plugins](plugins.md#webassembly-plugin-modules) |
 | `--plugins-prune` | | Remove stored plugin module versions under `--cwd`'s `.tinyagent/modules`, keeping each module's current version and the `--plugins-keep` newest others, then exit |
 | `--plugins-keep <n>` | 5 | Versions besides current that `--plugins-prune` keeps per module |
-| `--tinygo-install` | | Download the pinned TinyGo release (an external project, not part of tinyagent) used to build Go plugin modules, verify its checksum and cache it, then exit |
+| `--tinygo-install` | | Download the pinned TinyGo release (an external project, not part of tinyagent) used to build Go plugin modules, verify its checksum and cache it in `./.tinyagent/cache/toolchains` in `--cwd`, then exit |
 | `--tinygo-update` | | Install the TinyGo version pinned in this build if it isn't cached and remove other cached versions, then exit |
 | `--tinygo-status` | | Print the pinned and installed TinyGo versions, path and checksum state, then exit |
 | `--cwd` | `.` | Root directory; tools can't reach outside it |

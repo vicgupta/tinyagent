@@ -52,6 +52,7 @@ internal/config/      YAML config + built-in defaults; memory.toml is read only 
 internal/cwdpath/     Resolve confines a config or env path to --cwd (refuses "..", absolute paths elsewhere and symlinks that leave it)
 internal/memory/      project memory stores (markdown and SQLite), always under ./.tinyagent/memory in --cwd; confine.go refuses paths that leave --cwd
 internal/model/       providers, price table, context windows; CLI handoff providers (claudecode.go, codexexec.go, opencode.go) share handoff.go
+internal/tinygo/      pinned TinyGo toolchain manager; caches only in ./.tinyagent/cache/toolchains in --cwd (the tinygo / TINYAGENT_TINYGO executable override is used as given)
 internal/termmd/       streaming Markdown-to-terminal renderer used by chat (no dependencies; golden tests in testdata/)
 internal/resume/      what a --resume must match in its checkpoint (flag table, root, tool fingerprint, tool names); loads the checkpoint and pins its recorded settings onto the run config
 internal/tools/       the base tools listed above, plus the opt-in tools; docs_sync_test.go keeps the docs' base tool list in sync with tools.Specs(false)
@@ -172,8 +173,9 @@ memory JSON files, isn't looked at at all). Paths from config must be relative,
 stay inside `--cwd` and not escape through `..` or symlinks (see
 `internal/memory/confine.go`, or `internal/cwdpath` for new code). This covers
 config files too: `memory.toml` (`./memory.toml` or `$TINYAGENT_MEMORY_CONFIG`
-inside `--cwd`) and plugin `PLUGIN_DATA` (`./.tinyagent/plugin-data/<name>`)
-are never read from the user config directory. Tests for such a feature point `HOME`, `XDG_*`
+inside `--cwd`), plugin `PLUGIN_DATA` (`./.tinyagent/plugin-data/<name>`)
+and the TinyGo toolchain cache (`./.tinyagent/cache/toolchains`) are never
+read from the user config or cache directory. Tests for such a feature point `HOME`, `XDG_*`
 and the user config dir at a temp dir that holds data in the old locations and
 assert none of it is used.
 

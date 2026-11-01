@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -41,9 +42,10 @@ func TestTinygoCLI(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits++; w.Write(arch) }))
 	defer srv.Close()
 	cache := t.TempDir()
-	old := newTinygoManager
-	defer func() { newTinygoManager = old }()
-	newTinygoManager = func(override string) (*tinygo.Manager, error) {
+	old, oldHint := newTinygoManager, tinygoLegacyHint
+	defer func() { newTinygoManager, tinygoLegacyHint = old, oldHint }()
+	tinygoLegacyHint = func() string { return "" }
+	newTinygoManager = func(_, override string) (*tinygo.Manager, error) {
 		return &tinygo.Manager{CacheDir: cache, BaseURL: srv.URL, Version: "9.9.9", GOOS: runtime.GOOS, GOARCH: runtime.GOARCH,
 			Checksums: map[string]string{runtime.GOOS + "/" + runtime.GOARCH: hex.EncodeToString(h[:])}, HTTP: srv.Client(), Override: override}, nil
 	}
@@ -84,7 +86,7 @@ func TestTinygoIntegration(t *testing.T) {
 	if os.Getenv("TINYAGENT_REQUIRE_TINYGO") == "1" {
 		skip = t.Fatal
 	}
-	m, err := tinygo.Default("")
+	m, err := tinygo.Default(".", "")
 	if err != nil {
 		skip(err)
 	}
@@ -120,11 +122,85 @@ func upper() int32 {
 	}
 	root := t.TempDir()
 	var w bytes.Buffer
-	pool := plugins.WasmPool{Store: moduleStore(root), Compile: goModuleCompiler(bin, &w)}
+	pool := plugins.WasmPool{Store: moduleStore(root), Compile: goModuleCompiler(root, bin, &w)}
 	defer pool.Close()
 	wt := pool.Activate(context.Background(), ls, cfg, plugins.SessionGrant{Root: root}, &w)
 	out, isErr, ok := wt.Call(context.Background(), "tg__upper", `{"text":"hi"}`)
 	if !ok || isErr || out != `{"TEXT":"HI"}` {
 		t.Fatalf("call: %q isErr=%v ok=%v log=%s", out, isErr, ok, w.String())
 	}
+}
+
+// TestTinygoCLIOnlyCwd covers issue #337: with HOME, XDG_* and the user
+// cache and config dirs pointed at a temp dir that holds a cached TinyGo in
+// the old location, the toolchain is cached in ./.tinyagent/cache/toolchains
+// inside --cwd, the old cache is never used (only one hint line names it)
+// and nothing is written outside --cwd.
+func TestTinygoCLIOnlyCwd(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "cache"))
+	t.Setenv("APPDATA", filepath.Join(home, "config"))
+	t.Setenv(tinygo.EnvOverride, "")
+	ucache, err := os.UserCacheDir()
+	if err != nil {
+		t.Skip("no user cache dir:", err)
+	}
+	if !strings.HasPrefix(ucache, home) {
+		t.Skipf("user cache dir %s isn't under the fake HOME on this platform", ucache)
+	}
+	// A verified-looking cached install in the old location.
+	oldDir := filepath.Join(ucache, "tinyagent", "toolchains", "tinygo-"+tinygo.Version)
+	os.MkdirAll(filepath.Join(oldDir, "bin"), 0o755)
+	os.WriteFile(filepath.Join(oldDir, "bin", "tinygo"), []byte("#!/bin/sh\n"), 0o755)
+	os.WriteFile(filepath.Join(oldDir, ".tinyagent-verified"), []byte(tinygo.Checksums[runtime.GOOS+"/"+runtime.GOARCH]+"\n"), 0o644)
+	before := treeListing(t, home)
+
+	cwd := t.TempDir()
+	os.WriteFile(filepath.Join(cwd, "tinyagent.yaml"), []byte("model: x\n"), 0o644)
+	var out, errw bytes.Buffer
+	code := runTinygo(&options{cwd: cwd, tinygoStatus: true}, &out, &errw)
+	if code != 0 {
+		t.Fatalf("status: %d %s %s", code, out.String(), errw.String())
+	}
+	if !strings.Contains(out.String(), "installed: no") || !strings.Contains(out.String(), "using: none") {
+		t.Errorf("old cache was used: %s", out.String())
+	}
+	if n := strings.Count(errw.String(), "hint: the TinyGo cache in "); n != 1 || !strings.Contains(errw.String(), filepath.Dir(oldDir)) {
+		t.Errorf("want one hint naming %s, stderr %q", filepath.Dir(oldDir), errw.String())
+	}
+	m, err := tinygo.Default(cwd, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(cwd, ".tinyagent", "cache", "toolchains"); m.CacheDir != want {
+		t.Errorf("cache dir %s, want %s", m.CacheDir, want)
+	}
+	if after := treeListing(t, home); after != before {
+		t.Errorf("files outside --cwd changed:\nbefore %s\nafter  %s", before, after)
+	}
+
+	// No old cache: no hint.
+	os.RemoveAll(filepath.Join(ucache, "tinyagent"))
+	out.Reset()
+	errw.Reset()
+	if code := runTinygo(&options{cwd: cwd, tinygoStatus: true}, &out, &errw); code != 0 || strings.Contains(errw.String(), "hint:") {
+		t.Errorf("unexpected hint: %d %q", code, errw.String())
+	}
+}
+
+// treeListing lists every path under dir with its size.
+func treeListing(t *testing.T, dir string) string {
+	t.Helper()
+	var b strings.Builder
+	filepath.Walk(dir, func(p string, fi os.FileInfo, err error) error {
+		if err == nil {
+			fmt.Fprintf(&b, "%s:%d;", p, fi.Size())
+		}
+		return nil
+	})
+	return b.String()
 }
