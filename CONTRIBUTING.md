@@ -49,6 +49,7 @@ If you add or remove a direct dependency, update this list too;
 cmd/tinyagent/        CLI entrypoint, flag parsing, main loop glue; help.go holds --help and help topics (help workflows)
 internal/agent/       the run loop, compaction, tool dispatch; build an Agent with agent.New (it validates the options)
 internal/config/      YAML config + built-in defaults
+internal/memory/      project memory stores (markdown and SQLite), always under ./.tinyagent/memory in --cwd; confine.go refuses paths that leave --cwd
 internal/model/       providers, price table, context windows; CLI handoff providers (claudecode.go, codexexec.go, opencode.go) share handoff.go
 internal/termmd/       streaming Markdown-to-terminal renderer used by chat (no dependencies; golden tests in testdata/)
 internal/resume/      what a --resume must match in its checkpoint (flag table, root, tool fingerprint, tool names); loads the checkpoint and pins its recorded settings onto the run config
@@ -159,6 +160,16 @@ paths from `os.UserConfigDir()` (in `cmd/tinyagent`, use `userConfigDir(t)` /
 `userConfigPath(t)`) rather than joining `XDG_CONFIG_HOME` by hand. Temp dirs
 on macOS also live under `/var`, a symlink to `/private/var`; compare against
 `filepath.EvalSymlinks` results where the code canonicalizes paths.
+
+**Cwd-only paths.** State that tinyagent keeps for a project (memory, chats,
+handoff, tool output, worktrees and the like) lives under `./.tinyagent/` in
+`--cwd`, never in the home folder or an `XDG_*` / user config directory, and
+moving it is a hard cut: no silent migration, at most one stderr `hint:` line
+when the old location is inside `--cwd`. Paths from config must be relative,
+stay inside `--cwd` and not escape through `..` or symlinks (see
+`internal/memory/confine.go`). Tests for such a feature point `HOME`, `XDG_*`
+and the user config dir at a temp dir that holds data in the old locations and
+assert none of it is used.
 
 ## Adding or changing a model / provider
 

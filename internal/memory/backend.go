@@ -18,10 +18,11 @@ const (
 	backendJSON     = "json"
 )
 
-// Default store locations, relative to the working directory.
+// Default store locations, relative to the working directory (issue
+// #335: memory lives only under ./.tinyagent/memory in --cwd).
 const (
-	DefaultMarkdownPath = "memory"
-	DefaultSQLitePath   = "memory/memory.sqlite"
+	DefaultMarkdownPath = ".tinyagent/memory"
+	DefaultSQLitePath   = ".tinyagent/memory/memory.sqlite"
 )
 
 // ValidBackend reports whether s is a selectable backend.
@@ -48,8 +49,9 @@ func BackendOf(path string) string {
 }
 
 // ResolveStore returns the absolute store path for backend: dir (markdown)
-// or sqlitePath (sqlite), each defaulting to its Default*Path, with
-// relative paths resolved against cwd.
+// or sqlitePath (sqlite), each defaulting to its Default*Path, resolved
+// against cwd. A path that would leave cwd (absolute, "..", or a symlink
+// pointing outside) is refused with an error wrapping ErrOutsideCwd.
 func ResolveStore(backend, dir, sqlitePath, cwd string) (string, error) {
 	var p string
 	switch backend {
@@ -72,14 +74,7 @@ func ResolveStore(backend, dir, sqlitePath, cwd string) (string, error) {
 	default:
 		return "", fmt.Errorf("memory backend %q must be markdown or sqlite", backend)
 	}
-	if !filepath.IsAbs(p) {
-		abs, err := filepath.Abs(cwd)
-		if err != nil {
-			return "", err
-		}
-		p = filepath.Join(abs, p)
-	}
-	return filepath.Clean(p), nil
+	return confine(p, cwd)
 }
 
 // Exists reports whether the store at path exists (a folder for markdown,

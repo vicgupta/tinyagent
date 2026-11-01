@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## [Unreleased]
+
+### Breaking
+
+- Project memory lives only in `./.tinyagent/memory` inside `--cwd` (SQLite default `./.tinyagent/memory/memory.sqlite`). **Hard cut:** the old `./memory` folder and the old per-user JSON store (`$XDG_STATE_HOME/tinyagent/memory`, `~/.local/state/tinyagent/memory`, or the user config directory on macOS and Windows) are no longer read or imported. If the new store doesn't exist and `./memory` holds entries, one stderr `hint:` line names the new location; nothing is moved. Nothing outside `--cwd` is stat'ed, read or written for memory. Store paths that are absolute, contain `..` or resolve through a symlink outside `--cwd` are refused with a warning. `import_legacy` is still accepted but does nothing. See [Project memory](docs/memory.md#store-location) (#335).
 
 ### Fixes
 

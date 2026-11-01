@@ -65,7 +65,7 @@ func TestMemoryHelpDefaultsMatchLoader(t *testing.T) {
 	}
 	d := DefaultMemory()
 	if m.Backend != d.Backend || m.Enabled != d.Enabled || m.Approval != d.Approval || m.MaxEntrySize != d.MaxEntrySize ||
-		m.MaxEntries != d.MaxEntries || len(m.DefaultTags) != 0 || m.ImportLegacy != d.ImportLegacy || m.Path != "./memory" || m.SQLitePath != "./memory/memory.sqlite" {
+		m.MaxEntries != d.MaxEntries || len(m.DefaultTags) != 0 || m.ImportLegacy != d.ImportLegacy || m.Path != "./.tinyagent/memory" || m.SQLitePath != "./.tinyagent/memory/memory.sqlite" {
 		t.Errorf("help defaults load as %+v, defaults are %+v", m, d)
 	}
 }

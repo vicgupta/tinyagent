@@ -75,7 +75,7 @@ Ten subcommands are shortcuts for existing flags. They rewrite the command line 
 | `--memory-list` | | Print the [project memory](memory.md#project-memory) entries for `--cwd` (pending first, then newest first), or a JSON array with `--json`, then exit. Makes no model request and needs no credentials |
 | `--memory-approve <id\|all>` | | Approve one pending project memory entry, or every pending entry, then exit |
 | `--memory-forget <id\|all>` | | Delete one project memory entry; `all` deletes every entry and requires `--memory-yes` |
-| `--memory-path` | | Print the project memory store path for `--cwd`, then exit |
+| `--memory-path` | | Print the project memory store path for `--cwd` (default `.tinyagent/memory`, always inside `--cwd`; a path outside it exits 1), then exit |
 | `--ratchet-add <rule>` | | Record a [project rule](ratchet.md) in `<cwd>/.tinyagent/ratchet.toml`, then exit. Requires `--ratchet-incident`; without `--ratchet-expires` or `--ratchet-review` it expires in 90 days. Makes no model request and needs no credentials |
 | `--ratchet-incident <text>` | — | With `--ratchet-add`: the failure that led to the rule (required) |
 | `--ratchet-expires <YYYY-MM-DD>` | 90 days from today unless `--ratchet-review` | With `--ratchet-add`: from this date the rule is skipped and flagged as expired |
