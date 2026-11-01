@@ -124,6 +124,11 @@ Don't construct a `tools.Executor` literal anywhere else in `cmd/tinyagent`;
   `go vet`/`go test`, not at merge time.
 - When resolving conflicts, keep **both** semantic behaviors — never drop an
   exit path, error branch, or test helper while taking one side.
+- **Chat line editor** (`cmd/tinyagent/lineedit.go`): drive it through the fake
+  terminal in `lineedit_redraw_test.go` (`termEditor`), which models CR/LF,
+  cursor moves, clears, rune widths and autowrap. Assert on the screen and on
+  `lineFeeds`, not on raw bytes, and cover a colour prompt, a `NO_COLOR` prompt
+  and multibyte input.
 
 ## Adding or changing a model / provider
 

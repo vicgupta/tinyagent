@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
+
+	"github.com/vicgupta/tinyagent/internal/termmd"
 )
 
 // errInterrupt is returned by ReadLine for Ctrl-C, with the text typed.
@@ -23,6 +26,12 @@ type lineEditor struct {
 	// raw switches the terminal to raw mode and returns the restore
 	// function; nil reads cooked lines. Tests set it to a no-op.
 	raw func() (func(), error)
+	// width returns the terminal's column count; 0 means unknown, and
+	// redraw then assumes the line never wraps.
+	width func() int
+	// row is the cursor's row below the prompt line's first row, as left
+	// by the last redraw.
+	row int
 }
 
 func newLineEditor(tty *os.File, r io.Reader, w io.Writer, hist *chatHistory) *lineEditor {
@@ -32,6 +41,7 @@ func newLineEditor(tty *os.File, r io.Reader, w io.Writer, hist *chatHistory) *l
 	}
 	if tty != nil && isTerminal(tty) {
 		e.raw = func() (func(), error) { return makeRaw(tty) }
+		e.width = func() int { return terminalWidth(tty) }
 	}
 	return e
 }
@@ -66,12 +76,23 @@ type lineState struct {
 }
 
 // readRaw runs the key state machine until Enter, Ctrl-C or Ctrl-D.
+//
+// A prompt may start with lines of its own (the chat prompt opens with a
+// blank line); they are written once here, and only the prompt's last line
+// is redrawn on each key. Redrawing the whole prompt printed its newline
+// again on every keystroke.
 func (e *lineEditor) readRaw(prompt string) (string, error) {
 	st := &lineState{hist: e.hist.entries, hi: len(e.hist.entries)}
+	if i := strings.LastIndexByte(prompt, '\n'); i >= 0 {
+		io.WriteString(e.w, prompt[:i+1])
+		prompt = prompt[i+1:]
+	}
 	io.WriteString(e.w, prompt)
+	e.row = 0
 	for {
 		r, _, err := e.r.ReadRune()
 		if err != nil {
+			e.toEnd(prompt, st)
 			io.WriteString(e.w, "\r\n")
 			if len(st.buf) > 0 && err == io.EOF {
 				return string(st.buf), nil
@@ -80,13 +101,16 @@ func (e *lineEditor) readRaw(prompt string) (string, error) {
 		}
 		switch r {
 		case '\r', '\n':
+			e.toEnd(prompt, st)
 			io.WriteString(e.w, "\r\n")
 			return string(st.buf), nil
 		case 3: // Ctrl-C
+			e.toEnd(prompt, st)
 			io.WriteString(e.w, "^C\r\n")
 			return string(st.buf), errInterrupt
 		case 4: // Ctrl-D
 			if len(st.buf) == 0 {
+				e.toEnd(prompt, st)
 				io.WriteString(e.w, "\r\n")
 				return "", io.EOF
 			}
@@ -176,13 +200,82 @@ func (e *lineEditor) escape(st *lineState) {
 	}
 }
 
-// redraw rewrites the line and puts the cursor at pos.
-func (e *lineEditor) redraw(prompt string, st *lineState) {
-	s := "\r" + prompt + strings.ReplaceAll(string(st.buf), "\n", "↵") + "\x1b[K"
-	if back := len(st.buf) - st.pos; back > 0 {
-		s += fmt.Sprintf("\x1b[%dD", back)
+// reEscape matches CSI (colours, cursor moves) and OSC (hyperlinks,
+// titles) escape sequences, which take no columns.
+var reEscape = regexp.MustCompile("\x1b\\[[0-9;?]*[ -/]*[@-~]|\x1b\\][^\x07\x1b]*(?:\x07|\x1b\\\\)")
+
+// visibleWidth is the number of columns s takes on screen: escape
+// sequences stripped, runes measured with termmd's CJK/emoji widths.
+func visibleWidth(s string) int { return termmd.StringWidth(reEscape.ReplaceAllString(s, "")) }
+
+// cols returns the terminal width, or 0 when unknown.
+func (e *lineEditor) cols() int {
+	if e.width == nil {
+		return 0
 	}
-	io.WriteString(e.w, s)
+	return e.width()
+}
+
+// layout returns the column the cursor is at and the column the line ends
+// at, counted from the start of the prompt line.
+func layout(prompt string, st *lineState) (cur, end int) {
+	pw := visibleWidth(prompt)
+	text := strings.ReplaceAll(string(st.buf), "\n", "↵")
+	before := strings.ReplaceAll(string(st.buf[:st.pos]), "\n", "↵")
+	return pw + termmd.StringWidth(before), pw + termmd.StringWidth(text)
+}
+
+// redraw rewrites the prompt line in place and puts the cursor at pos. It
+// never prints a newline for a line that fits the terminal: it moves back
+// to the prompt's first row, returns to column 0 and clears to the end.
+func (e *lineEditor) redraw(prompt string, st *lineState) {
+	text := strings.ReplaceAll(string(st.buf), "\n", "↵")
+	cur, end := layout(prompt, st)
+	w := e.cols()
+	var b strings.Builder
+	if w <= 0 {
+		b.WriteString("\r" + prompt + text + "\x1b[K")
+		if back := end - cur; back > 0 {
+			fmt.Fprintf(&b, "\x1b[%dD", back)
+		}
+		io.WriteString(e.w, b.String())
+		return
+	}
+	if e.row > 0 {
+		fmt.Fprintf(&b, "\x1b[%dA", e.row)
+	}
+	// Clear before writing: clearing after a line that ends in the last
+	// column would erase that column.
+	b.WriteString("\r\x1b[J" + prompt + text)
+	endRow := end / w
+	if end > 0 && end%w == 0 {
+		// The cursor waits in the last column; move it onto the next row.
+		b.WriteString("\r\n")
+	}
+	curRow, curCol := cur/w, cur%w
+	if up := endRow - curRow; up > 0 {
+		fmt.Fprintf(&b, "\x1b[%dA", up)
+	}
+	b.WriteString("\r")
+	if curCol > 0 {
+		fmt.Fprintf(&b, "\x1b[%dC", curCol)
+	}
+	e.row = curRow
+	io.WriteString(e.w, b.String())
+}
+
+// toEnd moves the cursor below the last row of a wrapped line, so output
+// after Enter starts under it rather than over it.
+func (e *lineEditor) toEnd(prompt string, st *lineState) {
+	w := e.cols()
+	if w <= 0 {
+		return
+	}
+	_, end := layout(prompt, st)
+	if down := end/w - e.row; down > 0 {
+		fmt.Fprintf(e.w, "\x1b[%dB", down)
+	}
+	e.row = end / w
 }
 
 func (st *lineState) insert(r rune) {
