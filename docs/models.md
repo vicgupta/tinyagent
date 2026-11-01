@@ -40,6 +40,7 @@ tinyagent -m claude-code/sonnet -t "..."                     # --model sonnet
 tinyagent -m codex-exec/default -t "..."                     # Codex's configured model
 tinyagent -m codex-exec/gpt-5.5 -t "..."                     # --model gpt-5.5
 tinyagent -m opencode/default -t "..."                       # OpenCode's configured model
+tinyagent -m opencode/big-pickle -t "..."                    # Zen model: --model opencode/big-pickle
 tinyagent -m opencode/anthropic/claude-sonnet-4-5 -t "..."   # --model anthropic/claude-sonnet-4-5
 ```
 
@@ -84,16 +85,16 @@ codex exec --json --sandbox <read-only|workspace-write> --cd <cwd> [--model <nam
 Runs `opencode run`, OpenCode's documented non-interactive mode ([CLI](https://opencode.ai/docs/cli/), see `run`). tinyagent only starts the `opencode` binary; OpenCode loads its own config, providers and credentials.
 
 ```
-opencode run --format json [--dir <cwd>] [--model <provider/model>] [--agent plan] "<prompt>"
+opencode run --format json [--model <provider/model>] [--agent plan] "<prompt>"   # runs in --cwd
 ```
 
 - **Install:** `curl -fsSL https://opencode.ai/install | bash`, `npm i -g opencode-ai`, or Homebrew ([intro](https://opencode.ai/docs/), [repository](https://github.com/anomalyco/opencode)). `tinyagent --check -m opencode/default` shows the binary and its `opencode --version`.
 - **Sign in:** run `opencode auth login` (or set the provider's API key variable) as described in [Providers](https://opencode.ai/docs/providers/). OpenCode stores credentials in `~/.local/share/opencode/auth.json`; tinyagent never reads, copies or proxies that file or any token.
-- **Model:** everything after `opencode/` is passed to `--model` unchanged, in OpenCode's `provider/model` format ([Models](https://opencode.ai/docs/models/)); `opencode models` lists the ids. `opencode/default` sends no `--model`, so OpenCode's configured model applies.
-- **Working directory:** the process runs in `--cwd` and gets `--dir <cwd>`. A prompt starting with `-` gets a leading space so it isn't read as a flag.
+- **Model:** a `provider/model` after `opencode/` is passed to `--model` unchanged, in OpenCode's `provider/model` format ([Models](https://opencode.ai/docs/models/)); `opencode models` lists the ids. A single name (anything but `default`) is a model of OpenCode's own [Zen](https://opencode.ai/docs/zen/) provider, whose models are `opencode/<model-id>`: `-m opencode/big-pickle` sends `--model opencode/big-pickle`, and so does the explicit `-m opencode/opencode/big-pickle`. `opencode/default` sends no `--model`, so OpenCode's configured model applies.
+- **Working directory:** the process runs in `--cwd` (its working directory); no `--dir` flag is passed. `opencode run --dir` exists only in v1.2.0 to v1.x and the v2 CLI rejects it (`Unrecognized flag: --dir`), while the working directory works on every version. A prompt starting with `-` gets a leading space so it isn't read as a flag.
 - **Permissions:** normally no permission flags are passed (no `--auto`), so your OpenCode [permission](https://opencode.ai/docs/permissions/) config decides; a non-interactive run can't answer an `ask` prompt, so such requests are rejected by OpenCode.
 - **Read-only:** `--read-only` selects OpenCode's built-in `plan` agent (`--agent plan`, [Agents](https://opencode.ai/docs/agents/)) and sets `OPENCODE_CONFIG_CONTENT` (inline config, loaded after global and project config, [Config](https://opencode.ai/docs/config/)) denying `edit`, `bash`, `webfetch`, `websearch`, `task`, `external_directory`, `question` and `doom_loop`, both at the top level and on the `plan` agent. If `OPENCODE_CONFIG_CONTENT` is already set, tinyagent refuses read-only instead of overwriting it. OpenCode managed settings outrank inline config, and this is OpenCode's own policy, not an OS sandbox.
-- **Output:** `--format json` prints one JSON event per line. The event schema isn't documented; tinyagent reads it defensively, based on OpenCode's source: the `text` parts of the last assistant message are the answer, `step_finish` parts give `cost` and `tokens`, `error` events (or a non-zero exit) fail the step, and `sessionID` is recorded. Output that isn't JSON is used as plain text. Unlike the subscription CLIs, OpenCode's `cost` is reported as spend, so `--cost-limit` counts it.
+- **Output:** `--format json` prints one JSON event per line. The event schema isn't documented; tinyagent reads it defensively, based on OpenCode's source: the `text` parts of the last assistant message are the answer, `step_finish` parts give `cost` and `tokens`, `error` events (or a non-zero exit) fail the step, and `sessionID` is recorded. Output that isn't JSON is used as plain text. `--format` exists since OpenCode v0.11.3; if an older build rejects it (`Unrecognized flag` / `Unknown argument`), tinyagent retries once without it and reads plain text. When `opencode` exits non-zero, the error names its `opencode --version` and path and suggests upgrading OpenCode or setting `opencode.path`. Unlike the subscription CLIs, OpenCode's `cost` is reported as spend, so `--cost-limit` counts it.
 
 ## Model roles
 

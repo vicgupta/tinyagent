@@ -203,6 +203,9 @@ assert none of it is used.
   `internal/config/config.go`), `hint.go`, the `--check` line in
   `cmd/tinyagent/check.go`, its `<name>.path` config key (`config.go`,
   `locate.go`), and test it with a fake binary on PATH.
+- Keep handoff CLI flags to ones every supported version of that CLI accepts.
+  Set the working directory with `cmd.Dir`, not a CLI flag (OpenCode v2
+  dropped `run --dir`), and fall back when an optional flag is rejected.
 
 ## Pull request checklist
 

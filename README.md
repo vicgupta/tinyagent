@@ -116,6 +116,7 @@ tinyagent -m openrouter/qwen/qwen3-coder -t "..."
 tinyagent -m ollama/llama3.1 -t "..."
 tinyagent -m codex/gpt-5.6-luna -t "..."   # ChatGPT subscription, see docs/providers.md
 tinyagent -m opencode/anthropic/claude-sonnet-4-5 -t "..."   # your installed OpenCode, see docs/models.md#opencode
+tinyagent -m opencode/big-pickle -t "..."                    # an OpenCode Zen model (opencode/big-pickle)
 cat task.md | tinyagent -t -               # read a long or multi-line task from stdin
 tinyagent --read-only --cwd ~/src/project -t "Review error handling in pkg/api"
 cat review-task.md | tinyagent --read-only -t - -o review.json
