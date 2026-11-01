@@ -85,6 +85,7 @@ func TestLoadMCPTopLevel(t *testing.T) {
 
 func TestServers(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir()) // os.UserConfigDir ignores XDG_CONFIG_HOME on macOS
 	root := mcpRoot(t, `{`+schemaField+`,"mcpServers":{"v":{"type":"stdio","command":"./bin/server","cwd":"${PLUGIN_DATA}"},"h":{"type":"sse","url":"https://x"}}}`)
 	os.WriteFile(filepath.Join(root, ManifestFile), []byte(`{"$schema":"`+SchemaV1+`","name":"kit"}`), 0o644)
 	ls, err := Load([]config.Plugin{{Path: root}})

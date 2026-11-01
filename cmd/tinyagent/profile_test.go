@@ -28,6 +28,7 @@ func profileSetup(t *testing.T) (dir string, bodies *[]map[string]any) {
 	t.Setenv("OPENAI_API_KEY", "fake")
 	t.Setenv("AGENT_MODEL", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir()) // os.UserConfigDir ignores XDG_CONFIG_HOME on macOS
 	return t.TempDir(), bodies
 }
 

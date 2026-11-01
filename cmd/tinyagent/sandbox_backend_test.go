@@ -12,6 +12,7 @@ import (
 
 func TestSandboxBackendFlagValidation(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir()) // os.UserConfigDir ignores XDG_CONFIG_HOME on macOS
 	for _, v := range []string{"firejail", ""} {
 		if code, _, got := runWith(t, "--sandbox", "--sandbox-backend", v, "-t", "x"); code != 2 || !strings.Contains(got, "must be auto, landlock or bwrap") {
 			t.Errorf("--sandbox-backend %q: exit %d, stderr %q", v, code, got)
