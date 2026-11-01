@@ -31,6 +31,12 @@ jobs:
         run: go build ./...
       - name: Vet
         run: go vet ./...
+      # Same check as `make lint` (#317). Pinned so new staticcheck releases
+      # can't turn CI red on their own; bump the version on purpose.
+      - name: Lint (staticcheck)
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
+          "$(go env GOPATH)/bin/staticcheck" ./...
       - name: Install Fish
         run: sudo apt-get update && sudo apt-get install -y fish
       - name: Test
