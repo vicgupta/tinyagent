@@ -49,12 +49,6 @@ func ApplyPatchToolSignature(readOnly, plan, images, applyPatch bool) string {
 	return tools.Selection{ReadOnly: readOnly, Plan: plan, Images: images, ApplyPatch: applyPatch}.Signature()
 }
 
-// checkpointSelection is the tool selection a checkpoint recorded; see
-// resume.Selection.
-func checkpointSelection(t *trajectory.Trajectory, set *skills.Set) tools.Selection {
-	return resume.Selection(t, set)
-}
-
 // ValidateResume runs before provider setup, using only the explicit execution
 // root and current config. Checkpoint paths and credentials are never executed
 // or loaded from metadata.

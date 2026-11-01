@@ -101,10 +101,15 @@ Other shell names exit 2. In all three shells, words that don't start with `-` (
 
 ```bash
 git clone https://github.com/vicgupta/tinyagent && cd tinyagent
-make build    # ./tinyagent
-make test
-make dist     # linux/darwin/windows × amd64/arm64 in dist/
+make build      # ./tinyagent
+make test       # go test -count=1 ./..., same as CI
+make test-race  # go test -race -count=1 ./...
+make fmt        # gofmt check, same as CI
+make lint       # go vet, plus staticcheck if installed
+make dist       # linux/darwin/windows × amd64/arm64 in dist/
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md#getting-started) for what each target runs.
 
 ## Usage
 

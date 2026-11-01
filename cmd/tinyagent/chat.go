@@ -395,8 +395,7 @@ func (c *chat) turn(msg string, asFollowUp bool) {
 			fmt.Fprintln(termErr, line)
 		}
 	}
-	var text *markerFilter
-	text = &markerFilter{emit: func(t string) {
+	text := &markerFilter{emit: func(t string) {
 		if t == "" {
 			return
 		}

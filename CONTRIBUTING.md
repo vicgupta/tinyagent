@@ -22,10 +22,17 @@ high, so a little coordination up front goes a long way.
 
 ```bash
 git clone https://github.com/vicgupta/tinyagent && cd tinyagent
-make build    # ./tinyagent
-make test     # go test ./...
-make dist     # linux/darwin/windows x amd64/arm64 in dist/
+make build      # ./tinyagent
+make test       # go test -count=1 ./...  (same as CI)
+make test-race  # go test -race -count=1 ./...  (same as the CI race job)
+make fmt        # fails and lists files if gofmt -l . is not empty (same as CI)
+make lint       # go vet ./..., then staticcheck ./... if staticcheck is installed
+make dist       # linux/darwin/windows x amd64/arm64 in dist/
 ```
+
+`make lint` skips staticcheck with a hint when it isn't on your `PATH`; install it
+with `go install honnef.co/go/tools/cmd/staticcheck@latest`. It is not a module
+dependency. `make fmt` only checks; run `gofmt -w .` to fix files.
 
 You need Go 1.27 (see `go.mod`). Keep dependencies to a minimum and don't add one
 unless there is a very good reason. The direct dependencies in `go.mod` are:
@@ -146,8 +153,9 @@ on pushes to `main`:
 
 All three must pass before a merge. Each takes a few minutes; the macOS and
 `-race` jobs are the slowest, so expect the whole workflow to finish in roughly
-the time of the slowest job. Reproduce the race job locally with
-`go test -race -count=1 ./...`.
+the time of the slowest job. Reproduce the jobs locally with `make fmt`,
+`make test` and `make test-race` (the race job is `go test -race -count=1 ./...`).
+`makefile_test.go` fails if the Makefile targets drift from these CI commands.
 
 Both test jobs also fail if the suite created tinyagent's real user config
 directory (`~/.config/tinyagent` on Linux, `~/Library/Application Support/tinyagent`
@@ -215,7 +223,7 @@ Before opening a PR, confirm:
 
 - [ ] Rebased onto current `main`; no merge commits.
 - [ ] `gofmt -l .` is empty.
-- [ ] `go build ./...`, `go vet ./...`, `go test -count=1 ./...` pass.
+- [ ] `go build ./...`, `go vet ./...`, `go test -count=1 ./...` pass (`make fmt lint test`).
 - [ ] `GOOS=linux go build ./... && GOOS=linux go vet ./...` pass if build-tagged
       files changed.
 - [ ] `README.md` or `docs/` updated for any user-visible change (flag, config key, env var,
