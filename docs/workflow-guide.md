@@ -1,6 +1,6 @@
 # Setting up workflows: a guide with examples
 
-This page shows how to set up a [skill workflow](workflows.md) from scratch. It has three worked examples: simple, medium and complex. [workflows.md](workflows.md) is the full reference.
+This page shows how to set up a [skill workflow](workflows.md) from scratch. It has three worked examples: simple, medium and complex. [workflows.md](workflows.md) is the full reference. For single-run checklists, and for when to use a playbook instead of a workflow, see [Setting up playbooks](playbook-guide.md); a playbook can also hand a task to a workflow with `workflow:`.
 
 - [Setup](#setup)
   - [Where the files live](#where-the-files-live)

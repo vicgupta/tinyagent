@@ -266,6 +266,12 @@ Before opening a PR, confirm:
       `TestWorkflowHelpCoversEveryFlag`
       (`cmd/tinyagent/workflow_help_test.go`) fails when a workflow flag or event is
       missing from the topic or the page.
+- [ ] Playbook changes (a `--playbook*` flag, a frontmatter key, the body format,
+      routing, the handoff or resume) update [`docs/playbooks.md`](docs/playbooks.md),
+      the flag rows in `docs/subcommands.md`, and the examples in
+      [`docs/playbook-guide.md`](docs/playbook-guide.md);
+      `TestPlaybookGuideExamples` (`internal/playbooks/guide_test.go`) parses them and
+      checks their routing lines.
 - [ ] PR body follows [`.github/pull_request_template.md`](.github/pull_request_template.md):
       three sections, under ~200 words, no transcripts or run logs.
 

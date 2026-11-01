@@ -5,6 +5,7 @@
 ### Docs
 
 - New [Setting up workflows](docs/workflow-guide.md) guide. It covers where the files live, required and defaulted fields, how to run a workflow (`-t`, `--workflow-name`, `-o`, `--workflow-observe`) and its limits, with three worked examples: one stage, a few stages with checks and retries, and the full plan → code → vet → test → verify-behavior pipeline. `TestWorkflowGuideExamples` loads every example so the guide can't drift from the loader. Linked from the README and docs/workflows.md.
+- New [Setting up playbooks](docs/playbook-guide.md) guide: where playbooks live, required and optional frontmatter, `playbooks install samples`, the flags, keyword routing and the model fallback, the `workflow:` handoff and the `[p/w]` question, resume's content hash and limits, a playbooks-vs-workflows table, and three worked examples (a short checklist, a longer one with two skills, and one that hands off to a workflow). `TestPlaybookGuideExamples` parses every example with the real playbook loader, loads its skills and workflow, and checks the documented routing lines. Linked from the README, docs/playbooks.md and docs/workflow-guide.md.
 
 ### Features
 

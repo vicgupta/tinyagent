@@ -9,7 +9,7 @@ checklist, loads the skills it names, and adds its done check to
 
 Playbooks and skills are read only from inside the current working directory.
 
-Playbooks are off by default.
+Playbooks are off by default. For a step-by-step setup with three worked examples, and a comparison with workflows, see [Setting up playbooks](playbook-guide.md).
 
 ```sh
 tinyagent playbooks install samples      # write six samples to ./playbooks
