@@ -28,17 +28,18 @@ type Memory struct {
 	// Backend selects the store: markdown (default; one <id>.md per entry
 	// in Path) or sqlite (one database at SQLitePath).
 	Backend string `yaml:"backend"`
-	// Path is the markdown folder; relative paths resolve against --cwd
-	// (default ./memory).
+	// Path is the markdown folder, relative to --cwd and inside it
+	// (default ./.tinyagent/memory).
 	Path string `yaml:"path"`
-	// SQLitePath is the SQLite database (default ./memory/memory.sqlite).
+	// SQLitePath is the SQLite database (default
+	// ./.tinyagent/memory/memory.sqlite).
 	SQLitePath string `yaml:"sqlite_path"`
 	// MaxEntrySize caps one entry's text, in characters (default 500).
 	MaxEntrySize int `yaml:"max_entry_size"`
 	// DefaultTags are added to every new entry.
 	DefaultTags []string `yaml:"default_tags"`
-	// ImportLegacy copies the old per-project JSON store into a new,
-	// not-yet-existing store once (default true; the JSON file is kept).
+	// ImportLegacy is ignored: it is still accepted so older configs load,
+	// but memory is never imported from outside --cwd (issue #335).
 	ImportLegacy bool `yaml:"import_legacy"`
 }
 

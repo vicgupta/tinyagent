@@ -36,10 +36,10 @@ type MemoryKey struct {
 var MemoryKeys = []MemoryKey{
 	{Name: "backend", Type: "string", Default: `"markdown"`, Desc: "store backend: markdown (one <id>.md file per entry in path) or sqlite (one database at sqlite_path)",
 		set: func(m *Memory, v any) error { s, err := asString(v); m.Backend = s; return err }},
-	{Name: "path", Type: "string", Default: `"./memory"`, Desc: "markdown folder; relative paths resolve against --cwd",
+	{Name: "path", Type: "string", Default: `"./.tinyagent/memory"`, Desc: "markdown folder, relative to --cwd and inside it",
 		set:   func(m *Memory, v any) error { s, err := asString(v); m.Path = s; return err },
 		local: localPath(func(m *Memory, s string) { m.Path = s })},
-	{Name: "sqlite_path", Type: "string", Default: `"./memory/memory.sqlite"`, Desc: "SQLite database file (.sqlite, .sqlite3 or .db); relative paths resolve against --cwd",
+	{Name: "sqlite_path", Type: "string", Default: `"./.tinyagent/memory/memory.sqlite"`, Desc: "SQLite database file (.sqlite, .sqlite3 or .db), relative to --cwd and inside it",
 		set:   func(m *Memory, v any) error { s, err := asString(v); m.SQLitePath = s; return err },
 		local: localPath(func(m *Memory, s string) { m.SQLitePath = s })},
 	{Name: "auto_write", Type: "bool", Default: "false", Desc: "turn project memory on: load active entries into the prompt and offer remember, memory_search and memory_list (same as --memory)",
@@ -79,7 +79,7 @@ var MemoryKeys = []MemoryKey{
 		local: localMin(func(m *Memory) *int { return &m.MaxEntries })},
 	{Name: "default_tags", Type: "[]string", Default: "[]", Desc: `tags added to every new entry, e.g. ["project-x"] (env: comma-separated)`,
 		set: func(m *Memory, v any) error { s, err := asStrings(v); m.DefaultTags = s; return err }},
-	{Name: "import_legacy", Type: "bool", Default: "true", Desc: "copy the old per-project JSON store (~/.local/state/tinyagent/memory/*.json) into a new store once; the JSON file is never changed",
+	{Name: "import_legacy", Type: "bool", Default: "true", Desc: "ignored: accepted so older files still load; memory is never imported from outside --cwd",
 		set: func(m *Memory, v any) error { b, err := asBool(v); m.ImportLegacy = b; return err }},
 }
 

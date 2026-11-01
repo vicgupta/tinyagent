@@ -38,12 +38,8 @@ func checkMemory(fs *flag.FlagSet, o *options, cfg config.Memory, root string) s
 	if err != nil {
 		return fmt.Sprintf("%s, store unavailable: %v", head, err)
 	}
-	if !memory.Exists(path) && cfg.ImportLegacy {
-		if legacy := legacyMemoryPath(root); legacy != "" {
-			if old, err := memory.Load(legacy); err == nil && len(old) > 0 {
-				head += fmt.Sprintf(", %d legacy %s will be imported from %s on the next run", len(old), plural(len(old), "entry", "entries"), legacy)
-			}
-		}
+	if h := oldMemoryHint(cfg, root, path); h != "" {
+		head += ", " + strings.TrimPrefix(h, "hint: ")
 	}
 	entries, err := memory.Load(path)
 	if err != nil {

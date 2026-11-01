@@ -514,12 +514,10 @@ func TestStorePathOutsideGit(t *testing.T) {
 	}
 }
 
-func TestDefaultDirHonorsXDGStateHome(t *testing.T) {
-	d := t.TempDir()
-	t.Setenv("XDG_STATE_HOME", d)
-	got, err := DefaultDir()
-	if err != nil || got != filepath.Join(d, "tinyagent", "memory") {
-		t.Fatalf("%s %v", got, err)
+func TestStorePathNeedsDir(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if _, err := StorePath("", t.TempDir()); err == nil {
+		t.Fatal("empty dir accepted: there is no default outside --cwd")
 	}
 }
 
