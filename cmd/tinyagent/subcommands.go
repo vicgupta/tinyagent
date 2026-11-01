@@ -42,6 +42,9 @@ type subcommand struct {
 	// positional names the flag a leading non-option word sets, and
 	// positionalArg its placeholder in help (triage <issues.json>).
 	positional, positionalArg string
+	// topic, when set, is printed instead of the generated help: a help
+	// topic (tinyagent help workflows) rather than a subcommand.
+	topic string
 }
 
 type subAction struct {
@@ -112,7 +115,7 @@ var subcommands = []subcommand{
 		options: map[string]string{"keep": "plugins-keep"},
 	},
 	{
-		name: "skills", brief: "check workflow skill files and workflow files: validate", summary: "check skill-workflow Markdown skills and YAML workflow files without running anything (same as --skills-validate); not Agent Skills (--skills)",
+		name: "skills", brief: "check workflow skill files and workflow files: validate", summary: "check skill-workflow Markdown skills and YAML workflow files without running anything (same as --skills-validate), e.g. tinyagent skills validate docs/workflows/workflow.yaml; not Agent Skills (--skills). Run workflows with --workflow; see tinyagent help workflows",
 		actions: map[string]subAction{
 			"validate": {flag: "skills-validate", args: true, desc: "validate skill files, skills directories or workflow files, then exit (--skills-validate <path>, repeatable)"},
 		},
@@ -130,6 +133,12 @@ var subcommands = []subcommand{
 			"status":  {flag: "tinygo-status", desc: "print pinned and installed versions, path and checksum state (--tinygo-status)"},
 		},
 	},
+}
+
+// helpTopics are "tinyagent help <topic>" pages that aren't subcommands.
+var helpTopics = map[string]*subcommand{
+	"workflows": {name: "workflows", topic: helpWorkflows},
+	"workflow":  {name: "workflow", topic: helpWorkflows},
 }
 
 func findSubcommand(name string) *subcommand {
@@ -156,7 +165,10 @@ func expandSubcommand(args []string) ([]string, *subHelp, error) {
 		if s := findSubcommand(args[1]); s != nil {
 			return nil, &subHelp{s}, nil
 		}
-		return nil, nil, fmt.Errorf("unknown subcommand %q; subcommands: %s", args[1], subcommandNames())
+		if t, ok := helpTopics[args[1]]; ok {
+			return nil, &subHelp{t}, nil
+		}
+		return nil, nil, fmt.Errorf("unknown subcommand or help topic %q; subcommands: %s; topics: workflows", args[1], subcommandNames())
 	}
 	s := findSubcommand(args[0])
 	if s == nil {
@@ -279,6 +291,10 @@ func subcommandNames() string {
 
 // printSubcommandHelp prints one subcommand's grouped help.
 func printSubcommandHelp(w io.Writer, s *subcommand) {
+	if s.topic != "" {
+		fmt.Fprint(w, s.topic)
+		return
+	}
 	fs := newFlagSet(&options{})
 	fmt.Fprintf(w, "Usage: tinyagent %s", s.name)
 	if s.positionalArg != "" {

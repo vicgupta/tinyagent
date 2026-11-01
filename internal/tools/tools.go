@@ -236,27 +236,6 @@ func spec(name, desc string, p props, required ...string) model.ToolSpec {
 	}
 }
 
-// Run executes one tool call and returns text for the model. Tool failures are
-// reported as text so the model can recover; Run never returns an error.
-func (e *Executor) Run(ctx context.Context, call model.ToolCall) string {
-	out, _ := e.RunWithError(ctx, call)
-	return out
-}
-
-// RunWithError executes a tool call and reports whether execution failed.
-// The returned text is still suitable for passing back to the model.
-func (e *Executor) RunWithError(ctx context.Context, call model.ToolCall) (string, bool) {
-	out, _, isErr := e.RunWithImages(ctx, call)
-	return out, isErr
-}
-
-// RunWithImages is RunWithError plus any images the result carries (only
-// with Images on). The text already holds a placeholder for each image.
-func (e *Executor) RunWithImages(ctx context.Context, call model.ToolCall) (string, []model.Image, bool) {
-	r := e.RunResult(ctx, call)
-	return r.Text, r.Images, r.IsError
-}
-
 // Result is one tool call's outcome for the model.
 type Result struct {
 	Text    string
@@ -283,7 +262,11 @@ type Result struct {
 	Redactions int
 }
 
-// RunResult is RunWithImages plus where an over-limit result was saved.
+// RunResult executes one tool call and returns its outcome for the model:
+// the text, any images (only with Images on), whether it failed, and where an
+// over-limit result was saved. Tool failures are reported in the Result so the
+// model can recover; RunResult never returns an error. It is the Executor's
+// only public run entry point.
 func (e *Executor) RunResult(ctx context.Context, call model.ToolCall) Result {
 	if !e.onlyAllows(call.Function.Name) {
 		return notOffered(call.Function.Name)
@@ -402,47 +385,7 @@ func (e *Executor) Catalog() []model.ToolSpec {
 }
 
 func (e *Executor) catalog() []model.ToolSpec {
-	out := Specs(e.ReadOnly)
-	if e.Plan {
-		out = append(out, PlanSpec())
-	}
-	if e.Images {
-		out = append(out, ViewImageSpec())
-	}
-	if e.ApplyPatch && !e.ReadOnly {
-		out = append(out, ApplyPatchSpec())
-	}
-	if e.Delegate {
-		out = append(out, WithTaskType(DelegateSpec(), e.TaskTypes))
-	}
-	if e.Workers && !e.ReadOnly {
-		out = append(out, WithTaskType(WorkerSpec(), e.TaskTypes), ApplyWorkerSpec())
-	}
-	if e.WebFetch != nil {
-		out = append(out, WebFetchSpec())
-	}
-	if e.LSP != nil {
-		out = append(out, LSPSpec())
-	}
-	if e.AskUser {
-		out = append(out, AskUserSpec())
-	}
-	if e.Remember != nil && !e.ReadOnly {
-		out = append(out, RememberSpecFor(e.Remember.Limits.MaxTextLen))
-		if e.MemoryTools {
-			out = append(out, MemorySearchSpec(), MemoryListSpec())
-		}
-	}
-	if e.Skills.Len() > 0 {
-		out = append(out, e.Skills.Spec())
-	}
-	if e.ReadOnly {
-		return out
-	}
-	for _, c := range e.CommandTools {
-		out = append(out, c.Spec())
-	}
-	return append(out, e.ExternalSpecs...)
+	return e.Selection().Specs()
 }
 
 // PlanToolName is the opt-in plan tool.
@@ -737,17 +680,10 @@ func skipDir(name string) bool {
 	return false
 }
 
-// Truncate caps s at max characters, keeping its head and tail; 0 means
-// unlimited. It is the same cap applied to tool output.
+// Truncate caps s at max bytes of kept text, keeping its head and tail; 0
+// means unlimited. It is the same cap applied to tool output. See
+// truncate.go for the shared, UTF-8-safe implementation.
 func Truncate(s string, max int) string { return truncate(s, max) }
-
-func truncate(s string, max int) string {
-	if max <= 0 || len(s) <= max {
-		return s
-	}
-	half := max / 2
-	return fmt.Sprintf("%s\n\n... [%d characters elided] ...\n\n%s", s[:half], len(s)-2*half, s[len(s)-half:])
-}
 
 func isDir(path string) bool {
 	fi, err := os.Stat(path)

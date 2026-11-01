@@ -127,3 +127,67 @@ func TestWorkflowCLIUsageErrors(t *testing.T) {
 		t.Errorf("model run despite usage error: %q", calls)
 	}
 }
+
+func TestWorkflowObserve(t *testing.T) {
+	wf := writeWorkflowFiles(t)
+	var calls [][]string
+	fakeWorkflowAgent(t, "SUCCESS CHECK: FAIL - nothing planned", &calls)
+	cwd := t.TempDir()
+	code, stdout, stderr := runCLI(t, "--workflow", wf, "--workflow-name", "plan-tasks", "-t", "x", "--json", "--workflow-observe", "--cwd", cwd)
+	if code != harness.ExitBlocked {
+		t.Fatalf("exit %d, stderr:\n%s", code, stderr)
+	}
+	for _, a := range calls[0] {
+		if a == "--workflow-observe" {
+			t.Errorf("forwarded --workflow-observe: %q", calls[0])
+		}
+	}
+	b, err := os.ReadFile(filepath.Join(cwd, ".tinyagent", "observer", "proposals.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	var p map[string]any
+	if len(lines) != 1 || json.Unmarshal([]byte(lines[0]), &p) != nil {
+		t.Fatalf("proposals:\n%s", b)
+	}
+	if p["stage"] != "plan-tasks" || !strings.HasPrefix(p["suggested_command"].(string), "tinyagent ratchet add ") {
+		t.Errorf("proposal = %v", p)
+	}
+	if !strings.Contains(stdout, `"observer.proposed"`) || !strings.Contains(stderr, "tinyagent ratchet add ") {
+		t.Errorf("stdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+
+	// The same failure again: the ledger count goes up and it's flagged.
+	code, stdout, stderr = runCLI(t, "--workflow", wf, "--workflow-name", "plan-tasks", "-t", "x", "--json", "--workflow-observe", "--cwd", cwd)
+	if code != harness.ExitBlocked || !strings.Contains(stdout, `"observer.recurrence"`) || !strings.Contains(stdout, `"count":2`) || !strings.Contains(stderr, "gate did not hold") {
+		t.Errorf("exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if b2, _ := os.ReadFile(filepath.Join(cwd, ".tinyagent", "observer", "proposals.jsonl")); string(b2) != string(b) {
+		t.Errorf("recurrence wrote another proposal:\n%s", b2)
+	}
+}
+
+func TestWorkflowObservePassedAndOff(t *testing.T) {
+	wf := writeWorkflowFiles(t)
+	var calls [][]string
+	fakeWorkflowAgent(t, "1. do it\nSUCCESS CHECK: PASS", &calls)
+	cwd := t.TempDir()
+	if code, _, stderr := runCLI(t, "--workflow", wf, "-t", "plan the export feature", "--workflow-observe", "--cwd", cwd); code != 0 {
+		t.Fatalf("exit %d, stderr:\n%s", code, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(cwd, ".tinyagent")); !os.IsNotExist(err) {
+		t.Errorf("passing run wrote observer files: %v", err)
+	}
+
+	fakeWorkflowAgent(t, "SUCCESS CHECK: FAIL - nothing planned", &calls)
+	if code, _, _ := runCLI(t, "--workflow", wf, "--workflow-name", "plan-tasks", "-t", "x", "--cwd", cwd); code != harness.ExitBlocked {
+		t.Fatalf("exit %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(cwd, ".tinyagent")); !os.IsNotExist(err) {
+		t.Errorf("run without --workflow-observe wrote observer files: %v", err)
+	}
+	if code, _, _ := runCLI(t, "--workflow-observe", "-t", "x"); code != 2 {
+		t.Errorf("--workflow-observe without --workflow: exit %d, want 2", code)
+	}
+}

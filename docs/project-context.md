@@ -41,6 +41,8 @@ With `--skills` (or `skills: true`), tinyagent discovers [Agent Skills](https://
 
 ### Skill workflows
 
+For a task-oriented guide (quick start, paths, routing, flags, events, troubleshooting and examples), see [Workflows](workflows.md). This section is the detailed reference.
+
 `--workflow file.yaml` runs a sequence of small skills on the task (`-t`) as one automatic pipeline, for example plan, then generate, then validate, then test. Each stage is a fresh, unattended tinyagent run in `--cwd` that gets the original task and the previous stage's output. As soon as a stage passes its success check the next one starts; there is no pause or approval between stages. Without `--workflow`, tinyagent behaves exactly as before, and `--skills` Agent Skills are unaffected.
 
 A workflow has two layers: **one YAML workflow file** (the pipeline: stages, checks and limits), passed with `--workflow`, and **one Markdown file per skill** (each stage's instructions), kept in the workflow's `skills_dir`. The two formats don't compete; the file you pass to `--workflow` is always YAML.
@@ -71,7 +73,7 @@ workflows:
         behavior: .tinyagent/behavior.yaml
 ```
 
-Settings in `defaults` or on a stage: `model`, `profile`, `step_limit`, `cost_limit`, `token_limit`, `time_limit`, `retries`, and `check_timeout` (seconds). A stage can also have `check` (a command) or `behavior` (a behavior file; see [Verifying behavior](#verifying-behavior)), but not both, and `gate: spec` (see [Spec gate](#spec-gate)). The defaults are 1 retry (at most 5), 50 steps, a 300 second check timeout, and otherwise your usual config. Flags you pass with `--workflow` (such as `--sandbox` or `-m`) are forwarded to every stage, and stage settings override them. Workflows are sequential and have at most 20 stages. A complete example is in [docs/workflows](workflows).
+Settings in `defaults` or on a stage: `model`, `profile`, `step_limit`, `cost_limit`, `token_limit`, `time_limit`, `retries`, and `check_timeout` (seconds). A stage can also have `check` (a command) or `behavior` (a behavior file; see [Verifying behavior](#verifying-behavior)), but not both, and `gate: spec` (see [Spec gate](#spec-gate)). The defaults are 1 retry (at most 5), 50 steps, a 300 second check timeout, and otherwise your usual config. Flags you pass with `--workflow` (such as `--sandbox` or `-m`) are forwarded to every stage, and stage settings override them. [Verify before stop](verify.md#default-on-for-workflow-runs) is on by default for every stage; pass `--verify-on-stop=false` to turn it off. Workflows are sequential and have at most 20 stages. A complete example is in [docs/workflows](workflows).
 
 **Skill files (Markdown).** Each stage's skill is a Markdown file with three required parts: a heading, an intent line, and a list of inputs. A one-line success check is required too, unless the workflow gives that stage a `check` command.
 
@@ -105,6 +107,28 @@ Either way nothing more runs: no further attempts and no later stages, so a bloc
 
 **Re-queueing.** tinyagent keeps no list of blocked tasks; one run handles one task. To re-queue, fix the task or its acceptance criteria and run the same `tinyagent --workflow ... -t ...` command again. An outside loop that feeds tasks to tinyagent can park a task on exit 5; the suggested convention for an issue-label loop is to swap the issue's `amf:ready` label for `amf:blocked`, and have a person re-add `amf:ready` once the issue is fixed. [`tinyagent triage`](triage.md) flags issues with that label as `blocked` and ranks them last. tinyagent itself makes no GitHub calls.
 
+#### PR bodies
+
+A workflow (or an outside loop around it) that ends in a pull request should keep the PR body short and put the detail elsewhere. Write the full record to `--output` (the workflow `Result` JSON) and link or attach that run log; the PR body gets only the three sections of [`.github/pull_request_template.md`](../.github/pull_request_template.md): what changed, how it was verified, and risks or follow-ups, in under about 200 words, with no transcripts, run logs or full diffs. `gh pr create --body ...` ignores the template, so a tool that passes `--body` should follow the same three sections. tinyagent itself opens no PRs.
+
+#### Learning from failures
+
+`--workflow-observe` (off by default) adds an observer step after a `--workflow` run that ends `Failed` or `Blocked`. It turns the failure into one concrete artifact, a proposed [project rule](ratchet.md#observer-proposals), instead of leaving the lesson to be written by hand:
+
+```sh
+tinyagent --workflow docs/workflows/feature.yaml -t "add CSV export" --workflow-observe
+# observer: proposed project rule p-3f2a9c1b7d4e for stage generate-code in .tinyagent/observer/proposals.jsonl; apply it with:
+#   tinyagent ratchet add 'Before finishing the generate-code stage, run `go test ./...` yourself ...' --incident '...' --cwd '...'
+```
+
+- **Signature.** Each failure is identified by a SHA-256 of the failed stage, its check argv and the first failing line of the check output (the reason when there is none), with paths, hashes, numbers and durations normalized away, so the same failure in another temp dir or with other timings gets the same signature.
+- **Proposal.** The first time a signature is seen, one JSON line goes to `.tinyagent/observer/proposals.jsonl` in `--cwd`: `id`, `signature`, `created`, `workflow`, `status`, `stage`, `reason`, `check_method`, `check_argv`, `check_output_excerpt` (secret values from the environment and token-shaped strings masked, capped at 2,000 bytes), `rule`, `incident` and `suggested_command`. The command is printed on stderr too. The observer never applies the rule: a person reviews it and runs the command.
+- **Recurrence.** `.tinyagent/observer/ledger.jsonl` keeps `signature`, `stage`, `first_seen`, `last_seen`, `count` and `artifact_id` (one appended line per observation; the latest line per signature wins). When a signature is seen again, the observer writes no new proposal, bumps the count and warns `gate did not hold`, naming the project rule applied from the proposal if there is one (found by the `observer <signature prefix>` tag in its incident).
+- **Safety.** Passed and interrupted runs write nothing, and without the flag nothing is written. A corrupt ledger line is skipped with a warning, and a write error is a warning; neither changes the exit code. Each file write is one `O_APPEND` line, so concurrent runs in the same `--cwd` don't interleave.
+- **Events.** With `--json`, `observer.proposed` or `observer.recurrence` follows `workflow.finished`; see [JSON output](json-output.md#machine-readable-output).
+
+The observer makes no model call. Model-written skill edits, generated verify checks and eval-suite generation are not part of it.
+
 #### Spec gate
 
 A thin plan wastes a whole generate-code stage before anyone notices it can't be built or checked. `gate: spec` on a stage (normally `plan-tasks`) checks that stage's output after it passes its success check and before the next stage starts. The plan passes the gate when it has at least one task and every task has:
@@ -116,6 +140,29 @@ A thin plan wastes a whole generate-code stage before anyone notices it can't be
 The example [`plan-tasks`](workflows/skills/plan-tasks.md) skill asks for exactly this shape. The gate checks structure only; it doesn't judge whether the criteria are good.
 
 When the gate rejects a plan, the stage runs once more (a **re-plan**) with the gate's reason in its prompt. The re-plan gets the stage's normal retry budget again for its success check, so it doesn't use up the retries. If the gate rejects the re-plan too, the workflow stops before the next stage, with status `Failed`, the failed stage, and a reason starting `spec gate:`, and exits 1. It never re-plans in a loop. Each decision is a `stage.gate` event and an entry in the `-o` record's `gates` list, and is shown as a progress line. Without `gate:`, stages behave as before. `gate` is a new workflow key, so older tinyagent versions reject a workflow file that uses it.
+
+#### Contract docs
+
+A workflow keeps three things apart: the **spec** is what you are building this time (the `-t` task), a **skill** is how a stage builds it (a file in `skills_dir`), and a **contract doc** is the stable reference for a part of the target repository that keeps getting built on, such as a component library or an internal API. Without a contract doc, every plan re-researches that surface from the code.
+
+Contract docs live in the target repository, by default in `docs/contracts/<surface>.md`. Each starts with a fixed header and three sections:
+
+```markdown
+# Contract: tools-executor
+Covers: internal/tools
+Last verified: 3f2a9c1
+
+## Public API
+## Invariants
+## How to extend
+```
+
+- **Writing one (on request).** The example workflow file has a `contract` workflow that runs the [`write-contract`](workflows/skills/write-contract.md) skill: `tinyagent --workflow docs/workflows/workflow.yaml --workflow-name contract -t "write a contract doc for internal/tools"`. It reads the code, writes or updates `<contracts_dir>/<surface>.md`, and changes no code. Its `check` passes when a file in `docs/contracts` starts with `# Contract: `; if you set another `contracts_dir`, change the check path to match.
+- **Using them.** The example [`plan-tasks`](workflows/skills/plan-tasks.md) skill takes a `contracts_dir` input (the `implement` workflow sets `contracts_dir: docs/contracts`). It reads every contract doc whose `Covers:` line overlaps the spec before researching, lists the ones it used as `Contract used: <path>`, and lists each stable surface it had to research from scratch as `Contract candidate: <surface>`, so you know which contract to write next. With no contracts directory, it plans as before.
+- **Staleness.** `Last verified:` holds the commit or date the doc was checked against. When the covered code changed after that, plan-tasks re-checks what it relies on and reports the contract as stale instead of trusting it.
+- **Trust.** A contract doc is ordinary repository content, read as reference material. It is never loaded automatically, has no authority over the spec or AGENTS.md, and must not be named `AGENTS.md`.
+
+tinyagent doesn't detect repeated use across runs or refresh contracts by itself; run the `contract` workflow when plan-tasks reports a candidate or a stale contract.
 
 #### Verifying behavior
 
@@ -145,6 +192,6 @@ When the task has no behavioral criteria, the stage writes no file (or `cases: [
 
 **Evidence.** Each case's observed output (argv, exit code, stdout and stderr, each capped at 4 KiB, and its failures) is recorded in the check's `evidence` list in the `-o` workflow record and the `stage.finished` event, and is appended to that attempt's log under `== verify-behavior evidence ==`.
 
-**Output and exit status.** Progress lines go to stderr, and the last stage's output goes to stdout. `-o run.json` writes a workflow record (`"kind": "workflow"`) with the route, status, failed stage and reason, total cost, the spec gate decisions (`gates`), and one entry per attempt with its input, output, exit status, check result, and paths to that attempt's trajectory and log under `run.json.stages/`. Without `-o`, the per-stage files are temporary. `--json` prints JSONL events `workflow.started`, `stage.started` (with the input), `stage.finished` (input, output and `check`, which for a [behavior stage](#verifying-behavior) has `method: "behavior"`, `skipped` and `evidence`), `stage.gate` (a [spec gate](#spec-gate) decision), and `workflow.finished`. Exit status is 0 when every stage passes, 5 when a stage is [blocked](#blocked-tasks), 1 when a stage fails for another reason, 2 for an invalid skill or workflow file, a routing error or a conflicting flag (all before any model request), and 130 when interrupted. `--workflow` can't be combined with flags for one interactive or resumed run, such as `--resume`, `--review`, `--worktree`, `--eval` or `--ask-user`.
+**Output and exit status.** Progress lines go to stderr, and the last stage's output goes to stdout. `-o run.json` writes a workflow record (`"kind": "workflow"`) with the route, status, failed stage and reason, total cost, the spec gate decisions (`gates`), and one entry per attempt with its input, output, exit status, check result, paths to that attempt's trajectory and log under `run.json.stages/`, and `unverified: true` when the stage ended with [unverified changes](verify.md#default-on-for-workflow-runs). Without `-o`, the per-stage files are temporary. `--json` prints JSONL events `workflow.started`, `stage.started` (with the input), `stage.finished` (input, output, `unverified` when the stage ended unverified, and `check`, which for a [behavior stage](#verifying-behavior) has `method: "behavior"`, `skipped` and `evidence`), `stage.gate` (a [spec gate](#spec-gate) decision), and `workflow.finished`. Exit status is 0 when every stage passes, 5 when a stage is [blocked](#blocked-tasks), 1 when a stage fails for another reason, 2 for an invalid skill or workflow file, a routing error or a conflicting flag (all before any model request), and 130 when interrupted. `--workflow` can't be combined with flags for one interactive or resumed run, such as `--resume`, `--review`, `--worktree`, `--eval` or `--ask-user`.
 
 **Trust:** workflow skills are prompt input, and `check` commands run with your permissions, just like a project's AGENTS.md or Agent Skills. Only run workflow files you trust.

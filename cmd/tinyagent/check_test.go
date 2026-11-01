@@ -122,8 +122,7 @@ func TestCheckProjectConfigAndFallbacks(t *testing.T) {
 	checkEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", "k")
 	t.Setenv("OPENROUTER_API_KEY", "k")
-	xdg := os.Getenv("XDG_CONFIG_HOME")
-	p := filepath.Join(xdg, "tinyagent", "config.yaml")
+	p := userConfigPath(t)
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -121,6 +121,8 @@ type AgentConfig struct {
 	// handoff providers (docs/models.md). Unset looks the CLI up on PATH.
 	ClaudeCode HandoffCLI `yaml:"claude_code,omitempty"`
 	CodexExec  HandoffCLI `yaml:"codex_exec,omitempty"`
+	// OpenCode configures the opencode handoff provider the same way.
+	OpenCode HandoffCLI `yaml:"opencode,omitempty"`
 
 	MCPServers []MCPServer `yaml:"mcp_servers,omitempty"`
 
@@ -160,6 +162,9 @@ type AgentConfig struct {
 	// ChatHistory records interactive chat input in <cwd>/history/chat_history
 	// (default on; false or --no-chat-history keeps it in memory only).
 	ChatHistory *bool `yaml:"chat_history,omitempty"`
+	// ChatMarkdown renders chat replies as formatted Markdown (headings,
+	// lists, code blocks, tables); false shows them raw. nil means on.
+	ChatMarkdown *bool `yaml:"chat_markdown,omitempty"`
 	// ScopedAgentsMD also delivers AGENTS.md files in directories below
 	// --cwd with the results of file tools touching paths there (off by
 	// default; --scoped-agents-md overrides it).
@@ -993,7 +998,7 @@ type HandoffCLI struct {
 }
 
 // BuiltinProviders are reserved and can't be used as a providers[].id.
-var BuiltinProviders = []string{"openai", "openrouter", "anthropic", "ollama", "codex", "claude-code", "codex-exec"}
+var BuiltinProviders = []string{"openai", "openrouter", "anthropic", "ollama", "codex", "claude-code", "codex-exec", "opencode"}
 
 // ErrInvalidProvider wraps every providers validation error, so callers can
 // exit 2 for them.
@@ -1027,31 +1032,15 @@ func Default() AgentConfig {
 	}
 }
 
-// DefaultPath returns the per-user config file, tinyagent/config.yaml under
-// os.UserConfigDir, whether or not it exists.
+// DefaultPath returns the old per-user config file, tinyagent/config.yaml
+// under os.UserConfigDir, whether or not it exists. It is never loaded:
+// Locate only stats it for a hint and tinyagent init --migrate copies it.
 func DefaultPath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(dir, "tinyagent", "config.yaml"), nil
-}
-
-// Find returns the config file to Load: explicit if set, else the per-user
-// config if it exists, else "" for the defaults. A user config that exists
-// but can't be read is still returned, so Load reports it by name.
-func Find(explicit string) string {
-	if explicit != "" {
-		return explicit
-	}
-	p, err := DefaultPath()
-	if err != nil {
-		return ""
-	}
-	if _, err := os.Stat(p); errors.Is(err, fs.ErrNotExist) {
-		return ""
-	}
-	return p
 }
 
 // Load returns the defaults overlaid with the YAML file at path. An empty path

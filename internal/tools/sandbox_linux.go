@@ -348,6 +348,7 @@ func restrictSelf(writable []string, pol netPolicy) error {
 		return err
 	}
 	if abi < minABIWrite || (!pol.allow && abi < minABINet) {
+		//lint:ignore ST1005 Landlock is a proper noun
 		return fmt.Errorf("Landlock ABI %d too old", abi)
 	}
 	var attr struct{ fs, net, scoped uint64 }

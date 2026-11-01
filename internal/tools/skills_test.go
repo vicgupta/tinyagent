@@ -40,12 +40,13 @@ func TestSkillToolCatalogAndReadOnly(t *testing.T) {
 		if !found {
 			t.Errorf("read-only %v: skill not offered", ro)
 		}
-		out, isErr := e.RunWithError(context.Background(), skillCall("skill", `{"name":"mine"}`))
-		if isErr || !strings.Contains(out, "user body") {
+		r := e.RunResult(context.Background(), skillCall("skill", `{"name":"mine"}`))
+		out := r.Text
+		if r.IsError || !strings.Contains(out, "user body") {
 			t.Errorf("read-only %v: %q", ro, out)
 		}
 		// AC7: other tools still cannot read outside the root.
-		out, _ = e.RunWithError(context.Background(), skillCall("read_file", `{"path":"`+userSkill+`"}`))
+		out = e.RunResult(context.Background(), skillCall("read_file", `{"path":"`+userSkill+`"}`)).Text
 		if strings.Contains(out, "user body") {
 			t.Errorf("read-only %v: read_file escaped the root: %q", ro, out)
 		}

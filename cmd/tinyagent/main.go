@@ -28,6 +28,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/outschema"
 	"github.com/vicgupta/tinyagent/internal/permissions"
 	"github.com/vicgupta/tinyagent/internal/plugins"
+	"github.com/vicgupta/tinyagent/internal/resume"
 	"github.com/vicgupta/tinyagent/internal/sandboxnet"
 	"github.com/vicgupta/tinyagent/internal/skills"
 	"github.com/vicgupta/tinyagent/internal/telemetry"
@@ -113,6 +114,7 @@ type options struct {
 	acp                                              bool
 	interactive, noChatHistory                       bool
 	workflow, workflowName                           string
+	workflowObserve                                  bool
 	skillsValidate                                   stringList
 	memory                                           memoryCmd
 	handoff                                          bool
@@ -167,7 +169,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.planFirst, "plan-first", false, "require a plan (update_plan) before the first workspace-changing tool call; implies --plan (default off; config plan.require_first)")
 	registerVerifyFlags(fs, &o.verify)
 	fs.BoolVar(&o.plan, "plan", false, "enable the update_plan tool: a task plan saved in the checkpoint and pinned in every request (default off; config plan.enabled)")
-	fs.BoolVar(&o.toolOutputFiles, "tool-output-files", false, "save the full text of over-limit tool results under .tinyagent/tool-output so the model can page it with read_file and grep (default off; config tool_output_files.enabled)")
+	fs.BoolVar(&o.toolOutputFiles, "tool-output-files", false, "save the full text of over-limit tool results under .tinyagent/tool-output so the model can page it with read_file and grep; MCP tool and resource results are capped at 256 KiB before saving (default off; config tool_output_files.enabled)")
 	fs.BoolVar(&o.applyPatch, "apply-patch", false, "add the apply_patch tool: multi-file, multi-hunk edits in the *** Begin Patch format, checked before any write (default off; config apply_patch)")
 	fs.BoolVar(&o.webFetch, "web-fetch", false, "add the web_fetch tool: read an allowlisted http(s) URL as text, in tinyagent's own process, separate from command network access (default off; config web_fetch.enabled)")
 	fs.Var(&o.webFetchAllowDomains, "web-fetch-allow-domain", "with --web-fetch, let web_fetch read this host (name, *.domain or IP, optional :port); repeatable, replaces web_fetch.allowed_domains")
@@ -229,8 +231,9 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.noChatHistory, "no-chat-history", false, "don't write chat input to <cwd>/history/chat_history (config chat_history: false)")
 	fs.BoolVar(&o.acp, "acp", false, "serve the Agent Client Protocol on stdin/stdout for editors such as Zed and JetBrains IDEs (experimental): each session runs in the client's cwd with this config and flags; limits apply per prompt")
 	fs.StringVar(&o.completion, "completion", "", "print a flag-name completion script for this shell (bash, zsh or fish) and exit; load it with: source <(tinyagent --completion bash), or in zsh after compinit: source <(tinyagent --completion zsh), or in fish: tinyagent --completion fish | source; re-source it after --update")
-	fs.StringVar(&o.workflow, "workflow", "", "run the skill workflow in this YAML file on the task (-t): the router picks a workflow or skill by intent, and each stage runs automatically with the previous stage's output, gated by its success check")
-	fs.StringVar(&o.workflowName, "workflow-name", "", "with --workflow: run this workflow or skill instead of routing by the task's intent")
+	fs.StringVar(&o.workflow, "workflow", "", "run the skill workflow in this YAML file (path relative to the current directory) on the task (-t): the router picks a workflow or skill by intent, and each stage runs automatically with the previous stage's output, gated by its success check; e.g. --workflow docs/workflows/workflow.yaml -t \"add CSV export\"; see tinyagent help workflows")
+	fs.StringVar(&o.workflowName, "workflow-name", "", "with --workflow: run this workflow or skill instead of routing by the task's intent; e.g. --workflow-name contract")
+	fs.BoolVar(&o.workflowObserve, "workflow-observe", false, "with --workflow: after a Failed or Blocked run, write one proposed project rule (with a ready-to-run `tinyagent ratchet add` command) to .tinyagent/observer/proposals.jsonl in --cwd, and flag a failure that recurs (default off)")
 	fs.Var(&o.skillsValidate, "skills-validate", "check a skill-workflow skill file (.md), skills directory or workflow file (.yaml) without running anything, then exit; repeatable; not for Agent Skills (--skills)")
 	registerMemoryFlags(fs, &o.memory)
 	registerHandoffFlags(fs, &o.handoff)
@@ -367,6 +370,10 @@ func run() int {
 	}
 	if !flagWasSet(fs, "workflow") && flagWasSet(fs, "workflow-name") {
 		fmt.Fprintln(fs.Output(), "error: --workflow-name applies only to --workflow")
+		return 2
+	}
+	if !flagWasSet(fs, "workflow") && flagWasSet(fs, "workflow-observe") {
+		fmt.Fprintln(fs.Output(), "error: --workflow-observe applies only to --workflow")
 		return 2
 	}
 	if !flagWasSet(fs, "triage") && flagWasSet(fs, "triage-out", "triage-stale-days") {
@@ -569,7 +576,7 @@ func run() int {
 	if err != nil {
 		return configFail(err)
 	}
-	if err := checkPlugins(&cfg, os.Stderr, o.verbose, true); err != nil {
+	if err := checkPlugins(&cfg, o.cwd, os.Stderr, o.verbose, true); err != nil {
 		return configFail(err)
 	}
 	if flagWasSet(fs, "lsp") {
@@ -658,7 +665,7 @@ func run() int {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2
 	}
-	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
+	model.DefaultRuntime.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 
 	root, err := canonicalRoot(o.cwd)
 	if err != nil {
@@ -800,7 +807,7 @@ func run() int {
 	}
 	redactor, redactInfo := newSecretRedactor(cfg, os.Environ(), os.Stderr, o.verbose)
 
-	a := &agent.Agent{
+	a, err := agent.New(agent.Options{
 		Model:           m,
 		ModelName:       o.modelName,
 		FallbackModels:  fallbacks,
@@ -809,34 +816,24 @@ func run() int {
 		Profile:         o.profile,
 		ProviderAPI:     providerAPI,
 		ProviderBaseURL: providerBaseURL,
-		Tools: &tools.Executor{
-			Root:               root,
-			ReadOnly:           cfg.ReadOnly,
-			Env:                env,
-			BashTimeout:        time.Duration(cfg.BashTimeoutSec) * time.Second,
-			MaxOutputChars:     cfg.MaxOutputChars,
-			MaxProcesses:       cfg.MaxBackgroundProcesses,
-			Stream:             streamTo(jsonStream(o.jsonOutput), progress),
-			CommandTools:       cmdTools,
-			CommandLog:         commandLog(o.verbose),
-			ExternalSpecs:      extSpecs,
-			ExternalCall:       extCall,
-			Plan:               cfg.Plan.Enabled,
-			Images:             cfg.Images.Enabled,
-			ApplyPatch:         cfg.ApplyPatch,
-			Delegate:           subagents != nil,
-			TaskTypes:          taskTypes(cfg, subagents, workers),
-			Workers:            workers != nil,
-			AskUser:            cfg.AskUser.Enabled,
-			WebFetch:           webFetch,
-			LSP:                lspTools,
-			OutputFiles:        outputFiles,
-			FileAccess:         fileAccess,
-			ExtraDirs:          extraDirs,
-			MaxImageBytes:      cfg.MaxImageBytes,
-			ExternalCallImages: mcpRegistry.CallImages(cfg.MaxImageBytes),
-			Redactor:           redactor,
-		},
+		Tools: newRunExecutor(cfg, toolWiring{
+			root:        root,
+			env:         env,
+			stream:      streamTo(jsonStream(o.jsonOutput), progress),
+			cmdTools:    cmdTools,
+			commandLog:  commandLog(o.verbose),
+			extSpecs:    extSpecs,
+			extCall:     extCall,
+			mcp:         mcpRegistry,
+			subagents:   subagents,
+			workers:     workers,
+			webFetch:    webFetch,
+			lsp:         lspTools,
+			outputFiles: outputFiles,
+			fileAccess:  fileAccess,
+			extraDirs:   extraDirs,
+			redactor:    redactor,
+		}),
 		RedactSecrets:  redactInfo,
 		Config:         cfg,
 		Hooks:          hookRunner,
@@ -858,6 +855,10 @@ func run() int {
 		Review:         reviewInfo,
 		TaskImages:     taskImages,
 		Lockdown:       lock,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
 	}
 	if policy != nil && !o.jsonOutput {
 		a.PermissionApprover = terminalPermissionApprover
@@ -1004,7 +1005,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return fail(errors.New("resume: an explicit --cwd matching the checkpoint root is required"))
 	}
 
-	src, err := trajectory.Load(o.resume)
+	src, err := resume.Load(o.resume)
 	if err != nil {
 		return fail(fmt.Errorf("resume: %w", err))
 	}
@@ -1115,7 +1116,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return configFail(inConfig(cfgPath, err))
 	}
 	if src.MCPEnabled || len(src.ExternalTools) > 0 {
-		return fail(errors.New("resume: MCP-enabled runs cannot be resumed; start a fresh task"))
+		return fail(fmt.Errorf("resume: %w", agent.ErrMCPResume))
 	}
 	if len(cfg.MCPServers) > 0 {
 		fmt.Fprintln(os.Stderr, "resume: configured MCP servers are not started; resumed runs use only the built-in tools")
@@ -1132,72 +1133,19 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		fmt.Fprintln(os.Stderr, "error: resume:", err)
 		return 2
 	}
-	if flagWasSet(fs, "read-only") && o.readOnly != src.ReadOnly {
-		return fail(errors.New("resume: --read-only conflicts with the checkpoint's recorded mode; start a fresh task"))
+	if code := checkResumeFlags(fs, *o, src); code != 0 {
+		return code
 	}
-	cfg.ReadOnly = src.ReadOnly
-	if flagWasSet(fs, "plan") && o.plan != src.PlanEnabled {
-		return fail(errors.New("resume: --plan conflicts with the checkpoint's recorded plan setting; start a fresh task"))
-	}
-	cfg.Plan.Enabled = src.PlanEnabled
-	if flagWasSet(fs, "images") && o.images != src.ImagesEnabled {
-		return fail(errors.New("resume: --images conflicts with the checkpoint's recorded images setting; start a fresh task"))
-	}
-	cfg.Images.Enabled = src.ImagesEnabled
-	if flagWasSet(fs, "apply-patch") && o.applyPatch != src.ApplyPatchEnabled {
-		fmt.Fprintln(os.Stderr, "error: resume: --apply-patch conflicts with the checkpoint's recorded apply_patch setting; start a fresh task")
-		return 2
-	}
-	cfg.ApplyPatch = src.ApplyPatchEnabled
-	if flagWasSet(fs, "subagents") && o.subagents != src.SubagentsEnabled {
-		fmt.Fprintln(os.Stderr, "error: resume: --subagents conflicts with the checkpoint's recorded subagents setting; start a fresh task")
-		return 2
-	}
-	cfg.Subagents.Enabled = src.SubagentsEnabled
-	if flagWasSet(fs, "workers") && o.workers != src.WorkersEnabled {
-		fmt.Fprintln(os.Stderr, "error: resume: --workers conflicts with the checkpoint's recorded workers setting; start a fresh task")
-		return 2
-	}
-	setWorkers(&cfg, src.WorkersEnabled)
-	if flagWasSet(fs, "ask-user") && o.askUser != src.AskUserEnabled {
-		fmt.Fprintln(os.Stderr, "error: resume: --ask-user conflicts with the checkpoint's recorded ask_user setting; start a fresh task")
-		return 2
-	}
-	cfg.AskUser.Enabled = src.AskUserEnabled
-	if flagWasSet(fs, "web-fetch") && o.webFetch != src.WebFetchEnabled {
-		fmt.Fprintln(os.Stderr, "error: resume: --web-fetch conflicts with the checkpoint's recorded web_fetch setting; start a fresh task")
-		return 2
-	}
-	cfg.WebFetch.Enabled = src.WebFetchEnabled
+	// The checkpoint's recorded settings win; from here on the run is
+	// assembled from cfg exactly like a fresh run.
+	resume.Apply(src, &cfg)
 	webFetch, err := newWebFetcher(fs, *o, &cfg)
 	if err != nil {
 		return configFail(err)
 	}
-	if err := checkPlugins(&cfg, os.Stderr, o.verbose, false); err != nil {
+	if err := checkPlugins(&cfg, o.cwd, os.Stderr, o.verbose, false); err != nil {
 		return configFail(err)
 	}
-	if flagWasSet(fs, "lsp") && o.lsp != src.LSPEnabled {
-		fmt.Fprintln(os.Stderr, "error: resume: --lsp conflicts with the checkpoint's recorded lsp setting; start a fresh task")
-		return 2
-	}
-	cfg.LSP.Enabled = src.LSPEnabled
-	if flagWasSet(fs, "scoped-agents-md") && o.scopedAgentsMD != src.ScopedAgentsMDEnabled {
-		fmt.Fprintln(os.Stderr, "error: resume: --scoped-agents-md conflicts with the checkpoint's recorded scoped_agents_md setting; start a fresh task")
-		return 2
-	}
-	cfg.ScopedAgentsMD = src.ScopedAgentsMDEnabled
-	if on, set, err := skillsFlag(fs, *o); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		return 2
-	} else if set && on != src.SkillsEnabled {
-		return fail(errors.New("resume: --skills/--no-skills conflicts with the checkpoint's recorded skills setting; start a fresh task"))
-	}
-	cfg.Skills = src.SkillsEnabled
-	if flagWasSet(fs, "memory") && o.memory.enabled != src.MemoryEnabled {
-		fmt.Fprintln(os.Stderr, "error: resume: --memory conflicts with the checkpoint's recorded memory setting; start a fresh task")
-		return 2
-	}
-	cfg.Memory.Enabled = src.MemoryEnabled
 	// Snapshots are per invocation: config or --snapshots decides for this
 	// resume, and earlier snapshots stay in the trajectory either way.
 	if flagWasSet(fs, "snapshots") {
@@ -1221,7 +1169,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if code := checkLSP(cfg, cfgPath, "resume: "); code != 0 {
 		return code
 	}
-	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
+	model.DefaultRuntime.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 
 	root, err := canonicalRoot(o.cwd)
 	if err != nil {
@@ -1267,9 +1215,6 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		return fail(errors.New("resume: --output already exists; choose a new destination"))
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fail(fmt.Errorf("resume: checking --output: %w", err))
-	}
-	if flagWasSet(fs, "no-agents-md") && o.noAgentsMD != src.SkipAgentsMD {
-		return fail(errors.New("resume: --no-agents-md conflicts with the recorded loading mode; start a fresh task"))
 	}
 	if err := agent.ValidateResume(src, cfg, root); err != nil {
 		return fail(fmt.Errorf("resume: %w", err))
@@ -1376,7 +1321,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		prevStatus = "in progress"
 	}
 
-	a := &agent.Agent{
+	a, err := agent.New(agent.Options{
 		Model:           m,
 		ModelName:       modelName,
 		FallbackModels:  fallbacks,
@@ -1385,31 +1330,23 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		Profile:         o.profile,
 		ProviderAPI:     providerAPI,
 		ProviderBaseURL: providerBaseURL,
-		Tools: &tools.Executor{
-			Root:           root,
-			ReadOnly:       src.ReadOnly,
-			Env:            env,
-			BashTimeout:    time.Duration(cfg.BashTimeoutSec) * time.Second,
-			MaxOutputChars: cfg.MaxOutputChars,
-			MaxProcesses:   cfg.MaxBackgroundProcesses,
-			Stream:         jsonStream(o.jsonOutput),
-			Plan:           src.PlanEnabled,
-			Images:         src.ImagesEnabled,
-			ApplyPatch:     src.ApplyPatchEnabled,
-			Delegate:       src.SubagentsEnabled,
-			TaskTypes:      taskTypes(cfg, subagents, workers),
-			Workers:        workers != nil,
-			AskUser:        src.AskUserEnabled,
-			WebFetch:       webFetch,
-			LSP:            lspTools,
-			OutputFiles:    outputFiles,
-			FileAccess:     fileAccess,
-			ExtraDirs:      extraDirs,
-			MaxImageBytes:  cfg.MaxImageBytes,
-			Redactor:       redactor,
-			CommandTools:   cmdTools,
-			CommandLog:     commandLog(o.verbose),
-		},
+		// Resumed runs start no MCP servers (see ErrMCPResume above), so the
+		// MCP and plugin fields of the wiring stay empty.
+		Tools: newRunExecutor(cfg, toolWiring{
+			root:        root,
+			env:         env,
+			stream:      jsonStream(o.jsonOutput),
+			cmdTools:    cmdTools,
+			commandLog:  commandLog(o.verbose),
+			subagents:   subagents,
+			workers:     workers,
+			webFetch:    webFetch,
+			lsp:         lspTools,
+			outputFiles: outputFiles,
+			fileAccess:  fileAccess,
+			extraDirs:   extraDirs,
+			redactor:    redactor,
+		}),
 		RedactSecrets:  redactInfo,
 		Config:         cfg,
 		Hooks:          hookRunner,
@@ -1419,7 +1356,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		Verbose:        o.verbose,
 		Streamed:       !o.noStream,
 		SkipAgentsMD:   src.SkipAgentsMD,
-		ScopedAgentsMD: src.ScopedAgentsMDEnabled,
+		ScopedAgentsMD: cfg.ScopedAgentsMD,
 		NoCompact:      o.noCompact,
 		Resume:         src,
 		ResumeSource:   o.resume,
@@ -1432,6 +1369,9 @@ func runResume(o *options, fs *flag.FlagSet) int {
 		Routes:         modelRoutes(cfg, modelName, subagents, workers),
 		Helpers:        helpers,
 		Lockdown:       lock,
+	})
+	if err != nil {
+		return fail(fmt.Errorf("resume: %w", err))
 	}
 	if policy != nil && !o.jsonOutput {
 		a.PermissionApprover = terminalPermissionApprover

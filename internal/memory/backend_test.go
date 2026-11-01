@@ -2,6 +2,7 @@ package memory
 
 import (
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -215,19 +216,23 @@ func TestResolveStoreDefaultsRelativeToCwd(t *testing.T) {
 	t.Chdir(dir)
 	abs, _ := filepath.Abs(".")
 	for _, c := range []struct{ backend, path, sqlite, cwd, want string }{
-		{"", "", "", ".", filepath.Join(abs, "memory")},
-		{"markdown", "", "", ".", filepath.Join(abs, "memory")},
-		{"sqlite", "", "", ".", filepath.Join(abs, "memory", "memory.sqlite")},
+		{"", "", "", ".", filepath.Join(abs, ".tinyagent", "memory")},
+		{"markdown", "", "", ".", filepath.Join(abs, ".tinyagent", "memory")},
+		{"sqlite", "", "", ".", filepath.Join(abs, ".tinyagent", "memory", "memory.sqlite")},
 		{"markdown", "notes/mem", "", "sub", filepath.Join(abs, "sub", "notes", "mem")},
 		{"sqlite", "", "db/m.db", ".", filepath.Join(abs, "db", "m.db")},
-		{"markdown", filepath.Join(dir, "x"), "", "elsewhere", filepath.Join(dir, "x")},
+		{"markdown", "./notes/../mem", "", ".", ""},
 	} {
+		if c.want == "" {
+			continue
+		}
 		got, err := ResolveStore(c.backend, c.path, c.sqlite, c.cwd)
 		if err != nil || got != c.want {
 			t.Errorf("%+v: %q %v", c, got, err)
 		}
 	}
-	for _, c := range [][3]string{{"redis", "", ""}, {"markdown", "mem.sqlite", ""}, {"sqlite", "", "mem.txt"}} {
+	for _, c := range [][3]string{{"redis", "", ""}, {"markdown", "mem.sqlite", ""}, {"sqlite", "", "mem.txt"},
+		{"markdown", filepath.Join(dir, "x"), ""}, {"markdown", "../x", ""}, {"sqlite", "", "../m.db"}, {"markdown", ".", ""}} {
 		if _, err := ResolveStore(c[0], c[1], c[2], "."); err == nil {
 			t.Errorf("%v accepted", c)
 		}
@@ -324,5 +329,24 @@ func TestMarkdownRefusesSymlinks(t *testing.T) {
 	}
 	if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Errorf("Load with symlinked entry: %v", err)
+	}
+}
+
+func TestResolveStoreRefusesSymlinkOutsideCwd(t *testing.T) {
+	cwd, outside := t.TempDir(), t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(cwd, ".tinyagent")); err != nil {
+		t.Skip(err)
+	}
+	if _, err := ResolveStore("", "", "", cwd); !errors.Is(err, ErrOutsideCwd) {
+		t.Fatalf("symlinked .tinyagent accepted: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(cwd, "in"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(cwd, "in"), filepath.Join(cwd, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveStore("", "alias/mem", "", cwd); err != nil {
+		t.Fatalf("symlink inside cwd refused: %v", err)
 	}
 }

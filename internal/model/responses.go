@@ -79,9 +79,12 @@ type OpenAIResponses struct {
 	// Headers, if set, are added to every request after the defaults
 	// (configured providers).
 	Headers map[string]string
-	// Price, if set, replaces the Prices table entry for this model
-	// (configured providers); PriceOverride still wins.
+	// Price, if set, replaces the Runtime's price table entry for this
+	// model (configured providers); the Runtime's PriceOverride still wins.
 	Price *[3]float64
+	// Runtime supplies the HTTP client, retry policy and prices. nil uses
+	// DefaultRuntime.
+	Runtime *Runtime
 }
 
 func (o *OpenAIResponses) Query(ctx context.Context, messages []Message, tools []ToolSpec) (Message, Cost, error) {
@@ -128,7 +131,7 @@ func (o *OpenAIResponses) Query(ctx context.Context, messages []Message, tools [
 	if o.OnText != nil {
 		body["stream"] = true
 		headers["Accept"] = "text/event-stream"
-		resp, perr := post(ctx, url, headers, body)
+		resp, perr := o.Runtime.post(ctx, url, headers, body)
 		if perr != nil {
 			return Message{}, Cost{}, perr
 		}
@@ -150,7 +153,7 @@ func (o *OpenAIResponses) Query(ctx context.Context, messages []Message, tools [
 		}
 	} else {
 		var obj responsesObject
-		if err := postJSON(ctx, url, headers, body, &obj); err != nil {
+		if err := o.Runtime.postJSON(ctx, url, headers, body, &obj); err != nil {
 			return Message{}, Cost{}, err
 		}
 		msg, usage, err = parseResponsesObject(obj, "openai")
@@ -162,7 +165,7 @@ func (o *OpenAIResponses) Query(ctx context.Context, messages []Message, tools [
 	if cached > usage.InputTokens {
 		cached = usage.InputTokens
 	}
-	return msg, cachedPriceWith(o.Model, o.Price, usage.InputTokens-cached, 0, cached, usage.OutputTokens), nil
+	return msg, o.Runtime.cachedPriceWith(o.Model, o.Price, usage.InputTokens-cached, 0, cached, usage.OutputTokens), nil
 }
 
 // responsesTools converts tool specs to the Responses API's flat function

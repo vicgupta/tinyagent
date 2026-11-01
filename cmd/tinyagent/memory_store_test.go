@@ -30,13 +30,13 @@ func TestMemoryHelpFlag(t *testing.T) {
 func TestMemoryTOMLSelectsBackend(t *testing.T) {
 	cwd, _ := memoryEnv(t)
 	root, _ := canonicalRoot(cwd)
-	user := filepath.Join(t.TempDir(), "memory.toml")
+	user := filepath.Join(cwd, "settings.toml") // TINYAGENT_MEMORY_CONFIG must be inside --cwd (#336)
 	if err := os.WriteFile(user, []byte("backend = \"sqlite\"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("TINYAGENT_MEMORY_CONFIG", user)
 	code, out, errOut := runMemory(t, "--memory-path", "--cwd", cwd)
-	if want := filepath.Join(root, "memory", "memory.sqlite"); code != 0 || strings.TrimSpace(out) != want {
+	if want := filepath.Join(root, ".tinyagent", "memory", "memory.sqlite"); code != 0 || strings.TrimSpace(out) != want {
 		t.Fatalf("exit %d, %q (stderr %q), want %s", code, out, errOut, want)
 	}
 	t.Setenv("TINYAGENT_MEMORY_BACKEND", "markdown")
@@ -81,34 +81,131 @@ func TestMemoryRunOffersSearchTools(t *testing.T) {
 	}
 }
 
-func TestLegacyJSONImportedOnce(t *testing.T) {
-	cwd, store := memoryEnv(t)
+// TestMemoryNeverLeavesCwd (issue #335): data in every old location
+// outside --cwd (XDG_STATE_HOME, XDG_CONFIG_HOME, XDG_CACHE_HOME, HOME and
+// the user config dir) is never read, imported or hinted at; the store is
+// ./.tinyagent/memory and nothing is written elsewhere.
+func TestMemoryNeverLeavesCwd(t *testing.T) {
+	cwd, store, body := memoryRunEnv(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(home, "state"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
 	root, _ := canonicalRoot(cwd)
-	legacy := legacyMemoryPath(root)
 	at := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
-	seedMemory(t, legacy, testEntry("maaaa", memory.StatusActive, "old note", at), testEntry("mbbbb", memory.StatusPending, "old pending", at))
-	before, _ := os.ReadFile(legacy)
-	if code, _, _ := runMemory(t, "--memory-path", "--cwd", cwd); code != 0 || memory.Exists(store) {
-		t.Fatal("--memory-path imported")
+	key := memory.ProjectKey(root) + ".json"
+	var old []string
+	for _, d := range []string{
+		filepath.Join(home, "state", "tinyagent", "memory"),
+		filepath.Join(home, ".local", "state", "tinyagent", "memory"),
+		filepath.Join(home, "config", "tinyagent", "memory"),
+		filepath.Join(home, "Library", "Application Support", "tinyagent", "memory"),
+		filepath.Join(home, "cache", "tinyagent", "memory"),
+	} {
+		p := filepath.Join(d, key)
+		seedMemory(t, p, testEntry("maaaa", memory.StatusActive, "old note", at))
+		old = append(old, p)
+	}
+	if ucd, err := os.UserConfigDir(); err == nil && strings.HasPrefix(ucd, home) {
+		p := filepath.Join(ucd, "tinyagent", "memory", key)
+		seedMemory(t, p, testEntry("maaaa", memory.StatusActive, "old note", at))
+		old = append(old, p)
+	}
+	snap := func() map[string]string {
+		m := map[string]string{}
+		filepath.Walk(home, func(p string, fi os.FileInfo, err error) error {
+			if err == nil {
+				m[p] = fi.ModTime().String()
+				if !fi.IsDir() {
+					b, _ := os.ReadFile(p)
+					m[p] += string(b)
+				}
+			}
+			return nil
+		})
+		return m
+	}
+	before := snap()
+	if want := filepath.Join(root, ".tinyagent", "memory"); store != want {
+		t.Fatalf("store %s, want %s", store, want)
 	}
 	code, out, errOut := runMemory(t, "--memory-list", "--cwd", cwd)
-	if code != 0 || !strings.Contains(out, "old note") || !strings.Contains(errOut, "imported 2 entries from legacy store") {
-		t.Fatalf("exit %d, %q, %q", code, out, errOut)
+	if code != 0 || strings.Contains(out, "old note") || errOut != "" {
+		t.Fatalf("old data used: exit %d, %q, %q", code, out, errOut)
 	}
-	if after, _ := os.ReadFile(legacy); string(after) != string(before) {
-		t.Error("legacy store changed")
+	if code, stderr := runMemoryTask(t, cwd, "--memory"); code != 0 || strings.Contains(stderr, "old note") || strings.Contains(stderr, "legacy") || strings.Contains(body(), "old note") {
+		t.Fatalf("run: exit %d, %q", code, stderr)
 	}
-	if code, _, _ := runMemory(t, "--memory-forget", "all", "--memory-yes", "--cwd", cwd); code != 0 {
-		t.Fatal("forget all failed")
+	if code, out, _ := runMemory(t, "--memory-path", "--cwd", cwd); code != 0 || strings.TrimSpace(out) != store {
+		t.Fatalf("--memory-path %q", out)
 	}
-	if _, out, errOut := runMemory(t, "--memory-list", "--cwd", cwd); strings.Contains(out, "old note") || errOut != "" {
-		t.Errorf("re-imported after forget all: %q %q", out, errOut)
+	after := snap()
+	if len(after) != len(before) {
+		t.Fatalf("files outside cwd changed: %d before, %d after", len(before), len(after))
 	}
-	t.Setenv("TINYAGENT_MEMORY_IMPORT_LEGACY", "false")
-	cwd2 := t.TempDir()
-	root2, _ := canonicalRoot(cwd2)
-	seedMemory(t, legacyMemoryPath(root2), testEntry("maaaa", memory.StatusActive, "old note", at))
-	if _, out, _ := runMemory(t, "--memory-list", "--cwd", cwd2); strings.Contains(out, "old note") {
-		t.Error("imported with import_legacy = false")
+	for p, v := range before {
+		if after[p] != v {
+			t.Errorf("%s changed", p)
+		}
+	}
+	if len(old) == 0 {
+		t.Fatal("no old locations seeded")
+	}
+}
+
+// TestOldCwdMemoryHint: a store at the previous default (./memory) is not
+// read; one hint line names the new location.
+func TestOldCwdMemoryHint(t *testing.T) {
+	cwd, store := memoryEnv(t)
+	root, _ := canonicalRoot(cwd)
+	seedMemory(t, filepath.Join(root, "memory"), testEntry("maaaa", memory.StatusActive, "old note", time.Now()))
+	code, out, errOut := runMemory(t, "--memory-list", "--cwd", cwd)
+	if code != 0 || strings.Contains(out, "old note") {
+		t.Fatalf("exit %d, %q", code, out)
+	}
+	if strings.Count(errOut, "\n") != 1 || !strings.Contains(errOut, "hint: project memory now lives in ./.tinyagent/memory") {
+		t.Fatalf("want one hint line, got %q", errOut)
+	}
+	if memory.Exists(store) {
+		t.Error("store created by --memory-list")
+	}
+	seedMemory(t, store, testEntry("mbbbb", memory.StatusActive, "new note", time.Now()))
+	if _, _, errOut := runMemory(t, "--memory-list", "--cwd", cwd); errOut != "" {
+		t.Errorf("hint after the new store exists: %q", errOut)
+	}
+}
+
+// TestMemoryPathEscapingCwdRefused: absolute, ".." and symlinked store paths
+// are refused with a warning and the run continues without memory.
+func TestMemoryPathEscapingCwdRefused(t *testing.T) {
+	outside := t.TempDir()
+	for name, path := range map[string]string{
+		"absolute": filepath.Join(outside, "mem"),
+		"dotdot":   "../mem",
+		"symlink":  "link/mem",
+	} {
+		t.Run(name, func(t *testing.T) {
+			cwd, _, _ := memoryRunEnv(t)
+			if name == "symlink" {
+				if err := os.Symlink(outside, filepath.Join(cwd, "link")); err != nil {
+					t.Skip(err)
+				}
+			}
+			t.Setenv("TINYAGENT_MEMORY_PATH", path)
+			code, _, errOut := runMemory(t, "--memory-list", "--cwd", cwd)
+			if code == 0 || !strings.Contains(errOut, "must stay inside --cwd") {
+				t.Fatalf("exit %d, %q", code, errOut)
+			}
+			if code, stderr := runMemoryTask(t, cwd, "--memory"); code != 0 || !strings.Contains(stderr, "must stay inside --cwd") {
+				t.Fatalf("run: exit %d, %q", code, stderr)
+			}
+			if ents, _ := os.ReadDir(outside); len(ents) != 0 && name != "symlink" {
+				t.Errorf("wrote outside cwd: %v", ents)
+			}
+			if _, err := os.Stat(filepath.Join(outside, "mem")); err == nil {
+				t.Error("store created outside cwd")
+			}
+		})
 	}
 }

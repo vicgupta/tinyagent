@@ -57,6 +57,7 @@ func newEvalOpenAI(t *testing.T) *int {
 	t.Setenv("OPENAI_BASE_URL", srv.URL)
 	t.Setenv("OPENAI_API_KEY", "sk-eval-test")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir()) // os.UserConfigDir ignores XDG_CONFIG_HOME on macOS
 	t.Setenv("AGENT_MODEL", "")
 	t.Setenv(evalChildEnv, "1")
 	return n

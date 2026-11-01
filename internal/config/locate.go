@@ -59,7 +59,7 @@ func Locate(explicit, cwd string) Source {
 	if _, err := os.Stat(p); err == nil || !errors.Is(err, fs.ErrNotExist) {
 		return Source{Path: p, Kind: SourceCwd}
 	}
-	if user := Find(""); user != "" {
+	if user := legacyUserConfig(); user != "" {
 		return Source{Notes: []string{fmt.Sprintf("note: user config %s is no longer read; run tinyagent init --migrate to copy it to ./%s", user, ProjectFile)}}
 	}
 	return Source{}
@@ -72,7 +72,7 @@ func Locate(explicit, cwd string) Source {
 // untrusted_content, memory, container run_args).
 var UntrustedKeys = []string{
 	"mcp_servers", "hooks", "command_tools", "lsp.servers", "plugins", "tinygo",
-	"claude_code.path", "codex_exec.path", "handoff.startup_command",
+	"claude_code.path", "codex_exec.path", "opencode.path", "handoff.startup_command",
 	"verify_on_stop.checks", "attempts.checks", "acp.client_mcp_servers",
 	"container.run_args", "permissions", "file_access", "command_env",
 	"redact_secrets", "untrusted_content", "memory",
@@ -97,6 +97,7 @@ func StripUntrusted(cfg *AgentConfig) []string {
 	reset("tinygo", &cfg.TinyGo, d.TinyGo)
 	reset("claude_code.path", &cfg.ClaudeCode.Path, d.ClaudeCode.Path)
 	reset("codex_exec.path", &cfg.CodexExec.Path, d.CodexExec.Path)
+	reset("opencode.path", &cfg.OpenCode.Path, d.OpenCode.Path)
 	reset("handoff.startup_command", &cfg.Handoff.StartupCommand, d.Handoff.StartupCommand)
 	reset("verify_on_stop.checks", &cfg.VerifyOnStop.Checks, d.VerifyOnStop.Checks)
 	reset("attempts.checks", &cfg.Attempts.Checks, d.Attempts.Checks)
@@ -109,4 +110,17 @@ func StripUntrusted(cfg *AgentConfig) []string {
 	reset("untrusted_content", &cfg.UntrustedContent, d.UntrustedContent)
 	reset("memory", &cfg.Memory, d.Memory)
 	return out
+}
+
+// legacyUserConfig returns DefaultPath when something exists there, else "".
+// It is only stat'ed, never read.
+func legacyUserConfig() string {
+	p, err := DefaultPath()
+	if err != nil {
+		return ""
+	}
+	if _, err := os.Stat(p); errors.Is(err, fs.ErrNotExist) {
+		return ""
+	}
+	return p
 }

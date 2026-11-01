@@ -45,7 +45,7 @@ func webFetchServer(t *testing.T, hits *atomic.Int32) (*httptest.Server, *tools.
 func TestWebFetchOffKeepsSignature(t *testing.T) { // AC8
 	for _, ro := range []bool{false, true} {
 		for _, d := range []bool{false, true} {
-			if WebFetchToolSignature(ro, false, false, false, d, false) != toolSignature(ro, false, false, false, d) {
+			if WebFetchToolSignature(ro, false, false, false, d, false) != (tools.Selection{ReadOnly: ro, Delegate: d}).Signature() {
 				t.Errorf("signature changed with web_fetch off (read-only %v, delegate %v)", ro, d)
 			}
 			if s := WebFetchToolSignature(ro, false, false, false, d, true); !strings.HasPrefix(s, "web-fetch-v1:") {

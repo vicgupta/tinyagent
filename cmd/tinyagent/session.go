@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"time"
 
 	"github.com/vicgupta/tinyagent/internal/agent"
 	"github.com/vicgupta/tinyagent/internal/config"
@@ -56,6 +55,7 @@ type session struct {
 	lockdown                     *lockdown.State
 	extSpecs                     []model.ToolSpec // MCP plus plugin wasm tools
 	extCall                      func(ctx context.Context, name, raw string) (string, bool, bool)
+	cmdTools                     []*tools.CommandTool
 	remember                     *memory.Writer
 	traj                         *trajectory.Trajectory
 	turn                         int
@@ -138,7 +138,7 @@ func (s *session) setup(ctx context.Context, m sessionMode) (err error) {
 	if s.webFetch, err = newWebFetcher(fs, *o, &cfg); err != nil {
 		return err
 	}
-	if err := checkPlugins(&cfg, os.Stderr, o.verbose, true); err != nil {
+	if err := checkPlugins(&cfg, o.cwd, os.Stderr, o.verbose, true); err != nil {
 		return err
 	}
 	if flagWasSet(fs, "lsp") {
@@ -198,7 +198,7 @@ func (s *session) setup(ctx context.Context, m sessionMode) (err error) {
 	if s.helpers, err = newHelpers(cfg, s.modelName, cfg.ReasoningEffort); err != nil {
 		return err
 	}
-	model.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
+	model.DefaultRuntime.PriceOverride = [2]float64{cfg.InputPricePerMTok, cfg.OutputPricePerMTok}
 	if s.outputFiles, err = toolOutputFiles(fs, *o, cfg, root); err != nil {
 		return err
 	}
@@ -211,6 +211,9 @@ func (s *session) setup(ctx context.Context, m sessionMode) (err error) {
 	s.fileAccess.AddDirs(s.extraDirs)
 	if cfg.ReadOnly {
 		fmt.Fprintln(os.Stderr, "read-only mode: only read_file, list_files, and grep are available")
+	}
+	if s.cmdTools, err = commandTools(os.Stderr, cfg, root); err != nil {
+		return inConfig(cfgPath, err)
 	}
 	mcpDefs, err := m.mcpServers(cfg)
 	if err != nil {
@@ -225,6 +228,9 @@ func (s *session) setup(ctx context.Context, m sessionMode) (err error) {
 		return err
 	}
 	if s.extSpecs, s.extCall, err = externalTools(s.mcp, startWasmTools(ctx, cfg, root, s.fileAccess, s.lockdown, os.Stderr)); err != nil {
+		return err
+	}
+	if err := checkCommandToolNames(s.cmdTools, s.extSpecs); err != nil {
 		return err
 	}
 	m.startLockdown()
@@ -275,10 +281,19 @@ func (s *session) turnConfig(prev *trajectory.Trajectory) config.AgentConfig {
 	return cfg
 }
 
-// turnAgent builds the Agent for one turn with cfg and images.
-func (s *session) turnAgent(cfg config.AgentConfig, images []model.Image) *agent.Agent {
+// turnResume is what a turn continues: the previous turn's trajectory (nil
+// for the first turn), its audit source, the follow-up message, and whether
+// prev is this process's own earlier turn (agent.Options.Continue).
+type turnResume struct {
+	prev             *trajectory.Trajectory
+	source, followUp string
+	cont             bool
+}
+
+// turnAgent builds the Agent for one turn with cfg and images, continuing r.
+func (s *session) turnAgent(cfg config.AgentConfig, images []model.Image, r turnResume) (*agent.Agent, error) {
 	o := s.o
-	return &agent.Agent{
+	return agent.New(agent.Options{
 		Model:           s.model,
 		ModelName:       s.modelName,
 		FallbackModels:  s.fallbacks,
@@ -287,31 +302,25 @@ func (s *session) turnAgent(cfg config.AgentConfig, images []model.Image) *agent
 		Profile:         o.profile,
 		ProviderAPI:     s.providerAPI,
 		ProviderBaseURL: s.providerBaseURL,
-		Tools: &tools.Executor{
-			Root:               s.root,
-			ReadOnly:           cfg.ReadOnly,
-			Env:                s.env,
-			BashTimeout:        time.Duration(cfg.BashTimeoutSec) * time.Second,
-			MaxOutputChars:     cfg.MaxOutputChars,
-			MaxProcesses:       cfg.MaxBackgroundProcesses,
-			ExternalSpecs:      s.extSpecs,
-			ExternalCall:       s.extCall,
-			Plan:               cfg.Plan.Enabled,
-			Images:             cfg.Images.Enabled,
-			ApplyPatch:         cfg.ApplyPatch,
-			Delegate:           s.subagents != nil,
-			TaskTypes:          taskTypes(s.cfg, s.subagents, s.workers),
-			Workers:            s.workers != nil,
-			AskUser:            cfg.AskUser.Enabled, // always off in ACP sessions
-			WebFetch:           s.webFetch,
-			LSP:                newLSP(cfg, s.root), // a turn's end stops them
-			OutputFiles:        s.outputFiles,
-			FileAccess:         s.fileAccess,
-			ExtraDirs:          s.extraDirs,
-			MaxImageBytes:      cfg.MaxImageBytes,
-			ExternalCallImages: s.mcp.CallImages(cfg.MaxImageBytes),
-			Redactor:           s.redactor,
-		},
+		// AskUser is always off in ACP sessions; a turn's end stops its LSP
+		// servers, so each turn starts its own.
+		Tools: newRunExecutor(cfg, toolWiring{
+			root:        s.root,
+			env:         s.env,
+			cmdTools:    s.cmdTools,
+			commandLog:  commandLog(o.verbose),
+			extSpecs:    s.extSpecs,
+			extCall:     s.extCall,
+			mcp:         s.mcp,
+			subagents:   s.subagents,
+			workers:     s.workers,
+			webFetch:    s.webFetch,
+			lsp:         newLSP(cfg, s.root),
+			outputFiles: s.outputFiles,
+			fileAccess:  s.fileAccess,
+			extraDirs:   s.extraDirs,
+			redactor:    s.redactor,
+		}),
 		RedactSecrets:  s.redactInfo,
 		Config:         cfg,
 		Hooks:          s.hooks,
@@ -328,7 +337,11 @@ func (s *session) turnAgent(cfg config.AgentConfig, images []model.Image) *agent
 		Helpers:        s.helpers,
 		TaskImages:     images,
 		Lockdown:       s.lockdown,
-	}
+		Resume:         r.prev,
+		ResumeSource:   r.source,
+		FollowUp:       r.followUp,
+		Continue:       r.cont,
+	})
 }
 
 // streamed forwards the model's streamed text to the running turn.

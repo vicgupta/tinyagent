@@ -13,6 +13,7 @@ var chatCommands = []struct{ name, alias, desc string }{
 	{"/new", "/clear", "start a fresh conversation (new checkpoint)"},
 	{"/save", "", "save the checkpoint now, or to /save <path>"},
 	{"/compact", "", "compact the conversation before the next request"},
+	{"/raw", "", "toggle showing replies as raw Markdown"},
 }
 
 // command runs one slash command and reports whether the session ends.
@@ -22,14 +23,7 @@ func (c *chat) command(line string) bool {
 	w := c.io.errw
 	switch name {
 	case "/help":
-		for _, cmd := range chatCommands {
-			n := cmd.name
-			if cmd.alias != "" {
-				n += ", " + cmd.alias
-			}
-			fmt.Fprintf(w, "  %-16s %s\n", n, cmd.desc)
-		}
-		fmt.Fprintln(w, "  //text           send a message that starts with /")
+		fmt.Fprint(w, c.helpText())
 	case "/exit", "/quit":
 		return true
 	case "/cost":
@@ -38,7 +32,7 @@ func (c *chat) command(line string) bool {
 			fmt.Fprintln(w, "no turns yet")
 			return false
 		}
-		fmt.Fprintf(w, "%d turns · %d steps · %s input / %s output tokens · %s\n", c.turns, t.Steps, formatInt(t.InputTokens), formatInt(t.OutputTokens), formatCost(t.Cost))
+		fmt.Fprint(w, c.costText())
 	case "/new", "/clear":
 		c.s.traj, c.source, c.cont, c.turns, c.compact = nil, "", false, 0, false
 		c.s.remember = nil
@@ -77,6 +71,13 @@ func (c *chat) command(line string) bool {
 		}
 		c.compact = true
 		fmt.Fprintln(w, c.st.Dim("the next message compacts the conversation first"))
+	case "/raw":
+		c.md = !c.md
+		if c.md {
+			fmt.Fprintln(w, c.st.Dim("replies render as Markdown again"))
+		} else {
+			fmt.Fprintln(w, c.st.Dim("replies show as raw Markdown (/raw again to render)"))
+		}
 	default:
 		var names []string
 		for _, cmd := range chatCommands {

@@ -4,7 +4,7 @@
 curl -fsSL https://raw.githubusercontent.com/vicgupta/tinyagent/main/install.sh | sh
 ```
 
-A minimal coding agent in a single static Go binary. It gives an LLM nine tools (`read_file`, `write_file`, `edit_file`, `list_files`, `grep`, `bash`, and `start_process`, `read_process`, `stop_process` for background commands), plus the opt-in `update_plan`, `skill`, `view_image`, `apply_patch`, `delegate`, `web_fetch`, `lsp`, and MCP resource (`list_mcp_resources`, `read_mcp_resource`) tools, and keeps a linear message history until the model submits.
+A minimal coding agent in a single static Go binary. It gives an LLM ten base tools (`read_file`, `write_file`, `edit_file`, `undo_file`, `list_files`, `grep`, `bash`, and `start_process`, `read_process`, `stop_process` for background commands), plus the opt-in `update_plan`, `skill`, `view_image`, `apply_patch`, `delegate`, `web_fetch`, `lsp`, and MCP resource (`list_mcp_resources`, `read_mcp_resource`) tools, and keeps a linear message history until the model submits.
 
 ## Install
 
@@ -101,10 +101,15 @@ Other shell names exit 2. In all three shells, words that don't start with `-` (
 
 ```bash
 git clone https://github.com/vicgupta/tinyagent && cd tinyagent
-make build    # ./tinyagent
-make test
-make dist     # linux/darwin/windows × amd64/arm64 in dist/
+make build      # ./tinyagent
+make test       # go test -count=1 ./..., same as CI
+make test-race  # go test -race -count=1 ./...
+make fmt        # gofmt check, same as CI
+make lint       # go vet, plus staticcheck if installed
+make dist       # linux/darwin/windows × amd64/arm64 in dist/
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md#getting-started) for what each target runs.
 
 ## Usage
 
@@ -115,6 +120,8 @@ tinyagent -m anthropic/claude-sonnet-4-5 -t "..."
 tinyagent -m openrouter/qwen/qwen3-coder -t "..."
 tinyagent -m ollama/llama3.1 -t "..."
 tinyagent -m codex/gpt-5.6-luna -t "..."   # ChatGPT subscription, see docs/providers.md
+tinyagent -m opencode/anthropic/claude-sonnet-4-5 -t "..."   # your installed OpenCode, see docs/models.md#opencode
+tinyagent -m opencode/big-pickle -t "..."                    # an OpenCode Zen model (opencode/big-pickle)
 cat task.md | tinyagent -t -               # read a long or multi-line task from stdin
 tinyagent --read-only --cwd ~/src/project -t "Review error handling in pkg/api"
 cat review-task.md | tinyagent --read-only -t - -o review.json
@@ -126,19 +133,23 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 
 - Small set of file, search, shell and background-process tools, plus opt-in planning, skills, images, patches, subagents (read-only researchers), workers (read-write builders in their own Git worktree), web fetch, LSP and MCP tools.
 - Per-role model routing (`models:` in config, `--aux-model`, `--delegate-model`, `--route`, keyword or `task_type` routes, `--no-routing`) for compaction, the verify review and delegated children, each role with its own fallback chain and a `usage_by_role` cost split in the summary, JSON, trajectory, `--log-db` and eval reports; off by default.
-- Many providers: OpenAI, Anthropic, OpenRouter, Ollama, a ChatGPT subscription through Codex, handoff to your installed Claude Code (`claude-code`) or Codex CLI (`codex-exec`), and your own OpenAI-compatible endpoints.
-- Interactive chat (`tinyagent chat` or `-i`): a multi-turn conversation on the terminal with line editing, history, Ctrl-C to stop a turn and slash commands (`/cost`, `/new`, `/save`, `/compact`); every session is saved and can be resumed. See [Interactive chat](docs/chat.md).
+- Many providers: OpenAI, Anthropic, OpenRouter, Ollama, a ChatGPT subscription through Codex, handoff to your installed Claude Code (`claude-code`), Codex CLI (`codex-exec`) or OpenCode (`opencode`), and your own OpenAI-compatible endpoints.
+- Interactive chat (`tinyagent chat` or `-i`): a multi-turn conversation on the terminal with line editing, history, Ctrl-C to stop a turn and Markdown replies rendered for the terminal (headings, lists, code blocks, tables; `/raw` to turn off), a compact tool activity line and slash commands (`/cost`, `/new`, `/save`, `/compact`, `/raw`); every turn gets the same tools as a run, including [command tools](docs/config.md#command-tools); every session is saved and can be resumed. See [Interactive chat](docs/chat.md).
 - Streaming text, `--json` event output, structured output, SQLite event logs and OpenTelemetry.
 - Terminal-aware styling: color only at a terminal, off with `NO_COLOR`, or forced with `--color=auto|always|never`; piped output stays plain text.
-- Project memory across runs, with approval before entries become active.
+- Project memory across runs, with approval before entries become active, stored only in `./.tinyagent/memory` inside `--cwd`; see [Project memory](docs/memory.md#project-memory).
+- Cwd-only project state: memory settings (`./memory.toml`), plugin data (`./.tinyagent/plugin-data/<name>`) and memory live inside `--cwd`, never in the user config directory; old locations get a one-line hint, not a migration. See [Memory settings](docs/memory.md#project-memory) and [Plugins](docs/plugins.md).
 - Session handoff for long-running work (`--handoff`): each run leaves `.tinyagent/handoff.md` with what it did and what's next, the next fresh run reads it as data, and an optional startup command runs before the first turn; see [Session handoff](docs/long-runs.md#session-handoff).
 - Project rules from agent failures (`tinyagent ratchet add`): each rule records its incident and an expiry or review condition, is added to the system prompt, and can be enforced as a permission deny rule; see [Project rules](docs/ratchet.md).
 - A task planner that can require a plan before any change.
 - Run budgets: turn cap, cost limit and token limit (`--token-limit`), with an 80% warning to the model; delegates, workers and `--attempts` share the budget, and a run that hits it can be resumed.
-- Verify before stop (`--verify-on-stop`): a run that changed files isn't accepted until a test or build command passes; otherwise it is marked unverified. Optional computational checks (`--verify-check`, e.g. lint, type check, tests) run in order, cheapest first, before the run may finish; see [Computational checks](docs/verify.md#computational-checks). An optional inferential review (`--verify-review`) runs last, once every check passes, and reports the model's findings; see [Inferential review](docs/verify.md#inferential-review).
+- Verify before stop (`--verify-on-stop`): a run that changed files isn't accepted until a test or build command passes; otherwise it is marked unverified. On by default for every `--workflow` stage (`--verify-on-stop=false` opts out); see [Default on for workflow runs](docs/verify.md#default-on-for-workflow-runs). Optional computational checks (`--verify-check`, e.g. lint, type check, tests) run in order, cheapest first, before the run may finish; see [Computational checks](docs/verify.md#computational-checks). An optional inferential review (`--verify-review`) runs last, once every check passes, and reports the model's findings; see [Inferential review](docs/verify.md#inferential-review).
+- Skill workflows (`--workflow file.yaml -t ...`): run a task through fixed stages (plan, code, vet, test, verify behavior), each gated by a success check, with intent routing or `--workflow-name`; `tinyagent help workflows` at the terminal, full guide in [docs/workflows.md](docs/workflows.md).
 - Spec gate for skill workflows (`gate: spec`): a plan whose tasks lack acceptance criteria or a runnable `Verify:` command is re-planned once, then surfaced instead of reaching generate-code; see [Spec gate](docs/project-context.md#spec-gate).
 - Issue triage (`tinyagent triage issues.json`): ranks `gh issue list` output by value against effort with fixed, explainable rules, flags likely duplicates, stale and blocked items without dropping them, and writes a deterministic next-up JSON list an outside loop can work from; offline, no model call. See [Issue triage](docs/triage.md).
 - Blocked tasks for skill workflows: a stage whose check keeps failing on its merits ends the run as `Blocked` (exit 5) rather than `Failed`, with no further attempts, so an outside loop can park the task until a person fixes it; see [Blocked tasks](docs/project-context.md#blocked-tasks).
+- Learning from workflow failures (`--workflow-observe`, opt-in): a failed or blocked workflow run writes one proposed project rule with a ready-to-run `tinyagent ratchet add` command, and a failure that recurs is flagged as a gate that did not hold; see [Learning from failures](docs/project-context.md#learning-from-failures).
+- Contract docs for skill workflows: a `contract` workflow writes a stable reference doc (`docs/contracts/<surface>.md`: public API, invariants, how to extend) for a part of the target repo that keeps getting built on, and `plan-tasks` reads matching contracts before researching and reports surfaces that need one; see [Contract docs](docs/project-context.md#contract-docs).
 - Behavior verification for skill workflows: a `verify-behavior` stage (`behavior:` in the workflow file) runs the built program and passes or fails on its observed exit code and output against the task's behavioral acceptance criteria, records that output as evidence, and is skipped when the task has none; see [Verifying behavior](docs/project-context.md#verifying-behavior).
 - `tinyagent skills validate <path>...`: check skill-workflow skill files, skills directories and workflow files without a model call (exit 1 names an invalid skill), for CI or a pre-commit hook; see [Skill workflows](docs/project-context.md#skill-workflows).
 - Help everywhere: `tinyagent` or `tinyagent <subcommand>` alone at a terminal prints help (the top-level one shows how to pass the task, pick the model and the common options); `--help --verbose` lists every flag by section.
@@ -148,7 +159,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 - `tinyagent --update`: checksum-verified self-update with step-by-step progress and a `#` download bar.
 - Undo for file edits, workspace rewind, resume and follow-up runs.
 - Sandboxed commands (Linux: Bubblewrap with Landlock stacked inside, or Landlock alone, via `--sandbox-backend`; macOS: Seatbelt) with a network allowlist, permission rules, hooks, untrusted-content lockdown and file-access rules.
-- WebAssembly plugin modules run through Extism with permission checks, a version store, rollback and prune. Go source modules are built with TinyGo, an external dependency that tinyagent downloads on first use (pinned version, checksum-verified, cached locally, `tinyagent tinygo update` to update); TinyGo is never embedded in tinyagent.
+- WebAssembly plugin modules run through Extism with permission checks, a version store, rollback and prune. Go source modules are built with TinyGo, an external dependency that tinyagent downloads on first use (pinned version, checksum-verified, cached in `./.tinyagent/cache/toolchains` inside `--cwd`, `tinyagent tinygo update` to update; see [Managing TinyGo](docs/wasm-plugins.md#managing-tinygo)); TinyGo is never embedded in tinyagent.
 - AGENTS.md, Agent Skills, plugins, skill workflows, ACP editor integration and a GitHub Action.
 
 ## Documentation
@@ -167,13 +178,14 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 | Interactive chat (`tinyagent chat`) | [docs/chat.md](docs/chat.md) |
 | Tasks: passing a task, task types, task-based routing | [docs/tasks.md](docs/tasks.md) |
 | Reviews, worktrees, best-of-N, resume, transcripts, follow-ups, asking for input, token and cost budgets | [docs/runs.md](docs/runs.md) |
-| Long runs, session handoff, images, tool output files, apply_patch, subagents (read-only researchers), workers (read-write builders), web fetch, LSP | [docs/long-runs.md](docs/long-runs.md) |
+| Long runs, session handoff, images, tool output files (MCP results capped at 256 KiB), apply_patch, subagents (read-only researchers), workers (read-write builders), web fetch, LSP | [docs/long-runs.md](docs/long-runs.md) |
 | Planner (`update_plan`, `--plan-first`) | [docs/planner.md](docs/planner.md) |
 | Verify before stop (`--verify-on-stop`) | [docs/verify.md](docs/verify.md) |
 | `undo_file` and `--rewind` | [docs/undo.md](docs/undo.md) |
 | Project memory | [docs/memory.md](docs/memory.md) |
 | Project rules from agent failures (`ratchet`) | [docs/ratchet.md](docs/ratchet.md) |
-| AGENTS.md, skills and skill workflows | [docs/project-context.md](docs/project-context.md) |
+| Workflows: multi-stage skill pipelines (`--workflow`), routing, `--workflow-observe`, events | [docs/workflows.md](docs/workflows.md) |
+| AGENTS.md, skills and skill workflows (reference) | [docs/project-context.md](docs/project-context.md) |
 
 ### Models
 

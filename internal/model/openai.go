@@ -25,9 +25,12 @@ type OpenAI struct {
 	// Headers, if set, are added to every request after the defaults
 	// (configured providers).
 	Headers map[string]string
-	// Price, if set, replaces the Prices table entry for this model
-	// (configured providers); PriceOverride still wins.
+	// Price, if set, replaces the Runtime's price table entry for this
+	// model (configured providers); the Runtime's PriceOverride still wins.
 	Price *[3]float64
+	// Runtime supplies the HTTP client, retry policy and prices. nil uses
+	// DefaultRuntime.
+	Runtime *Runtime
 }
 
 // openAIMessage is the wire form of Message; it omits Extra and always sends
@@ -166,12 +169,12 @@ func (o *OpenAI) Query(ctx context.Context, messages []Message, tools []ToolSpec
 	if finish == "length" {
 		markTruncated(&msg, "finish_reason: length")
 	}
-	return msg, cachedPriceWith(o.Model, o.Price, usage.PromptTokens, 0, 0, usage.CompletionTokens), nil
+	return msg, o.Runtime.cachedPriceWith(o.Model, o.Price, usage.PromptTokens, 0, 0, usage.CompletionTokens), nil
 }
 
 func (o *OpenAI) complete(ctx context.Context, url string, headers map[string]string, body any) (Message, openAIUsage, string, error) {
 	var resp openAIResponse
-	if err := postJSON(ctx, url, headers, body, &resp); err != nil {
+	if err := o.Runtime.postJSON(ctx, url, headers, body, &resp); err != nil {
 		return Message{}, openAIUsage{}, "", err
 	}
 	if len(resp.Choices) == 0 {
@@ -184,7 +187,7 @@ func (o *OpenAI) complete(ctx context.Context, url string, headers map[string]st
 // stream reads an SSE response, passing text deltas to OnText and assembling
 // tool calls from their fragments.
 func (o *OpenAI) stream(ctx context.Context, url string, headers map[string]string, body any) (Message, openAIUsage, string, error) {
-	resp, err := post(ctx, url, headers, body)
+	resp, err := o.Runtime.post(ctx, url, headers, body)
 	if err != nil {
 		return Message{}, openAIUsage{}, "", err
 	}

@@ -146,7 +146,8 @@ itself calls `go`, so a Go toolchain must be on `PATH`.
 ### Managing TinyGo
 
 - `tinyagent tinygo install` (`--tinygo-install`) downloads the pinned
-  release into `os.UserCacheDir()/tinyagent/toolchains/tinygo-<version>/`,
+  release into `./.tinyagent/cache/toolchains/tinygo-<version>/` inside
+  `--cwd`,
   verifies its checksum (a mismatch is refused and leaves nothing cached)
   and extracts it safely (no path traversal or escaping links). With a
   verified copy cached it says so and downloads nothing.
@@ -155,9 +156,26 @@ itself calls `go`, so a Go toolchain must be on `PATH`.
 - `tinyagent tinygo status` (`--tinygo-status`) prints the pinned version
   and checksum, whether it is installed and verified, and the path in use.
 
+The cache lives only inside `--cwd`, so each project keeps its own copy;
+add `.tinyagent/` to your `.gitignore`. If `.tinyagent` or the cache folder
+resolves through a symlink to somewhere outside `--cwd`, the command (or the
+Go module build) stops with an error.
+
+**Hard cut:** earlier versions cached TinyGo in
+`os.UserCacheDir()/tinyagent/toolchains` (for example
+`~/.cache/tinyagent/toolchains` on Linux or
+`~/Library/Caches/tinyagent/toolchains` on macOS). That folder is no longer
+used or copied. When it exists, `tinyagent tinygo` and the first Go module
+build of a run print one stderr line, `hint: the TinyGo cache in <old path>
+is no longer used; toolchains are now cached in
+./.tinyagent/cache/toolchains in --cwd (...)`, and the pinned release is
+downloaded again into `--cwd`. Delete the old folder to silence the hint.
+
 To use your own TinyGo instead, set the `tinygo` config key or the
 `TINYAGENT_TINYGO` environment variable to its executable; nothing is
-downloaded then.
+downloaded then. This override may point anywhere (for example a
+system-wide install); it is not limited to `--cwd`, and no hint is printed
+when it is set.
 
 ### Bumping the pinned TinyGo version
 

@@ -680,7 +680,7 @@ func TestUnpricedCostLimitWarning(t *testing.T) {
 	if err := os.WriteFile(noConfig, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { model.PriceOverride = [2]float64{} })
+	t.Cleanup(func() { model.DefaultRuntime.PriceOverride = [2]float64{} })
 	cases := []struct {
 		name string
 		args []string
@@ -914,6 +914,7 @@ func TestInvalidHookConfigFailsBeforeProvider(t *testing.T) {
 }
 func TestEnvFlag(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir()) // os.UserConfigDir ignores XDG_CONFIG_HOME on macOS
 	if code, _, got := runWith(t, "--env", "bogus", "-t", "x"); code != 2 || !strings.Contains(got, `--env "bogus"`) {
 		t.Errorf("--env bogus: exit %d, stderr %q; want 2", code, got)
 	}
@@ -933,6 +934,7 @@ func TestEnvFlag(t *testing.T) {
 
 func TestSandboxAllowDomainValidation(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir()) // os.UserConfigDir ignores XDG_CONFIG_HOME on macOS
 	var requests atomic.Int32
 	srv := fakeOpenAI(t, &requests)
 	t.Setenv("OPENAI_BASE_URL", srv.URL)

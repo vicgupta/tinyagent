@@ -37,15 +37,25 @@ func write(t *testing.T, path, data string) {
 	}
 }
 
+// find is the lookup Locate used before the per-user config stopped being
+// read (#294, #336): explicit, else DefaultPath when it exists. These tests
+// use it to exercise Load on a file at that path.
+func find(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	return legacyUserConfig()
+}
+
 func load(t *testing.T, explicit string) (AgentConfig, error) {
 	t.Helper()
-	return Load(Find(explicit))
+	return Load(find(explicit))
 }
 
 func TestNoUserConfigUsesDefaults(t *testing.T) {
 	fakeUserDirs(t)
-	if got := Find(""); got != "" {
-		t.Errorf("Find(\"\") = %q, want \"\" when no user config exists", got)
+	if got := find(""); got != "" {
+		t.Errorf("find(\"\") = %q, want \"\" when no user config exists", got)
 	}
 	cfg, err := load(t, "")
 	if err != nil || !reflect.DeepEqual(cfg, Default()) {
@@ -56,8 +66,8 @@ func TestNoUserConfigUsesDefaults(t *testing.T) {
 func TestUserConfigOverridesDefaults(t *testing.T) {
 	p := fakeUserDirs(t)
 	write(t, p, "step_limit: 50\nbash_timeout_seconds: 300\n")
-	if got := Find(""); got != p {
-		t.Errorf("Find(\"\") = %q, want %q", got, p)
+	if got := find(""); got != p {
+		t.Errorf("find(\"\") = %q, want %q", got, p)
 	}
 	cfg, err := load(t, "")
 	if err != nil || cfg.StepLimit != 50 || cfg.BashTimeoutSec != 300 || cfg.MaxOutputChars != Default().MaxOutputChars {
@@ -70,8 +80,8 @@ func TestExplicitConfigWins(t *testing.T) {
 	write(t, p, "step_limit: 50\n")
 	explicit := filepath.Join(t.TempDir(), "ci.yaml")
 	write(t, explicit, "step_limit: 7\n")
-	if got := Find(explicit); got != explicit {
-		t.Errorf("Find(%q) = %q", explicit, got)
+	if got := find(explicit); got != explicit {
+		t.Errorf("find(%q) = %q", explicit, got)
 	}
 	if cfg, err := load(t, explicit); err != nil || cfg.StepLimit != 7 {
 		t.Errorf("load = %+v, %v; want step_limit 7 from the explicit file", cfg, err)
@@ -107,8 +117,8 @@ func TestNoUserConfigDir(t *testing.T) {
 	t.Setenv("HOME", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("AppData", "")
-	if got := Find(""); got != "" {
-		t.Errorf("Find(\"\") = %q, want \"\" when there's no user config dir", got)
+	if got := find(""); got != "" {
+		t.Errorf("find(\"\") = %q, want \"\" when there's no user config dir", got)
 	}
 }
 

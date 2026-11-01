@@ -1,0 +1,13 @@
+[2m╭─ python[0m
+[2m│[0m [35mdef[0m f(x):  [2m# c[0m
+[2m│[0m     [35mreturn[0m [35mNone[0m
+[2m╰─[0m
+
+[2m╭─ sh[0m
+[2m│[0m echo [32m"$HOME"[0m [2m# c[0m
+[2m╰─[0m
+
+[2m╭─ diff[0m
+[2m│[0m [31m- old[0m
+[2m│[0m [32m+ new[0m
+[2m╰─[0m

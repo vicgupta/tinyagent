@@ -1,0 +1,13 @@
++-- python
+| def f(x):  # c
+|     return None
++--
+
++-- sh
+| echo "$HOME" # c
++--
+
++-- diff
+| - old
+| + new
++--

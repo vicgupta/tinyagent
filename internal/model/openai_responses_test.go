@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 )
 
 func TestResolveOpenAIAPI(t *testing.T) {
@@ -149,7 +148,7 @@ data: {"type":"response.completed","response":{"status":"completed","usage":{"in
 		t.Fatalf("tool calls = %+v", msg.ToolCalls)
 	}
 	// 200 uncached + 800 cached at the cache-read price, 100 output.
-	p := Prices["gpt-4.1"]
+	p := builtinPrices["gpt-4.1"]
 	read := p[2]
 	if read == 0 {
 		read = cacheReadMultiplier
@@ -266,7 +265,7 @@ data: {"type":"response.failed","response":{"status":"failed","error":{"code":"s
 // TestOpenAIResponsesRetryAndOverflow covers retries and the context-too-long
 // error reaching compaction (AC10).
 func TestOpenAIResponsesRetryAndOverflow(t *testing.T) {
-	retryBase = time.Millisecond
+	t.Parallel()
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch calls.Add(1) {
@@ -280,7 +279,7 @@ func TestOpenAIResponsesRetryAndOverflow(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	o := &OpenAIResponses{BaseURL: srv.URL, Model: "gpt-4.1"}
+	o := &OpenAIResponses{BaseURL: srv.URL, Model: "gpt-4.1", Runtime: fastRetryRuntime()}
 	msgs := []Message{{Role: "user", Content: "hi"}}
 	if msg, _, err := o.Query(context.Background(), msgs, nil); err != nil || msg.Content != "Done." {
 		t.Fatalf("msg = %+v, err = %v", msg, err)

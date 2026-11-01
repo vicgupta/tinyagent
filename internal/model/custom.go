@@ -18,7 +18,7 @@ const (
 )
 
 // builtinProviders are the provider names New knows without configuration.
-var builtinProviders = []string{"openai", "openrouter", "anthropic", "ollama", "codex", "claude-code", "codex-exec"}
+var builtinProviders = []string{"openai", "openrouter", "anthropic", "ollama", "codex", "claude-code", "codex-exec", "opencode"}
 
 // ModelMeta is per-model price and context-window metadata for a
 // configured provider. Zero values mean unknown.
@@ -167,7 +167,7 @@ func InsecureBaseURL(d ProviderDef) bool {
 }
 
 // newConfigured builds the adapter for configured provider d.
-func newConfigured(d ProviderDef, spec, name string, onText func(string)) (Model, error) {
+func newConfigured(d ProviderDef, spec, name string, onText func(string), rt *Runtime) (Model, error) {
 	headers, err := providerHeaders(d)
 	if err != nil {
 		return nil, err
@@ -176,21 +176,21 @@ func newConfigured(d ProviderDef, spec, name string, onText func(string)) (Model
 	if d.APIKeyEnv != "" {
 		key = os.Getenv(d.APIKeyEnv)
 	}
-	price := providerPrice(spec)
+	price := rt.providerPrice(spec)
 	switch d.API {
 	case ProviderAPIChat:
-		return &OpenAI{BaseURL: d.BaseURL, APIKey: key, Model: name, OnText: onText, Headers: headers, Price: price}, nil
+		return &OpenAI{BaseURL: d.BaseURL, APIKey: key, Model: name, OnText: onText, Headers: headers, Price: price, Runtime: rt}, nil
 	case ProviderAPIResponses:
-		return &OpenAIResponses{BaseURL: d.BaseURL, APIKey: key, Model: name, OnText: onText, Headers: headers, Price: price}, nil
+		return &OpenAIResponses{BaseURL: d.BaseURL, APIKey: key, Model: name, OnText: onText, Headers: headers, Price: price, Runtime: rt}, nil
 	case ProviderAPIAnthropic:
-		return &Anthropic{BaseURL: d.BaseURL, APIKey: key, Model: name, OnText: onText, Headers: headers, Price: price, OmitEmptyKey: true}, nil
+		return &Anthropic{BaseURL: d.BaseURL, APIKey: key, Model: name, OnText: onText, Headers: headers, Price: price, OmitEmptyKey: true, Runtime: rt}, nil
 	}
 	return nil, fmt.Errorf("provider %q: unknown api %q", d.ID, d.API)
 }
 
-// providerPrice returns the configured price entry for spec, in Prices
+// providerPrice returns the configured price entry for spec, in price table
 // form, or nil when the model has no configured price.
-func providerPrice(spec string) *[3]float64 {
+func (r *Runtime) providerPrice(spec string) *[3]float64 {
 	m, ok := configuredMeta(spec)
 	if !ok {
 		return nil
@@ -200,7 +200,7 @@ func providerPrice(spec string) *[3]float64 {
 	}
 	// A multiplier alone refines the built-in price for the model name.
 	_, name := splitSpec(spec)
-	if p, ok := lookupPrice(name); ok && m.CacheReadMultiplier > 0 {
+	if p, ok := r.lookupPrice(name); ok && m.CacheReadMultiplier > 0 {
 		p[2] = m.CacheReadMultiplier
 		return &p
 	}

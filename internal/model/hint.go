@@ -66,6 +66,13 @@ func Hint(spec, errMsg string) string {
 		case authFailure(errMsg, claudeAuthMarkers):
 			return "sign in to Claude Code: run `claude`, then /login, then rerun tinyagent"
 		}
+	case OpenCodeProvider:
+		switch {
+		case strings.Contains(errMsg, "not found on PATH") || strings.Contains(errMsg, "is not an executable"):
+			return "install OpenCode (https://opencode.ai/docs/), run `opencode auth login` once, or set opencode.path in your config"
+		case authFailure(errMsg, openCodeAuthMarkers):
+			return "sign in to OpenCode: run `opencode auth login`, then rerun tinyagent"
+		}
 	case CodexExecProvider:
 		switch {
 		case strings.Contains(errMsg, "not found on PATH") || strings.Contains(errMsg, "is not an executable"):

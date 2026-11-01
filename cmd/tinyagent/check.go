@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -228,7 +229,7 @@ func resolveCheck(o *options, fs *flag.FlagSet, sum *checkSummary) ([][2]string,
 	for _, s := range cfg.MCPServers {
 		add("mcp", fmt.Sprintf("%s: %d tools, %d resource patterns", s.Alias, len(s.Tools), len(s.Resources)))
 	}
-	pl, err := checkPluginsLine(cfg, os.Stderr)
+	pl, err := checkPluginsLine(cfg, o.cwd, os.Stderr)
 	if err != nil {
 		return nil, err
 	}
@@ -346,6 +347,15 @@ func providerStatus(spec string, m model.Model) string {
 			return "codex-exec, runs " + c.Path + " (its own sign-in; not checked)"
 		}
 		return "codex-exec"
+	case model.OpenCodeProvider:
+		if c, ok := m.(*model.OpenCode); ok {
+			v := c.Version(context.Background())
+			if v == "" {
+				v = "version unknown"
+			}
+			return "opencode, runs " + c.Path + " (" + v + "; its own sign-in; not checked)"
+		}
+		return "opencode"
 	}
 	env := map[string]string{"openai": "OPENAI_API_KEY", "openrouter": "OPENROUTER_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}[provider]
 	if os.Getenv(env) == "" {

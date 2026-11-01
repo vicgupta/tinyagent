@@ -44,7 +44,7 @@ func testStorePath(t *testing.T, cwd string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return filepath.Join(root, "memory")
+	return filepath.Join(root, ".tinyagent", "memory")
 }
 
 func seedMemory(t *testing.T, store string, entries ...memory.Entry) {

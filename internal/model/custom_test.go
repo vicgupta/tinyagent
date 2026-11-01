@@ -137,12 +137,12 @@ func TestConfiguredProviderEnvErrors(t *testing.T) {
 func TestUnknownProviderListsIDs(t *testing.T) {
 	withProviders(t)
 	_, err := New("nope/x", nil)
-	if err == nil || err.Error() != `unknown provider "nope" (want openai, openrouter, anthropic, ollama, codex, claude-code, or codex-exec)` {
+	if err == nil || err.Error() != `unknown provider "nope" (want openai, openrouter, anthropic, ollama, codex, claude-code, codex-exec, or opencode)` {
 		t.Errorf("no providers: %v", err)
 	}
 	withProviders(t, ProviderDef{ID: "zeta", API: "chat", BaseURL: "http://x"}, ProviderDef{ID: "alpha", API: "chat", BaseURL: "http://x"})
 	_, err = New("nope/x", nil)
-	if err == nil || !strings.Contains(err.Error(), "openai, openrouter, anthropic, ollama, codex, claude-code, codex-exec; configured: alpha, zeta") {
+	if err == nil || !strings.Contains(err.Error(), "openai, openrouter, anthropic, ollama, codex, claude-code, codex-exec, opencode; configured: alpha, zeta") {
 		t.Errorf("with providers: %v", err)
 	}
 }
@@ -157,23 +157,22 @@ func TestConfiguredMetadataPrecedence(t *testing.T) {
 	if Unpriced("gw/priced") || !Unpriced("gw/mystery") || Unpriced("gw/gpt-4o-mini") {
 		t.Error("Unpriced wrong for configured models")
 	}
-	p := providerPrice("gw/priced")
-	if c := cachedPriceWith("priced", p, 0, 0, 1e6, 0); c.USD != 2 {
+	rt := NewRuntime()
+	p := rt.providerPrice("gw/priced")
+	if c := rt.cachedPriceWith("priced", p, 0, 0, 1e6, 0); c.USD != 2 {
 		t.Errorf("cache read cost = %v, want 2 (0.5 x $4)", c.USD)
 	}
-	if p := providerPrice("gw/gpt-4o"); p == nil || p[2] != 0.25 || p[0] != Prices["gpt-4o"][0] {
+	if p := rt.providerPrice("gw/gpt-4o"); p == nil || p[2] != 0.25 || p[0] != builtinPrices["gpt-4o"][0] {
 		t.Errorf("multiplier-only price = %v", p)
 	}
 	if ContextWindow("gw/priced") != 12345 || ContextWindow("gw/windowed") != 999 || ContextWindow("gw/unknown") != 0 {
 		t.Error("configured context windows")
 	}
-	old := PriceOverride
-	t.Cleanup(func() { PriceOverride = old })
-	PriceOverride = [2]float64{1, 1}
-	if c := cachedPriceWith("priced", p, 1e6, 0, 0, 1e6); c.USD != 2 {
+	rt.PriceOverride = [2]float64{1, 1}
+	if c := rt.cachedPriceWith("priced", p, 1e6, 0, 0, 1e6); c.USD != 2 {
 		t.Errorf("override cost = %v, want 2", c.USD)
 	}
-	if Unpriced("gw/mystery") {
+	if rt.Unpriced("gw/mystery") {
 		t.Error("override should price any configured model")
 	}
 }

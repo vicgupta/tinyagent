@@ -376,3 +376,26 @@ func TestUnsatisfiable(t *testing.T) {
 		}
 	}
 }
+
+func TestRunAttemptUnverified(t *testing.T) {
+	w := loadTestWorkflow(t, "version: 1\nworkflows:\n  build:\n    stages:\n      - skill: run-tests\n")
+	r, _ := w.Route("", "build")
+	agent := func(_ context.Context, args []string, _ io.Writer) error {
+		for i := range args {
+			if args[i] == "-o" {
+				return os.WriteFile(args[i+1], []byte(`{"exit_status":"Submitted","submission":"SUCCESS CHECK: PASS","unverified":true}`), 0o600)
+			}
+		}
+		return nil
+	}
+	res := Run(context.Background(), Options{Route: r, Task: "t", Cwd: t.TempDir(), Dir: t.TempDir(), RunAgent: agent})
+	if res.Status != StatusPassed || len(res.Attempts) != 1 {
+		t.Fatalf("result = %+v", res)
+	}
+	if !res.Attempts[0].Unverified {
+		t.Error("attempt not marked unverified")
+	}
+	if attemptFields(res.Attempts[0])["unverified"] != true {
+		t.Error("stage.finished fields lack unverified")
+	}
+}

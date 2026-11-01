@@ -94,6 +94,26 @@ It isn't printed with `--json`, without `-o`, or for `--output-schema` runs.
 
 An explicit `--cwd` must resolve to the recorded canonical root (directory symlinks are resolved). For a [`--worktree`](#worktrees) run, that is the path inside the worktree. The effective system prompt must match the saved prompt, including `{{cwd}}`/`{{os}}` substitutions and the recorded AGENTS.md loading mode. Current config is used to reconstruct it without appending AGENTS.md twice. Changed instructions, a conflicting `--no-agents-md`, or changed tool definitions/compatibility require a fresh task. In particular, a task that edits its effective AGENTS.md cannot resume under changed instructions.
 
+**Recorded settings.** A checkpoint records its boolean tool and mode settings, and `--resume` keeps them. Leaving a flag out is always fine; passing one that contradicts the checkpoint is refused before provider setup with `error: resume: <flag> conflicts with the checkpoint's <recorded setting>; start a fresh task`:
+
+| Flag | Checkpoint field | Exit |
+| --- | --- | --- |
+| `--read-only` | `read_only` | 1 |
+| `--plan` | `plan_enabled` | 1 |
+| `--images` | `images_enabled` | 1 |
+| `--apply-patch` | `apply_patch_enabled` | 2 |
+| `--subagents` | `subagents_enabled` | 2 |
+| `--workers` | `workers_enabled` | 2 |
+| `--ask-user` | `ask_user_enabled` | 2 |
+| `--web-fetch` | `web_fetch_enabled` | 2 |
+| `--lsp` | `lsp_enabled` | 2 |
+| `--scoped-agents-md` | `scoped_agents_md_enabled` | 2 |
+| `--skills` / `--no-skills` | `skills_enabled` | 1 |
+| `--memory` | `memory_enabled` | 2 |
+| `--no-agents-md` | `skip_agents_md` | 1 |
+
+When several flags conflict, the first one in this table is reported. The `--no-agents-md` message now reads "conflicts with the checkpoint's recorded loading mode" (it used to omit "the checkpoint's").
+
 Only new-format, unfinished checkpoints are eligible: an in-progress save (including one left by a crash or `kill -9`) or a stop caused by a step/cost/time limit, interruption, or error. Successful `Submitted`/`Completed` runs are not resumed this way; continue them with a follow-up task instead (see below). Legacy logs, unsupported versions/state, and malformed or partial tool turns are refused before provider setup. Checkpoint loading is limited to regular files of at most **64 MiB**. Larger trajectories remain audit logs.
 
 With `-o`, the checkpoint is written before tools run (recording the calls as `pending_calls`) and again after each tool result. If the process dies mid-turn, `--resume` gives every call without a result the error result `[interrupted: tool did not complete before the agent stopped; it may have partially run — verify state before retrying]` and emits `resume.interrupted_call`. **Interrupted calls are never re-executed automatically**: a half-run `bash` or edit may have had side effects, so the model decides what to inspect or retry. Background processes started with `start_process` are recorded with their PID; they do not survive into a new invocation, so resume emits `resume.process_lost` and tells the model which ones are gone.

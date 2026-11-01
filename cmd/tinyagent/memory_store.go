@@ -14,7 +14,8 @@ var memorySource config.MemorySource
 
 // applyMemoryConfig layers memory.toml (found from cwd) and the
 // TINYAGENT_MEMORY_* variables over cfg.Memory and prints a warning for
-// each repository-local setting that was ignored. Callers apply --memory
+// each repository-local setting or refused path that was ignored, plus the
+// one-line hint about a memory.toml left in the old user config location. Callers apply --memory
 // afterwards.
 func applyMemoryConfig(cfg *config.AgentConfig, cwd string, stderr io.Writer) error {
 	src, err := config.ApplyMemoryOverlay(&cfg.Memory, cwd, os.Getenv)
@@ -25,6 +26,9 @@ func applyMemoryConfig(cfg *config.AgentConfig, cwd string, stderr io.Writer) er
 	for _, w := range src.Warnings {
 		fmt.Fprintln(stderr, "warning:", w)
 	}
+	if src.Hint != "" {
+		fmt.Fprintln(stderr, src.Hint)
+	}
 	return nil
 }
 
@@ -34,31 +38,30 @@ func memoryStorePath(cfg config.Memory, root string) (string, error) {
 	return memory.ResolveStore(cfg.Backend, cfg.Path, cfg.SQLitePath, root)
 }
 
-// legacyMemoryPath returns the pre-markdown JSON store for root, or "".
-func legacyMemoryPath(root string) string {
-	p, err := memory.StorePath("", root)
-	if err != nil {
-		return ""
-	}
-	return p
-}
-
-// openMemoryStore resolves the store for root and, with import_legacy on,
-// copies the legacy JSON store into it once when it doesn't exist yet.
+// openMemoryStore resolves the store for root. Memory lives only inside
+// --cwd (issue #335): nothing is imported from older locations. When the
+// store doesn't exist yet but the previous default (./memory) holds one,
+// warn gets a single hint pointing at the new location.
 func openMemoryStore(cfg config.Memory, root string, warn func(string)) (string, error) {
 	path, err := memoryStorePath(cfg, root)
 	if err != nil {
 		return "", err
 	}
-	if cfg.ImportLegacy {
-		legacy := legacyMemoryPath(root)
-		n, err := memory.ImportLegacy(path, legacy)
-		switch {
-		case err != nil:
-			warn(fmt.Sprintf("project memory: importing legacy store %s: %v", legacy, err))
-		case n > 0:
-			warn(fmt.Sprintf("project memory: imported %d %s from legacy store %s into %s (the old file was kept)", n, plural(n, "entry", "entries"), legacy, path))
-		}
+	if h := oldMemoryHint(cfg, root, path); h != "" {
+		warn(h)
 	}
 	return path, nil
+}
+
+// oldMemoryHint returns the one-line hint for a store left at the previous
+// default location, or "".
+func oldMemoryHint(cfg config.Memory, root, path string) string {
+	if memory.Exists(path) {
+		return ""
+	}
+	old := memory.OldDefaultStore(cfg.Backend, root)
+	if old == "" || old == path {
+		return ""
+	}
+	return fmt.Sprintf("hint: project memory now lives in ./%s; %s is no longer read (move it there to keep it)", memory.DefaultMarkdownPath, old)
 }

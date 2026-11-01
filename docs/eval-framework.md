@@ -444,7 +444,7 @@ Existing code to reuse (all present on `main`):
 | `internal/model/` | Price table for cost estimates and totals; fallback handling (`fallback.go`). |
 | `internal/eventlog/` | `--log-db` should record the trial id. |
 
-Constraints (CONTRIBUTING.md): the only dependency is `gopkg.in/yaml.v3` — keep it that way; PRs small and focused; sandboxing isn't supported on Windows.
+Constraints (CONTRIBUTING.md): keep dependencies to a minimum (the direct ones are listed there); PRs small and focused; sandboxing isn't supported on Windows.
 
 ### Suggested PR split
 

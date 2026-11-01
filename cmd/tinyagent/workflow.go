@@ -24,7 +24,7 @@ var workflowConflicts = []string{"resume", "rewind", "to", "dry-run", "transcrip
 
 // workflowOwn are flags --workflow consumes; every other flag set on the
 // command line is forwarded to each stage's run.
-var workflowOwn = []string{"workflow", "workflow-name", "t", "task", "o", "output", "cwd", "json"}
+var workflowOwn = []string{"workflow", "workflow-name", "workflow-observe", "t", "task", "o", "output", "cwd", "json"}
 
 // runWorkflowAgent runs one stage; tests replace it with a fake.
 var runWorkflowAgent = func() (harness.RunAgent, error) {
@@ -96,7 +96,7 @@ func runWorkflow(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.
 	defer stop()
 	fmt.Fprintf(stderr, "workflow %s (%s, %s): %d stage(s)\n", route.Name, route.Kind, route.How, len(route.Pipeline.Stages))
 	res := harness.Run(ctx, harness.Options{
-		Route: route, Task: task, Cwd: cwd, ExtraArgs: forwardArgs(fs, args, workflowOwn),
+		Route: route, Task: task, Cwd: cwd, ExtraArgs: workflowStageArgs(fs, args),
 		Dir: dir, RunAgent: runAgent, Progress: stderr,
 		Emit: func(kind string, f map[string]any) {
 			if jl != nil {
@@ -115,6 +115,9 @@ func runWorkflow(o *options, fs *flag.FlagSet, args []string, stdout, stderr io.
 			fmt.Fprintln(stderr, "error: write --output:", err)
 			return 1
 		}
+	}
+	if o.workflowObserve {
+		observeWorkflow(res, cwd, jl, stderr)
 	}
 	if jl != nil && jl.Err() != nil && !errors.Is(jl.Err(), io.ErrClosedPipe) {
 		fmt.Fprintln(stderr, "error: write events:", jl.Err())

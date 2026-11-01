@@ -105,19 +105,20 @@ func TestViewImageErrorsAndReadOnly(t *testing.T) {
 		"big.png":        "big.png is 2,000 bytes; max_image_bytes is 1,000",
 	}
 	for path, want := range cases {
-		out, images, isErr := a.Tools.RunWithImages(context.Background(), call("c", "view_image", `{"path":"`+path+`"}`))
+		r := a.Tools.RunResult(context.Background(), call("c", "view_image", `{"path":"`+path+`"}`))
+		out, images, isErr := r.Text, r.Images, r.IsError
 		if !isErr || len(images) != 0 || !strings.Contains(out, want) {
 			t.Errorf("%s: %q, %d images, isErr %v; want error containing %q", path, out, len(images), isErr, want)
 		}
 	}
-	if _, images, isErr := a.Tools.RunWithImages(context.Background(), call("c", "view_image", `{"path":"docs/ui.png"}`)); isErr || len(images) != 1 {
+	if r := a.Tools.RunResult(context.Background(), call("c", "view_image", `{"path":"docs/ui.png"}`)); r.IsError || len(r.Images) != 1 {
 		t.Errorf("read-only view_image failed")
 	}
 	if !a.Tools.Permits("view_image") || a.Tools.Permits("bash") || a.Tools.Permits("write_file") {
 		t.Error("read-only images catalog is wrong")
 	}
-	if out, isErr := a.Tools.RunWithError(context.Background(), call("c", "bash", `{"command":"true"}`)); !isErr || !strings.Contains(out, "read-only") {
-		t.Errorf("bash in read-only = %q", out)
+	if r := a.Tools.RunResult(context.Background(), call("c", "bash", `{"command":"true"}`)); !r.IsError || !strings.Contains(r.Text, "read-only") {
+		t.Errorf("bash in read-only = %q", r.Text)
 	}
 }
 
