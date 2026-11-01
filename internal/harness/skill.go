@@ -74,8 +74,22 @@ func ParseSkill(name, path string, data []byte) (*Skill, error) {
 	}
 	s.Body = strings.TrimSpace(text)
 	inInputs := false
+	fence := "" // the open code fence (``` or ~~~ run), if any
 	for _, line := range strings.Split(text, "\n") {
 		trim := strings.TrimSpace(line)
+		// Fenced code blocks are instructions for the model, kept verbatim
+		// in Body: a "# comment", "- item" or "Success check:" line inside
+		// one is not the skill's heading, inputs or check.
+		if fence != "" {
+			if strings.HasPrefix(trim, fence) && strings.Trim(trim, fence[:1]) == "" {
+				fence = ""
+			}
+			continue
+		}
+		if f := openFence(trim); f != "" {
+			fence, inInputs = f, false
+			continue
+		}
 		if inInputs {
 			if m := reBullet.FindStringSubmatch(line); m != nil {
 				s.Inputs = append(s.Inputs, inputName(m[1]))
@@ -94,11 +108,11 @@ func ParseSkill(name, path string, data []byte) (*Skill, error) {
 			}
 			s.Title = t
 		case s.Intent == "" && reIntent.MatchString(trim):
-			s.Intent = strings.Trim(reIntent.FindStringSubmatch(trim)[1], "* ")
+			s.Intent = stripEmphasis(reIntent.FindStringSubmatch(trim)[1])
 		case reInputs.MatchString(trim):
 			inInputs = true
 		case s.SuccessCheck == "" && reCheck.MatchString(trim):
-			s.SuccessCheck = strings.Trim(reCheck.FindStringSubmatch(trim)[1], "* ")
+			s.SuccessCheck = stripEmphasis(reCheck.FindStringSubmatch(trim)[1])
 		}
 	}
 	if s.Title == "" {
@@ -121,6 +135,41 @@ func ParseSkill(name, path string, data []byte) (*Skill, error) {
 		return nil, fmt.Errorf("skill %s: %s is missing %s", name, path, strings.Join(missing, ", "))
 	}
 	return s, nil
+}
+
+// openFence returns the fence marker (a run of 3 or more ` or ~) when line
+// opens a fenced code block, else "".
+func openFence(line string) string {
+	for _, c := range []string{"`", "~"} {
+		n := len(line) - len(strings.TrimLeft(line, c))
+		if n >= 3 {
+			if c == "`" && strings.Contains(line[n:], "`") {
+				return "" // a backtick info string can't hold backticks
+			}
+			return line[:n]
+		}
+	}
+	return ""
+}
+
+// stripEmphasis removes Markdown bold markers (** and __) outside inline
+// code spans, and trims spaces and stray * around the text, so
+// "**`make test`** passes" becomes "`make test` passes". Backticks and
+// everything inside a code span are kept as written.
+func stripEmphasis(s string) string {
+	var b strings.Builder
+	inCode := false
+	for i := 0; i < len(s); i++ {
+		if s[i] == '`' {
+			inCode = !inCode
+		}
+		if !inCode && i+1 < len(s) && (s[i:i+2] == "**" || s[i:i+2] == "__") {
+			i++
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return strings.Trim(b.String(), "* ")
 }
 
 // inputName reduces an input bullet ("`spec`: the feature spec") to its name.

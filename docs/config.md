@@ -223,6 +223,10 @@ profiles:                    # omitted by default; named overlays selected with 
     model: openai/gpt-5-mini
     read_only: true
 ```
+### Workflows
+
+`tinyagent.yaml` has no workflow-specific keys. Stage settings (`model`, `profile`, `step_limit`, `cost_limit`, `token_limit`, `time_limit`, `retries`, `check_timeout`) live in the workflow file passed to `--workflow`, and each stage otherwise uses this config, including `profiles` and `verify_on_stop`. See [Workflows](workflows.md#flags-and-settings).
+
 ### Verify before stop
 
 `verify_on_stop` (or `--verify-on-stop`, `--verify-command`, `--verify-check`, `--max-verify-reprompts`) keeps a run that changed files from finishing until a test or build command has passed, re-prompting the model up to `max_reprompts` times and otherwise marking the run unverified. `verify_on_stop.checks` lists computational checks (lint, type check, tests) that tinyagent runs itself, in order, when the model finishes with unverified changes; see [Computational checks](verify.md#computational-checks). `verify_on_stop.review` (or `--verify-review`) then asks the model once to review the changes, report only; see [Inferential review](verify.md#inferential-review). See [Verify before stop](verify.md#verify-before-stop) for the full rules.

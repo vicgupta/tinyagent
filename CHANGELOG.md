@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixes
+
+- Workflow skill files: backticks and fenced code blocks are handled correctly. The skill parser used to read lines inside ```` ``` ```` / `~~~` fences as the skill's heading, `Intent:`, `Inputs` or `Success check:`, so a fenced example could replace the real inputs or success check, and a `# comment` in a fence could become the title. Fenced lines are now skipped by the parser (and still sent verbatim to the model), and bold around an inline code span (`` **`make test`** passes ``) no longer leaves stray `**` in the intent or success check. See [Markdown and backticks](docs/workflows.md#skill-files-markdown).
+
+### Documentation
+
+- Workflows are documented in the CLI and in a new [docs/workflows.md](docs/workflows.md) guide (what they are, quick start, file format and cwd-relative paths, routing, flags and settings, `--workflow-observe`, JSON events, interaction with chat and other flags, troubleshooting, examples). New `tinyagent help workflows` help topic; brief `--help` shows a workflow example and points at it; `--workflow`, `--workflow-name` and `tinyagent skills` help gain examples. Linked from the README, `docs/subcommands.md`, `docs/config.md`, `docs/json-output.md` and `docs/project-context.md`. `TestWorkflowHelpCoversEveryFlag` keeps the topic and page in sync with the workflow flags and events.
+
 ## [v0.15.1] - 2026-10-31
 
 ### Fixes

@@ -41,6 +41,8 @@ With `--skills` (or `skills: true`), tinyagent discovers [Agent Skills](https://
 
 ### Skill workflows
 
+For a task-oriented guide (quick start, paths, routing, flags, events, troubleshooting and examples), see [Workflows](workflows.md). This section is the detailed reference.
+
 `--workflow file.yaml` runs a sequence of small skills on the task (`-t`) as one automatic pipeline, for example plan, then generate, then validate, then test. Each stage is a fresh, unattended tinyagent run in `--cwd` that gets the original task and the previous stage's output. As soon as a stage passes its success check the next one starts; there is no pause or approval between stages. Without `--workflow`, tinyagent behaves exactly as before, and `--skills` Agent Skills are unaffected.
 
 A workflow has two layers: **one YAML workflow file** (the pipeline: stages, checks and limits), passed with `--workflow`, and **one Markdown file per skill** (each stage's instructions), kept in the workflow's `skills_dir`. The two formats don't compete; the file you pass to `--workflow` is always YAML.

@@ -17,6 +17,7 @@ Runs an AI coding agent on a task in --cwd, using tools to read, edit and run co
 
 // helpFooter points at the detailed views and the full reference.
 const helpFooter = `Run tinyagent <subcommand> --help for its actions and options,
+tinyagent help workflows for skill workflows (--workflow),
 tinyagent --help --verbose for every flag, or see docs/subcommands.md.
 `
 
@@ -32,6 +33,8 @@ var helpEssentials = `Examples:
   tinyagent -t "fix the failing test in ./pkg"
   git diff | tinyagent -t - -m anthropic/claude-sonnet-4-5 --read-only
   tinyagent chat       # interactive session: type messages, Ctrl-D to quit
+  tinyagent --workflow docs/workflows/workflow.yaml -t "add CSV export"
+                       # multi-stage skill workflow; see tinyagent help workflows
 
 Common options:
   -t, --task string    the task/prompt; "-" reads it from stdin
@@ -207,3 +210,60 @@ func wrapWords(s string, width int) []string {
 	}
 	return append(lines, cur)
 }
+
+// helpWorkflows is the "tinyagent help workflows" topic: what skill
+// workflows are, every workflow flag with an example, the file format and
+// where paths resolve, routing, exit status and events. Keep it in sync
+// with docs/workflows.md; TestWorkflowHelpCoversEveryFlag checks that every
+// workflow flag is named here and in that page.
+const helpWorkflows = `Usage: tinyagent --workflow <file.yaml> -t "<task>" [--workflow-name name] [--workflow-observe] [flags]
+Skill workflows run a task through fixed stages (for example plan, code, vet, test,
+verify behavior). Each stage is a fresh, unattended run of one skill (a Markdown file),
+gated by its success check; a failed stage is retried, then the workflow stops.
+
+Examples:
+  tinyagent --workflow docs/workflows/workflow.yaml -t "add CSV export"
+  tinyagent --workflow docs/workflows/workflow.yaml --workflow-name contract \
+            -t "write a contract doc for internal/tools"
+  tinyagent --workflow wf.yaml -t "fix the flaky test" --workflow-observe --json
+  tinyagent skills validate docs/workflows/workflow.yaml   # check files, no model call
+
+Flags:
+  --workflow file.yaml    run the workflow file on the -t task; the router picks a
+                          workflow or skill by the task's intent
+  --workflow-name name    run this workflow (or a single skill) instead of routing
+  --workflow-observe      after a Failed or Blocked run, propose one project rule in
+                          .tinyagent/observer/proposals.jsonl (in --cwd); never applied
+  --skills-validate path  validate skill files, skills dirs or workflow files, then exit
+                          (same as tinyagent skills validate <path>...)
+  -o, --output path       write the workflow record (route, status, per-stage attempts)
+  --json                  JSONL events: workflow.started, stage.started, stage.gate,
+                          stage.finished, workflow.finished, observer.proposed,
+                          observer.recurrence
+  Other flags (-m, --sandbox, --cost-limit, ...) are passed to every stage.
+  --verify-on-stop is on for every stage; --verify-on-stop=false turns it off.
+
+Files and paths:
+  The workflow file path is relative to the current directory. skills_dir (default
+  skills/) is relative to the workflow file; skills are <name>.md or <name>/SKILL.md.
+  check commands and behavior: files run and resolve in --cwd (default .).
+
+  version: 1
+  skills_dir: skills
+  default: implement
+  workflows:
+    implement:
+      intent: Implement a feature from a spec, then test it.
+      stages:
+        - skill: plan-tasks
+          gate: spec
+        - skill: generate-code
+        - skill: run-tests
+          check: [go, test, ./...]
+
+Exit status: 0 all stages passed, 1 a stage failed, 5 a stage is blocked, 2 invalid
+file, routing error or conflicting flag (before any model call), 130 interrupted.
+Not with chat, --resume, --review, --worktree, --eval, --ask-user or --attempts.
+
+See docs/workflows.md for the full guide.
+`
