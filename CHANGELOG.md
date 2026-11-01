@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Docs
+
+- New [Setting up workflows](docs/workflow-guide.md) guide. It covers where the files live, required and defaulted fields, how to run a workflow (`-t`, `--workflow-name`, `-o`, `--workflow-observe`) and its limits, with three worked examples: one stage, a few stages with checks and retries, and the full plan → code → vet → test → verify-behavior pipeline. `TestWorkflowGuideExamples` loads every example so the guide can't drift from the loader. Linked from the README and docs/workflows.md.
+
 ### Behaviour changes
 
 - **Behaviour change:** [Agent Skills](docs/project-context.md#agent-skills) discovery is hybrid. It is on by default in interactive runs (stdin and stdout on a terminal, including chat) and off by default in hardened modes: non-TTY runs, `CI` or `GITHUB_ACTIONS` set (including the GitHub Action), `--eval`, `--attempts`, `--lockdown` and `--read-only`. Precedence is flag > config > mode default: `--skills` turns it on in any mode, `--no-skills` or `skills: false` turns it off. The `skills` config key is now tri-state (unset means the mode default). In hardened modes `skills: true` from a repository `./tinyagent.yaml` is ignored unless `--trust-config` is set. `--check` prints a `skills:` line with the decision and its source, `--check --json` adds a `skills` object (`enabled`, `source`, `detail`), and `-v` prints it at run start. Checkpoints that recorded skills off (including those from before skills existed) still resume with skills off (#359).
