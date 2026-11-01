@@ -3,13 +3,16 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
 
-.PHONY: build test dist clean
+.PHONY: build test dist clean lint
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN) ./cmd/$(BIN)
 
 test:
 	go test ./...
+
+lint:
+	go vet ./...
 
 dist:
 	@mkdir -p dist
@@ -26,3 +29,7 @@ dist:
 
 clean:
 	rm -rf $(BIN) dist
+
+# Alias lint to test for the CI workflow alignment (Issue #318, #317)
+lint-test:
+	go vet ./...
