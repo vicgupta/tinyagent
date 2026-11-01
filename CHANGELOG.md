@@ -10,6 +10,7 @@
 
 ### Fixes
 
+- `opencode` provider: works with OpenCode v2. tinyagent passed `opencode run --dir <cwd>`, which the v2 CLI rejects (`Unrecognized flag: --dir in command opencode run`) and which OpenCode before v1.2.0 never had; it now passes no `--dir` and runs `opencode` in `--cwd` instead. If `--format json` is rejected by an old OpenCode, the run is retried once without it and the plain-text answer is used. A single name after `opencode/` is now an OpenCode [Zen](https://opencode.ai/docs/zen/) model (`-m opencode/big-pickle` sends `--model opencode/big-pickle`; `opencode/opencode/big-pickle` works too). A non-zero exit now reports the `opencode --version` and path and suggests upgrading OpenCode or setting `opencode.path`. See [opencode](docs/models.md#opencode) and [OpenCode CLI](https://opencode.ai/docs/cli/).
 - Workflow skill files: backticks and fenced code blocks are handled correctly. The skill parser used to read lines inside ```` ``` ```` / `~~~` fences as the skill's heading, `Intent:`, `Inputs` or `Success check:`, so a fenced example could replace the real inputs or success check, and a `# comment` in a fence could become the title. Fenced lines are now skipped by the parser (and still sent verbatim to the model), and bold around an inline code span (`` **`make test`** passes ``) no longer leaves stray `**` in the intent or success check. See [Markdown and backticks](docs/workflows.md#skill-files-markdown).
 
 ### Documentation

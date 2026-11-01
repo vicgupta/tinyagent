@@ -51,7 +51,7 @@ func TestOpenCodeSuccess(t *testing.T) {
 	if cost.USD != 0.75 || cost.InputTokens != 34 || cost.OutputTokens != 11 || cost.CacheReadTokens != 3 || cost.CacheWriteTokens != 1 {
 		t.Fatalf("cost = %+v", cost)
 	}
-	want := "run\n--format\njson\n--dir\n" + work + "\n--model\nanthropic/claude-sonnet-4-5\nfix the bug\n"
+	want := "run\n--format\njson\n--model\nanthropic/claude-sonnet-4-5\nfix the bug\n"
 	if got := readFile(t, filepath.Join(dir, "args")); got != want {
 		t.Fatalf("args = %q, want %q", got, want)
 	}
@@ -164,5 +164,96 @@ func TestOpenCodeVersion(t *testing.T) {
 	m, _ := newOpenCodeFake(t, `[ "$1" = "--version" ] && echo 1.2.3`, "default", HandoffOptions{})
 	if v := m.(*OpenCode).Version(context.Background()); v != "1.2.3" {
 		t.Fatalf("version = %q", v)
+	}
+}
+
+// assertOpenCodeCwd fails if --dir was passed and checks the process ran in want.
+func assertOpenCodeCwd(t *testing.T, dir, want string) {
+	t.Helper()
+	for _, a := range strings.Split(readFile(t, filepath.Join(dir, "args")), "\n") {
+		if a == "--dir" || strings.HasPrefix(a, "--dir=") {
+			t.Fatalf("--dir passed: %q", readFile(t, filepath.Join(dir, "args")))
+		}
+	}
+	got := strings.TrimSpace(readFile(t, filepath.Join(dir, "cwd")))
+	real, _ := filepath.EvalSymlinks(want)
+	if got != want && got != real {
+		t.Fatalf("cwd = %q, want %q", got, want)
+	}
+}
+
+// v2Strict mimics OpenCode v2, which rejects --dir.
+const openCodeV2Strict = `for a in "$@"; do [ "$a" = "--dir" ] && { echo 'ERROR' >&2; echo '  Unrecognized flag: --dir in command opencode run' >&2; exit 1; }; done
+echo '{"type":"text","sessionID":"s","part":{"type":"text","messageID":"m","text":"done"}}'`
+
+func TestOpenCodeNoDirRunsInCwd(t *testing.T) {
+	work := t.TempDir()
+	m, dir := newOpenCodeFake(t, openCodeV2Strict, "big-pickle", HandoffOptions{Dir: work})
+	msg, _, err := m.Query(context.Background(), userTask, nil)
+	if err != nil || msg.Content != "done" {
+		t.Fatalf("msg = %+v, err = %v", msg, err)
+	}
+	assertOpenCodeCwd(t, dir, work)
+}
+
+func TestOpenCodeModelMapping(t *testing.T) {
+	for name, want := range map[string]string{
+		"big-pickle":                  "--model\nopencode/big-pickle\n",
+		"opencode/big-pickle":         "--model\nopencode/big-pickle\n",
+		"anthropic/claude-sonnet-4-5": "--model\nanthropic/claude-sonnet-4-5\n",
+	} {
+		work := t.TempDir()
+		m, dir := newOpenCodeFake(t, openCodeV2Strict, name, HandoffOptions{Dir: work})
+		if _, _, err := m.Query(context.Background(), userTask, nil); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := readFile(t, filepath.Join(dir, "args")); !strings.Contains(got, want) {
+			t.Fatalf("%s: args = %q, want %q", name, got, want)
+		}
+		assertOpenCodeCwd(t, dir, work)
+	}
+	if got := OpenCodeModelID("default"); got != "default" {
+		t.Fatalf("default -> %q", got)
+	}
+	m, dir := newOpenCodeFake(t, `echo ok`, "default", HandoffOptions{})
+	if _, _, err := m.Query(context.Background(), userTask, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, filepath.Join(dir, "args")); strings.Contains(got, "--model") {
+		t.Fatalf("default sent --model: %q", got)
+	}
+}
+
+func TestOpenCodeFormatFallback(t *testing.T) {
+	work := t.TempDir()
+	// An old OpenCode without --format: reject it, answer in plain text.
+	body := `n=$(cat "$d/calls" 2>/dev/null || echo 0); echo $((n+1)) > "$d/calls"
+for a in "$@"; do [ "$a" = "--format" ] && { echo 'Unrecognized flag: --format in command opencode run' >&2; exit 1; }; done
+echo 'plain answer'`
+	m, dir := newOpenCodeFake(t, body, "anthropic/x", HandoffOptions{Dir: work})
+	msg, _, err := m.Query(context.Background(), userTask, nil)
+	if err != nil || msg.Content != "plain answer" {
+		t.Fatalf("msg = %+v, err = %v", msg, err)
+	}
+	if got := strings.TrimSpace(readFile(t, filepath.Join(dir, "calls"))); got != "2" {
+		t.Fatalf("calls = %s, want 2", got)
+	}
+	if got := readFile(t, filepath.Join(dir, "args")); got != "run\n--model\nanthropic/x\nfix the bug\n" {
+		t.Fatalf("retry args = %q", got)
+	}
+	assertOpenCodeCwd(t, dir, work)
+	// The yargs wording is recognized too; other failures aren't retried.
+	if !unrecognizedFlag("Unknown argument: format", "format") || unrecognizedFlag("Unrecognized flag: --dir", "format") {
+		t.Fatal("unrecognizedFlag")
+	}
+}
+
+func TestOpenCodeErrorIncludesVersionAndHint(t *testing.T) {
+	body := `[ "$1" = "--version" ] && { echo 2.2.5; exit 0; }
+echo 'Unrecognized flag: --agent in command opencode run' >&2; exit 1`
+	m, _ := newOpenCodeFake(t, body, "default", HandoffOptions{ReadOnly: true})
+	_, _, err := m.Query(context.Background(), userTask, nil)
+	if err == nil || !strings.Contains(err.Error(), "opencode 2.2.5") || !strings.Contains(err.Error(), "opencode.path") || !strings.Contains(err.Error(), "upgrade OpenCode") {
+		t.Fatalf("err = %v", err)
 	}
 }

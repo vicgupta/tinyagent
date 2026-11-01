@@ -7,8 +7,8 @@ package model
 //   - https://opencode.ai/docs/cli/
 //     `opencode run [message..]` runs non-interactively; --model/-m takes
 //     provider/model; --format json prints raw JSON events (default is
-//     formatted text); --agent picks the agent; --dir is the directory to
-//     run in; --auto auto-approves permissions (not used here);
+//     formatted text); --agent picks the agent; --auto auto-approves
+//     permissions (not used here);
 //     --version/-v prints the version; OPENCODE_CONFIG_CONTENT is inline
 //     JSON config.
 //   - https://opencode.ai/docs/config/
@@ -34,6 +34,24 @@ package model
 // step_finish), errors as {"type":"error","error":{"message":...}}, and
 // exit status 1 on failure. It is parsed defensively: unknown events are
 // ignored, and when no JSON event parses the raw stdout is the answer.
+//
+// Flag compatibility, checked against the run command's source
+// (packages/opencode/src/cli/cmd/run.ts in v0.x/v1.x, and
+// packages/cli/src/commands/commands.ts in v2.x):
+//   - --model/-m and --agent exist in every release.
+//   - --format default|json was added in v0.11.3 (Sep 2025) and is in v2.
+//   - --dir was added in v1.2.0 (Feb 2026) but the v2 CLI (v2.x, Oct 2026)
+//     has no --dir and rejects it with "Unrecognized flag: --dir". So
+//     tinyagent never passes --dir; it sets the process working directory,
+//     which every version honours.
+// If an old build rejects --format, the run is retried once without it and
+// the plain-text output is used.
+//
+// Model names: OpenCode's own Zen provider has the id "opencode", so a Zen
+// model is "opencode/<model-id>" (https://opencode.ai/docs/zen/).
+// tinyagent's "opencode/big-pickle" (one segment) therefore means
+// --model opencode/big-pickle; "opencode/opencode/big-pickle" and
+// "opencode/<provider>/<model>" pass the rest unchanged.
 //
 // tinyagent never reads OpenCode's credential store (auth.json) or any
 // token; the child inherits tinyagent's environment and signs itself in.
@@ -84,15 +102,35 @@ func NewOpenCode(name string, opts HandoffOptions) (*OpenCode, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &OpenCode{Path: path, Model: name, HandoffOptions: opts}, nil
+	return &OpenCode{Path: path, Model: OpenCodeModelID(name), HandoffOptions: opts}, nil
+}
+
+// OpenCodeZenProvider is OpenCode's own Zen provider id.
+const OpenCodeZenProvider = "opencode"
+
+// OpenCodeModelID maps the part of a tinyagent model name after
+// "opencode/" to OpenCode's --model value: "" and "default" stay as they
+// are, a bare name is a Zen model ("big-pickle" -> "opencode/big-pickle"),
+// and "provider/model" is passed unchanged.
+func OpenCodeModelID(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" || name == HandoffDefaultModel || strings.Contains(name, "/") {
+		return name
+	}
+	return OpenCodeZenProvider + "/" + name
 }
 
 // Args returns the opencode arguments for one run with prompt as the
 // message.
+// The working directory is not a flag: the process runs in c.Dir.
 func (c *OpenCode) Args(prompt string) []string {
-	args := []string{"run", "--format", "json"}
-	if c.Dir != "" {
-		args = append(args, "--dir", c.Dir)
+	return c.args(prompt, true)
+}
+
+func (c *OpenCode) args(prompt string, jsonFormat bool) []string {
+	args := []string{"run"}
+	if jsonFormat {
+		args = append(args, "--format", "json")
 	}
 	if c.Model != "" && c.Model != HandoffDefaultModel {
 		args = append(args, "--model", c.Model)
@@ -205,10 +243,32 @@ func parseOpenCodeOutput(stdout []byte) openCodeRun {
 	return r
 }
 
+// unrecognizedFlag reports whether output says flag was rejected, in the
+// v2 CLI's wording ("Unrecognized flag: --format") or yargs' ("Unknown
+// argument: format").
+func unrecognizedFlag(output, flag string) bool {
+	o := strings.ToLower(output)
+	for _, line := range strings.Split(o, "\n") {
+		if (strings.Contains(line, "unrecognized flag") || strings.Contains(line, "unknown argument") || strings.Contains(line, "unknown option")) &&
+			(strings.Contains(line, "--"+flag) || strings.Contains(line, ": "+flag)) {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *OpenCode) Query(ctx context.Context, messages []Message, _ []ToolSpec) (Message, Cost, error) {
-	res, err := runCLIEnv(ctx, OpenCodeProvider, c.Path, c.Args(handoffPrompt(messages)), c.Dir, "", c.Env())
+	prompt := handoffPrompt(messages)
+	res, err := runCLIEnv(ctx, OpenCodeProvider, c.Path, c.args(prompt, true), c.Dir, "", c.Env())
 	if err != nil {
 		return Message{}, Cost{}, err
+	}
+	if res.exitCode != 0 && unrecognizedFlag(string(res.stderr)+"\n"+string(res.stdout), "format") {
+		// An OpenCode without --format: retry once and read plain text.
+		res, err = runCLIEnv(ctx, OpenCodeProvider, c.Path, c.args(prompt, false), c.Dir, "", c.Env())
+		if err != nil {
+			return Message{}, Cost{}, err
+		}
 	}
 	r := parseOpenCodeOutput(res.stdout)
 	cost := r.cost
@@ -226,6 +286,13 @@ func (c *OpenCode) Query(ctx context.Context, messages []Message, _ []ToolSpec) 
 		}
 		if r.sessionID != "" {
 			msg += " (session " + r.sessionID + ")"
+		}
+		if res.exitCode != 0 {
+			v := c.Version(ctx)
+			if v == "" {
+				v = "unknown"
+			}
+			msg += fmt.Sprintf(" [opencode %s at %s; if this is a CLI or flag error, upgrade OpenCode (`opencode upgrade`) or point `opencode.path` in the tinyagent config at a newer binary; https://opencode.ai/docs/cli/]", v, c.Path)
 		}
 		return Message{}, cost, fmt.Errorf("%s", msg)
 	}
