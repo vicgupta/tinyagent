@@ -1032,31 +1032,15 @@ func Default() AgentConfig {
 	}
 }
 
-// DefaultPath returns the per-user config file, tinyagent/config.yaml under
-// os.UserConfigDir, whether or not it exists.
+// DefaultPath returns the old per-user config file, tinyagent/config.yaml
+// under os.UserConfigDir, whether or not it exists. It is never loaded:
+// Locate only stats it for a hint and tinyagent init --migrate copies it.
 func DefaultPath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(dir, "tinyagent", "config.yaml"), nil
-}
-
-// Find returns the config file to Load: explicit if set, else the per-user
-// config if it exists, else "" for the defaults. A user config that exists
-// but can't be read is still returned, so Load reports it by name.
-func Find(explicit string) string {
-	if explicit != "" {
-		return explicit
-	}
-	p, err := DefaultPath()
-	if err != nil {
-		return ""
-	}
-	if _, err := os.Stat(p); errors.Is(err, fs.ErrNotExist) {
-		return ""
-	}
-	return p
 }
 
 // Load returns the defaults overlaid with the YAML file at path. An empty path

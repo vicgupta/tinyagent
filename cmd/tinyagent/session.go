@@ -138,7 +138,7 @@ func (s *session) setup(ctx context.Context, m sessionMode) (err error) {
 	if s.webFetch, err = newWebFetcher(fs, *o, &cfg); err != nil {
 		return err
 	}
-	if err := checkPlugins(&cfg, os.Stderr, o.verbose, true); err != nil {
+	if err := checkPlugins(&cfg, o.cwd, os.Stderr, o.verbose, true); err != nil {
 		return err
 	}
 	if flagWasSet(fs, "lsp") {

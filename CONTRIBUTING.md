@@ -48,7 +48,8 @@ If you add or remove a direct dependency, update this list too;
 ```
 cmd/tinyagent/        CLI entrypoint, flag parsing, main loop glue; help.go holds --help and help topics (help workflows)
 internal/agent/       the run loop, compaction, tool dispatch; build an Agent with agent.New (it validates the options)
-internal/config/      YAML config + built-in defaults
+internal/config/      YAML config + built-in defaults; memory.toml is read only from --cwd
+internal/cwdpath/     Resolve confines a config or env path to --cwd (refuses "..", absolute paths elsewhere and symlinks that leave it)
 internal/memory/      project memory stores (markdown and SQLite), always under ./.tinyagent/memory in --cwd; confine.go refuses paths that leave --cwd
 internal/model/       providers, price table, context windows; CLI handoff providers (claudecode.go, codexexec.go, opencode.go) share handoff.go
 internal/termmd/       streaming Markdown-to-terminal renderer used by chat (no dependencies; golden tests in testdata/)
@@ -165,9 +166,14 @@ on macOS also live under `/var`, a symlink to `/private/var`; compare against
 handoff, tool output, worktrees and the like) lives under `./.tinyagent/` in
 `--cwd`, never in the home folder or an `XDG_*` / user config directory, and
 moving it is a hard cut: no silent migration, at most one stderr `hint:` line
-when the old location is inside `--cwd`. Paths from config must be relative,
+naming the new location. An old location outside `--cwd` may only be stat'ed
+for that hint, never read (and per-project data outside `--cwd`, like the old
+memory JSON files, isn't looked at at all). Paths from config must be relative,
 stay inside `--cwd` and not escape through `..` or symlinks (see
-`internal/memory/confine.go`). Tests for such a feature point `HOME`, `XDG_*`
+`internal/memory/confine.go`, or `internal/cwdpath` for new code). This covers
+config files too: `memory.toml` (`./memory.toml` or `$TINYAGENT_MEMORY_CONFIG`
+inside `--cwd`) and plugin `PLUGIN_DATA` (`./.tinyagent/plugin-data/<name>`)
+are never read from the user config directory. Tests for such a feature point `HOME`, `XDG_*`
 and the user config dir at a temp dir that holds data in the old locations and
 assert none of it is used.
 

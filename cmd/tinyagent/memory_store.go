@@ -14,7 +14,8 @@ var memorySource config.MemorySource
 
 // applyMemoryConfig layers memory.toml (found from cwd) and the
 // TINYAGENT_MEMORY_* variables over cfg.Memory and prints a warning for
-// each repository-local setting that was ignored. Callers apply --memory
+// each repository-local setting or refused path that was ignored, plus the
+// one-line hint about a memory.toml left in the old user config location. Callers apply --memory
 // afterwards.
 func applyMemoryConfig(cfg *config.AgentConfig, cwd string, stderr io.Writer) error {
 	src, err := config.ApplyMemoryOverlay(&cfg.Memory, cwd, os.Getenv)
@@ -24,6 +25,9 @@ func applyMemoryConfig(cfg *config.AgentConfig, cwd string, stderr io.Writer) er
 	}
 	for _, w := range src.Warnings {
 		fmt.Fprintln(stderr, "warning:", w)
+	}
+	if src.Hint != "" {
+		fmt.Fprintln(stderr, src.Hint)
 	}
 	return nil
 }

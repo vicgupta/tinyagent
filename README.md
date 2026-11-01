@@ -133,6 +133,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 - Streaming text, `--json` event output, structured output, SQLite event logs and OpenTelemetry.
 - Terminal-aware styling: color only at a terminal, off with `NO_COLOR`, or forced with `--color=auto|always|never`; piped output stays plain text.
 - Project memory across runs, with approval before entries become active, stored only in `./.tinyagent/memory` inside `--cwd`; see [Project memory](docs/memory.md#project-memory).
+- Cwd-only project state: memory settings (`./memory.toml`), plugin data (`./.tinyagent/plugin-data/<name>`) and memory live inside `--cwd`, never in the user config directory; old locations get a one-line hint, not a migration. See [Memory settings](docs/memory.md#project-memory) and [Plugins](docs/plugins.md).
 - Session handoff for long-running work (`--handoff`): each run leaves `.tinyagent/handoff.md` with what it did and what's next, the next fresh run reads it as data, and an optional startup command runs before the first turn; see [Session handoff](docs/long-runs.md#session-handoff).
 - Project rules from agent failures (`tinyagent ratchet add`): each rule records its incident and an expiry or review condition, is added to the system prompt, and can be enforced as a permission deny rule; see [Project rules](docs/ratchet.md).
 - A task planner that can require a plan before any change.

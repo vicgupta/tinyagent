@@ -35,8 +35,9 @@ func (l Loaded) MCPWarnings(auth []config.PluginServer) []string {
 // loaded plugin l (cfg is its config entry). A rejected plugin with
 // authorized servers, a listed server that is missing, invalid or
 // unsupported, or a disabled mcp.json is an error naming plugin and server.
-// With create set, the plugin's PLUGIN_DATA directory is created (0700).
-func Servers(l Loaded, cfg config.Plugin, create bool) ([]config.MCPServer, error) {
+// PLUGIN_DATA is ./.tinyagent/plugin-data/<name> inside cwd; with create
+// set, that directory is created (0700).
+func Servers(l Loaded, cfg config.Plugin, cwd string, create bool) ([]config.MCPServer, error) {
 	if len(cfg.MCPServers) == 0 {
 		return nil, nil
 	}
@@ -50,7 +51,7 @@ func Servers(l Loaded, cfg config.Plugin, create bool) ([]config.MCPServer, erro
 	case l.MCP.Err != nil:
 		return nil, fmt.Errorf("plugin %s: %v", name, l.MCP.Err)
 	}
-	data, err := DataDir(name)
+	data, err := DataDir(cwd, name)
 	if err != nil {
 		return nil, fmt.Errorf("plugin %s: PLUGIN_DATA: %w", name, err)
 	}
