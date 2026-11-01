@@ -130,6 +130,36 @@ Don't construct a `tools.Executor` literal anywhere else in `cmd/tinyagent`;
   `lineFeeds`, not on raw bytes, and cover a colour prompt, a `NO_COLOR` prompt
   and multibyte input.
 
+### Continuous integration
+
+`.github/workflows/ci.yml` runs three jobs in parallel on every pull request and
+on pushes to `main`:
+
+| Job | Runner | Runs |
+| --- | --- | --- |
+| `build-vet-test` | `ubuntu-latest` | `gofmt -l .`, `go build`, `go vet`, then `go test -count=1 ./...` with Fish installed and `TINYAGENT_REQUIRE_FISH=1` |
+| `build-vet-test-macos` | `macos-latest` | `go build`, `go vet`, `go test -count=1 ./...` (Fish tests skip themselves when `fish` is missing) |
+| `race` | `ubuntu-latest` | `go test -race -count=1 ./...` |
+
+All three must pass before a merge. Each takes a few minutes; the macOS and
+`-race` jobs are the slowest, so expect the whole workflow to finish in roughly
+the time of the slowest job. Reproduce the race job locally with
+`go test -race -count=1 ./...`.
+
+Both test jobs also fail if the suite created tinyagent's real user config
+directory (`~/.config/tinyagent` on Linux, `~/Library/Application Support/tinyagent`
+on macOS). Tests must use `t.TempDir()` and point `HOME` / `XDG_CONFIG_HOME` (or
+the package's path helpers) at it instead of writing under the real home
+directory.
+
+On macOS `os.UserConfigDir()` ignores `XDG_CONFIG_HOME` and returns
+`$HOME/Library/Application Support`, so setting only `XDG_CONFIG_HOME` is not
+enough. Set both `HOME` and `XDG_CONFIG_HOME` to temp dirs and derive expected
+paths from `os.UserConfigDir()` (in `cmd/tinyagent`, use `userConfigDir(t)` /
+`userConfigPath(t)`) rather than joining `XDG_CONFIG_HOME` by hand. Temp dirs
+on macOS also live under `/var`, a symlink to `/private/var`; compare against
+`filepath.EvalSymlinks` results where the code canonicalizes paths.
+
 ## Adding or changing a model / provider
 
 `internal/model/` holds the provider and model metadata. When you touch it:

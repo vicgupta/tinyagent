@@ -18,6 +18,7 @@ func TestListPlugins(t *testing.T) { // AC2, AC11, AC18
 	hits := checkEnv(t)
 	cfgHome := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", cfgHome)
+	t.Setenv("HOME", t.TempDir()) // os.UserConfigDir ignores XDG_CONFIG_HOME on macOS
 	min := t.TempDir()
 	os.WriteFile(filepath.Join(min, "plugin.json"), []byte(`{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"demo"}`), 0o644)
 	code, stdout, stderr := runCLI(t, "--list-plugins", "-c", pluginConfig(t, "plugins:\n  - path: "+min+"\n"))
@@ -87,6 +88,7 @@ func TestPluginRecords(t *testing.T) { // AC1, AC16
 	}
 	pluginToolServer(t, "kit__echo")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir()) // os.UserConfigDir ignores XDG_CONFIG_HOME on macOS
 	dir := mcpPlugin(t, fmt.Sprintf(fixtureServer, os.Args[0]))
 	os.MkdirAll(filepath.Join(dir, "skills", "lint"), 0o755)
 	os.WriteFile(filepath.Join(dir, "skills", "lint", "SKILL.md"), []byte("---\nname: lint\ndescription: Lint.\n---\n"), 0o644)

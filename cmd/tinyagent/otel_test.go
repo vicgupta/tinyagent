@@ -117,6 +117,7 @@ func newReadFileOpenAI(t *testing.T) *int {
 	t.Setenv("OPENAI_BASE_URL", srv.URL)
 	t.Setenv("OPENAI_API_KEY", "sk-test-key-0123456789abcdef")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir()) // os.UserConfigDir ignores XDG_CONFIG_HOME on macOS
 	return n
 }
 

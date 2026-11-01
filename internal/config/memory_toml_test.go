@@ -72,6 +72,7 @@ func TestMemoryHelpDefaultsMatchLoader(t *testing.T) {
 
 func TestMemoryPrecedenceEnvOverTOMLOverYAML(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir()) // os.UserConfigDir ignores XDG_CONFIG_HOME on macOS
 	user := writeTOML(t, t.TempDir(), "backend = \"sqlite\"\nmax_entries_per_project = 20\nmax_entry_size = 300\nauto_write = true\nrequire_approval = false\ndefault_tags = [\"Proj\"]\n")
 	m := DefaultMemory()
 	m.MaxEntries = 10 // from the memory: YAML section

@@ -48,6 +48,7 @@ func newToolCallOpenAI(t *testing.T, replies ...[2]string) *toolCallOpenAI {
 	t.Setenv("OPENAI_BASE_URL", srv.URL)
 	t.Setenv("OPENAI_API_KEY", "sk-test")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir()) // os.UserConfigDir ignores XDG_CONFIG_HOME on macOS
 	return f
 }
 

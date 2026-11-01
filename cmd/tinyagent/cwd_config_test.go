@@ -27,8 +27,22 @@ func writeFile(t *testing.T, path, body string) {
 	}
 }
 
-func userConfigPath() string {
-	return filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "tinyagent", "config.yaml")
+// userConfigDir returns <os.UserConfigDir>/tinyagent, the way the code
+// derives it. Call it after HOME and XDG_CONFIG_HOME point at temp dirs
+// (checkEnv does that): on macOS os.UserConfigDir ignores XDG_CONFIG_HOME
+// and uses $HOME/Library/Application Support.
+func userConfigDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(dir, "tinyagent")
+}
+
+func userConfigPath(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(userConfigDir(t), "config.yaml")
 }
 
 func TestCwdConfigPrecedence(t *testing.T) {
@@ -108,7 +122,7 @@ func TestCwdConfigStrictLookup(t *testing.T) {
 
 func TestCwdConfigInvalidNoFallback(t *testing.T) {
 	dir := cwdEnv(t)
-	writeFile(t, userConfigPath(), "model: anthropic/claude-sonnet-4-5\n")
+	writeFile(t, userConfigPath(t), "model: anthropic/claude-sonnet-4-5\n")
 	writeFile(t, filepath.Join(dir, "tinyagent.yaml"), "no_such_key: 1\n")
 	code, _, stderr := runCLI(t, "--check", "--cwd", dir)
 	if code != 2 || !strings.Contains(stderr, "no_such_key") {
@@ -119,7 +133,7 @@ func TestCwdConfigInvalidNoFallback(t *testing.T) {
 // The old per-user config is never read; a note points at init --migrate.
 func TestUserConfigNoLongerRead(t *testing.T) {
 	dir := cwdEnv(t)
-	user := userConfigPath()
+	user := userConfigPath(t)
 	writeFile(t, user, "model: openrouter/old/model\n")
 	code, stdout, stderr := runCLI(t, "--check", "--cwd", dir)
 	if code != 0 {
@@ -239,7 +253,7 @@ func TestInitMigrate(t *testing.T) {
 	if code, _, stderr := runCLI(t, "init", "--migrate", "--cwd", dir); code != 2 || !strings.Contains(stderr, "no user config") {
 		t.Errorf("migrate without a user config: exit %d, %q", code, stderr)
 	}
-	user := userConfigPath()
+	user := userConfigPath(t)
 	const old = "model: anthropic/claude-sonnet-4-5\nstep_limit: 9\n"
 	writeFile(t, user, old)
 	if code, _, stderr := runCLI(t, "init", "--migrate", "--cwd", dir); code != 0 {

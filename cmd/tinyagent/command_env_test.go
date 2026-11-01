@@ -54,6 +54,7 @@ func newEnvOpenAI(t *testing.T, key string, replies ...string) *envOpenAI {
 	t.Setenv("OPENAI_BASE_URL", srv.URL)
 	t.Setenv("OPENAI_API_KEY", key)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir()) // os.UserConfigDir ignores XDG_CONFIG_HOME on macOS
 	return f
 }
 
