@@ -42,7 +42,7 @@ var (
 	reGateCriteria = regexp.MustCompile(`(?i)^\s*(?:#{1,6}\s*|[-*+]\s+)?\**\s*acceptance criteria\s*\**\s*:?\s*\**\s*:?\s*(.*?)\s*$`)
 	reGateItem     = regexp.MustCompile(`^\s*(?:[-*+]|\d+[.)])\s+\S`)
 	// "Verify: `cmd`" line, optionally bold or a bullet.
-	reGateVerify = regexp.MustCompile("(?i)^\\s*(?:[-*+]\\s+)?\\**\\s*verif(?:y|ication)\\s*\\**\\s*:\\s*\\**\\s*(.*?)\\s*$")
+	reGateVerify = regexp.MustCompile(`(?i)^\s*(?:[-*+]\s+)?\**\s*verif(?:y|ication)\s*\**\s*:\s*\**\s*(.*?)\s*$`)
 	reGateCode   = regexp.MustCompile("`([^`]+)`")
 	reGateAssign = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
 )

@@ -193,6 +193,7 @@ func bashPath() string {
 	return "bash"
 }
 
+//lint:ignore U1000 used by sandbox_other.go on platforms without a sandbox
 var errSandboxUnsupported = errors.New("sandbox: not supported on this operating system (supported: Linux with Landlock, macOS); run without --sandbox")
 
 // devFiles are device files that ordinary tools write to.

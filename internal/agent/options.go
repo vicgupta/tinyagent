@@ -120,9 +120,11 @@ var ErrMCPResume = errors.New("MCP-enabled runs cannot be resumed; start a fresh
 
 func (o *Options) validate() error {
 	if o.Model == nil {
+		//lint:ignore ST1005 names the exported Options field
 		return errors.New("Model is required")
 	}
 	if o.Tools == nil {
+		//lint:ignore ST1005 names the exported Options field
 		return errors.New("Tools is required")
 	}
 	if (o.Subagents != nil) != o.Tools.Delegate {
@@ -195,6 +197,7 @@ func (o *Options) validateResume() error {
 		case o.FollowUp != "":
 			return errors.New("FollowUp needs Resume")
 		case o.Continue:
+			//lint:ignore ST1005 names the exported Options fields
 			return errors.New("Continue needs Resume")
 		case o.ResumeSource != "":
 			return errors.New("ResumeSource needs Resume")
