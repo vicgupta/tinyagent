@@ -154,7 +154,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 - `tinyagent --update`: checksum-verified self-update with step-by-step progress and a `#` download bar.
 - Undo for file edits, workspace rewind, resume and follow-up runs.
 - Sandboxed commands (Linux: Bubblewrap with Landlock stacked inside, or Landlock alone, via `--sandbox-backend`; macOS: Seatbelt) with a network allowlist, permission rules, hooks, untrusted-content lockdown and file-access rules.
-- WebAssembly plugin modules run through Extism with permission checks, a version store, rollback and prune. Go source modules are built with TinyGo, an external dependency that tinyagent downloads on first use (pinned version, checksum-verified, cached locally, `tinyagent tinygo update` to update); TinyGo is never embedded in tinyagent.
+- WebAssembly plugin modules run through Extism with permission checks, a version store, rollback and prune. Go source modules are built with TinyGo, an external dependency that tinyagent downloads on first use (pinned version, checksum-verified, cached in `./.tinyagent/cache/toolchains` inside `--cwd`, `tinyagent tinygo update` to update; see [Managing TinyGo](docs/wasm-plugins.md#managing-tinygo)); TinyGo is never embedded in tinyagent.
 - AGENTS.md, Agent Skills, plugins, skill workflows, ACP editor integration and a GitHub Action.
 
 ## Documentation
