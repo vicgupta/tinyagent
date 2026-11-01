@@ -32,9 +32,9 @@ func skillsRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	for path, body := range map[string]string{
-		".git/HEAD":                       "",
-		".agents/skills/release/SKILL.md": "---\nname: release\ndescription: Cut a release.\n---\nsteps\n",
-		".agents/skills/broken/SKILL.md":  "---\nname: broken\n---\nno description\n",
+		".git/HEAD":               "",
+		"skills/release/SKILL.md": "---\nname: release\ndescription: Cut a release.\n---\nsteps\n",
+		"skills/broken/SKILL.md":  "---\nname: broken\n---\nno description\n",
 	} {
 		p := filepath.Join(dir, path)
 		os.MkdirAll(filepath.Dir(p), 0o755)

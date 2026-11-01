@@ -187,9 +187,13 @@ type AgentConfig struct {
 	// results and the read-only lsp tool (off by default; --lsp overrides
 	// Enabled). It comes only from -c or a trusted ./tinyagent.yaml (--trust-config).
 	LSP LSP `yaml:"lsp"`
-	// Skills turns on Agent Skills discovery from .agents/skills (off by
-	// default; --skills / --no-skills override it).
-	Skills bool `yaml:"skills"`
+	// Skills turns Agent Skills discovery from ./skills in the cwd on or
+	// off. It is tri-state: nil (unset) uses the run's mode default (on in
+	// interactive runs, off in non-interactive and hardened runs), and an
+	// explicit true or false overrides it. --skills / --no-skills override
+	// the config; hardened runs ignore skills: true from an untrusted
+	// ./tinyagent.yaml. Use SkillsOn for the resolved value.
+	Skills *bool `yaml:"skills"`
 	// Memory configures opt-in cross-run project memory (off by default;
 	// --memory overrides Enabled). It comes only from -c or a trusted ./tinyagent.yaml (--trust-config).
 	Memory Memory `yaml:"memory"`
@@ -1452,3 +1456,10 @@ func validEnvName(s string) bool {
 	}
 	return true
 }
+
+// SkillsOn reports whether Agent Skills discovery is on: Skills is set and
+// true. Runs resolve the mode default into Skills before reading it.
+func (c AgentConfig) SkillsOn() bool { return c.Skills != nil && *c.Skills }
+
+// BoolPtr returns a pointer to b, for tri-state settings such as Skills.
+func BoolPtr(b bool) *bool { return &b }

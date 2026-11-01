@@ -185,7 +185,17 @@ inside `--cwd`), plugin `PLUGIN_DATA` (`./.tinyagent/plugin-data/<name>`)
 and the TinyGo toolchain cache (`./.tinyagent/cache/toolchains`) are never
 read from the user config or cache directory. Tests for such a feature point `HOME`, `XDG_*`
 and the user config dir at a temp dir that holds data in the old locations and
-assert none of it is used.
+assert none of it is used. Agent Skills follow the same rule: only `./skills`
+under `--cwd` is scanned (no parents, no `~/.agents/skills`).
+
+Features that load repository content into the prompt (like Agent Skills) should
+be on by default only in interactive runs and off in hardened modes (non-TTY,
+`CI`/`GITHUB_ACTIONS`, `--eval`, `--attempts`, lockdown, `--read-only`), with
+precedence flag > config > mode default and a cwd-config opt-in ignored in
+hardened modes without `--trust-config`. Reuse `resolveSkills` and
+`hardenedReason` in `cmd/tinyagent/skills_default.go`, report the decision in
+`--check`, and in tests clear `CI`/`GITHUB_ACTIONS` and stub `runIsInteractive`
+so they pass both locally and on CI.
 
 ## Adding or changing a model / provider
 

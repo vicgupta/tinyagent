@@ -271,6 +271,12 @@ func resolveCheck(o *options, fs *flag.FlagSet, sum *checkSummary) ([][2]string,
 		add("lockdown", lock)
 		sum.Lockdown = checkLockdownSum{Enabled: !strings.HasPrefix(lock, "off"), Detail: lock}
 	}
+	if _, _, err := skillsFlag(fs, *o); err != nil {
+		return nil, err
+	}
+	sk := checkSkills(fs, o, cfg, cfgSrc)
+	add("skills", sk.String())
+	sum.Skills = sk
 	att, err := checkAttempts(fs, o, cfg)
 	if err != nil {
 		return nil, err
@@ -420,3 +426,20 @@ func sandboxBackendName(cfg config.AgentConfig, fs *flag.FlagSet, o options) str
 
 // probeSandbox is tools.ProbeSandbox; tests replace it.
 var probeSandbox = tools.ProbeSandbox
+
+// checkSkills resolves the Agent Skills setting the way a run would and
+// reports it with its source (#359). Like a run, chat (-i) and a one-shot
+// run on a terminal count as interactive.
+func checkSkills(fs *flag.FlagSet, o *options, cfg config.AgentConfig, src config.Source) skillsDecision {
+	if flagWasSet(fs, "read-only") {
+		cfg.ReadOnly = o.readOnly
+	}
+	if flagWasSet(fs, "lockdown") {
+		cfg.UntrustedContent.Enabled = o.lockdown.enabled
+	}
+	m := skillsMode{
+		Interactive: o.interactive || runIsInteractive(),
+		Hardened:    hardenedReason(flagWasSet(fs, "eval"), attemptsActive(fs), cfg.UntrustedContent.Enabled, cfg.ReadOnly),
+	}
+	return resolveSkills(skillsInputsFor(fs, *o, cfg, src), m)
+}

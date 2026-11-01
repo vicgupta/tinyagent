@@ -29,7 +29,7 @@ func Apply(t *trajectory.Trajectory, cfg *config.AgentConfig) {
 	cfg.WebFetch.Enabled = t.WebFetchEnabled
 	cfg.LSP.Enabled = t.LSPEnabled
 	cfg.ScopedAgentsMD = t.ScopedAgentsMDEnabled
-	cfg.Skills = t.SkillsEnabled
+	cfg.Skills = config.BoolPtr(t.SkillsEnabled)
 	cfg.Memory.Enabled = t.MemoryEnabled
 }
 

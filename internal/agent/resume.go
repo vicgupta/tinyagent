@@ -58,7 +58,7 @@ func ValidateResume(t *trajectory.Trajectory, cfg config.AgentConfig, root strin
 	}
 	var set *skills.Set
 	if t.SkillsEnabled {
-		set, _ = skills.Discover(root, skills.UserDir())
+		set, _ = skills.Discover(root)
 	}
 	if err := resume.Check(t, resume.Request{Root: root, Skills: set}); err != nil {
 		return err

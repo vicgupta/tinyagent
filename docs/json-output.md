@@ -80,6 +80,7 @@ Environment: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (any OpenAI-compatible endpoint
   "sandbox": {"enabled": true, "backend": "auto", "available": true, "detail": "bwrap + landlock (ABI 6) (sandbox_backend auto)"},
   "permissions": {"configured": true, "rules": 3, "default": "allow", "non_interactive": "deny"},
   "lockdown": {"enabled": false, "detail": ""},
+  "skills": {"enabled": true, "source": "interactive default"},
   "cwd": "/home/me/project",
   "limits": {"steps": 0, "cost_usd": 0, "tokens": 0, "time_sec": 0},
   "error": null
@@ -98,6 +99,7 @@ Environment: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (any OpenAI-compatible endpoint
 | `sandbox` | `enabled`, the `backend` (`auto`, `landlock`, `bwrap`), whether the engine is `available` on this host, and the text `detail` |
 | `permissions` | Whether rules are `configured`, the rule count and the `default` and `non_interactive` decisions |
 | `lockdown` | Whether untrusted-content lockdown is `enabled`, and the text `detail` |
+| `skills` | Whether [Agent Skills](project-context.md#agent-skills) discovery is `enabled`, its `source` (`flag`, `config`, `interactive default` or `hardened default`) and, when there is one, a `detail` such as `--no-skills` or `CI is set` (added without a schema bump) |
 | `cwd` | The resolved working directory |
 | `limits` | `steps`, `cost_usd`, `tokens`, `time_sec`; `0` means unlimited |
 | `error` | `null`, or `{"message", "hint"}` (`hint` is `""` when there is none) |

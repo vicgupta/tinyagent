@@ -121,8 +121,8 @@ Ten subcommands are shortcuts for existing flags. They rewrite the command line 
 | `--image <path>` | — | Attach a PNG, JPEG, GIF or WebP file to the task message (or a `--resume -t` follow-up). Repeatable, up to 10, each within `max_image_bytes`; needs `-t`; independent of `--images`. See [Attaching images to the task](long-runs.md#attaching-images-to-the-task) |
 | `--plan-first` | config `plan.require_first`, else off | Require a plan (`update_plan`) before the first workspace-changing tool call; implies `--plan`. See [Plan first](planner.md#plan-first) |
 | `--plan-file` | — | Mirror the current plan to this Markdown file after each checkpoint save (requires the plan tool) |
-| `--skills` | config `skills`, else off | Discover [Agent Skills](project-context.md#agent-skills) and offer the `skill` tool |
-| `--no-skills` | — | Disable skills even if the config enables them (`--no-skills=false` enables) |
+| `--skills` | config `skills`, else on in an interactive run and off in hardened modes (non-TTY, `CI`/`GITHUB_ACTIONS`, `--eval`, `--attempts`, `--lockdown`, `--read-only`) | Discover [Agent Skills](project-context.md#agent-skills) in `./skills` and offer the `skill` tool; turns them on in any mode. Precedence: flag > config > mode default; see [When skills are on](project-context.md#agent-skills) |
+| `--no-skills` | — | Disable skills even in an interactive run or when the config enables them (`--no-skills=false` enables) |
 | `--read-only` | config `read_only`, else off | Permit only `read_file`, `list_files`, and `grep`; blocks edits, shell, and process tools. `--read-only=false` explicitly disables it. |
 | `--add-dir-read` | config `additional_dirs`, else none | Let the file tools read (not write) an existing directory outside `--cwd`; repeatable. See [Additional directories](permissions.md#additional-directories) |
 | `--add-dir-write` | config `additional_dirs`, else none | Let the file tools read and write an existing directory outside `--cwd`; repeatable. See [Additional directories](permissions.md#additional-directories) |

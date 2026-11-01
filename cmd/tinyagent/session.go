@@ -65,6 +65,9 @@ type session struct {
 
 // sessionMode holds what a front end (ACP) changes in session setup.
 type sessionMode struct {
+	// interactive is a chat session on a terminal: skills default on there
+	// (#359); ACP sessions are driven by an editor and default off.
+	interactive    bool
 	setupLockdown  func(cfg *config.AgentConfig) (*lockdown.State, error)
 	beforeWebFetch func(cfg *config.AgentConfig)
 	beforeEnvCheck func(cfg *config.AgentConfig)
@@ -150,8 +153,12 @@ func (s *session) setup(ctx context.Context, m sessionMode) (err error) {
 	if err := lspError(cfg, cfgPath); err != nil {
 		return err
 	}
-	if on, set, _ := skillsFlag(fs, *o); set {
-		cfg.Skills = on
+	skillsDec := applySkillsDefault(fs, *o, &cfg, cfgSrc, skillsMode{
+		Interactive: m.interactive,
+		Hardened:    hardenedReason(false, false, cfg.UntrustedContent.Enabled, cfg.ReadOnly),
+	})
+	if o.verbose {
+		fmt.Fprintln(os.Stderr, "skills:", skillsDec)
 	}
 	if flagWasSet(fs, "memory") {
 		cfg.Memory.Enabled = o.memory.enabled
