@@ -576,7 +576,7 @@ func run() int {
 	if err != nil {
 		return configFail(err)
 	}
-	if err := checkPlugins(&cfg, os.Stderr, o.verbose, true); err != nil {
+	if err := checkPlugins(&cfg, o.cwd, os.Stderr, o.verbose, true); err != nil {
 		return configFail(err)
 	}
 	if flagWasSet(fs, "lsp") {
@@ -1143,7 +1143,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if err != nil {
 		return configFail(err)
 	}
-	if err := checkPlugins(&cfg, os.Stderr, o.verbose, false); err != nil {
+	if err := checkPlugins(&cfg, o.cwd, os.Stderr, o.verbose, false); err != nil {
 		return configFail(err)
 	}
 	// Snapshots are per invocation: config or --snapshots decides for this

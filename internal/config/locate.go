@@ -59,7 +59,7 @@ func Locate(explicit, cwd string) Source {
 	if _, err := os.Stat(p); err == nil || !errors.Is(err, fs.ErrNotExist) {
 		return Source{Path: p, Kind: SourceCwd}
 	}
-	if user := Find(""); user != "" {
+	if user := legacyUserConfig(); user != "" {
 		return Source{Notes: []string{fmt.Sprintf("note: user config %s is no longer read; run tinyagent init --migrate to copy it to ./%s", user, ProjectFile)}}
 	}
 	return Source{}
@@ -110,4 +110,17 @@ func StripUntrusted(cfg *AgentConfig) []string {
 	reset("untrusted_content", &cfg.UntrustedContent, d.UntrustedContent)
 	reset("memory", &cfg.Memory, d.Memory)
 	return out
+}
+
+// legacyUserConfig returns DefaultPath when something exists there, else "".
+// It is only stat'ed, never read.
+func legacyUserConfig() string {
+	p, err := DefaultPath()
+	if err != nil {
+		return ""
+	}
+	if _, err := os.Stat(p); errors.Is(err, fs.ErrNotExist) {
+		return ""
+	}
+	return p
 }
