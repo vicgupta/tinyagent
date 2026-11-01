@@ -147,6 +147,14 @@ on macOS). Tests must use `t.TempDir()` and point `HOME` / `XDG_CONFIG_HOME` (or
 the package's path helpers) at it instead of writing under the real home
 directory.
 
+On macOS `os.UserConfigDir()` ignores `XDG_CONFIG_HOME` and returns
+`$HOME/Library/Application Support`, so setting only `XDG_CONFIG_HOME` is not
+enough. Set both `HOME` and `XDG_CONFIG_HOME` to temp dirs and derive expected
+paths from `os.UserConfigDir()` (in `cmd/tinyagent`, use `userConfigDir(t)` /
+`userConfigPath(t)`) rather than joining `XDG_CONFIG_HOME` by hand. Temp dirs
+on macOS also live under `/var`, a symlink to `/private/var`; compare against
+`filepath.EvalSymlinks` results where the code canonicalizes paths.
+
 ## Adding or changing a model / provider
 
 `internal/model/` holds the provider and model metadata. When you touch it:

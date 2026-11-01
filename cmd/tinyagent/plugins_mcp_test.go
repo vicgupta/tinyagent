@@ -86,8 +86,8 @@ func TestPluginMCPServer(t *testing.T) { // AC8, AC9, AC11
 		t.Skip("shell script server")
 	}
 	bodies := pluginToolServer(t, "kit__echo")
-	cfgHome := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", cfgHome)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 	dir := mcpPlugin(t, fmt.Sprintf(fixtureServer, os.Args[0])+`,"other":{"type":"stdio","command":"node"},"remote":{"type":"sse","url":"https://x"}`)
 	root, _ := filepath.EvalSymlinks(dir)
 	cfg := pluginConfig(t, "plugins:\n  - path: "+dir+"\n    mcp_servers:\n      - server: validator\n        alias: kit\n        tools: [echo]\n")
@@ -95,7 +95,7 @@ func TestPluginMCPServer(t *testing.T) { // AC8, AC9, AC11
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
-	data := filepath.Join(cfgHome, "tinyagent", "plugin-data", "kit")
+	data := filepath.Join(userConfigDir(t), "plugin-data", "kit")
 	if fi, err := os.Stat(data); err != nil || fi.Mode().Perm() != 0o700 {
 		t.Errorf("PLUGIN_DATA %v, %v", fi, err)
 	}
@@ -122,6 +122,7 @@ func TestPluginMCPServer(t *testing.T) { // AC8, AC9, AC11
 func TestPluginMCPConfigErrors(t *testing.T) { // AC3, AC11, AC13, AC14
 	pluginToolServer(t, "kit__echo")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
 	dir := mcpPlugin(t, fmt.Sprintf(fixtureServer, os.Args[0]))
 	auth := "    mcp_servers:\n      - server: %s\n        alias: %s\n        tools: [echo]\n"
 	bad := t.TempDir()

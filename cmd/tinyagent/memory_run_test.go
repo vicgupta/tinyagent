@@ -210,6 +210,11 @@ func TestMemorySnapshotSurvivesStoreChanges(t *testing.T) {
 	// is rebuilt from the snapshot.
 	seedMemory(t, store, testEntry("act2", memory.StatusActive, "later note", at.Add(time.Hour)))
 	cfg := config.Default()
+	// The checkpoint records the canonical root; on macOS the temp dir
+	// is under /var, a symlink to /private/var.
+	if cwd, err = filepath.EvalSymlinks(cwd); err != nil {
+		t.Fatal(err)
+	}
 	if err := agent.ValidateResume(tr, cfg, cwd); err != nil {
 		t.Errorf("resume after store change: %v", err)
 	}
