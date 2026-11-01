@@ -37,6 +37,7 @@ func captureStdoutStderr(t *testing.T, f func()) (stdout, stderr string) {
 func lockdownEnv(t *testing.T) (dir string, requests *atomic.Int32) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir()) // os.UserConfigDir ignores XDG_CONFIG_HOME on macOS
 	t.Setenv("AGENT_MODEL", "")
 	requests = &atomic.Int32{}
 	srv := fakeOpenAI(t, requests)

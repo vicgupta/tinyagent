@@ -28,6 +28,7 @@ func profileSetup(t *testing.T) (dir string, bodies *[]map[string]any) {
 	t.Setenv("OPENAI_API_KEY", "fake")
 	t.Setenv("AGENT_MODEL", "")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir()) // os.UserConfigDir ignores XDG_CONFIG_HOME on macOS
 	return t.TempDir(), bodies
 }
 
@@ -124,7 +125,7 @@ func TestProfileErrorsExit2(t *testing.T) { // AC8-AC12
 
 func TestProfileExplicitConfigOnly(t *testing.T) { // AC14
 	dir, _ := profileSetup(t)
-	user := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "tinyagent", "config.yaml")
+	user := userConfigPath(t)
 	os.MkdirAll(filepath.Dir(user), 0o755)
 	os.WriteFile(user, []byte("profiles:\n  mine: {}\n"), 0o644)
 	team := writeConfig(t, "profiles:\n  ci: {step_limit: 7}\n")
