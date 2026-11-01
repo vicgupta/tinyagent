@@ -161,7 +161,7 @@ claude_code:              # optional; claude-code provider, see CLI handoff prov
 codex_exec:               # optional; codex-exec provider
   path: ""                # codex binary; empty looks up `codex` on PATH
 opencode:                 # optional; opencode provider
-  path: ""                # opencode binary; empty looks up `opencode` on PATH
+  path: ""                # opencode binary; empty looks up `opencode` on PATH (use it to pick a newer OpenCode)
 providers:                # omitted by default; see Named providers
   - id: gateway           # use as -m gateway/<model>
     api: chat             # chat, responses, or anthropic
