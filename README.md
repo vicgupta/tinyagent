@@ -131,7 +131,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 - Interactive chat (`tinyagent chat` or `-i`): a multi-turn conversation on the terminal with line editing, history, Ctrl-C to stop a turn and Markdown replies rendered for the terminal (headings, lists, code blocks, tables; `/raw` to turn off), a compact tool activity line and slash commands (`/cost`, `/new`, `/save`, `/compact`, `/raw`); every turn gets the same tools as a run, including [command tools](docs/config.md#command-tools); every session is saved and can be resumed. See [Interactive chat](docs/chat.md).
 - Streaming text, `--json` event output, structured output, SQLite event logs and OpenTelemetry.
 - Terminal-aware styling: color only at a terminal, off with `NO_COLOR`, or forced with `--color=auto|always|never`; piped output stays plain text.
-- Project memory across runs, with approval before entries become active.
+- Project memory across runs, with approval before entries become active, stored only in `./.tinyagent/memory` inside `--cwd`; see [Project memory](docs/memory.md#project-memory).
 - Session handoff for long-running work (`--handoff`): each run leaves `.tinyagent/handoff.md` with what it did and what's next, the next fresh run reads it as data, and an optional startup command runs before the first turn; see [Session handoff](docs/long-runs.md#session-handoff).
 - Project rules from agent failures (`tinyagent ratchet add`): each rule records its incident and an expiry or review condition, is added to the system prompt, and can be enforced as a permission deny rule; see [Project rules](docs/ratchet.md).
 - A task planner that can require a plan before any change.

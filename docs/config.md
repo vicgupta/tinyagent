@@ -87,6 +87,9 @@ memory:                   # project memory; see Project memory (-c, or ./tinyage
   max_writes_per_run: 5   # entries one run may add, replace or forget; >= 1
   max_entries: 50         # active entries kept per project; >= 1
   max_bytes: 8192         # cap on the Project memory prompt section; 1 to 65536
+  backend: markdown       # markdown or sqlite
+  path: .tinyagent/memory # markdown folder; relative to --cwd, must stay inside it
+  sqlite_path: .tinyagent/memory/memory.sqlite  # relative to --cwd, must stay inside it
 handoff:                  # session handoff file; see Session handoff (-c, or ./tinyagent.yaml with --trust-config)
   enabled: false          # read the file at start and rewrite it at the end (same as --handoff)
   path: .tinyagent/handoff.md  # relative to --cwd; must stay inside it

@@ -30,12 +30,11 @@ const starterConfig = `# tinyagent project config (./tinyagent.yaml). Flags over
 #   max_writes_per_run: 5
 #   max_entries: 50
 #   max_bytes: 8192           # cap on the Project memory prompt section (1-65536)
-#   backend: markdown         # markdown (./memory/<id>.md) or sqlite (./memory/memory.sqlite)
-#   path: ./memory            # markdown folder, relative to --cwd
-#   sqlite_path: ./memory/memory.sqlite
+#   backend: markdown         # markdown (./.tinyagent/memory/<id>.md) or sqlite (./.tinyagent/memory/memory.sqlite)
+#   path: ./.tinyagent/memory # markdown folder, relative to --cwd and inside it
+#   sqlite_path: ./.tinyagent/memory/memory.sqlite
 #   max_entry_size: 500       # characters per entry (1-4000)
 #   default_tags: []          # tags added to every new entry
-#   import_legacy: true       # copy the old per-project JSON store in once
 #   # memory.toml and TINYAGENT_MEMORY_* override these: tinyagent --memory-help
 # untrusted_content:          # lockdown: once a web_fetch or MCP result or a review diff enters the run,
 #   enabled: false            # refuse commands, MCP tools and other web_fetch hosts (same as --lockdown)
