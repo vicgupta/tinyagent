@@ -15,25 +15,27 @@ import (
 	"time"
 
 	"github.com/vicgupta/tinyagent/internal/agent"
-	"github.com/vicgupta/tinyagent/internal/config"
-	"github.com/vicgupta/tinyagent/internal/lockdown"
 	"github.com/vicgupta/tinyagent/internal/trajectory"
 )
 
 // chatConflicts are the flags --interactive can't be combined with: other
 // modes, and output formats meant for scripts.
 var chatConflicts = []string{
-	"acp", "json", "workflow", "workflow-name", "workflow-observe", "eval", "review", "review-base", "review-commit",
+	"acp", "web", "web-port", "web-no-open", "json", "workflow", "workflow-name", "workflow-observe", "eval", "review", "review-base", "review-commit",
 	"rewind", "to", "dry-run", "transcript", "output-schema", "check", "init-config", "completion",
 	"update", "version", "V", "worktree", "image",
 }
 
 // chatConflict returns the first flag given that --interactive can't be
 // combined with, as typed, or "".
-func chatConflict(fs *flag.FlagSet) string {
+func chatConflict(fs *flag.FlagSet) string { return modeConflict(fs, chatConflicts) }
+
+// modeConflict returns the first flag given that is in conflicts (or
+// --attempts), as typed, or "".
+func modeConflict(fs *flag.FlagSet, conflicts []string) string {
 	name := ""
 	fs.Visit(func(f *flag.Flag) {
-		if name == "" && slices.Contains(chatConflicts, f.Name) {
+		if name == "" && slices.Contains(conflicts, f.Name) {
 			name = f.Name
 		}
 	})
@@ -115,57 +117,13 @@ func runChatIO(o *options, fs *flag.FlagSet, cio chatIO) int {
 	if code := checkACPLockdown(o, fs); code != 0 {
 		return code
 	}
-	root, err := canonicalRoot(o.cwd)
-	if err != nil {
-		fmt.Fprintf(errw, "error: --cwd %s: %v\n", o.cwd, err)
-		return 2
+	s, prev, code := newChatSession(o, fs, errw)
+	if code != 0 {
+		return code
 	}
-	var prev *trajectory.Trajectory
-	if o.resume != "" {
-		if o.output != "" && sameFile(o.resume, o.output) {
-			fmt.Fprintln(errw, "error: -o must differ from the --resume checkpoint")
-			return 2
-		}
-		prev, err = trajectory.Load(o.resume)
-		if err != nil {
-			fmt.Fprintln(errw, "error:", err)
-			return 1
-		}
-		if !flagWasSet(fs, "model", "m") && prev.Model != "" {
-			fs.Set("model", prev.Model)
-		}
-	}
-	s := &session{o: o, fs: fs, root: root, closeEnv: func() {}}
 	defer s.Close()
-	if err := s.setup(context.Background(), sessionMode{
-		interactive: true,
-		setupLockdown: func(cfg *config.AgentConfig) (*lockdown.State, error) {
-			return acpSetupLockdown(fs, o.lockdown, cfg)
-		},
-		beforeWebFetch: func(cfg *config.AgentConfig) {
-			if flagWasSet(fs, "ask-user") {
-				cfg.AskUser.Enabled = o.askUser
-			}
-		},
-		beforeEnvCheck: func(cfg *config.AgentConfig) {
-			if cfg.Snapshots.Enabled {
-				fmt.Fprintln(errw, "chat: workspace snapshots are not taken in chat mode yet")
-				cfg.Snapshots.Enabled = false
-			}
-		},
-		mcpServers: func(cfg config.AgentConfig) ([]config.MCPServer, error) {
-			return mcpServers(errw, cfg), nil
-		},
-		startLockdown: func() { startACPLockdown(s.lockdown, nil, s.env, s.webFetch, errw) },
-	}); err != nil {
-		return fail(err)
-	}
-	if prev != nil {
-		if err := agent.ValidateResume(prev, s.cfg, root); err != nil {
-			fmt.Fprintln(errw, "error:", err)
-			return 1
-		}
-	}
+	root := s.root
+	var err error
 	c := &chat{s: s, io: cio, st: styleFor(errw), outSt: styleFor(cio.out), start: time.Now()}
 	c.md = s.cfg.ChatMarkdown == nil || *s.cfg.ChatMarkdown
 	c.path = o.output
@@ -316,7 +274,7 @@ func (c *chat) prompt() string {
 // turn runs one message as one Agent.Run continuing the conversation.
 // asFollowUp is false only for re-running an unfinished checkpoint.
 func (c *chat) turn(msg string, asFollowUp bool) {
-	s, o, errw := c.s, c.s.o, c.io.errw
+	s, errw := c.s, c.io.errw
 	s.turn++
 	c.turns++
 	prev := s.traj
@@ -354,34 +312,8 @@ func (c *chat) turn(msg string, asFollowUp bool) {
 	if s.policy != nil {
 		a.PermissionApprover = terminalPermissionApprover
 	}
-	var events *runEvents
-	warn := func(m string) { events.warn(m) }
-	db, dbErr := openLogDB(s.fs, *o, cfg, s.root, msg, s.modelName, prev != nil, a, warn)
-	tr, trWarn := startOTel(s.otel, cfg, a, msg, prev != nil, o.verbose && s.turn == 1)
-	events = startEvents(io.Discard, false, a, prev != nil, cancel, db, tr)
+	events := s.beginTurn(a, cfg, msg, prev, c.path, cancel, c.turns)
 	defer events.close()
-	if dbErr != nil {
-		warn(dbErr.Error())
-	}
-	if trWarn != "" {
-		warn(trWarn)
-	}
-	events.emit("chat.turn", map[string]any{"turn": c.turns})
-	if s.turn == 1 {
-		emitStartTaints(s.lockdown, events)
-		startOutputFiles(s.outputFiles, cfg.ToolOutputFiles.MaxRuns, warn)
-	}
-	if cfg.SkillsOn() {
-		loadSkills(a, s.root, pluginSkillSources(cfg), warn)
-	}
-	s.memoryTurn(a, prev, events, warn, false)
-	a.OnStep = func(t *trajectory.Trajectory) error {
-		if err := t.Save(c.path); err != nil {
-			return err
-		}
-		checkpointSaved(a, t, c.path, o.planFile)
-		return nil
-	}
 	// Replies render as Markdown a block at a time; tool calls end the
 	// block before them and collapse into one line once text resumes.
 	var mu sync.Mutex
@@ -433,6 +365,7 @@ func (c *chat) turn(msg string, asFollowUp bool) {
 	act.run()
 	s.setText(text.write)
 	start := time.Now()
+	before := turnCounts(prev) // Run extends prev in place
 	t := a.Run(ctx, msg)
 	s.setText(nil)
 	text.flush()
@@ -472,7 +405,7 @@ func (c *chat) turn(msg string, asFollowUp bool) {
 	default:
 		fmt.Fprintln(errw, c.st.Yellow(t.ExitStatus)+c.st.Dim(" (your next message continues from here)"))
 	}
-	fmt.Fprintln(errw, "\n"+c.st.Dim(c.turnLine(prev, t, elapsed)))
+	fmt.Fprintln(errw, "\n"+c.st.Dim(c.turnLine(before, t, elapsed)))
 	events.finish(t, elapsed)
 	s.traj, c.source, c.cont = t, "chat session", true
 }
@@ -480,11 +413,26 @@ func (c *chat) turn(msg string, asFollowUp bool) {
 // turnLine is the dim line after a turn: its steps, tokens and cost, and
 // the session's total cost.
 func (c *chat) turnLine(prev, t *trajectory.Trajectory, elapsed time.Duration) string {
+	return turnSummary(c.turns, prev, t, elapsed)
+}
+
+// turnCounts copies the step, token and cost totals of prev (nil stays
+// nil) so turnSummary can subtract them after Run has extended prev.
+func turnCounts(prev *trajectory.Trajectory) *trajectory.Trajectory {
+	if prev == nil {
+		return nil
+	}
+	return &trajectory.Trajectory{Steps: prev.Steps, InputTokens: prev.InputTokens, OutputTokens: prev.OutputTokens, Cost: prev.Cost}
+}
+
+// turnSummary is the line after turn n: its steps, tokens and cost, and the
+// session's total cost.
+func turnSummary(n int, prev, t *trajectory.Trajectory, elapsed time.Duration) string {
 	steps, in, out, cost := t.Steps, t.InputTokens, t.OutputTokens, t.Cost
 	if prev != nil {
 		steps, in, out, cost = steps-prev.Steps, in-prev.InputTokens, out-prev.OutputTokens, cost-prev.Cost
 	}
-	line := fmt.Sprintf("turn %d · %s · %s in / %s out tokens", c.turns, count(steps, "step"), formatInt(in), formatInt(out))
+	line := fmt.Sprintf("turn %d · %s · %s in / %s out tokens", n, count(steps, "step"), formatInt(in), formatInt(out))
 	if t.Cost > 0 {
 		line += fmt.Sprintf(" · %s (session %s)", formatCost(cost), formatCost(t.Cost))
 	}

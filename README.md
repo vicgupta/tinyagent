@@ -135,6 +135,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 - Per-role model routing (`models:` in config, `--aux-model`, `--delegate-model`, `--route`, keyword or `task_type` routes, `--no-routing`) for compaction, the verify review and delegated children, each role with its own fallback chain and a `usage_by_role` cost split in the summary, JSON, trajectory, `--log-db` and eval reports; off by default.
 - Many providers: OpenAI, Anthropic, OpenRouter, Ollama, a ChatGPT subscription through Codex, handoff to your installed Claude Code (`claude-code`), Codex CLI (`codex-exec`) or OpenCode (`opencode`), and your own OpenAI-compatible endpoints.
 - Interactive chat (`tinyagent chat` or `-i`): a multi-turn conversation on the terminal with line editing, history, Ctrl-C to stop a turn and Markdown replies rendered for the terminal (headings, lists, code blocks, tables; `/raw` to turn off), a compact tool activity line and slash commands (`/cost`, `/new`, `/save`, `/compact`, `/raw`); every turn gets the same tools as a run, including [command tools](docs/config.md#command-tools); every session is saved and can be resumed. See [Interactive chat](docs/chat.md).
+- Web UI (`tinyagent web`): the same chat in your browser on `127.0.0.1`, guarded by a per-run token. It has streaming Markdown with highlighted code, collapsible tool-call cards with diffs, inline permission approve and deny, stop, edit and regenerate, a model picker, a searchable sessions sidebar, a `/` command menu, a Ctrl/⌘-K palette and light or dark mode. No Node build step and no dependencies. See [Web UI](docs/web.md).
 - Streaming text, `--json` event output, structured output, SQLite event logs and OpenTelemetry.
 - Agent Skills from `./skills`: on by default at an interactive terminal, off in CI, the GitHub Action, `--eval`, `--attempts`, `--lockdown`, `--read-only` and other non-TTY runs (`--skills`/`--no-skills` or `skills:` override; `--check` shows why); see [Agent Skills](docs/project-context.md#agent-skills).
 - Terminal-aware styling: color only at a terminal, off with `NO_COLOR`, or forced with `--color=auto|always|never`; piped output stays plain text.
@@ -178,6 +179,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 | Topic | Doc |
 |---|---|
 | Interactive chat (`tinyagent chat`) | [docs/chat.md](docs/chat.md) |
+| Web UI (`tinyagent web`) | [docs/web.md](docs/web.md) |
 | Tasks: passing a task, task types, task-based routing | [docs/tasks.md](docs/tasks.md) |
 | Reviews, worktrees, best-of-N, resume, transcripts, follow-ups, asking for input, token and cost budgets | [docs/runs.md](docs/runs.md) |
 | Long runs, session handoff, images, tool output files (MCP results capped at 256 KiB), apply_patch, subagents (read-only researchers), workers (read-write builders), web fetch, LSP | [docs/long-runs.md](docs/long-runs.md) |
