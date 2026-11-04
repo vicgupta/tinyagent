@@ -560,6 +560,7 @@ func (w *webUI) state() map[string]any {
 		"version":    currentVersion(),
 		"cwd":        s.root,
 		"model":      s.modelName,
+		"handoff":    model.IsHandoff(s.modelName),
 		"models":     w.knownModels(),
 		"providers":  model.BuiltinProviders(),
 		"running":    w.running,

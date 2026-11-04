@@ -7,7 +7,7 @@ Eleven subcommands are shortcuts for existing flags. They rewrite the command li
 | Subcommand | Same as |
 |---|---|
 | `tinyagent chat [-t "..."] [-- message]` | `--interactive` (`-i`); see [Interactive chat](chat.md) |
-| `tinyagent web [--port n] [--no-open]` | `--web [--web-port n] [--web-no-open]`; see [Web UI](web.md) |
+| `tinyagent web [--port n] [--no-open]` | `--web [--web-port n] [--web-no-open]`; see [Web UI](web.md). Reads `./.env` like chat (`AGENT_MODEL` or `model=`) |
 | `tinyagent init [--force] [--migrate]` | `--init-config [--init-force] [--init-migrate]` |
 | `tinyagent sandbox -t "..."` | `--sandbox` |
 | `tinyagent sandbox network [--allow-domain host]... -t "..."` | `--sandbox --sandbox-network [--sandbox-allow-domain host]` (`--allowed-domains` is an alias) |

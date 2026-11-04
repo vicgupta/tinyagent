@@ -18,6 +18,14 @@ import (
 // auth environment variables: the child inherits tinyagent's environment
 // unchanged and the CLI authenticates itself.
 
+// IsHandoff reports whether spec names a handoff provider (claude-code,
+// codex-exec, opencode): one that runs an installed CLI and returns only its
+// final answer, so TinyAgent's tools, sandbox and subagents don't apply.
+func IsHandoff(spec string) bool {
+	p, _, _ := strings.Cut(spec, "/")
+	return p == ClaudeCodeProvider || p == CodexExecProvider || p == OpenCodeProvider
+}
+
 // HandoffOptions are the TinyAgent settings a handoff provider maps onto
 // the CLI it runs.
 type HandoffOptions struct {

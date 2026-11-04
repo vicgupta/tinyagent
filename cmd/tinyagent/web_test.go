@@ -34,9 +34,16 @@ type webTest struct {
 
 func startWeb(t *testing.T, root string, args ...string) *webTest {
 	t.Helper()
+	return startWebArgs(t, root, append([]string{"-m", "openai/gpt-4o"}, args...)...)
+}
+
+// startWebArgs is startWeb without the default -m, so the model comes from
+// the environment, ./.env or the config.
+func startWebArgs(t *testing.T, root string, args ...string) *webTest {
+	t.Helper()
 	var o options
 	fs := newFlagSet(&o)
-	if err := fs.Parse(append([]string{"--web", "--cwd", root, "--color", "never", "-m", "openai/gpt-4o"}, args...)); err != nil {
+	if err := fs.Parse(append([]string{"--web", "--cwd", root, "--color", "never"}, args...)); err != nil {
 		t.Fatal(err)
 	}
 	var errw bytes.Buffer
