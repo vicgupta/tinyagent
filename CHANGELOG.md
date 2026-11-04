@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [v0.17.0] - 2026-11-04
+
 ### Added
 
 - `tinyagent web` (`--web`) runs chat in the browser. It's a local web UI on `127.0.0.1` for the same session backend as `tinyagent chat`, with the same tools, sandbox, permissions, lockdown, memory, AGENTS.md and checkpoints. It defaults to port 7777, and when `--port` isn't set and 7777 is busy it uses the next free port. `--no-open` prints the URL instead of opening the browser, and every chat flag applies. A random per-run token is required on every request, and `Host` and `Origin` are checked; no API keys or `.env` values reach the browser. Features: streaming Markdown with highlighted code and copy buttons, collapsible tool-call cards with arguments, results and diffs, inline approve and deny for permission prompts and `ask_user`, stop, edit-and-resend and regenerate, a model picker, a searchable sessions sidebar (open and continue saved chats), a project panel (AGENTS.md and memory), and a status bar with model, cwd, tokens and cost. It also has a `/` command menu, a Ctrl/⌘-K palette, `?` shortcuts, file and image drag-and-drop or paste, light or dark mode that follows the system, a responsive layout, a reconnect notice and keyboard-accessible markup. It's built with `net/http` and `go:embed`, with no Node build step and no dependencies. See [Web UI](docs/web.md).
