@@ -84,6 +84,14 @@ func TestLoadLowercaseModelAlias(t *testing.T) {
 	if env["AGENT_MODEL"] != "a/b" {
 		t.Errorf("AGENT_MODEL = %q, want a/b", env["AGENT_MODEL"])
 	}
+	// The alias is case-insensitive.
+	env = map[string]string{}
+	os.WriteFile(p, []byte("Model=e/f\n"), 0o600)
+	load(p, lookup, set)
+	if env["AGENT_MODEL"] != "e/f" {
+		t.Errorf("Model= alias: AGENT_MODEL = %q", env["AGENT_MODEL"])
+	}
+	os.WriteFile(p, []byte("AGENT_MODEL=a/b\nmodel=c/d\n"), 0o600)
 	// The real environment wins over the alias.
 	env = map[string]string{"AGENT_MODEL": ""}
 	load(p, lookup, set)

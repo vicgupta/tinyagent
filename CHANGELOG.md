@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- `.env`: a lowercase `model=provider/name` line now sets the model, as an alias of `AGENT_MODEL`. Before, it was loaded as a variable named `model` that nothing reads, so `tinyagent web` (and chat and `-t` runs) silently fell back to `openai/gpt-4o` and then failed with `OPENAI_API_KEY is not set`. An `AGENT_MODEL` line in the same file wins over `model=`, and a real `AGENT_MODEL` in the environment wins over both. `-v` reports it as `loaded AGENT_MODEL from .env`. See [.env file](docs/config.md#env-file).
+- `.env`: a `model=provider/name` line (case-insensitive) now sets the model, as an alias of `AGENT_MODEL`. Before, it was loaded as a variable named `model` that nothing reads, so `tinyagent web` (and chat and `-t` runs) silently fell back to `openai/gpt-4o` and then failed with `OPENAI_API_KEY is not set`. An `AGENT_MODEL` line in the same file wins over `model=`, and a real `AGENT_MODEL` in the environment wins over both. `-v` reports it as `loaded AGENT_MODEL from .env`. See [.env file](docs/config.md#env-file).
 
 ### Changed
 

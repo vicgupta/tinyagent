@@ -17,7 +17,8 @@ import (
 const FileName = ".env"
 
 // Aliases maps a .env key that has no environment meaning of its own onto
-// the variable tinyagent reads. A lowercase model=provider/name line sets
+// the variable tinyagent reads, matched case-insensitively. These mirror
+// tinyagent.yaml keys that have an environment equivalent. A model=provider/name line sets
 // AGENT_MODEL. An AGENT_MODEL line in the same file wins over the alias, and
 // a real AGENT_MODEL in the environment wins over both.
 var Aliases = map[string]string{"model": "AGENT_MODEL"}
@@ -51,7 +52,7 @@ func load(path string, lookup func(string) (string, bool), set func(string, stri
 		if !ok {
 			continue
 		}
-		if target, isAlias := Aliases[k]; isAlias {
+		if target, isAlias := Aliases[strings.ToLower(k)]; isAlias {
 			if _, seen := aliased[target]; !seen {
 				aliasOrder = append(aliasOrder, target)
 			}
