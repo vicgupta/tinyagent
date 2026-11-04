@@ -22,6 +22,8 @@ bool read-only "$INPUT_READ_ONLY"
 bool sandbox "$INPUT_SANDBOX"
 bool lockdown "$INPUT_LOCKDOWN"
 bool untrusted-task "$INPUT_UNTRUSTED_TASK"
+INPUT_WEB_FETCH=${INPUT_WEB_FETCH:-false}
+bool web-fetch "$INPUT_WEB_FETCH"
 bool job-summary "$INPUT_JOB_SUMMARY"
 bool fail-on-error "$INPUT_FAIL_ON_ERROR"
 command -v jq >/dev/null 2>&1 || usage "jq is required to read tinyagent's result; install it before this step"
@@ -82,6 +84,9 @@ fi
 [ "$INPUT_SANDBOX" = false ] || args+=(--sandbox)
 [ "$INPUT_LOCKDOWN" = false ] || args+=(--lockdown)
 [ "$INPUT_UNTRUSTED_TASK" = false ] || args+=(--untrusted-task)
+# CI runs read repository and issue content: web_fetch stays off unless the
+# web-fetch input is true.
+[ "$INPUT_WEB_FETCH" = true ] || args+=(--no-web-fetch)
 [ -z "$INPUT_OUTPUT_SCHEMA" ] || args+=(--output-schema "$INPUT_OUTPUT_SCHEMA")
 while IFS= read -r line || [ -n "$line" ]; do
 	[ -z "$line" ] || args+=("$line")

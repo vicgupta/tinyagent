@@ -280,6 +280,12 @@ Please do not paste API keys, tokens, or other secrets into issues or PRs.
 
 The `bash` tool runs in a new process and **is not sandboxed**; path sandboxing
 for the file tools is lexical and symlinks inside the root can point outside it.
+`web_fetch` is on by default for public hosts, and fetched pages are untrusted
+input that may carry prompt injection. Keep its non-public-address check
+(`sandboxnet.IsNonPublic`) on every path, including with no allowlist, and keep
+it off by default under lockdown and in the GitHub Action. Tests that assert a
+run's first stderr line must allow the `web_fetch: any public host` startup line
+(or pass `--no-web-fetch`).
 Only run it on code you trust. If you find a security issue, please report it
 privately rather than opening a public issue.
 

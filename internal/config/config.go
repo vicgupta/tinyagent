@@ -176,8 +176,9 @@ type AgentConfig struct {
 	// Models routes roles and tasks to their own models (empty by
 	// default: every task uses the main model).
 	Models Models `yaml:"models,omitempty"`
-	// WebFetch configures the opt-in web_fetch tool (off by default;
-	// --web-fetch overrides Enabled).
+	// WebFetch configures the web_fetch tool (on by default for any public
+	// host, off under lockdown unless enabled explicitly; --web-fetch and
+	// --no-web-fetch override Enabled).
 	WebFetch WebFetch `yaml:"web_fetch"`
 	// AskUser configures the opt-in ask_user tool, which ends a run with
 	// one question for the user (off by default; --ask-user overrides
@@ -300,12 +301,14 @@ type Images struct {
 // DefaultMaxImageBytes is the default max_image_bytes (5 MiB).
 const DefaultMaxImageBytes = 5 << 20
 
-// WebFetch configures the opt-in web_fetch tool, which reads allowlisted
-// URLs in tinyagent's own process, separately from command network access.
+// WebFetch configures the web_fetch tool, which reads public URLs in
+// tinyagent's own process, separately from command network access.
 type WebFetch struct {
-	Enabled bool `yaml:"enabled"`
-	// AllowedDomains lists the hosts web_fetch may read, in the
-	// sandbox_allowed_domains syntax. Required when Enabled.
+	// Enabled is nil when neither the config nor a flag set it: the tool is
+	// then on, except under untrusted-content lockdown. See On.
+	Enabled *bool `yaml:"enabled,omitempty"`
+	// AllowedDomains, when set, narrows web_fetch to these hosts, in the
+	// sandbox_allowed_domains syntax. Empty means any public host.
 	AllowedDomains []string `yaml:"allowed_domains,omitempty"`
 	// MaxBytes caps the body read per fetch. Must be >= 1; default 2 MiB.
 	MaxBytes int `yaml:"max_bytes"`
@@ -321,8 +324,17 @@ const (
 	MaxWebFetchTimeoutSeconds     = 120
 )
 
-// Validate checks the limits and allowlist syntax. An empty allowlist with
-// Enabled is checked after flags apply (see the CLI).
+// On reports whether web_fetch is offered. An unset Enabled means on,
+// except under lockdown, where only an explicit true turns it on.
+func (w WebFetch) On(lockdown bool) bool {
+	if w.Enabled == nil {
+		return !lockdown
+	}
+	return *w.Enabled
+}
+
+// Validate checks the limits and allowlist syntax. An empty allowlist means
+// any public host.
 func (w WebFetch) Validate() error {
 	if w.MaxBytes < 1 {
 		return fmt.Errorf("web_fetch.max_bytes must be >= 1, got %d", w.MaxBytes)

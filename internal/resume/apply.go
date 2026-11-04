@@ -26,7 +26,7 @@ func Apply(t *trajectory.Trajectory, cfg *config.AgentConfig) {
 	cfg.Subagents.Enabled = t.SubagentsEnabled
 	setWorkers(cfg, t.WorkersEnabled)
 	cfg.AskUser.Enabled = t.AskUserEnabled
-	cfg.WebFetch.Enabled = t.WebFetchEnabled
+	cfg.WebFetch.Enabled = config.BoolPtr(t.WebFetchEnabled)
 	cfg.LSP.Enabled = t.LSPEnabled
 	cfg.ScopedAgentsMD = t.ScopedAgentsMDEnabled
 	cfg.Skills = config.BoolPtr(t.SkillsEnabled)

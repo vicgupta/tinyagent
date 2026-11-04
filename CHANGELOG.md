@@ -8,6 +8,8 @@
 
 ### Changed
 
+- **Behavior change: `web_fetch` is on by default.** Every one-shot, chat, `tinyagent web`, ACP, review and eval run now offers the `web_fetch` tool for any public host, and prints `web_fetch: any public host` on stderr at start. Loopback, private, link-local and cloud metadata addresses are still always refused. `web_fetch.allowed_domains` / `--web-fetch-allow-domain` now narrow it (an empty list no longer exits 2; a bare `*` still does). Turn it off with `--no-web-fetch` (new), `--web-fetch=false` or `web_fetch.enabled: false`. It stays off by default under lockdown (unless enabled explicitly) and in the GitHub Action (new `web-fetch` input, default `false`); `--read-only` keeps it; subagents never get it; `--resume` keeps the checkpoint's recorded setting, so older checkpoints resume without it. **Security:** fetched page content is untrusted input to the model and may carry prompt injection; use an allowlist, `--no-web-fetch` or `--lockdown` for runs on sensitive code or with credentials. See [Web fetch](docs/long-runs.md#web-fetch).
+
 - `tinyagent web` shows a `handoff` badge in the status bar when the model is a CLI handoff provider (`claude-code`, `codex-exec`, `opencode`). Those turns return only the CLI's final answer, so there are no tool cards, and TinyAgent's tools, sandbox and subagents don't apply. `/api/state` has a new `handoff` field. See [Web UI](docs/web.md).
 
 ## [v0.17.0] - 2026-11-04

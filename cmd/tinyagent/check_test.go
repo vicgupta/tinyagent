@@ -210,7 +210,12 @@ func TestCheckErrorsMatchRun(t *testing.T) {
 			continue
 		}
 		_, _, runErr := runCLI(t, append([]string{"-t", "x", "--no-stream"}, c.args...)...)
-		first := func(s string) string { l, _, _ := strings.Cut(s, "\n"); return l }
+		// A run prints the web_fetch startup line before config errors.
+		first := func(s string) string {
+			s = strings.TrimPrefix(s, "web_fetch: any public host\n")
+			l, _, _ := strings.Cut(s, "\n")
+			return l
+		}
 		if first(stderr) != first(runErr) {
 			t.Errorf("%s: --check said %q, a run said %q", c.name, first(stderr), first(runErr))
 		}

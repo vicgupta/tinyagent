@@ -63,6 +63,7 @@ type options struct {
 	workers                                          bool
 	askUser                                          bool
 	webFetch                                         bool
+	noWebFetch                                       bool
 	webFetchAllowDomains                             domainList
 	lsp                                              bool
 	scopedAgentsMD                                   bool
@@ -174,8 +175,9 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.plan, "plan", false, "enable the update_plan tool: a task plan saved in the checkpoint and pinned in every request (default off; config plan.enabled)")
 	fs.BoolVar(&o.toolOutputFiles, "tool-output-files", false, "save the full text of over-limit tool results under .tinyagent/tool-output so the model can page it with read_file and grep; MCP tool and resource results are capped at 256 KiB before saving (default off; config tool_output_files.enabled)")
 	fs.BoolVar(&o.applyPatch, "apply-patch", false, "add the apply_patch tool: multi-file, multi-hunk edits in the *** Begin Patch format, checked before any write (default off; config apply_patch)")
-	fs.BoolVar(&o.webFetch, "web-fetch", false, "add the web_fetch tool: read an allowlisted http(s) URL as text, in tinyagent's own process, separate from command network access (default off; config web_fetch.enabled)")
-	fs.Var(&o.webFetchAllowDomains, "web-fetch-allow-domain", "with --web-fetch, let web_fetch read this host (name, *.domain or IP, optional :port); repeatable, replaces web_fetch.allowed_domains")
+	fs.BoolVar(&o.webFetch, "web-fetch", true, "offer the web_fetch tool: read a public http(s) URL as text, in tinyagent's own process, separate from command network access; loopback, private, link-local and metadata addresses stay blocked. On by default (off under lockdown unless given); --web-fetch=false turns it off (config web_fetch.enabled)")
+	fs.BoolVar(&o.noWebFetch, "no-web-fetch", false, "turn the web_fetch tool off; same as --web-fetch=false")
+	fs.Var(&o.webFetchAllowDomains, "web-fetch-allow-domain", "narrow web_fetch to this host (name, *.domain or IP, optional :port); repeatable, replaces web_fetch.allowed_domains; unset, any public host")
 	fs.BoolVar(&o.lsp, "lsp", false, "start the configured language servers (lsp.servers in -c or a trusted ./tinyagent.yaml (--trust-config)): append compiler diagnostics to edit results and add the read-only lsp tool (default off; config lsp.enabled)")
 	fs.BoolVar(&o.subagents, "subagents", false, "add the delegate tool: hand a task to a read-only subagent with a fresh context and get back only its report (default off; config subagents.enabled)")
 	fs.BoolVar(&o.workers, "workers", false, "add the worker and apply_worker tools: a worker subagent edits files and runs commands in its own Git worktree, its changes are committed to branch tinyagent/<run>-w<n>, and apply_worker applies them (default off; config subagents.workers.enabled)")
@@ -586,9 +588,6 @@ func run() int {
 	}
 	if flagWasSet(fs, "workers") {
 		setWorkers(&cfg, o.workers)
-	}
-	if flagWasSet(fs, "web-fetch") {
-		cfg.WebFetch.Enabled = o.webFetch
 	}
 	if flagWasSet(fs, "ask-user") {
 		cfg.AskUser.Enabled = o.askUser
@@ -1619,22 +1618,54 @@ func newLSP(cfg config.AgentConfig, root string) *tools.LSP {
 	}
 }
 
-// newWebFetcher applies --web-fetch-allow-domain to cfg and returns the
-// web_fetch tool, or nil when it is off. Its settings come only from the
-// user's config, -c and flags; an empty allowlist is a usage error.
+// webFetchFlag returns the explicit --web-fetch / --no-web-fetch setting,
+// or nil when neither was given.
+func webFetchFlag(fs *flag.FlagSet, o options) (*bool, error) {
+	onSet, offSet := flagWasSet(fs, "web-fetch"), flagWasSet(fs, "no-web-fetch")
+	switch {
+	case onSet && offSet && o.webFetch == o.noWebFetch:
+		return nil, errors.New("--web-fetch and --no-web-fetch conflict")
+	case offSet:
+		return config.BoolPtr(!o.noWebFetch), nil
+	case onSet:
+		return config.BoolPtr(o.webFetch), nil
+	}
+	return nil, nil
+}
+
+// lockdownRequested reports whether untrusted-content lockdown is on for
+// this run (the --lockdown flag or untrusted_content.enabled).
+func lockdownRequested(fs *flag.FlagSet, o options, cfg *config.AgentConfig) bool {
+	if flagWasSet(fs, "lockdown") {
+		return o.lockdown.enabled
+	}
+	return cfg.UntrustedContent.Enabled
+}
+
+// newWebFetcher applies --web-fetch, --no-web-fetch and
+// --web-fetch-allow-domain to cfg and returns the web_fetch tool, or nil
+// when it is off. It is on by default for any public host; lockdown keeps
+// it off unless enabled explicitly. Its settings come only from the user's
+// config, -c and flags.
 func newWebFetcher(fs *flag.FlagSet, o options, cfg *config.AgentConfig) (*tools.WebFetcher, error) {
+	explicit, err := webFetchFlag(fs, o)
+	if err != nil {
+		return nil, &config.InvalidError{Err: err}
+	}
+	if explicit != nil {
+		cfg.WebFetch.Enabled = explicit
+	}
+	on := cfg.WebFetch.On(lockdownRequested(fs, o, cfg))
+	cfg.WebFetch.Enabled = config.BoolPtr(on)
 	if flagWasSet(fs, "web-fetch-allow-domain") {
-		if !cfg.WebFetch.Enabled {
-			return nil, &config.InvalidError{Err: errors.New("--web-fetch-allow-domain requires --web-fetch (web_fetch.enabled: true)")}
+		if !on {
+			return nil, &config.InvalidError{Err: errors.New("--web-fetch-allow-domain needs web_fetch on; it is off here (--web-fetch=false, --no-web-fetch, web_fetch.enabled: false, a resumed checkpoint, or lockdown without --web-fetch)")}
 		}
 		cfg.WebFetch.AllowedDomains = o.webFetchAllowDomains
 	}
 	w := cfg.WebFetch
-	if !w.Enabled {
+	if !on {
 		return nil, nil
-	}
-	if len(w.AllowedDomains) == 0 {
-		return nil, &config.InvalidError{Err: errors.New("web_fetch is enabled but web_fetch.allowed_domains is empty; list the hosts it may read in web_fetch.allowed_domains or with --web-fetch-allow-domain")}
 	}
 	if err := w.Validate(); err != nil {
 		return nil, &config.InvalidError{Err: err}
@@ -1642,6 +1673,10 @@ func newWebFetcher(fs *flag.FlagSet, o options, cfg *config.AgentConfig) (*tools
 	f, err := tools.NewWebFetcher(w.AllowedDomains, w.MaxBytes, time.Duration(w.TimeoutSeconds)*time.Second, "tinyagent/"+currentVersion())
 	if err != nil {
 		return nil, &config.InvalidError{Err: err}
+	}
+	if len(w.AllowedDomains) == 0 {
+		fmt.Fprintln(os.Stderr, "web_fetch: any public host")
+		return f, nil
 	}
 	unit := "domains"
 	if len(w.AllowedDomains) == 1 {

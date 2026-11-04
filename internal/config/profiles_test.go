@@ -68,7 +68,7 @@ func TestProfileOverlay(t *testing.T) { // AC2, AC4-AC7
 	if c := load("review"); c.Model != "openai/b" || c.CostLimit != 0.5 || c.StepLimit != 40 {
 		t.Errorf("review: model %q cost %v steps %d", c.Model, c.CostLimit, c.StepLimit)
 	}
-	if c := load("fetch"); !c.WebFetch.Enabled || !reflect.DeepEqual(c.WebFetch.AllowedDomains, []string{"pkg.go.dev"}) {
+	if c := load("fetch"); !c.WebFetch.On(false) || !reflect.DeepEqual(c.WebFetch.AllowedDomains, []string{"pkg.go.dev"}) {
 		t.Errorf("fetch: web_fetch %+v", c.WebFetch)
 	}
 	if c := load("chain"); !reflect.DeepEqual(c.FallbackModels, []string{"openai/z"}) {
@@ -81,7 +81,7 @@ func TestProfileOverlay(t *testing.T) { // AC2, AC4-AC7
 		t.Errorf("policy: command_env %+v file_access %+v", c.CommandEnv, c.FileAccess)
 	}
 	// The base is untouched by a selected profile's merge.
-	if c := load(""); c.Model != "openai/a" || c.WebFetch.Enabled || len(c.FallbackModels) != 2 {
+	if c := load(""); c.Model != "openai/a" || !c.WebFetch.On(false) || c.WebFetch.Enabled != nil || len(c.FallbackModels) != 2 {
 		t.Errorf("base: %+v", c)
 	}
 }
