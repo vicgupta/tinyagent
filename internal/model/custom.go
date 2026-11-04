@@ -206,3 +206,16 @@ func (r *Runtime) providerPrice(spec string) *[3]float64 {
 	}
 	return nil
 }
+
+// BuiltinProviders returns the built-in provider ids, in help order.
+func BuiltinProviders() []string { return append([]string(nil), builtinProviders...) }
+
+// ConfiguredProviders returns the config-defined providers, sorted by id.
+func ConfiguredProviders() []ProviderDef {
+	out := make([]ProviderDef, 0, len(configured))
+	for _, d := range configured {
+		out = append(out, d)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}

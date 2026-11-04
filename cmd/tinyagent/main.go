@@ -113,6 +113,8 @@ type options struct {
 	review                                           bool
 	reviewBase, reviewCommit                         string
 	acp                                              bool
+	web, webNoOpen                                   bool
+	webPort                                          int
 	interactive, noChatHistory                       bool
 	workflow, workflowName                           string
 	workflowObserve                                  bool
@@ -229,6 +231,9 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.listPlugins, "list-plugins", false, "print each configured plugin, its skills and its mcp.json servers with their state, then exit 0 (all load), 1 (a plugin is rejected or a configured server is invalid) or 2 (usage or config error); makes no model request and starts nothing")
 	fs.BoolVar(&o.interactive, "interactive", false, "start an interactive chat session (REPL) on the terminal; same as tinyagent chat; -t sends a first message; limits apply per turn")
 	fs.BoolVar(&o.interactive, "i", false, "shorthand for --interactive")
+	fs.BoolVar(&o.web, "web", false, "start the chat web UI: a local server on 127.0.0.1 and the default browser opened to it; same as tinyagent web; chat flags apply")
+	fs.IntVar(&o.webPort, "web-port", defaultWebPort, "port for --web; when not set and it is busy, the next free port is used")
+	fs.BoolVar(&o.webNoOpen, "web-no-open", false, "with --web, print the URL instead of opening a browser")
 	fs.BoolVar(&o.noChatHistory, "no-chat-history", false, "don't write chat input to <cwd>/history/chat_history (config chat_history: false)")
 	fs.BoolVar(&o.acp, "acp", false, "serve the Agent Client Protocol on stdin/stdout for editors such as Zed and JetBrains IDEs (experimental): each session runs in the client's cwd with this config and flags; limits apply per prompt")
 	fs.StringVar(&o.completion, "completion", "", "print a flag-name completion script for this shell (bash, zsh or fish) and exit; load it with: source <(tinyagent --completion bash), or in zsh after compinit: source <(tinyagent --completion zsh), or in fish: tinyagent --completion fish | source; re-source it after --update")
@@ -343,6 +348,15 @@ func run() int {
 			return 2
 		}
 	}
+	if o.web {
+		if f := webConflict(fs); f != "" {
+			fmt.Fprintf(fs.Output(), "error: --web can't be combined with %s\n", f)
+			return 2
+		}
+	} else if flagWasSet(fs, "web-port", "web-no-open") {
+		fmt.Fprintln(fs.Output(), "error: --web-port and --web-no-open apply only to tinyagent web (--web)")
+		return 2
+	}
 	if flagWasSet(fs, "transcript") {
 		return runTranscript(&o, fs, os.Stdout)
 	}
@@ -390,6 +404,9 @@ func run() int {
 	}
 	if flagWasSet(fs, "triage") {
 		return runTriage(&o, fs, os.Stdin, os.Stdout, os.Stderr)
+	}
+	if o.web {
+		return runWeb(&o, fs)
 	}
 	if o.interactive {
 		return runChat(&o, fs)
@@ -1823,7 +1840,7 @@ var usageGroups = []struct {
 	flags [][3]string
 }{
 	{"", [][3]string{{"h", "help", ""}}},
-	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "profile", "name"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}, {"", "ask-user", ""}, {"i", "interactive", ""}, {"", "no-chat-history", ""}, {"", "acp", ""}}},
+	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "profile", "name"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}, {"", "ask-user", ""}, {"i", "interactive", ""}, {"", "no-chat-history", ""}, {"", "web", ""}, {"", "web-port", "port"}, {"", "web-no-open", ""}, {"", "acp", ""}}},
 	{"Review", [][3]string{{"", "review", ""}, {"", "review-base", "ref"}, {"", "review-commit", "rev"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "token-limit", "n"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
 	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "color", "when"}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "otel", ""}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-backend", "name"}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},

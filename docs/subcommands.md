@@ -2,11 +2,12 @@
 
 ## Subcommands
 
-Ten subcommands are shortcuts for existing flags. They rewrite the command line into those flags before parsing, so config, environment variables and precedence work the same either way, and every `--flag` form keeps working.
+Eleven subcommands are shortcuts for existing flags. They rewrite the command line into those flags before parsing, so config, environment variables and precedence work the same either way, and every `--flag` form keeps working.
 
 | Subcommand | Same as |
 |---|---|
 | `tinyagent chat [-t "..."] [-- message]` | `--interactive` (`-i`); see [Interactive chat](chat.md) |
+| `tinyagent web [--port n] [--no-open]` | `--web [--web-port n] [--web-no-open]`; see [Web UI](web.md) |
 | `tinyagent init [--force] [--migrate]` | `--init-config [--init-force] [--init-migrate]` |
 | `tinyagent sandbox -t "..."` | `--sandbox` |
 | `tinyagent sandbox network [--allow-domain host]... -t "..."` | `--sandbox --sandbox-network [--sandbox-allow-domain host]` (`--allowed-domains` is an alias) |
@@ -43,6 +44,9 @@ Ten subcommands are shortcuts for existing flags. They rewrite the command line 
 | `-t, --task` | — | Task prompt (required unless `--resume`; with `--resume` of a finished run, the follow-up task; of a `NeedsInput` run, the answer); `-` reads it from stdin |
 | `--resume` | — | Continue a validated unfinished trajectory; requires explicit matching `--cwd` and a new `-o` path |
 | `-i, --interactive` | off | Same as `tinyagent chat`: an interactive session on the terminal; `-t` sends the first message, and limits apply per turn. Needs a terminal (exit 2 otherwise); see [Interactive chat](chat.md) |
+| `--web` | off | Same as `tinyagent web`: chat in the browser. Serves a local web UI on `127.0.0.1` with a per-run token and opens the default browser; chat flags apply and limits apply per turn. Can't be combined with `-i`/`chat` or `--acp`; see [Web UI](web.md) |
+| `--web-port` | `7777` | Port for `--web`. Unset, a busy port falls back to the next free one (or one the OS picks) and the URL shows which; set, a busy port exits 1 |
+| `--web-no-open` | off | With `--web`, print the URL instead of opening a browser |
 | `--no-chat-history` | config `chat_history`, else on | Don't record chat input in `<cwd>/history/chat_history`; see [Interactive chat](chat.md#files) |
 | `--ask-user` | config `ask_user.enabled`, else off | Give the model the `ask_user` tool: it may end the run with one question (status `NeedsInput`, exit 4), answered with `--resume <trajectory> -t "<answer>"`. Requires `-o`; can't be combined with `--output-schema`; `--ask-user=false` disables it. See [Asking for input](runs.md#asking-for-input) |
 | `--acp` | off | Serve the [Agent Client Protocol](integrations.md#editor-integration-acp) on stdin/stdout so editors such as Zed and JetBrains IDEs can run tinyagent as an external agent (experimental). Can't be combined with `-t`, `--resume`, `--rewind`, `--transcript`, review flags, `--worktree`, `--output-schema`, `--json`, `--ask-user`, `--check`, `--init-config`, `--completion`, `-o`, `--cwd`, `--image` or `--snapshots` (exit 2) |

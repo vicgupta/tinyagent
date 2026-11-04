@@ -11,6 +11,8 @@ tinyagent chat --resume .tinyagent/chats/20261031-115411.json --cwd .   # pick a
 
 Chat reads the model, API keys and other settings exactly as a normal run does, including from [`./.env`](config.md#env-file) in `--cwd`: an `AGENT_MODEL` there picks the chat model when neither `-m` nor a real `$AGENT_MODEL` is set.
 
+To chat in a browser instead, run `tinyagent web`: the same session, tools and settings in a local web UI. See [Web UI](web.md).
+
 Press Ctrl-D (or type `/exit`) to quit. tinyagent prints the session's turns and cost, and the command that resumes it.
 
 ## What it looks like

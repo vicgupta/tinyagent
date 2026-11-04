@@ -33,8 +33,7 @@ var helpEssentials = `Examples:
   tinyagent -t "fix the failing test in ./pkg"
   git diff | tinyagent -t - -m anthropic/claude-sonnet-4-5 --read-only
   tinyagent chat       # interactive session: type messages, Ctrl-D to quit
-  tinyagent --workflow docs/workflows/workflow.yaml -t "add CSV export"
-                       # multi-stage skill workflow; see tinyagent help workflows
+  tinyagent --workflow wf.yaml -t "add CSV export"  # see tinyagent help workflows
 
 Common options:
   -t, --task string    the task/prompt; "-" reads it from stdin
@@ -96,7 +95,7 @@ type flagGroup = struct {
 // FlagSet. TestVerboseHelp checks that every registered flag is listed.
 var helpGroups = []flagGroup{
 	{"", [][3]string{{"h", "help", ""}}},
-	{"Task", [][3]string{{"t", "task", "string"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}, {"", "ask-user", ""}, {"i", "interactive", ""}, {"", "no-chat-history", ""}, {"", "acp", ""}, {"", "image", "path"}, {"", "images", ""}, {"", "untrusted-task", ""}}},
+	{"Task", [][3]string{{"t", "task", "string"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}, {"", "ask-user", ""}, {"i", "interactive", ""}, {"", "no-chat-history", ""}, {"", "web", ""}, {"", "web-port", "port"}, {"", "web-no-open", ""}, {"", "acp", ""}, {"", "image", "path"}, {"", "images", ""}, {"", "untrusted-task", ""}}},
 	{"Model and provider", [][3]string{{"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "aux-model", "spec"}, {"", "delegate-model", "spec"}, {"", "route", "task=spec"}, {"", "no-routing", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "profile", "name"}}},
 	{"Run control", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "token-limit", "n"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}, {"", "subagents", ""}, {"", "workers", ""}}},
 	{"Verify before stop", verifyGroup.flags},

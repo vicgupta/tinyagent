@@ -2,6 +2,7 @@ package model
 
 import (
 	"net/http"
+	"sort"
 	"time"
 )
 
@@ -122,4 +123,15 @@ func (r *Runtime) prices() map[string][3]float64 {
 
 func (r *Runtime) priceOverride() [2]float64 {
 	return r.orDefault().PriceOverride
+}
+
+// KnownModels returns the model names in the built-in price table, sorted.
+// They are name prefixes without a provider (gpt-4.1, claude-sonnet-4).
+func KnownModels() []string {
+	out := make([]string, 0, len(builtinPrices))
+	for k := range builtinPrices {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

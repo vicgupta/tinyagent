@@ -67,6 +67,12 @@ var subcommands = []subcommand{
 		runBare: true,
 	},
 	{
+		name: "web", brief: "chat in the browser: a local web UI (--port, --no-open)", summary: "start the chat web UI: serve it on 127.0.0.1 with a per-run token and open the default browser to it; each message is one turn of the same conversation as tinyagent chat (same as --web)",
+		base:    []string{"--web"},
+		runBare: true,
+		options: map[string]string{"port": "web-port", "no-open": "web-no-open"},
+	},
+	{
 		name: "init", brief: "write ./tinyagent.yaml in --cwd (--force, --migrate)", summary: "write a commented starter ./tinyagent.yaml in --cwd, or with -c to that path (same as --init-config)",
 		base:    []string{"--init-config"},
 		runBare: true,
@@ -347,7 +353,9 @@ func printSubcommandHelp(w io.Writer, s *subcommand) {
 		}
 		printRows(w, rows)
 	}
-	if s.runBare {
+	if s.name == "web" {
+		fmt.Fprintln(w, "\nAny chat flag (-m, --cwd, --sandbox, --memory, ...) may follow and applies to the session.\nEvery --flag form keeps working without the subcommand.")
+	} else if s.runBare {
 		fmt.Fprintln(w, "\n--cwd <dir> and -c <path> choose where the file goes.\nEvery --flag form keeps working without the subcommand.")
 	} else if len(s.base) > 0 {
 		fmt.Fprintf(w, "\nAny other tinyagent flag (-t, -m, --cwd, ...) may follow.\nEvery --flag form keeps working without the subcommand.\nA task starting with %q is passed with -t, e.g. tinyagent -t %q.\n", s.name, s.name+" ...")

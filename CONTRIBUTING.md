@@ -54,6 +54,7 @@ If you add or remove a direct dependency, update this list too;
 
 ```
 cmd/tinyagent/        CLI entrypoint, flag parsing, main loop glue; help.go holds --help and help topics (help workflows)
+cmd/tinyagent/web/    tinyagent web's page (HTML/CSS/JS, hand-written, embedded with go:embed; no build step, never commit generated files); web.go serves it, chat_session.go is the session core shared with chat
 internal/agent/       the run loop, compaction, tool dispatch; build an Agent with agent.New (it validates the options)
 internal/config/      YAML config + built-in defaults; memory.toml is read only from --cwd
 internal/dotenv/      loads ./.env from --cwd at startup (real env wins, values never logged); tests that write a .env should unset its keys with t.Setenv+os.Unsetenv so they're restored
@@ -135,6 +136,12 @@ Don't construct a `tools.Executor` literal anywhere else in `cmd/tinyagent`;
   `go vet`/`go test`, not at merge time.
 - When resolving conflicts, keep **both** semantic behaviors — never drop an
   exit path, error branch, or test helper while taking one side.
+- **Web UI** (`cmd/tinyagent/web.go`, `web/`): handler tests in `web_test.go`
+  drive the real server through `httptest` with the fake provider
+  (`newACPProvider`), so no network is used. The browser-side Markdown renderer is
+  checked by `web/ui_test.js`, which `TestWebUIScripts` runs when `node` is installed.
+  Keep the page dependency-free and escape everything model-provided before it
+  reaches the DOM.
 - **Chat line editor** (`cmd/tinyagent/lineedit.go`): drive it through the fake
   terminal in `lineedit_redraw_test.go` (`termEditor`), which models CR/LF,
   cursor moves, clears, rune widths and autowrap. Assert on the screen and on

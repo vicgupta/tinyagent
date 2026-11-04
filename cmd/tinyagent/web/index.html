@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>TinyAgent</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/markdown.js" defer></script>
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#composer-input">Skip to message box</a>
+<div id="app" class="app">
+  <aside id="sidebar" class="sidebar" aria-label="Conversations">
+    <div class="sidebar-head">
+      <span class="brand">TinyAgent</span>
+      <button id="new-chat" class="btn primary" title="New chat (Ctrl+Shift+O)">+ New chat</button>
+    </div>
+    <label class="sr-only" for="session-search">Search conversations</label>
+    <input id="session-search" class="input" type="search" placeholder="Search conversations (Ctrl+Shift+F)" autocomplete="off">
+    <ul id="sessions" class="sessions" role="listbox" aria-label="Saved conversations"></ul>
+    <div class="sidebar-foot">
+      <button id="project-btn" class="btn ghost" title="AGENTS.md and memory">Project: AGENTS.md &amp; memory</button>
+    </div>
+  </aside>
+  <main class="main">
+    <header class="topbar">
+      <button id="toggle-sidebar" class="btn ghost icon" aria-label="Toggle sidebar" aria-controls="sidebar" aria-expanded="true">☰</button>
+      <div class="model-picker">
+        <label for="model-input" class="sr-only">Model</label>
+        <input id="model-input" class="input" list="model-list" spellcheck="false" autocomplete="off" title="Model (Ctrl+Shift+M): provider/model">
+        <datalist id="model-list"></datalist>
+        <button id="model-apply" class="btn">Switch</button>
+      </div>
+      <div class="spacer"></div>
+      <button id="palette-btn" class="btn ghost" title="Command palette (Ctrl+K)">⌘K Commands</button>
+      <button id="theme-btn" class="btn ghost icon" aria-label="Theme: system" title="Theme (system / light / dark)">◐</button>
+      <button id="help-btn" class="btn ghost icon" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">?</button>
+    </header>
+    <div id="banner" class="banner" role="status" hidden></div>
+    <section id="log" class="log" aria-label="Conversation" aria-live="polite" tabindex="-1">
+      <div id="empty" class="empty">
+        <h1>What should TinyAgent do?</h1>
+        <p>Messages run as turns of one conversation, exactly like <code>tinyagent chat</code>. Type <kbd>/</kbd> for commands, <kbd>Ctrl</kbd>+<kbd>K</kbd> for the palette, <kbd>?</kbd> for shortcuts.</p>
+      </div>
+      <div id="messages"></div>
+    </section>
+    <button id="jump" class="jump btn" hidden aria-label="Jump to latest">↓ Latest</button>
+    <form id="composer" class="composer" autocomplete="off">
+      <div id="attachments" class="attachments" aria-label="Attachments"></div>
+      <div id="slash-menu" class="menu" role="listbox" aria-label="Commands" hidden></div>
+      <div class="composer-row">
+        <label for="composer-input" class="sr-only">Message</label>
+        <textarea id="composer-input" rows="1" placeholder="Message TinyAgent — Enter to send, Shift+Enter for a new line, / for commands" aria-autocomplete="list" aria-controls="slash-menu"></textarea>
+        <label class="btn ghost icon attach" title="Attach images or text files" aria-label="Attach files">📎<input id="file-input" type="file" multiple hidden></label>
+        <button id="send" class="btn primary" type="submit">Send</button>
+        <button id="stop" class="btn danger" type="button" hidden title="Stop (Esc)">■ Stop</button>
+      </div>
+    </form>
+    <footer id="status" class="status" aria-label="Status"></footer>
+  </main>
+</div>
+<div id="drop" class="drop" hidden>Drop images or text files to attach</div>
+<dialog id="palette" class="dialog palette" aria-label="Command palette">
+  <input id="palette-input" class="input" placeholder="Type a command…" autocomplete="off" aria-controls="palette-list">
+  <ul id="palette-list" class="menu static" role="listbox"></ul>
+</dialog>
+<dialog id="help" class="dialog" aria-labelledby="help-title">
+  <h2 id="help-title">Commands and shortcuts</h2>
+  <div id="help-body"></div>
+  <form method="dialog"><button class="btn">Close</button></form>
+</dialog>
+<dialog id="project" class="dialog wide" aria-labelledby="project-title">
+  <h2 id="project-title">Project</h2>
+  <div id="project-body"></div>
+  <form method="dialog"><button class="btn">Close</button></form>
+</dialog>
+</body>
+</html>
