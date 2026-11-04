@@ -36,7 +36,7 @@ func TestApplyPinsRecordedSettings(t *testing.T) {
 				"subagents":        cfg.Subagents.Enabled,
 				"workers":          cfg.Subagents.Workers != nil && cfg.Subagents.Workers.Enabled,
 				"ask_user":         cfg.AskUser.Enabled,
-				"web_fetch":        cfg.WebFetch.Enabled,
+				"web_fetch":        *cfg.WebFetch.Enabled,
 				"lsp":              cfg.LSP.Enabled,
 				"scoped_agents_md": cfg.ScopedAgentsMD,
 				"skills":           cfg.SkillsOn(),
@@ -56,7 +56,7 @@ func allOnConfig() config.AgentConfig {
 	c.ReadOnly, c.ApplyPatch, c.ScopedAgentsMD, c.Skills = true, true, true, config.BoolPtr(true)
 	c.Plan.Enabled, c.Images.Enabled, c.Subagents.Enabled = true, true, true
 	c.Subagents.Workers = &config.Workers{Enabled: true}
-	c.AskUser.Enabled, c.WebFetch.Enabled, c.LSP.Enabled, c.Memory.Enabled = true, true, true, true
+	c.AskUser.Enabled, c.WebFetch.Enabled, c.LSP.Enabled, c.Memory.Enabled = true, config.BoolPtr(true), true, true
 	return c
 }
 

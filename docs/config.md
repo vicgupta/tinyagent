@@ -134,8 +134,8 @@ ask_user:
   enabled: false          # offer the ask_user tool (same as --ask-user); see Asking for input
   max_questions: 3        # questions per run, counted across resumes; 1 to 20
 web_fetch:
-  enabled: false          # offer the web_fetch tool (same as --web-fetch)
-  allowed_domains: []     # hosts it may read, e.g. [pkg.go.dev, "*.python.org"]; required when enabled
+  enabled: true           # offer the web_fetch tool (default; off under lockdown unless set); false = --no-web-fetch
+  allowed_domains: []     # narrow it to these hosts, e.g. [pkg.go.dev, "*.python.org"]; empty = any public host
   max_bytes: 2097152      # response bytes read per fetch (2 MiB); must be >= 1
   timeout_seconds: 20     # per fetch, including redirects; 1 to 120
 lsp:                      # language servers; see Language servers (LSP)

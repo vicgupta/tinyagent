@@ -72,6 +72,10 @@ inputs:
     description: Pass `--lockdown` (untrusted-content lockdown; once the run reads untrusted content, commands and MCP tools are refused). true or false; false passes nothing, so the config decides.
     required: false
     default: "false"
+  web-fetch:
+    description: Offer the `web_fetch` tool (reads public URLs). true or false; false (the default in the Action) passes `--no-web-fetch`, true passes nothing, so the config or tinyagent's default (on) decides.
+    required: false
+    default: "false"
   untrusted-task:
     description: Pass `--untrusted-task` (the task is untrusted text such as an issue body, so the run starts tainted). Requires lockdown (the lockdown input or untrusted_content.enabled in config). true or false.
     required: false
@@ -192,6 +196,7 @@ runs:
         INPUT_SANDBOX: ${{ inputs.sandbox }}
         INPUT_LOCKDOWN: ${{ inputs.lockdown }}
         INPUT_UNTRUSTED_TASK: ${{ inputs.untrusted-task }}
+        INPUT_WEB_FETCH: ${{ inputs.web-fetch }}
         INPUT_OUTPUT_SCHEMA: ${{ inputs.output-schema }}
         INPUT_ARGS: ${{ inputs.args }}
         INPUT_ATTEMPTS: ${{ inputs.attempts }}

@@ -29,7 +29,7 @@ func checkResumeFlags(fs *flag.FlagSet, o options, src *trajectory.Trajectory) i
 		Subagents:      opt(o.subagents, "subagents"),
 		Workers:        opt(o.workers, "workers"),
 		AskUser:        opt(o.askUser, "ask-user"),
-		WebFetch:       opt(o.webFetch, "web-fetch"),
+		WebFetch:       webFetchResumeOpt(fs, o),
 		LSP:            opt(o.lsp, "lsp"),
 		ScopedAgentsMD: opt(o.scopedAgentsMD, "scoped-agents-md"),
 		Skills:         resume.Opt{Set: skillsSet, On: skillsOn},
@@ -52,4 +52,15 @@ func renderResumeCheck(err error) int {
 		return 2
 	}
 	return fail(fmt.Errorf("resume: %w", err))
+}
+
+// webFetchResumeOpt is the explicit --web-fetch / --no-web-fetch setting
+// for the resume check; neither flag (or a conflicting pair, reported
+// later) leaves the checkpoint's recorded setting alone.
+func webFetchResumeOpt(fs *flag.FlagSet, o options) resume.Opt {
+	v, err := webFetchFlag(fs, o)
+	if err != nil || v == nil {
+		return resume.Opt{}
+	}
+	return resume.Opt{Set: true, On: *v}
 }

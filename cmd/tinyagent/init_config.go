@@ -36,6 +36,9 @@ const starterConfig = `# tinyagent project config (./tinyagent.yaml). Flags over
 #   max_entry_size: 500       # characters per entry (1-4000)
 #   default_tags: []          # tags added to every new entry
 #   # memory.toml and TINYAGENT_MEMORY_* override these: tinyagent --memory-help
+# web_fetch:                  # read public web pages; on by default (off under lockdown unless enabled)
+#   enabled: true             # false = --no-web-fetch; page content is untrusted input
+#   allowed_domains: []       # narrow to these hosts; empty = any public host
 # untrusted_content:          # lockdown: once a web_fetch or MCP result or a review diff enters the run,
 #   enabled: false            # refuse commands, MCP tools and other web_fetch hosts (same as --lockdown)
 #   lockdown:                 # sources and per-MCP-server untrusted/lockdown_allowed: docs/permissions.md "Untrusted-content lockdown"

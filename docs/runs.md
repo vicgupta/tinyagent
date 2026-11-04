@@ -2,7 +2,7 @@
 
 ### Reviewing changes
 
-`--review`, `--review-base <ref>` and `--review-commit <rev>` review one Git change set without giving the model a shell. tinyagent runs fixed, read-only `git` commands itself, puts the diff in the first user message with built-in review instructions, and runs the model with the [read-only](subcommands.md#flags) tool set (plus any of `skill`, `web_fetch`, `lsp` and `delegate` you turned on) so it can read the surrounding code. The model reports findings ordered by severity, each with `file:line`, a severity and a short failure scenario. Nothing in the working tree or index changes.
+`--review`, `--review-base <ref>` and `--review-commit <rev>` review one Git change set without giving the model a shell. tinyagent runs fixed, read-only `git` commands itself, puts the diff in the first user message with built-in review instructions, and runs the model with the [read-only](subcommands.md#flags) tool set (plus `web_fetch` unless it is off, and any of `skill`, `lsp` and `delegate` you turned on) so it can read the surrounding code. The model reports findings ordered by severity, each with `file:line`, a severity and a short failure scenario. Nothing in the working tree or index changes.
 
 ```sh
 tinyagent --review                                  # staged + unstaged + untracked vs HEAD

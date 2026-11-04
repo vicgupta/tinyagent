@@ -118,12 +118,9 @@ type WebFetcher struct {
 }
 
 // NewWebFetcher returns a fetcher for allowlist entries in the
-// sandbox_allowed_domains syntax. An empty allowlist or a bad entry is an
-// error. maxBytes and timeout of 0 use the defaults.
+// sandbox_allowed_domains syntax. An empty allowlist allows any public
+// host (non-public addresses stay blocked); a bad entry is an error. maxBytes and timeout of 0 use the defaults.
 func NewWebFetcher(domains []string, maxBytes int, timeout time.Duration, userAgent string) (*WebFetcher, error) {
-	if len(domains) == 0 {
-		return nil, errors.New("web_fetch.allowed_domains is empty; list the hosts web_fetch may read")
-	}
 	rules, err := sandboxnet.ParseRules(domains)
 	if err != nil {
 		return nil, fmt.Errorf("web_fetch.allowed_domains %v", err)
@@ -254,7 +251,7 @@ func (f *WebFetcher) get(ctx context.Context, u *url.URL) (*http.Response, error
 		}
 		port = n
 	}
-	if !f.allowed(host, port) {
+	if len(f.rules) > 0 && !f.allowed(host, port) {
 		return nil, &webFetchDenied{WebFetchDeniedHost, fmt.Sprintf("host %s (port %d) is not in web_fetch.allowed_domains", host, port)}
 	}
 	if f.Gate != nil {

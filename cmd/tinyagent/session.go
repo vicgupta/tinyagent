@@ -134,9 +134,6 @@ func (s *session) setup(ctx context.Context, m sessionMode) (err error) {
 	if err := checkWorkers(cfg, false, root); err != nil {
 		return err
 	}
-	if flagWasSet(fs, "web-fetch") {
-		cfg.WebFetch.Enabled = o.webFetch
-	}
 	m.beforeWebFetch(&cfg)
 	if s.webFetch, err = newWebFetcher(fs, *o, &cfg); err != nil {
 		return err

@@ -15,12 +15,19 @@ func TestWebFetchFlagAndConfig(t *testing.T) {
 	os.WriteFile(onCfg, []byte("web_fetch:\n  enabled: true\n  allowed_domains: [pkg.go.dev, \"*.python.org\"]\n"), 0o644)
 	listCfg := filepath.Join(dir, "list.yaml")
 	os.WriteFile(listCfg, []byte("web_fetch:\n  allowed_domains: [pkg.go.dev]\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "off.yaml"), []byte("web_fetch:\n  enabled: false\n"), 0o644)
 	for _, c := range []struct {
 		name, line string
 		want       bool
 		args       []string
 	}{
-		{"default", "", false, []string{"-c", emptyCfg}},
+		{"default", "web_fetch: any public host", true, []string{"-c", emptyCfg}},
+		{"no-web-fetch", "", false, []string{"-c", emptyCfg, "--no-web-fetch"}},
+		{"web-fetch=false", "", false, []string{"-c", emptyCfg, "--web-fetch=false"}},
+		{"config off", "", false, []string{"-c", filepath.Join(dir, "off.yaml")}},
+		{"lockdown default off", "", false, []string{"-c", emptyCfg, "--lockdown"}},
+		{"lockdown explicit on", "web_fetch: any public host", true, []string{"-c", emptyCfg, "--lockdown", "--web-fetch"}},
+		{"allowlist without enabled", "web_fetch: 1 domain (pkg.go.dev)", true, []string{"-c", listCfg}},
 		{"config", "web_fetch: 2 domains (pkg.go.dev, *.python.org)", true, []string{"-c", onCfg}},
 		{"flag", "web_fetch: 1 domain (pkg.go.dev)", true, []string{"-c", listCfg, "--web-fetch"}},
 		{"flag list replaces config", "web_fetch: 2 domains (docs.rs, go.dev)", true,
@@ -46,7 +53,7 @@ func TestWebFetchFlagAndConfig(t *testing.T) {
 			if c.line != "" && !strings.Contains(stderr, c.line) {
 				t.Errorf("stderr lacks %q:\n%s", c.line, stderr)
 			}
-			if c.line == "" && strings.Contains(stderr, "web_fetch") {
+			if c.line == "" && (strings.HasPrefix(stderr, "web_fetch:") || strings.Contains(stderr, "\nweb_fetch:")) {
 				t.Errorf("stderr mentions web_fetch while off:\n%s", stderr)
 			}
 		})
@@ -65,13 +72,13 @@ func TestWebFetchInvalidSettingsExit2(t *testing.T) {
 		name, want string
 		args       []string
 	}{
-		{"empty allowlist", "web_fetch.allowed_domains is empty", []string{"-c", emptyCfg, "--web-fetch"}},
+		{"flags conflict", "--web-fetch and --no-web-fetch conflict", []string{"-c", emptyCfg, "--web-fetch", "--no-web-fetch"}},
 		{"bare star", "web_fetch.allowed_domains", []string{"-c", cfg("star.yaml", "web_fetch: {enabled: true, allowed_domains: [\"*\"]}\n")}},
 		{"bare star flag", "*", []string{"-c", emptyCfg, "--web-fetch", "--web-fetch-allow-domain", "*"}},
 		{"timeout 0", "web_fetch.timeout_seconds", []string{"-c", cfg("t0.yaml", "web_fetch: {timeout_seconds: 0}\n")}},
 		{"timeout 121", "web_fetch.timeout_seconds", []string{"-c", cfg("t121.yaml", "web_fetch: {timeout_seconds: 121}\n")}},
 		{"max_bytes 0", "web_fetch.max_bytes", []string{"-c", cfg("mb.yaml", "web_fetch: {max_bytes: 0}\n")}},
-		{"allow-domain without enabling", "--web-fetch-allow-domain requires --web-fetch", []string{"-c", emptyCfg, "--web-fetch-allow-domain", "go.dev"}},
+		{"allow-domain while disabled", "--web-fetch-allow-domain needs web_fetch on", []string{"-c", emptyCfg, "--no-web-fetch", "--web-fetch-allow-domain", "go.dev"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f := &fakeResponses{replies: []string{responsesSubmit}}

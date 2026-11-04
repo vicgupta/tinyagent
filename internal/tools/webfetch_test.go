@@ -169,8 +169,15 @@ func TestWebFetchAllowlist(t *testing.T) { // AC5
 	if _, err := NewWebFetcher([]string{"*"}, 0, 0, "ua"); err == nil {
 		t.Error("bare * accepted")
 	}
-	if _, err := NewWebFetcher(nil, 0, 0, "ua"); err == nil {
-		t.Error("empty allowlist accepted")
+	// An empty allowlist means any public host; non-public ones stay refused.
+	any, err := NewWebFetcher(nil, 0, 0, "ua")
+	if err != nil {
+		t.Fatalf("empty allowlist: %v", err)
+	}
+	for _, u := range []string{"http://127.0.0.1/", "http://10.0.0.1/", "http://169.254.169.254/latest/meta-data/", "http://[::1]/"} {
+		if _, err := any.Fetch(context.Background(), u); err == nil {
+			t.Errorf("empty allowlist fetched non-public %s", u)
+		}
 	}
 }
 

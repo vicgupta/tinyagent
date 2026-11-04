@@ -10,7 +10,7 @@ import (
 
 func TestWebFetchConfig(t *testing.T) {
 	d := Default().WebFetch
-	if d.Enabled || len(d.AllowedDomains) != 0 || d.MaxBytes != 2097152 || d.TimeoutSeconds != 20 {
+	if d.Enabled != nil || !d.On(false) || d.On(true) || len(d.AllowedDomains) != 0 || d.MaxBytes != 2097152 || d.TimeoutSeconds != 20 {
 		t.Fatalf("defaults = %+v", d)
 	}
 	p := filepath.Join(t.TempDir(), "c.yaml")
@@ -19,7 +19,7 @@ func TestWebFetchConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := WebFetch{Enabled: true, AllowedDomains: []string{"pkg.go.dev", "*.python.org"}, MaxBytes: 2097152, TimeoutSeconds: 20}
+	want := WebFetch{Enabled: BoolPtr(true), AllowedDomains: []string{"pkg.go.dev", "*.python.org"}, MaxBytes: 2097152, TimeoutSeconds: 20}
 	if !reflect.DeepEqual(cfg.WebFetch, want) {
 		t.Fatalf("got %+v", cfg.WebFetch)
 	}
@@ -37,6 +37,14 @@ func TestWebFetchConfig(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), c.want) || !errors.As(err, &invalid) {
 			t.Errorf("%s: err = %v, want InvalidError naming %q", c.yaml, err, c.want)
 		}
+	}
+	write(t, p, "web_fetch: {enabled: false}\n")
+	if cfg, err := Load(p); err != nil || cfg.WebFetch.On(false) {
+		t.Errorf("enabled: false: on=%v err=%v", cfg.WebFetch.On(false), err)
+	}
+	write(t, p, "web_fetch: {enabled: true}\n")
+	if cfg, err := Load(p); err != nil || !cfg.WebFetch.On(true) {
+		t.Errorf("enabled: true under lockdown: on=%v err=%v", cfg.WebFetch.On(true), err)
 	}
 	write(t, p, "web_fetch: {bogus: 1}\n")
 	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "bogus") {
