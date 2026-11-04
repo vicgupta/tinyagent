@@ -198,6 +198,7 @@
     els.status.textContent = "";
     function item(label, val, title) { var s = el("span", null); s.appendChild(document.createTextNode(label + " ")); var c = el("code", null, val); s.appendChild(c); if (title) s.title = title; els.status.appendChild(s); }
     item("model", st.model);
+    if (st.handoff) { var hb = el("span", "badge on", "handoff"); hb.title = "This model hands each message to its own CLI and returns only the final answer: no tool cards, and TinyAgent's tools, sandbox and subagents don't apply."; els.status.appendChild(hb); }
     item("cwd", st.cwd);
     item("turns", String(st.turns));
     var u = st.usage || {};

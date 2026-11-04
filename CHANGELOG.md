@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- `.env`: a lowercase `model=provider/name` line now sets the model, as an alias of `AGENT_MODEL`. Before, it was loaded as a variable named `model` that nothing reads, so `tinyagent web` (and chat and `-t` runs) silently fell back to `openai/gpt-4o` and then failed with `OPENAI_API_KEY is not set`. An `AGENT_MODEL` line in the same file wins over `model=`, and a real `AGENT_MODEL` in the environment wins over both. `-v` reports it as `loaded AGENT_MODEL from .env`. See [.env file](docs/config.md#env-file).
+
+### Changed
+
+- `tinyagent web` shows a `handoff` badge in the status bar when the model is a CLI handoff provider (`claude-code`, `codex-exec`, `opencode`). Those turns return only the CLI's final answer, so there are no tool cards, and TinyAgent's tools, sandbox and subagents don't apply. `/api/state` has a new `handoff` field. See [Web UI](docs/web.md).
+
 ## [v0.17.0] - 2026-11-04
 
 ### Added

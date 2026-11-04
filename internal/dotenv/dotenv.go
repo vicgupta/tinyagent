@@ -16,6 +16,12 @@ import (
 // FileName is the only file read: ./.env relative to the working directory.
 const FileName = ".env"
 
+// Aliases maps a .env key that has no environment meaning of its own onto
+// the variable tinyagent reads. A lowercase model=provider/name line sets
+// AGENT_MODEL. An AGENT_MODEL line in the same file wins over the alias, and
+// a real AGENT_MODEL in the environment wins over both.
+var Aliases = map[string]string{"model": "AGENT_MODEL"}
+
 // Load reads dir/.env and sets every variable not already present in the
 // environment. A missing file is not an error. It returns the names (never
 // the values) of the variables it set.
@@ -33,6 +39,8 @@ func load(path string, lookup func(string) (string, bool), set func(string, stri
 	}
 	defer f.Close()
 	var names []string
+	aliased := map[string]string{}
+	var aliasOrder []string
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	for n := 1; sc.Scan(); n++ {
@@ -43,6 +51,13 @@ func load(path string, lookup func(string) (string, bool), set func(string, stri
 		if !ok {
 			continue
 		}
+		if target, isAlias := Aliases[k]; isAlias {
+			if _, seen := aliased[target]; !seen {
+				aliasOrder = append(aliasOrder, target)
+			}
+			aliased[target] = v
+			continue
+		}
 		if _, exists := lookup(k); exists {
 			continue
 		}
@@ -51,7 +66,19 @@ func load(path string, lookup func(string) (string, bool), set func(string, stri
 		}
 		names = append(names, k)
 	}
-	return names, sc.Err()
+	if err := sc.Err(); err != nil {
+		return names, err
+	}
+	for _, k := range aliasOrder {
+		if _, exists := lookup(k); exists {
+			continue
+		}
+		if err := set(k, aliased[k]); err != nil {
+			return names, fmt.Errorf("%s: setting %s: %w", FileName, k, err)
+		}
+		names = append(names, k)
+	}
+	return names, nil
 }
 
 // parseLine parses one line. Blank lines and # comments return ok=false.

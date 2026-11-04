@@ -26,6 +26,7 @@ AGENT_MODEL=anthropic/claude-sonnet-4-5
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
+- `model=provider/name` (lowercase) is accepted as an alias of `AGENT_MODEL`, so `model=codex/gpt-5` works. If the file has both, the `AGENT_MODEL` line wins. A real `AGENT_MODEL` in the environment still wins over both. Other keys are case-sensitive and set as written.
 - Only `./.env` in `--cwd` is read: no parent directories, no home-directory file. A missing `.env` is fine.
 - A variable already set in the environment (even to an empty value) is left alone, so real environment variables win over `.env`, and explicit flags such as `-m` win over both.
 - Format: `KEY=value` lines, optional `export ` prefix, `#` comment lines and ` # trailing comments` on unquoted values, `'single'` (literal) or `"double"` (with `\n`, `\t`, `\"`, `\\` escapes) quotes. A malformed line is an error (exit 2) naming `.env` and the line number, never the value.
