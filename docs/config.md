@@ -14,7 +14,23 @@ A `tinyagent.yaml` that exists but can't be read or parsed is an error naming th
 
 **The per-user config is no longer read.** Earlier versions loaded `~/.config/tinyagent/config.yaml` (macOS `~/Library/Application Support/tinyagent/config.yaml`, Windows `%AppData%\tinyagent\config.yaml`). That file is now ignored; when it exists and no `tinyagent.yaml` was found, tinyagent prints `note: user config <path> is no longer read; run tinyagent init --migrate to copy it to ./tinyagent.yaml`. `tinyagent init --migrate` copies it into `--cwd` once (it refuses an existing `tinyagent.yaml` unless `--force`, and never deletes the original). To keep one config for many projects, pass it with `-c`, e.g. an alias `tinyagent -c ~/.config/tinyagent/config.yaml`.
 
-**Precedence**, highest first: explicit command-line flags, environment variables (such as `$AGENT_MODEL`, which still outranks the file's `model:`), the selected `--profile`, the config file, the built-in defaults. A flag counts only when given, so `--read-only=false` overrides `read_only: true`, and a repeatable list flag (`--fallback-model`, `--verify-check`, ...) replaces the file's list rather than adding to it.
+**Precedence**, highest first: explicit command-line flags, environment variables (such as `$AGENT_MODEL`, which still outranks the file's `model:`), variables from [`./.env`](#env-file), the selected `--profile`, the config file, the built-in defaults. A flag counts only when given, so `--read-only=false` overrides `read_only: true`, and a repeatable list flag (`--fallback-model`, `--verify-check`, ...) replaces the file's list rather than adding to it.
+
+### .env file
+
+When `.env` exists in `--cwd` (default `.`), tinyagent loads it at startup, before any mode runs, so one-shot runs (`-t`), `tinyagent chat`/`-i`, `--check`, `--acp` and subcommands all see the same settings: the model (`AGENT_MODEL`), API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, ...), base URLs (`OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`, `OLLAMA_HOST`) and any other variable tinyagent or a configured `api_key_env` reads.
+
+```sh
+# .env
+AGENT_MODEL=anthropic/claude-sonnet-4-5
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+- Only `./.env` in `--cwd` is read: no parent directories, no home-directory file. A missing `.env` is fine.
+- A variable already set in the environment (even to an empty value) is left alone, so real environment variables win over `.env`, and explicit flags such as `-m` win over both.
+- Format: `KEY=value` lines, optional `export ` prefix, `#` comment lines and ` # trailing comments` on unquoted values, `'single'` (literal) or `"double"` (with `\n`, `\t`, `\"`, `\\` escapes) quotes. A malformed line is an error (exit 2) naming `.env` and the line number, never the value.
+- Values are never printed. With `-v`, tinyagent prints the names of the variables it loaded (`loaded AGENT_MODEL, ANTHROPIC_API_KEY from .env`).
+- Keep `.env` out of Git (add it to `.gitignore`); consider a [`file_access`](permissions.md#restricting-file-access) `deny_read: [".env"]` rule so the model's file tools can't read it.
 
 ### Trusting a project config
 
@@ -30,7 +46,7 @@ Every key is optional, but an unrecognized key (a typo like `step_limt`) is an e
 
 Set `read_only: true` to make repository analysis the default. `--read-only` overrides the config value, including `--read-only=false`. In this mode, executor dispatch allows only `read_file`, `list_files`, and `grep`; writes, edits, shell commands, and background process tools are denied even if task text or repository instructions request them. Denials are returned to the model as tool errors. The restriction is model tool authority, not an OS sandbox (for that, see `--sandbox` under Sandboxing commands): an explicit `-o` trajectory destination can be written by the CLI, provider requests still send their context to the selected service, the Codex provider may refresh its credential file, the [`claude-code`, `codex-exec` and `opencode`](models.md#cli-handoff-providers) providers map read-only onto their CLI's own restriction (see there), and the opt-in [`web_fetch`](long-runs.md#web-fetch) tool, which only reads allowlisted URLs, stays available when enabled, as does the read-only [`lsp`](long-runs.md#language-servers-lsp) tool (its servers are still started and write logs under `.tinyagent/lsp`). `--update` is an administrative action outside task-tool policy. Readable secrets (unless hidden with [`file_access`](permissions.md#restricting-file-access) rules), symlinks that point outside `--cwd`, existing lexical path behavior, and AGENTS.md discovery retain their existing limitations; read-only mode does not make an untrusted repository safe.
 
-`model` saves a default model, so `tinyagent -t "fix the failing test"` needs no `-m`. The model is chosen in this order: `-m`/`--model` if given (even `-m openai/gpt-4o`), then a nonempty `$AGENT_MODEL`, then a nonempty `model` in the config, then `openai/gpt-4o`.
+`model` saves a default model, so `tinyagent -t "fix the failing test"` needs no `-m`. The model is chosen in this order: `-m`/`--model` if given (even `-m openai/gpt-4o`), then a nonempty `$AGENT_MODEL` (from the environment or [`./.env`](#env-file)), then a nonempty `model` in the config, then `openai/gpt-4o`.
 
 ```yaml
 model: ollama/llama3.1    # same <provider>/<model> syntax as -m

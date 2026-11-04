@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- `./.env` support: when `.env` exists in `--cwd`, tinyagent loads it once at startup, so `tinyagent chat`/`-i` (as well as `-t` runs, `--check`, `--acp` and subcommands) pick up `AGENT_MODEL`, API keys, base URLs and other variables from it. Previously no `.env` was read, so chat only saw variables exported in the shell. Precedence: flags > real environment variables (even empty ones) > `.env` > `--profile` > config file > defaults. Only `./.env` is read (no parent or home-directory file); a missing file is fine; a malformed line exits 2 naming the line, never the value; `-v` lists the loaded variable names. See [.env file](docs/config.md#env-file).
+
+### Tests
+
+- `TestCompletionFishCandidates` keeps only prefix matches, so it passes with fish 4 (now on the Ubuntu CI runner), which also returns substring matches (`--he` → `--check`).
+
 ### Docs
 
 - New [Setting up workflows](docs/workflow-guide.md) guide. It covers where the files live, required and defaulted fields, how to run a workflow (`-t`, `--workflow-name`, `-o`, `--workflow-observe`) and its limits, with three worked examples: one stage, a few stages with checks and retries, and the full plan → code → vet → test → verify-behavior pipeline. `TestWorkflowGuideExamples` loads every example so the guide can't drift from the loader. Linked from the README and docs/workflows.md.

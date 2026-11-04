@@ -386,11 +386,17 @@ func TestCompletionFishCandidates(t *testing.T) {
 			if err != nil {
 				t.Fatalf("fish completing %q: %v", tc.line, err)
 			}
+			lastWord := tc.line[strings.LastIndexByte(tc.line, ' ')+1:]
 			var got []string
 			for _, line := range strings.Split(strings.TrimSuffix(string(out), "\n"), "\n") {
 				if line != "" {
 					candidate, _, _ := strings.Cut(line, "\t")
-					got = append(got, candidate)
+					// Fish 4 also offers substring and fuzzy matches
+					// (--he -> --check); keep the prefix matches every
+					// version returns.
+					if strings.HasPrefix(candidate, lastWord) {
+						got = append(got, candidate)
+					}
 				}
 			}
 			slices.Sort(got)

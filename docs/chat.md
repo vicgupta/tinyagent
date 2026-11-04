@@ -9,6 +9,8 @@ tinyagent chat -- explain main.go       # the same, without quoting
 tinyagent chat --resume .tinyagent/chats/20261031-115411.json --cwd .   # pick a session back up
 ```
 
+Chat reads the model, API keys and other settings exactly as a normal run does, including from [`./.env`](config.md#env-file) in `--cwd`: an `AGENT_MODEL` there picks the chat model when neither `-m` nor a real `$AGENT_MODEL` is set.
+
 Press Ctrl-D (or type `/exit`) to quit. tinyagent prints the session's turns and cost, and the command that resumes it.
 
 ## What it looks like
