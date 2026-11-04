@@ -56,6 +56,7 @@ If you add or remove a direct dependency, update this list too;
 cmd/tinyagent/        CLI entrypoint, flag parsing, main loop glue; help.go holds --help and help topics (help workflows)
 internal/agent/       the run loop, compaction, tool dispatch; build an Agent with agent.New (it validates the options)
 internal/config/      YAML config + built-in defaults; memory.toml is read only from --cwd
+internal/dotenv/      loads ./.env from --cwd at startup (real env wins, values never logged); tests that write a .env should unset its keys with t.Setenv+os.Unsetenv so they're restored
 internal/cwdpath/     Resolve confines a config or env path to --cwd (refuses "..", absolute paths elsewhere and symlinks that leave it)
 internal/memory/      project memory stores (markdown and SQLite), always under ./.tinyagent/memory in --cwd; confine.go refuses paths that leave --cwd
 internal/model/       providers, price table, context windows; CLI handoff providers (claudecode.go, codexexec.go, opencode.go) share handoff.go
