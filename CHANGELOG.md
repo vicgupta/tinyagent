@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [v0.18.0] - 2026-11-05
+
 ### Added
 
 - **`web_search` tool, free and keyless, on by default.** The model can search the web and get a short numbered list of titles, URLs and snippets. No API key is needed or accepted: DuckDuckGo's HTML endpoint answers first, and Exa's public MCP endpoint (`mcp.exa.ai`, free per-IP tier) takes over on an error, timeout, 429, challenge page or empty result; set `web_search.searxng_url` to put your own SearXNG instance first. `web_search.providers` sets the order, and the result header names the provider that answered. Same defaults as `web_fetch`: `--no-web-search`/`--web-search=false` turn it off, it is off under lockdown unless enabled and in the GitHub Action (new `web-search` input, default `false`), kept with `--read-only`, never given to subagents, and `--resume` keeps the checkpoint's setting (older checkpoints resume without it). Results are untrusted (lockdown source `web_search`), and after taint `web_search` is refused. On start it prints `web_search: duckduckgo → exa`. Design credits: opencode's Exa MCP search and pi's DuckDuckGo search extensions. See [Web search](docs/long-runs.md#web-search).
