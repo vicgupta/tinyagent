@@ -39,7 +39,7 @@ func TestCheckLockdownStatus(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("--lockdown: exit %d; stderr:\n%s", code, stderr)
 	}
-	want := "on (from --lockdown) (sources: web_fetch, mcp, review, untrusted task; after taint: commands refused, web_fetch → 0 domains, mcp tools refused)"
+	want := "on (from --lockdown) (sources: web_fetch, web_search, mcp, review, untrusted task; after taint: commands refused, web_fetch → 0 domains, mcp tools refused)"
 	if got := reportLine(t, stdout, "lockdown"); got != want {
 		t.Errorf("--lockdown line\n got %q\nwant %q", got, want)
 	}

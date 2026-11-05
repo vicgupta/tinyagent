@@ -350,6 +350,10 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			t.ExitStatus, t.Submission = StatusError, "resume web_fetch setting differs from checkpoint"
 			return t
 		}
+		if t.WebSearchEnabled != (a.Tools.WebSearch != nil) {
+			t.ExitStatus, t.Submission = StatusError, "resume web_search setting differs from checkpoint"
+			return t
+		}
 		if t.LSPEnabled != (a.Tools.LSP != nil) {
 			t.ExitStatus, t.Submission = StatusError, "resume lsp setting differs from checkpoint"
 			return t
@@ -438,6 +442,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			SubagentsEnabled:      a.Tools.Delegate,
 			WorkersEnabled:        a.workersOn(),
 			WebFetchEnabled:       a.Tools.WebFetch != nil,
+			WebSearchEnabled:      a.Tools.WebSearch != nil,
 			LSPEnabled:            a.Tools.LSP != nil,
 			ScopedAgentsMDEnabled: a.scopedOn(),
 			AskUserEnabled:        a.Tools.AskUser,
@@ -704,6 +709,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 					res = a.runTool(ctx, t, call)
 				}
 				a.recordWebFetches()
+				a.recordWebSearches()
 				a.recordMemorySaves()
 				a.recordLSPEvents()
 				out, images, isError = res.Text, res.Images, res.IsError
@@ -1480,6 +1486,30 @@ func (a *Agent) recordWebFetches() {
 				trunc = ", truncated"
 			}
 			fmt.Fprintf(a.Err, "web_fetch: %s -> %d %s, %d bytes%s (%dms)\n", r.URL, r.Status, r.ContentType, r.Bytes, trunc, r.Duration.Milliseconds())
+		}
+	}
+}
+
+// recordWebSearches emits a web_search event, and with -v a stderr line
+// per provider tried, for each search the last tool call made.
+func (a *Agent) recordWebSearches() {
+	if a.Tools.WebSearch == nil {
+		return
+	}
+	for _, r := range a.Tools.WebSearch.TakeRecords() {
+		a.event("web_search", r.Fields())
+		if !a.Verbose {
+			continue
+		}
+		for _, at := range r.Attempts {
+			if at.Error != "" {
+				fmt.Fprintf(a.Err, "web_search: %q via %s failed: %s (%dms)\n", r.Query, at.Provider, at.Error, at.Duration.Milliseconds())
+			} else {
+				fmt.Fprintf(a.Err, "web_search: %q via %s -> %d results (%dms)\n", r.Query, at.Provider, at.Results, at.Duration.Milliseconds())
+			}
+		}
+		if len(r.Attempts) == 0 && r.Error != "" {
+			fmt.Fprintf(a.Err, "web_search: %q refused: %s\n", r.Query, r.Error)
 		}
 	}
 }

@@ -77,6 +77,9 @@ type Executor struct {
 	// WebFetch, when set, offers the opt-in web_fetch tool (also in
 	// read-only mode). nil leaves it off.
 	WebFetch *WebFetcher
+	// WebSearch, when set, offers web_search (also in read-only mode;
+	// never to subagents).
+	WebSearch *WebSearcher
 	// LSP, when set, offers the opt-in read-only lsp tool (also in
 	// read-only mode) and, with AfterEdit, appends language-server
 	// diagnostics to write_file, edit_file and apply_patch results. nil
@@ -461,8 +464,9 @@ func (e *Executor) run(ctx context.Context, name, raw string, edited *[]string) 
 	}
 	skillTool := name == skills.ToolName && e.Skills.Len() > 0
 	webFetch := name == WebFetchToolName && e.WebFetch != nil
+	webSearch := name == WebSearchToolName && e.WebSearch != nil
 	lspTool := name == LSPToolName && e.LSP != nil
-	if e.ReadOnly && !skillTool && !webFetch && !lspTool && (name != "read_file" && name != "list_files" && name != "grep") {
+	if e.ReadOnly && !skillTool && !webFetch && !webSearch && !lspTool && (name != "read_file" && name != "list_files" && name != "grep") {
 		return "", fmt.Errorf("tool %q is unavailable in read-only mode; only read_file, list_files, and grep are allowed", name)
 	}
 	var a args
@@ -473,6 +477,11 @@ func (e *Executor) run(ctx context.Context, name, raw string, edited *[]string) 
 	}
 	if webFetch {
 		return e.WebFetch.Fetch(ctx, a.URL)
+	}
+	if webSearch {
+		var q webSearchArgs
+		_ = json.Unmarshal([]byte(raw), &q)
+		return e.WebSearch.Search(ctx, q.Query)
 	}
 	if name == RememberToolName && e.Remember != nil {
 		return e.remember(raw)

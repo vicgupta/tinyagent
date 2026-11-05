@@ -24,6 +24,8 @@ bool lockdown "$INPUT_LOCKDOWN"
 bool untrusted-task "$INPUT_UNTRUSTED_TASK"
 INPUT_WEB_FETCH=${INPUT_WEB_FETCH:-false}
 bool web-fetch "$INPUT_WEB_FETCH"
+INPUT_WEB_SEARCH=${INPUT_WEB_SEARCH:-false}
+bool web-search "$INPUT_WEB_SEARCH"
 bool job-summary "$INPUT_JOB_SUMMARY"
 bool fail-on-error "$INPUT_FAIL_ON_ERROR"
 command -v jq >/dev/null 2>&1 || usage "jq is required to read tinyagent's result; install it before this step"
@@ -87,6 +89,8 @@ fi
 # CI runs read repository and issue content: web_fetch stays off unless the
 # web-fetch input is true.
 [ "$INPUT_WEB_FETCH" = true ] || args+=(--no-web-fetch)
+# The same for web_search: off unless the web-search input is true.
+[ "$INPUT_WEB_SEARCH" = true ] || args+=(--no-web-search)
 [ -z "$INPUT_OUTPUT_SCHEMA" ] || args+=(--output-schema "$INPUT_OUTPUT_SCHEMA")
 while IFS= read -r line || [ -n "$line" ]; do
 	[ -z "$line" ] || args+=("$line")

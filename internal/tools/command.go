@@ -43,7 +43,7 @@ func ReservedToolNames() []string {
 		names = append(names, s.Function.Name)
 	}
 	return append(names, PlanToolName, ViewImageToolName, ApplyPatchToolName, DelegateToolName,
-		WebFetchToolName, LSPToolName, skills.ToolName, "submit_result")
+		WebFetchToolName, WebSearchToolName, LSPToolName, skills.ToolName, "submit_result")
 }
 
 // NewCommandTools checks the command_tools definitions for a run rooted at

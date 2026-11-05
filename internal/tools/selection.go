@@ -30,6 +30,8 @@ type Selection struct {
 	Workers bool
 	// WebFetch offers web_fetch.
 	WebFetch bool
+	// WebSearch offers web_search.
+	WebSearch bool
 	// LSP offers lsp.
 	LSP bool
 	// AskUser offers ask_user.
@@ -61,6 +63,7 @@ func (e *Executor) Selection() Selection {
 		Delegate:     e.Delegate,
 		Workers:      e.Workers,
 		WebFetch:     e.WebFetch != nil,
+		WebSearch:    e.WebSearch != nil,
 		LSP:          e.LSP != nil,
 		AskUser:      e.AskUser,
 		Remember:     e.Remember != nil,
@@ -97,6 +100,9 @@ func (s Selection) Specs() []model.ToolSpec {
 	}
 	if s.WebFetch {
 		out = append(out, WebFetchSpec())
+	}
+	if s.WebSearch {
+		out = append(out, WebSearchSpec())
 	}
 	if s.LSP {
 		out = append(out, LSPSpec())
@@ -165,6 +171,7 @@ func (s Selection) Signature() string {
 		{s.ApplyPatch, "apply-patch-v1:"},
 		{s.Delegate, "subagents-v1:"},
 		{s.WebFetch, "web-fetch-v1:"},
+		{s.WebSearch, "web-search-v1:"},
 		{s.LSP, "lsp-v1:"},
 		{s.AskUser, "ask-user-v1:"},
 	} {

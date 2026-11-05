@@ -7,8 +7,9 @@ package tools
 // untrusted_content.sources values lockdown.SourceWebFetch and
 // lockdown.SourceMCP.
 const (
-	UntrustedWebFetch = "web_fetch"
-	UntrustedMCP      = "mcp"
+	UntrustedWebFetch  = "web_fetch"
+	UntrustedMCP       = "mcp"
+	UntrustedWebSearch = "web_search"
 )
 
 // UntrustedSource reports which untrusted source a result of the tool
@@ -21,6 +22,9 @@ func (e *Executor) UntrustedSource(name string) string {
 	}
 	if name == WebFetchToolName && e.WebFetch != nil {
 		return UntrustedWebFetch
+	}
+	if name == WebSearchToolName && e.WebSearch != nil {
+		return UntrustedWebSearch
 	}
 	for _, s := range e.ExternalSpecs {
 		if s.Function.Name == name {
@@ -35,7 +39,7 @@ func (e *Executor) UntrustedSource(name string) string {
 // or a call to one of the checkpoint's external tools. It is the
 // UntrustedSource rule for a run that only exists as a trajectory.
 func UntrustedHistoryCall(name string, externalTools []string) bool {
-	if name == WebFetchToolName {
+	if name == WebFetchToolName || name == WebSearchToolName {
 		return true
 	}
 	for _, n := range externalTools {

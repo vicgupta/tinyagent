@@ -61,6 +61,7 @@ func Selection(t *trajectory.Trajectory, set *skills.Set) tools.Selection {
 		Delegate:    t.SubagentsEnabled,
 		Workers:     t.WorkersEnabled,
 		WebFetch:    t.WebFetchEnabled,
+		WebSearch:   t.WebSearchEnabled,
 		LSP:         t.LSPEnabled,
 		AskUser:     t.AskUserEnabled,
 		Remember:    RememberOffered(t),

@@ -4,7 +4,7 @@
 curl -fsSL https://raw.githubusercontent.com/vicgupta/tinyagent/main/install.sh | sh
 ```
 
-A minimal coding agent in a single static Go binary. It gives an LLM ten base tools (`read_file`, `write_file`, `edit_file`, `undo_file`, `list_files`, `grep`, `bash`, and `start_process`, `read_process`, `stop_process` for background commands), plus `web_fetch` (on by default for public hosts; `--no-web-fetch` turns it off) and the opt-in `update_plan`, `skill`, `view_image`, `apply_patch`, `delegate`, `lsp`, and MCP resource (`list_mcp_resources`, `read_mcp_resource`) tools, and keeps a linear message history until the model submits.
+A minimal coding agent in a single static Go binary. It gives an LLM ten base tools (`read_file`, `write_file`, `edit_file`, `undo_file`, `list_files`, `grep`, `bash`, and `start_process`, `read_process`, `stop_process` for background commands), plus `web_fetch` (on by default for public hosts; `--no-web-fetch` turns it off), the keyless `web_search` (on by default; DuckDuckGo with Exa as backup; `--no-web-search` turns it off) and the opt-in `update_plan`, `skill`, `view_image`, `apply_patch`, `delegate`, `lsp`, and MCP resource (`list_mcp_resources`, `read_mcp_resource`) tools, and keeps a linear message history until the model submits.
 
 ## Install
 
@@ -131,7 +131,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 
 ## Features
 
-- Small set of file, search, shell and background-process tools, plus web fetch of public pages (on by default, optional host allowlist, private addresses always refused; `--no-web-fetch` turns it off) and opt-in planning, skills, images, patches, subagents (read-only researchers), workers (read-write builders in their own Git worktree), LSP and MCP tools.
+- Small set of file, search, shell and background-process tools, plus web fetch of public pages (on by default, optional host allowlist, private addresses always refused; `--no-web-fetch` turns it off), free keyless web search (DuckDuckGo, falling back to Exa's public MCP endpoint, or your own SearXNG; `--no-web-search` turns it off) and opt-in planning, skills, images, patches, subagents (read-only researchers), workers (read-write builders in their own Git worktree), LSP and MCP tools.
 - Per-role model routing (`models:` in config, `--aux-model`, `--delegate-model`, `--route`, keyword or `task_type` routes, `--no-routing`) for compaction, the verify review and delegated children, each role with its own fallback chain and a `usage_by_role` cost split in the summary, JSON, trajectory, `--log-db` and eval reports; off by default.
 - Many providers: OpenAI, Anthropic, OpenRouter, Ollama, a ChatGPT subscription through Codex, handoff to your installed Claude Code (`claude-code`), Codex CLI (`codex-exec`) or OpenCode (`opencode`), and your own OpenAI-compatible endpoints.
 - Interactive chat (`tinyagent chat` or `-i`): a multi-turn conversation on the terminal with line editing, history, Ctrl-C to stop a turn and Markdown replies rendered for the terminal (headings, lists, code blocks, tables; `/raw` to turn off), a compact tool activity line and slash commands (`/cost`, `/new`, `/save`, `/compact`, `/raw`); every turn gets the same tools as a run, including [command tools](docs/config.md#command-tools); every session is saved and can be resumed. See [Interactive chat](docs/chat.md).
@@ -182,7 +182,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 | Web UI (`tinyagent web`) | [docs/web.md](docs/web.md) |
 | Tasks: passing a task, task types, task-based routing | [docs/tasks.md](docs/tasks.md) |
 | Reviews, worktrees, best-of-N, resume, transcripts, follow-ups, asking for input, token and cost budgets | [docs/runs.md](docs/runs.md) |
-| Long runs, session handoff, images, tool output files (MCP results capped at 256 KiB), apply_patch, subagents (read-only researchers), workers (read-write builders), web fetch, LSP | [docs/long-runs.md](docs/long-runs.md) |
+| Long runs, session handoff, images, tool output files (MCP results capped at 256 KiB), apply_patch, subagents (read-only researchers), workers (read-write builders), web fetch, web search, LSP | [docs/long-runs.md](docs/long-runs.md) |
 | Planner (`update_plan`, `--plan-first`) | [docs/planner.md](docs/planner.md) |
 | Verify before stop (`--verify-on-stop`) | [docs/verify.md](docs/verify.md) |
 | `undo_file` and `--rewind` | [docs/undo.md](docs/undo.md) |

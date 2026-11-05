@@ -64,6 +64,8 @@ type options struct {
 	askUser                                          bool
 	webFetch                                         bool
 	noWebFetch                                       bool
+	webSearch                                        bool
+	noWebSearch                                      bool
 	webFetchAllowDomains                             domainList
 	lsp                                              bool
 	scopedAgentsMD                                   bool
@@ -177,6 +179,8 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.applyPatch, "apply-patch", false, "add the apply_patch tool: multi-file, multi-hunk edits in the *** Begin Patch format, checked before any write (default off; config apply_patch)")
 	fs.BoolVar(&o.webFetch, "web-fetch", true, "offer the web_fetch tool: read a public http(s) URL as text, in tinyagent's own process, separate from command network access; loopback, private, link-local and metadata addresses stay blocked. On by default (off under lockdown unless given); --web-fetch=false turns it off (config web_fetch.enabled)")
 	fs.BoolVar(&o.noWebFetch, "no-web-fetch", false, "turn the web_fetch tool off; same as --web-fetch=false")
+	fs.BoolVar(&o.webSearch, "web-search", true, "offer the web_search tool: search the web with keyless providers (web_search.providers; default duckduckgo, then exa as backup), in tinyagent's own process. On by default (off under lockdown unless given); --web-search=false turns it off (config web_search.enabled)")
+	fs.BoolVar(&o.noWebSearch, "no-web-search", false, "turn the web_search tool off; same as --web-search=false")
 	fs.Var(&o.webFetchAllowDomains, "web-fetch-allow-domain", "narrow web_fetch to this host (name, *.domain or IP, optional :port); repeatable, replaces web_fetch.allowed_domains; unset, any public host")
 	fs.BoolVar(&o.lsp, "lsp", false, "start the configured language servers (lsp.servers in -c or a trusted ./tinyagent.yaml (--trust-config)): append compiler diagnostics to edit results and add the read-only lsp tool (default off; config lsp.enabled)")
 	fs.BoolVar(&o.subagents, "subagents", false, "add the delegate tool: hand a task to a read-only subagent with a fresh context and get back only its report (default off; config subagents.enabled)")
@@ -600,6 +604,10 @@ func run() int {
 	if err != nil {
 		return configFail(err)
 	}
+	webSearch, err := newWebSearcher(fs, o, &cfg)
+	if err != nil {
+		return configFail(err)
+	}
 	if err := checkPlugins(&cfg, o.cwd, os.Stderr, o.verbose, true); err != nil {
 		return configFail(err)
 	}
@@ -857,6 +865,7 @@ func run() int {
 			subagents:   subagents,
 			workers:     workers,
 			webFetch:    webFetch,
+			webSearch:   webSearch,
 			lsp:         lspTools,
 			outputFiles: outputFiles,
 			fileAccess:  fileAccess,
@@ -1172,6 +1181,10 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if err != nil {
 		return configFail(err)
 	}
+	webSearch, err := newWebSearcher(fs, *o, &cfg)
+	if err != nil {
+		return configFail(err)
+	}
 	if err := checkPlugins(&cfg, o.cwd, os.Stderr, o.verbose, false); err != nil {
 		return configFail(err)
 	}
@@ -1370,6 +1383,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 			subagents:   subagents,
 			workers:     workers,
 			webFetch:    webFetch,
+			webSearch:   webSearch,
 			lsp:         lspTools,
 			outputFiles: outputFiles,
 			fileAccess:  fileAccess,
@@ -1631,6 +1645,53 @@ func webFetchFlag(fs *flag.FlagSet, o options) (*bool, error) {
 		return config.BoolPtr(o.webFetch), nil
 	}
 	return nil, nil
+}
+
+// webSearchFlag returns the explicit --web-search / --no-web-search
+// setting, or nil when neither was given.
+func webSearchFlag(fs *flag.FlagSet, o options) (*bool, error) {
+	onSet, offSet := flagWasSet(fs, "web-search"), flagWasSet(fs, "no-web-search")
+	switch {
+	case onSet && offSet && o.webSearch == o.noWebSearch:
+		return nil, errors.New("--web-search and --no-web-search conflict")
+	case offSet:
+		return config.BoolPtr(!o.noWebSearch), nil
+	case onSet:
+		return config.BoolPtr(o.webSearch), nil
+	}
+	return nil, nil
+}
+
+// newWebSearcher applies --web-search and --no-web-search to cfg and
+// returns the web_search tool, or nil when it is off. Like web_fetch it is
+// on by default and off under lockdown unless enabled explicitly. It prints
+// the provider order to stderr; no provider takes a key.
+func newWebSearcher(fs *flag.FlagSet, o options, cfg *config.AgentConfig) (*tools.WebSearcher, error) {
+	explicit, err := webSearchFlag(fs, o)
+	if err != nil {
+		return nil, &config.InvalidError{Err: err}
+	}
+	if explicit != nil {
+		cfg.WebSearch.Enabled = explicit
+	}
+	on := cfg.WebSearch.On(lockdownRequested(fs, o, cfg))
+	cfg.WebSearch.Enabled = config.BoolPtr(on)
+	if !on {
+		return nil, nil
+	}
+	w := cfg.WebSearch
+	if err := w.Validate(); err != nil {
+		return nil, &config.InvalidError{Err: err}
+	}
+	s, err := tools.NewWebSearcher(tools.WebSearchOptions{
+		Providers: w.ProviderOrder(), SearXNGURL: w.SearXNGURL, MaxResults: w.MaxResults,
+		Timeout: time.Duration(w.TimeoutSeconds) * time.Second, UserAgent: "tinyagent/" + currentVersion(),
+	})
+	if err != nil {
+		return nil, &config.InvalidError{Err: err}
+	}
+	fmt.Fprintf(os.Stderr, "web_search: %s\n", strings.Join(w.ProviderOrder(), " → "))
+	return s, nil
 }
 
 // lockdownRequested reports whether untrusted-content lockdown is on for
@@ -2397,6 +2458,9 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 	}
 	if wf := a.Tools.WebFetch; wf != nil {
 		started["web_fetch"] = map[string]any{"allowed_domains": wf.Domains}
+	}
+	if ws := a.Tools.WebSearch; ws != nil {
+		started["web_search"] = map[string]any{"providers": ws.Providers, "max_results": ws.MaxResults}
 	}
 	if l := a.Tools.LSP; l != nil {
 		started["lsp"] = map[string]any{"servers": l.Manager.Names()}

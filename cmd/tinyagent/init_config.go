@@ -39,6 +39,10 @@ const starterConfig = `# tinyagent project config (./tinyagent.yaml). Flags over
 # web_fetch:                  # read public web pages; on by default (off under lockdown unless enabled)
 #   enabled: true             # false = --no-web-fetch; page content is untrusted input
 #   allowed_domains: []       # narrow to these hosts; empty = any public host
+# web_search:                 # free, keyless search; on by default (off under lockdown unless enabled)
+#   enabled: true             # false = --no-web-search; results are untrusted input
+#   providers: [duckduckgo, exa]  # primary, then backup; add searxng with searxng_url
+#   searxng_url: ""           # your own SearXNG instance (goes first when set)
 # untrusted_content:          # lockdown: once a web_fetch or MCP result or a review diff enters the run,
 #   enabled: false            # refuse commands, MCP tools and other web_fetch hosts (same as --lockdown)
 #   lockdown:                 # sources and per-MCP-server untrusted/lockdown_allowed: docs/permissions.md "Untrusted-content lockdown"

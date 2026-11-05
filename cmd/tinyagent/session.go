@@ -46,6 +46,7 @@ type session struct {
 	closeEnv                     func()
 	mcp                          *mcptools.Registry
 	webFetch                     *tools.WebFetcher
+	webSearch                    *tools.WebSearcher
 	outputFiles                  *tools.OutputFiles
 	fileAccess                   *tools.FileAccess
 	extraDirs                    []tools.ExtraDir
@@ -136,6 +137,9 @@ func (s *session) setup(ctx context.Context, m sessionMode) (err error) {
 	}
 	m.beforeWebFetch(&cfg)
 	if s.webFetch, err = newWebFetcher(fs, *o, &cfg); err != nil {
+		return err
+	}
+	if s.webSearch, err = newWebSearcher(fs, *o, &cfg); err != nil {
 		return err
 	}
 	if err := checkPlugins(&cfg, o.cwd, os.Stderr, o.verbose, true); err != nil {
@@ -319,6 +323,7 @@ func (s *session) turnAgent(cfg config.AgentConfig, images []model.Image, r turn
 			subagents:   s.subagents,
 			workers:     s.workers,
 			webFetch:    s.webFetch,
+			webSearch:   s.webSearch,
 			lsp:         newLSP(cfg, s.root),
 			outputFiles: s.outputFiles,
 			fileAccess:  s.fileAccess,

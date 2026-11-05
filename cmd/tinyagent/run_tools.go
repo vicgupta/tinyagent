@@ -42,6 +42,7 @@ type toolWiring struct {
 	workers   *agent.Workers
 
 	webFetch    *tools.WebFetcher
+	webSearch   *tools.WebSearcher
 	lsp         *tools.LSP
 	outputFiles *tools.OutputFiles
 	fileAccess  *tools.FileAccess
@@ -71,6 +72,7 @@ func newRunExecutor(cfg config.AgentConfig, w toolWiring) *tools.Executor {
 		Workers:        w.workers != nil,
 		AskUser:        cfg.AskUser.Enabled,
 		WebFetch:       w.webFetch,
+		WebSearch:      w.webSearch,
 		LSP:            w.lsp,
 		OutputFiles:    w.outputFiles,
 		FileAccess:     w.fileAccess,
