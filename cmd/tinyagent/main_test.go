@@ -718,7 +718,7 @@ func TestUnpricedCostLimitWarning(t *testing.T) {
 				return
 			}
 			want := warn + c.args[1] + "; --cost-limit cannot be enforced. Set input_price_per_mtok and output_price_per_mtok in your config to enable cost tracking.\n"
-			if !strings.HasPrefix(strings.TrimPrefix(got, "web_fetch: any public host\n"), want) {
+			if !strings.HasPrefix(strings.TrimPrefix(strings.TrimPrefix(got, "web_fetch: any public host\n"), "web_search: duckduckgo → exa\n"), want) {
 				t.Errorf("stderr = %q, want it to start with %q", got, want)
 			}
 			if strings.Contains(out, "warning") {

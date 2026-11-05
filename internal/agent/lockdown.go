@@ -19,6 +19,8 @@ func (a *Agent) lockdownChannel(name string) string {
 	switch {
 	case name == tools.WebFetchToolName && a.Tools.WebFetch != nil:
 		return lockdown.ChannelWebFetch
+	case name == tools.WebSearchToolName && a.Tools.WebSearch != nil:
+		return lockdown.ChannelWebSearch
 	case name == "bash" || name == "start_process":
 		return lockdown.ChannelCommand
 	}
@@ -104,6 +106,8 @@ func (a *Agent) lockdownTaint(t *trajectory.Trajectory, call model.ToolCall, res
 	case tools.UntrustedWebFetch:
 		src.Source = lockdown.SourceWebFetch
 		src.Host, _, _ = webFetchURLHost(call.Function.Arguments)
+	case tools.UntrustedWebSearch:
+		src.Source = lockdown.SourceWebSearch
 	case tools.UntrustedMCP:
 		source, taints := a.Lockdown.MCPTaintSource(a.mcpServersOf(call.Function.Name, call.Function.Arguments))
 		if !taints {

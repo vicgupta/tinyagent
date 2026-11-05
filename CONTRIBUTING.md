@@ -285,7 +285,11 @@ input that may carry prompt injection. Keep its non-public-address check
 (`sandboxnet.IsNonPublic`) on every path, including with no allowlist, and keep
 it off by default under lockdown and in the GitHub Action. Tests that assert a
 run's first stderr line must allow the `web_fetch: any public host` startup line
-(or pass `--no-web-fetch`).
+(or pass `--no-web-fetch`). The same goes for `web_search` (startup line
+`web_search: duckduckgo → exa`, `--no-web-search`): it must stay keyless, keep
+the non-public check on every provider except the configured SearXNG host, be
+refused after lockdown taint, and its tests must use `httptest` fakes, never
+the real DuckDuckGo or Exa endpoints.
 Only run it on code you trust. If you find a security issue, please report it
 privately rather than opening a public issue.
 

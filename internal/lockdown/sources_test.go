@@ -39,7 +39,7 @@ func TestSourcesDefaultAll(t *testing.T) {
 			t.Errorf("%s doesn't taint by default", src)
 		}
 	}
-	if !strings.Contains(s.Describe(), "sources: web_fetch, mcp, review, untrusted task;") {
+	if !strings.Contains(s.Describe(), "sources: web_fetch, web_search, mcp, review, untrusted task;") {
 		t.Errorf("describe = %q", s.Describe())
 	}
 }

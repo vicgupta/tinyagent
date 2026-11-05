@@ -35,6 +35,8 @@ func TestCheckFlagMismatches(t *testing.T) {
 			"--ask-user conflicts with the checkpoint's recorded ask_user setting; start a fresh task", 2},
 		{"web-fetch", Flags{WebFetch: off}, trajectory.Trajectory{WebFetchEnabled: true}, "--web-fetch", "web_fetch_enabled",
 			"--web-fetch conflicts with the checkpoint's recorded web_fetch setting; start a fresh task", 2},
+		{"web-search", Flags{WebSearch: on}, trajectory.Trajectory{}, "--web-search", "web_search_enabled",
+			"--web-search conflicts with the checkpoint's recorded web_search setting; start a fresh task", 2},
 		{"lsp", Flags{LSP: on}, trajectory.Trajectory{}, "--lsp", "lsp_enabled",
 			"--lsp conflicts with the checkpoint's recorded lsp setting; start a fresh task", 2},
 		{"scoped-agents-md", Flags{ScopedAgentsMD: on}, trajectory.Trajectory{}, "--scoped-agents-md", "scoped_agents_md_enabled",

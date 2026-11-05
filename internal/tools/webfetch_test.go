@@ -179,6 +179,12 @@ func TestWebFetchAllowlist(t *testing.T) { // AC5
 			t.Errorf("empty allowlist fetched non-public %s", u)
 		}
 	}
+	// A literal loopback URL to a live server is refused before dialing.
+	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "ok") }))
+	defer live.Close()
+	if _, err := any.Fetch(context.Background(), live.URL); err == nil || !strings.Contains(err.Error(), WebFetchDeniedNonPublic) {
+		t.Errorf("empty allowlist fetched literal loopback %s: %v", live.URL, err)
+	}
 }
 
 func TestWebFetchNonPublicAddresses(t *testing.T) { // AC5

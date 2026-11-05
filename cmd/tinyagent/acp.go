@@ -480,6 +480,8 @@ func toolKind(name string) string {
 		return "execute"
 	case "web_fetch":
 		return "fetch"
+	case "web_search":
+		return "search"
 	}
 	return "other"
 }

@@ -56,6 +56,7 @@ var childReset = map[string]bool{
 	"Delegate":           true,
 	"TaskTypes":          true,
 	"WebFetch":           true,
+	"WebSearch":          true,
 	"LSP":                true,
 	"AskUser":            true,
 	"Workers":            true,
@@ -80,7 +81,7 @@ var childReset = map[string]bool{
 //
 // Reset (the child starts without them): Stream, ExternalSpecs,
 // ExternalCall, ExternalCallImages, Plan, Images, MaxImageBytes, Skills,
-// Delegate, TaskTypes, WebFetch, LSP, AskUser, Workers, Remember,
+// Delegate, TaskTypes, WebFetch, WebSearch, LSP, AskUser, Workers, Remember,
 // MemoryTools and UndoSession, plus all unexported run state (background
 // processes, undo snapshots).
 func (e *Executor) Child(spec ChildSpec) *Executor {

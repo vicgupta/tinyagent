@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -112,6 +113,11 @@ type WebFetcher struct {
 	// allowlist (the untrusted-content lockdown sets it); an error
 	// refuses the hop before any connection.
 	Gate func(host string, port int) error
+
+	// allowNonPublic lets every host this fetcher's rules allow resolve to
+	// a non-public address. web_search sets it only for a user-configured
+	// SearXNG URL, whose host is then the only rule.
+	allowNonPublic bool
 
 	mu      sync.Mutex
 	records []WebFetchRecord
@@ -230,6 +236,14 @@ func (f *WebFetcher) ctxError(ctx context.Context, err error) error {
 // get checks u against the allowlist and address rules and sends one GET to
 // the address it checked, without following redirects.
 func (f *WebFetcher) get(ctx context.Context, u *url.URL) (*http.Response, error) {
+	h := http.Header{}
+	h.Set("Accept", "text/html, text/plain, application/json, application/xml;q=0.9, */*;q=0.5")
+	return f.send(ctx, http.MethodGet, u, nil, h)
+}
+
+// send is get for any method: one request with body and headers to the
+// checked address, with no cookies, no proxy and no redirects followed.
+func (f *WebFetcher) send(ctx context.Context, method string, u *url.URL, body []byte, hdr http.Header) (*http.Response, error) {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return nil, &webFetchDenied{WebFetchDeniedScheme, fmt.Sprintf("%s, got %q", WebFetchDeniedScheme, u.Scheme+":")}
 	}
@@ -274,12 +288,18 @@ func (f *WebFetcher) get(ctx context.Context, u *url.URL) (*http.Response, error
 		ResponseHeaderTimeout: f.Timeout,
 	}
 	defer tr.CloseIdleConnections()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	var rd io.Reader
+	if body != nil {
+		rd = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), rd)
 	if err != nil {
 		return nil, err
 	}
+	for k, v := range hdr {
+		req.Header[k] = v
+	}
 	req.Header.Set("User-Agent", f.UserAgent)
-	req.Header.Set("Accept", "text/html, text/plain, application/json, application/xml;q=0.9, */*;q=0.5")
 	return tr.RoundTrip(req)
 }
 
@@ -287,7 +307,13 @@ func (f *WebFetcher) get(ctx context.Context, u *url.URL) (*http.Response, error
 // listed literally.
 func (f *WebFetcher) pick(ctx context.Context, host string, port int) (netip.Addr, error) {
 	if a, err := netip.ParseAddr(host); err == nil {
-		return a.Unmap(), nil // it matched a literal rule
+		a = a.Unmap()
+		// A literal non-public address needs a matching literal rule; an
+		// empty allowlist means public hosts only.
+		if sandboxnet.IsNonPublic(a) && !f.allowed(a.String(), port) && !f.allowNonPublic {
+			return netip.Addr{}, &webFetchDenied{WebFetchDeniedNonPublic, fmt.Sprintf("%s: %s; list that address in web_fetch.allowed_domains to allow it", WebFetchDeniedNonPublic, a)}
+		}
+		return a, nil
 	}
 	all, err := f.Resolve(ctx, host)
 	if err != nil {
@@ -295,7 +321,7 @@ func (f *WebFetcher) pick(ctx context.Context, host string, port int) (netip.Add
 	}
 	for _, a := range all {
 		a = a.Unmap()
-		if !sandboxnet.IsNonPublic(a) || f.allowed(a.String(), port) {
+		if !sandboxnet.IsNonPublic(a) || f.allowed(a.String(), port) || f.allowNonPublic {
 			return a, nil
 		}
 	}

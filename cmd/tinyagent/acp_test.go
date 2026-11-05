@@ -504,7 +504,7 @@ func TestACPReadOnly(t *testing.T) {
 	c := startACP(t, "-c", writeConfig(t, "model: openai/gpt-4o\n"), "--no-stream", "--read-only")
 	sess := c.newSession(root)
 	stop, _, updates := c.prompt(sess, "try to write")
-	if got := requestTools(p.requests()[0]); stop != "end_turn" || fmt.Sprint(got) != "[read_file list_files grep web_fetch]" {
+	if got := requestTools(p.requests()[0]); stop != "end_turn" || fmt.Sprint(got) != "[read_file list_files grep web_fetch web_search]" {
 		t.Errorf("stop %q, tools %v", stop, got)
 	}
 	if tu := toolUpdates(updates); len(tu) != 3 || tu[2]["status"] != "failed" {

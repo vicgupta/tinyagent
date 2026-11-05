@@ -24,6 +24,7 @@ import (
 // Taint sources.
 const (
 	SourceWebFetch      = "web_fetch"
+	SourceWebSearch     = "web_search"
 	SourceMCP           = "mcp"
 	SourceReview        = "review"
 	SourceUntrustedTask = "untrusted_task"
@@ -37,10 +38,13 @@ const (
 	ChannelCommand  = "command"
 	ChannelWebFetch = "web_fetch"
 	ChannelMCP      = "mcp"
+	// ChannelWebSearch is refused outright after taint: a query can carry
+	// data to the search provider.
+	ChannelWebSearch = "web_search"
 )
 
 // Notice is appended once per run to the tool result that first taints it.
-const Notice = "[tinyagent: untrusted content received; commands, web_fetch and MCP tools are restricted for the rest of this run]"
+const Notice = "[tinyagent: untrusted content received; commands, web_fetch, web_search and MCP tools are restricted for the rest of this run]"
 
 // Source is one recorded taint: what brought untrusted content into
 // context and where.
@@ -288,6 +292,8 @@ func RefusalMessage(tool, channel string, first Source, host string) string {
 		} else {
 			detail = "; the url is not one lockdown can check"
 		}
+	case ChannelWebSearch:
+		detail = "; web_search is not callable after taint"
 	case ChannelMCP:
 		detail = "; MCP tools are not callable after taint unless their server is lockdown_allowed: true"
 	}

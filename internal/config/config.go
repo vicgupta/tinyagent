@@ -180,6 +180,10 @@ type AgentConfig struct {
 	// host, off under lockdown unless enabled explicitly; --web-fetch and
 	// --no-web-fetch override Enabled).
 	WebFetch WebFetch `yaml:"web_fetch"`
+	// WebSearch configures the web_search tool (on by default with keyless
+	// providers, off under lockdown unless enabled explicitly;
+	// --web-search and --no-web-search override Enabled).
+	WebSearch WebSearch `yaml:"web_search"`
 	// AskUser configures the opt-in ask_user tool, which ends a run with
 	// one question for the user (off by default; --ask-user overrides
 	// Enabled).
@@ -323,6 +327,87 @@ const (
 	DefaultWebFetchTimeoutSeconds = 20
 	MaxWebFetchTimeoutSeconds     = 120
 )
+
+// WebSearch configures the web_search tool. Every provider is keyless.
+type WebSearch struct {
+	// Enabled is nil when neither the config nor a flag set it: the tool is
+	// then on, except under untrusted-content lockdown. See On.
+	Enabled *bool `yaml:"enabled,omitempty"`
+	// Providers is the order tried: duckduckgo, exa, searxng. Unset means
+	// [duckduckgo, exa], with searxng first when SearXNGURL is set.
+	Providers []string `yaml:"providers,omitempty"`
+	// SearXNGURL is the base URL of a SearXNG instance with the JSON
+	// format enabled. Its host may be a private address.
+	SearXNGURL string `yaml:"searxng_url,omitempty"`
+	// MaxResults caps the results returned (1..10; default 6).
+	MaxResults int `yaml:"max_results"`
+	// TimeoutSeconds caps each provider attempt (1..60; default 15).
+	TimeoutSeconds int `yaml:"timeout_seconds"`
+}
+
+// Web search defaults and limits.
+const (
+	DefaultWebSearchMaxResults     = 6
+	MaxWebSearchMaxResults         = 10
+	DefaultWebSearchTimeoutSeconds = 15
+	MaxWebSearchTimeoutSeconds     = 60
+)
+
+// WebSearchProviderNames are the valid web_search.providers entries.
+var WebSearchProviderNames = []string{"duckduckgo", "exa", "searxng"}
+
+// On reports whether web_search is offered: like web_fetch, an unset
+// Enabled means on except under lockdown.
+func (w WebSearch) On(lockdown bool) bool {
+	if w.Enabled == nil {
+		return !lockdown
+	}
+	return *w.Enabled
+}
+
+// ProviderOrder returns the providers tried, in order.
+func (w WebSearch) ProviderOrder() []string {
+	if w.Providers != nil {
+		return w.Providers
+	}
+	if w.SearXNGURL != "" {
+		return []string{"searxng", "duckduckgo", "exa"}
+	}
+	return []string{"duckduckgo", "exa"}
+}
+
+// Validate checks the provider list, the SearXNG URL and the limits.
+func (w WebSearch) Validate() error {
+	if w.MaxResults < 1 || w.MaxResults > MaxWebSearchMaxResults {
+		return fmt.Errorf("web_search.max_results must be between 1 and %d, got %d", MaxWebSearchMaxResults, w.MaxResults)
+	}
+	if w.TimeoutSeconds < 1 || w.TimeoutSeconds > MaxWebSearchTimeoutSeconds {
+		return fmt.Errorf("web_search.timeout_seconds must be between 1 and %d, got %d", MaxWebSearchTimeoutSeconds, w.TimeoutSeconds)
+	}
+	if w.Providers != nil && len(w.Providers) == 0 {
+		return errors.New("web_search.providers is empty; omit the key for the default order, or set web_search.enabled: false")
+	}
+	seen := map[string]bool{}
+	for _, p := range w.Providers {
+		if !slices.Contains(WebSearchProviderNames, p) {
+			return fmt.Errorf("web_search.providers: unknown provider %q (valid: %s)", p, strings.Join(WebSearchProviderNames, ", "))
+		}
+		if seen[p] {
+			return fmt.Errorf("web_search.providers: duplicate provider %q", p)
+		}
+		seen[p] = true
+	}
+	if seen["searxng"] && w.SearXNGURL == "" {
+		return errors.New("web_search.providers lists searxng but web_search.searxng_url is not set")
+	}
+	if w.SearXNGURL != "" {
+		u, err := url.Parse(w.SearXNGURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" {
+			return fmt.Errorf("web_search.searxng_url must be an http(s) URL without credentials or query, got %q", w.SearXNGURL)
+		}
+	}
+	return nil
+}
 
 // On reports whether web_fetch is offered. An unset Enabled means on,
 // except under lockdown, where only an explicit true turns it on.
@@ -653,10 +738,10 @@ func (r PermissionRule) validate(i int) error {
 			}
 			continue // a glob can't be checked against a matcher family
 		}
-		if r.Command != "" && (fileFamilyTools[t] || t == "web_fetch") {
+		if r.Command != "" && (fileFamilyTools[t] || t == "web_fetch" || t == "web_search") {
 			return fmt.Errorf("%s: command matches shell commands; it does not apply to %q", where, t)
 		}
-		if r.Path != "" && (commandFamilyTools[t] || t == "web_fetch") {
+		if r.Path != "" && (commandFamilyTools[t] || t == "web_fetch" || t == "web_search") {
 			return fmt.Errorf("%s: path matches file tools; it does not apply to %q", where, t)
 		}
 		if r.Host != "" && t != "web_fetch" {
@@ -1037,6 +1122,7 @@ func Default() AgentConfig {
 		MaxTruncations:         DefaultMaxTruncations,
 		MaxImageBytes:          DefaultMaxImageBytes,
 		WebFetch:               WebFetch{MaxBytes: DefaultWebFetchMaxBytes, TimeoutSeconds: DefaultWebFetchTimeoutSeconds},
+		WebSearch:              WebSearch{MaxResults: DefaultWebSearchMaxResults, TimeoutSeconds: DefaultWebSearchTimeoutSeconds},
 		LSP:                    DefaultLSP(),
 		AskUser:                AskUser{MaxQuestions: DefaultAskUserMaxQuestions},
 		LogDB:                  LogDB{Level: "metadata", MaxDays: 30, MaxRuns: 500},
@@ -1257,6 +1343,9 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.WebFetch.Validate(); err != nil {
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+	}
+	if err := cfg.WebSearch.Validate(); err != nil {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.UntrustedContent.Validate(); err != nil {

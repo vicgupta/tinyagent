@@ -213,6 +213,7 @@ func TestCheckErrorsMatchRun(t *testing.T) {
 		// A run prints the web_fetch startup line before config errors.
 		first := func(s string) string {
 			s = strings.TrimPrefix(s, "web_fetch: any public host\n")
+			s = strings.TrimPrefix(s, "web_search: duckduckgo → exa\n")
 			l, _, _ := strings.Cut(s, "\n")
 			return l
 		}

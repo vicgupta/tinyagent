@@ -13,7 +13,7 @@ const SourceACPClientMCP = "acp_client_mcp"
 // choose from, in the order they are described. --untrusted-task and a
 // resumed untrusted checkpoint are not configurable: asking for them is
 // explicit, and a tainted history stays tainted.
-var ConfigurableSources = []string{SourceWebFetch, SourceMCP, SourceReview, SourceACPClientMCP}
+var ConfigurableSources = []string{SourceWebFetch, SourceWebSearch, SourceMCP, SourceReview, SourceACPClientMCP}
 
 func configurable(source string) bool {
 	for _, s := range ConfigurableSources {

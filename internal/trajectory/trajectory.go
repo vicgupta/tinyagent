@@ -299,6 +299,9 @@ type Trajectory struct {
 	// WebFetch is set when web_fetch was offered; it records this
 	// invocation's allowlist.
 	WebFetch *WebFetchInfo `json:"web_fetch,omitempty"`
+	// WebSearchEnabled records whether web_search was offered. A resume
+	// must use the same setting; a checkpoint without it had it off.
+	WebSearchEnabled bool `json:"web_search_enabled,omitempty"`
 	// LSPEnabled (schema 2) records whether language servers (the lsp
 	// tool and post-edit diagnostics) were on. A resume must use the same
 	// setting.

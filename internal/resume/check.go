@@ -30,6 +30,7 @@ type Flags struct {
 	Workers        Opt
 	AskUser        Opt
 	WebFetch       Opt
+	WebSearch      Opt
 	LSP            Opt
 	ScopedAgentsMD Opt
 	Skills         Opt
@@ -112,6 +113,8 @@ var settings = []setting{
 		func(f *Flags) Opt { return f.AskUser }, func(t *trajectory.Trajectory) bool { return t.AskUserEnabled }},
 	{"--web-fetch", "web_fetch_enabled", "recorded web_fetch setting", true,
 		func(f *Flags) Opt { return f.WebFetch }, func(t *trajectory.Trajectory) bool { return t.WebFetchEnabled }},
+	{"--web-search", "web_search_enabled", "recorded web_search setting", true,
+		func(f *Flags) Opt { return f.WebSearch }, func(t *trajectory.Trajectory) bool { return t.WebSearchEnabled }},
 	{"--lsp", "lsp_enabled", "recorded lsp setting", true,
 		func(f *Flags) Opt { return f.LSP }, func(t *trajectory.Trajectory) bool { return t.LSPEnabled }},
 	{"--scoped-agents-md", "scoped_agents_md_enabled", "recorded scoped_agents_md setting", true,
