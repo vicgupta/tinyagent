@@ -124,6 +124,15 @@ to MCP and command-tool wiring goes there once and reaches every entry point.
 Don't construct a `tools.Executor` literal anywhere else in `cmd/tinyagent`;
 `TestExecutorBuiltInOnePlace` guards this.
 
+Optional per-task tool scoping (`--tools`, config/profile `tools:`, workflow
+stage/skill `tools:`, and per-call `delegate`/`worker` `tools`) is off by
+default so `Executor.Only` stays nil unless opted in. When active, validate
+names against `Selection` (`ValidateScopedTools`), apply the filter to both
+`Executor.Only` and loop-handled tools (`internal/agent/scope.go`), record
+`ScopedTools` in `trajectory.Trajectory` for `--resume`, and strip
+`WithToolsParam` in `Selection.fingerprintSpecs` so `Selection.Signature()`
+stays unchanged.
+
 ## Testing
 
 - Unit tests live next to code as `_test.go` files. Run `go test ./...`.

@@ -48,6 +48,7 @@ A workflow is one YAML file plus a directory of skill files. You can put the YAM
 | `step_limit` | no | `50` |
 | `check_timeout` | no | `300` seconds |
 | `cost_limit`, `token_limit`, `time_limit`, `model`, `profile` | no | inherited from the run |
+| `tools` | no | optional tool allowlist (`stage > skill frontmatter > defaults > all enabled tools`; `*` clears) |
 
 The settings rows (from `retries` down) can also go under top-level `defaults:`. A stage value overrides `defaults:`.
 
@@ -199,6 +200,7 @@ workflows:
     stages:
       - skill: plan-tasks
         gate: spec                  # reject plans without acceptance criteria / Verify lines
+        tools: [read_file, list_files, grep]  # optional: scope this stage to read-only inspection
       - skill: generate-code
         step_limit: 100
       - skill: validate-diff
