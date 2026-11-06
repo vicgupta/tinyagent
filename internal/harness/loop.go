@@ -311,6 +311,9 @@ func runAttempt(ctx context.Context, o Options, st Stage, idx, n int, input stri
 	if st.TimeLimit > 0 {
 		args = append(args, "--time-limit", strconv.Itoa(st.TimeLimit))
 	}
+	if len(st.Tools) > 0 {
+		args = append(args, "--tools", strings.Join(st.Tools, ","))
+	}
 	args = append(args, "--cwd", o.Cwd, "-o", at.Trajectory, "-t", input)
 	if st.Behavior != "" {
 		// A behavior file left by an earlier attempt or run must not decide this one.

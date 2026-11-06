@@ -4,6 +4,8 @@
 
 ### Added
 
+- **Optional per-task tool scoping.** Agents default to their full configured catalog (same as v0.18.0). Opt in with `--tools name[,name...]` (repeatable; comma-separated OK), `tools: [...]` in `tinyagent.yaml` / profiles, a workflow `defaults.tools` / `stages[].tools` / skill frontmatter `tools:`, or a per-call `tools` argument on `delegate` and `worker`. `--tools` overrides config; `--no-tool-scope` or `--tools=*` / `--tools=""` clears a profile/config list. Unknown, empty, duplicate, or unavailable names (e.g. `--read-only --tools write_file`) exit 2 before any model call. Checkpoints record `scoped_tools` when active (omitted when unset so old checkpoints resume unchanged); `--resume` restores/verifies the list. `run.started` includes `scoped_tools` when set; `--check`/`-v` print a `tool_scope:` / `tools:` line; chat `/tools` shows the active scope. See [Tasks](docs/tasks.md#tool-scoping), [Config](docs/config.md), [Workflows](docs/workflows.md).
+
 - Live output for `bash` and configured `command_tools` while commands run, plus output from `read_process` waits: `--json` emits `tool.output`, web streams `tool_output` into the running tool card, and chat displays a plain-text preview without disturbing the spinner. `--no-stream` disables all live tool output, and explicit bash `stream: false` silences that call. Short implicit commands stay quiet in one-shot human mode; after one second their preview goes to stderr (`-v` or `stream: true` shows it immediately). Live previews apply configured secret redaction, are capped at 256 KiB per call, and never enter `--log-db`, `--otel` or trajectory files; final tool results are unchanged. See [Streaming](docs/json-output.md#streaming).
 
 ### Changed

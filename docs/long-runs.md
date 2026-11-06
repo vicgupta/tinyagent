@@ -98,7 +98,10 @@ Writes are not transactional: if writing fails part-way (for example, a permissi
 
 A checkpoint records whether `apply_patch` was enabled (`apply_patch_enabled`), and `--resume` keeps that setting: passing a conflicting `--apply-patch` exits 2, and the config's `apply_patch` is ignored on resume.
 
-### Subagents and workers at a glance
+### Subagents
+
+`delegate` accepts an optional `tools` array to restrict that child; omit it for the usual read-only catalog. See [Tool scoping](tasks.md#tool-scoping).
+ and workers at a glance
 
 tinyagent can hand work to two kinds of child agents. A **subagent** is a read-only researcher: it investigates and reports back, and cannot change files. A **worker** is a read-write builder: it makes changes in its own Git worktree, and the parent applies them. Both start with a fresh context and share the parent's cost and token budget.
 
@@ -128,6 +131,9 @@ A subagent is a read-only researcher: it investigates and reports back, and cann
 Not in this version: children that can write or run commands, parallel children, nested delegation, and streaming the child's output.
 
 ### Workers
+
+`worker` accepts an optional `tools` array (subset of the worker's allowed tools). See [Tool scoping](tasks.md#tool-scoping).
+
 
 A worker is a read-write builder: it makes changes in its own Git worktree, and the parent applies them.
 

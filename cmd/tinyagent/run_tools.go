@@ -80,6 +80,7 @@ func newRunExecutor(cfg config.AgentConfig, w toolWiring) *tools.Executor {
 		ExtraDirs:      w.extraDirs,
 		MaxImageBytes:  cfg.MaxImageBytes,
 		Redactor:       w.redactor,
+		Only:           append([]string(nil), cfg.Tools...),
 	}
 	if w.mcp != nil {
 		e.ExternalCallImages = w.mcp.CallImages(cfg.MaxImageBytes)

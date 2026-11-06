@@ -113,6 +113,10 @@ func (s *session) setup(ctx context.Context, m sessionMode) (err error) {
 	if flagWasSet(fs, "read-only") {
 		cfg.ReadOnly = o.readOnly
 	}
+	if _, err := resolveScopedTools(fs, *o, &cfg); err != nil {
+		return err
+	}
+	describeScopedTools(os.Stderr, cfg.Tools)
 	applySandboxFlags(fs, &cfg, *o)
 	if err := applyVerifyFlags(fs, &cfg, o.verify); err != nil {
 		return err
@@ -301,7 +305,7 @@ type turnResume struct {
 // turnAgent builds the Agent for one turn with cfg and images, continuing r.
 func (s *session) turnAgent(cfg config.AgentConfig, images []model.Image, r turnResume) (*agent.Agent, error) {
 	o := s.o
-	return agent.New(agent.Options{
+	a, err := agent.New(agent.Options{
 		Model:           s.model,
 		ModelName:       s.modelName,
 		FallbackModels:  s.fallbacks,
@@ -351,6 +355,13 @@ func (s *session) turnAgent(cfg config.AgentConfig, images []model.Image, r turn
 		FollowUp:       r.followUp,
 		Continue:       r.cont,
 	})
+	if err != nil {
+		return nil, err
+	}
+	if err := validateRunTools(a.Tools); err != nil {
+		return nil, err
+	}
+	return a, nil
 }
 
 // streamed forwards the model's streamed text to the running turn.

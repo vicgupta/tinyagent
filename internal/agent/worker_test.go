@@ -89,7 +89,7 @@ func TestOnlyRestrictsCatalogAndDispatch(t *testing.T) {
 		t.Errorf("catalog = %v", names)
 	}
 	res := e.RunResult(context.Background(), call("1", "bash", `{"command":"echo hi"}`))
-	if !res.IsError || !strings.Contains(res.Text, "not available to this worker") {
+	if !res.IsError || !strings.Contains(res.Text, "not available in this run") {
 		t.Errorf("bash result = %+v", res)
 	}
 	if e.Permits("bash") {

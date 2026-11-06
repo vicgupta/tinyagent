@@ -97,6 +97,9 @@ func resolveCheck(o *options, fs *flag.FlagSet, sum *checkSummary) ([][2]string,
 		return nil, inConfig(cfgPath, err)
 	}
 	applyFlagOverrides(fs, &cfg, o.stepLimit, o.costLimit, o.timeLimit)
+	if _, err := resolveScopedTools(fs, *o, &cfg); err != nil {
+		return nil, err
+	}
 	if flagWasSet(fs, "max-output-tokens") {
 		cfg.MaxOutputTokens = o.maxOutputTokens
 	}
@@ -253,6 +256,9 @@ func resolveCheck(o *options, fs *flag.FlagSet, sum *checkSummary) ([][2]string,
 			names[i] = c.Name
 		}
 		add("tools", fmt.Sprintf("%d command tools (%s)", n, strings.Join(names, ", ")))
+	}
+	if len(cfg.Tools) > 0 {
+		add("tool_scope", strings.Join(cfg.Tools, ", "))
 	}
 	if sb, err := checkSandbox(fs, *o, cfg); err != nil {
 		return nil, err

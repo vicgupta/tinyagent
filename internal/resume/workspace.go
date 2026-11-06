@@ -115,7 +115,8 @@ func checkWorkspace(t *trajectory.Trajectory, req Request) error {
 			Message:  fingerprintMessage,
 		}
 	}
-	if names := sel.Names(); !equalNames(names, t.Tools) {
+	names := scopedNames(sel, t.ScopedTools)
+	if !equalNames(names, t.Tools) {
 		return &Incompatibility{
 			Field:    FieldTools,
 			Recorded: "tool set",
@@ -126,6 +127,26 @@ func checkWorkspace(t *trajectory.Trajectory, req Request) error {
 		}
 	}
 	return nil
+}
+
+// scopedNames is the tool list a checkpoint with ScopedTools would offer:
+// Selection.Names filtered to the scoped set (catalog order). Empty scoped
+// means the full selection.
+func scopedNames(sel tools.Selection, scoped []string) []string {
+	if len(scoped) == 0 {
+		return sel.Names()
+	}
+	allow := map[string]bool{}
+	for _, n := range scoped {
+		allow[n] = true
+	}
+	var out []string
+	for _, n := range sel.Names() {
+		if allow[n] {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 func equalNames(a, b []string) bool {

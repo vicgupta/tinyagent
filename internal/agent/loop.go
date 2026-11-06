@@ -436,6 +436,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 			SystemPrompt:          system,
 			SkipAgentsMD:          a.SkipAgentsMD,
 			Tools:                 toolNames(withoutCommandTools(a.Tools.Catalog(), a.Tools.CommandTools)),
+			ScopedTools:           append([]string(nil), a.Tools.Only...),
 			ToolSignature:         a.Tools.Selection().Signature(),
 			PlanEnabled:           a.Tools.Plan,
 			ImagesEnabled:         a.Tools.Images,

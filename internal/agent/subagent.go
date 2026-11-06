@@ -61,9 +61,10 @@ func (a *Agent) takeDelegateStop() string {
 // its history is kept in t.Subagents and its usage is added to t.
 func (a *Agent) delegate(ctx context.Context, t *trajectory.Trajectory, call model.ToolCall) tools.Result {
 	var args struct {
-		Task     string `json:"task"`
-		Label    string `json:"label"`
-		TaskType string `json:"task_type"`
+		Task     string   `json:"task"`
+		Label    string   `json:"label"`
+		TaskType string   `json:"task_type"`
+		Tools    []string `json:"tools"`
 	}
 	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
 		return tools.Result{Text: "error: invalid delegate arguments: " + err.Error(), IsError: true}
@@ -73,6 +74,10 @@ func (a *Agent) delegate(ctx context.Context, t *trajectory.Trajectory, call mod
 	}
 	if a.Subagents == nil || a.Subagents.Model == nil {
 		return tools.Result{Text: "error: delegate is not available in this run", IsError: true}
+	}
+	only, err := scopedChildTools(args.Tools, a.Tools.Child(tools.ChildSpec{ReadOnly: true}).Selection())
+	if err != nil {
+		return tools.Result{Text: "error: delegate tools: " + err.Error(), IsError: true}
 	}
 	label := clipRunes(strings.TrimSpace(args.Label), maxDelegateLabel)
 	id := fmt.Sprintf("d%d", len(t.Subagents)+1)
@@ -108,7 +113,7 @@ func (a *Agent) delegate(ctx context.Context, t *trajectory.Trajectory, call mod
 		UsageTask:      routing.TaskDelegate,
 		Model:          childModel,
 		ModelName:      childName,
-		Tools:          a.Tools.Child(tools.ChildSpec{ReadOnly: true}),
+		Tools:          a.Tools.Child(tools.ChildSpec{ReadOnly: true, Only: only}),
 		Config:         cfg,
 		Out:            out,
 		Err:            a.Err,

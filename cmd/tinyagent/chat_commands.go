@@ -10,6 +10,7 @@ var chatCommands = []struct{ name, alias, desc string }{
 	{"/help", "", "show this list"},
 	{"/exit", "/quit", "end the session (also Ctrl-D)"},
 	{"/cost", "", "tokens and cost so far"},
+	{"/tools", "", "list tools available for this session"},
 	{"/new", "/clear", "start a fresh conversation (new checkpoint)"},
 	{"/save", "", "save the checkpoint now, or to /save <path>"},
 	{"/compact", "", "compact the conversation before the next request"},
@@ -26,6 +27,20 @@ func (c *chat) command(line string) bool {
 		fmt.Fprint(w, c.helpText())
 	case "/exit", "/quit":
 		return true
+	case "/tools":
+		if t := c.s.traj; t != nil && len(t.ScopedTools) > 0 {
+			fmt.Fprintln(w, "tools: "+strings.Join(t.ScopedTools, ", ")+" (scoped)")
+			return false
+		}
+		if len(c.s.cfg.Tools) > 0 {
+			fmt.Fprintln(w, "tools: "+strings.Join(c.s.cfg.Tools, ", ")+" (scoped)")
+			return false
+		}
+		if t := c.s.traj; t != nil && len(t.Tools) > 0 {
+			fmt.Fprintln(w, "tools: "+strings.Join(t.Tools, ", "))
+			return false
+		}
+		fmt.Fprintln(w, "tools: all enabled tools (no --tools scope)")
 	case "/cost":
 		t := c.s.traj
 		if t == nil {

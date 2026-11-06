@@ -405,6 +405,8 @@ Output:
       --no-agents-md                      don't add AGENTS.md (nearest, up to the repo root) to the system prompt
       --scoped-agents-md                  also deliver AGENTS.md files in directories below --cwd, appended to the first file tool result that touches a path there (default off; config scoped_agents_md)
       --read-only                         allow only read_file, list_files, and grep; blocks edits and commands
+      --tools names                       restrict this run to these tool names (comma-separated and/or repeatable); overrides config/profile tools:; --tools="" or --tools=* clears a config list (same as --no-tool-scope)
+      --no-tool-scope                     ignore config/profile tools: and offer the full catalog; same as --tools=*
       --add-dir-read path                 let the file tools (and a container) read this directory outside --cwd; repeatable; with --add-dir-write, replaces config additional_dirs
       --add-dir-write path                let the file tools, --sandbox commands and a container read and write this directory outside --cwd; repeatable; with --add-dir-read, replaces config additional_dirs
       --sandbox                           confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths

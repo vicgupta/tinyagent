@@ -390,3 +390,21 @@ func TestMCPServerResourcesConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestToolsConfigValidation(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "tinyagent.yaml")
+	os.WriteFile(p, []byte("tools: [read_file, read_file]\n"), 0o644)
+	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("duplicate: %v", err)
+	}
+	os.WriteFile(p, []byte("tools: [\"\"]\n"), 0o644)
+	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("empty: %v", err)
+	}
+	os.WriteFile(p, []byte("tools: [read_file, grep]\n"), 0o644)
+	cfg, err := Load(p)
+	if err != nil || len(cfg.Tools) != 2 {
+		t.Fatalf("%+v %v", cfg.Tools, err)
+	}
+}

@@ -62,7 +62,8 @@ func (e *Executor) filterOnly(specs []model.ToolSpec) []model.ToolSpec {
 	return out
 }
 
-// notOffered is the result for a call Only refuses.
+// notOffered is the result for a call Only refuses (a worker's
+// configured tools, or a task that opted into --tools scoping).
 func notOffered(name string) Result {
-	return Result{Text: fmt.Sprintf("error: tool %q is not available to this worker", name), IsError: true}
+	return Result{Text: fmt.Sprintf("error: tool %q is not available in this run", name), IsError: true}
 }
