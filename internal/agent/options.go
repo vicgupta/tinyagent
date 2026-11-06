@@ -47,9 +47,10 @@ type Options struct {
 	Snapshots     Snapshotter
 
 	// Output.
-	Out      io.Writer
-	Err      io.Writer
-	Verbose  bool
+	Out     io.Writer
+	Err     io.Writer
+	Verbose bool
+	// Streamed enables model text streaming and live tool.output events.
 	Streamed bool
 
 	// Context and instructions.

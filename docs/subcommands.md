@@ -162,7 +162,7 @@ Eleven subcommands are shortcuts for existing flags. They rewrite the command li
 | `--output-schema` | | End the run with a JSON result validated against this JSON Schema file (printed to stdout) |
 | `--log-db[=path]` | off | Also record run events in a local SQLite database (default `<cwd>/.tinyagent/tinyagent.db`); see [Event log database](json-output.md#event-log-database) |
 | `--otel` | config `otel.enabled`, else off | Export the run as an OpenTelemetry trace over OTLP/HTTP; `--otel=false` turns the config setting off. `OTEL_*` variables alone never enable it. See [OpenTelemetry export](json-output.md#opentelemetry-export) |
-| `--no-stream` | off | Wait for each full response instead of streaming it (a server that ignores the stream request and answers with plain JSON is also handled) |
+| `--no-stream` | off | Wait for each full response and disable live tool output (`tool.output` in JSONL, previews in chat/web); overrides bash `stream: true` (servers answering with plain JSON are also handled) |
 | `--no-agents-md` | off | Don't append the nearest `AGENTS.md` (at or above `<cwd>`, up to the repo root; capped at 32KB) to the system prompt |
 | `--scoped-agents-md` | off | Also deliver `AGENTS.md` files in directories below `<cwd>`, appended to the first file tool result that touches a path there; see [Project instructions](project-context.md#project-instructions-agentsmd). Can't be combined with `--no-agents-md` |
 | `-V, --version` | | Print the version and exit |

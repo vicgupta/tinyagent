@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Live output for `bash` and configured `command_tools` while commands run, plus output from `read_process` waits: `--json` emits `tool.output`, web streams `tool_output` into the running tool card, and chat displays a plain-text preview without disturbing the spinner. `--no-stream` disables all live tool output, and explicit bash `stream: false` silences that call. Short implicit commands stay quiet in one-shot human mode; after one second their preview goes to stderr (`-v` or `stream: true` shows it immediately). Live previews apply configured secret redaction, are capped at 256 KiB per call, and never enter `--log-db`, `--otel` or trajectory files; final tool results are unchanged. See [Streaming](docs/json-output.md#streaming).
+
 ## [v0.18.0] - 2026-11-05
 
 ### Added

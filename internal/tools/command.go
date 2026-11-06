@@ -260,7 +260,7 @@ func (e *Executor) runCommandTool(ctx context.Context, c *CommandTool, raw strin
 		quoted, _ := json.Marshal(argv)
 		fmt.Fprintf(e.CommandLog, "command tool %s: %s\n", c.Name, quoted)
 	}
-	out, err := runStream(ctx, c.Timeout, nil, func(ctx context.Context) *exec.Cmd {
+	out, err := runStream(ctx, c.Timeout, outputWriter(ctx), func(ctx context.Context) *exec.Cmd {
 		return environment(e.Env).Exec(ctx, c.Dir, argv)
 	})
 	if err != nil {

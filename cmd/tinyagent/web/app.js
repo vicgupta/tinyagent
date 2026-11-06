@@ -145,8 +145,22 @@
     var as = el("div", "section"); as.appendChild(el("h4", null, "Arguments")); as.appendChild(pre(prettyArgs(args))); d.appendChild(as);
     return d;
   }
+  function toolOutput(card, output) {
+    if (!card || card.querySelector(".st.ok, .st.err")) return;
+    var live = card.querySelector(".live-output");
+    if (!live) {
+      live = el("div", "section live-output");
+      live.appendChild(el("h4", null, "Live output"));
+      live.appendChild(el("pre"));
+      card.appendChild(live);
+      card.open = true;
+    }
+    live.querySelector("pre").textContent += output || "";
+  }
   function toolResult(card, output, isErr) {
     if (!card) return;
+    var live = card.querySelector(".live-output");
+    if (live) live.remove();
     var st = card.querySelector(".st");
     st.className = "st " + (isErr ? "err" : "ok");
     st.textContent = isErr ? "error" : "done";
@@ -326,6 +340,10 @@
       S.cur.seg = null;
       S.cur.msg.appendChild(toolCard(d.id, d.name, d.arguments));
       scroll();
+    });
+    es.addEventListener("tool_output", function (e) {
+      var d = JSON.parse(e.data);
+      toolOutput(findCard(d.id), d.output); scroll();
     });
     es.addEventListener("tool_result", function (e) {
       var d = JSON.parse(e.data);

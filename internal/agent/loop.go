@@ -94,7 +94,8 @@ type Agent struct {
 	Out           io.Writer // progress log; nil discards
 	Err           io.Writer // warnings; nil discards
 	Verbose       bool
-	// Streamed means the model already wrote its text to Out as it arrived.
+	// Streamed means the model already wrote its text to Out as it arrived,
+	// and enables live tool.output events for command-executing tools.
 	Streamed bool
 	// CompactFirst compacts the conversation before the run's first model
 	// request, whatever its size (chat's /compact). NoCompact wins.
@@ -932,6 +933,15 @@ func (a *Agent) maxFormatErrors() int {
 // reaches hooks, and a policy allow still runs them.
 func (a *Agent) runTool(ctx context.Context, t *trajectory.Trajectory, call model.ToolCall) tools.Result {
 	a.toolRefused = false
+	// Keep the callback in this call's context, never in shared executor state.
+	// A nil callback also suppresses the legacy Stream writer with --no-stream.
+	var output func(string)
+	if a.Streamed && a.OnEvent != nil {
+		output = func(chunk string) {
+			a.event("tool.output", map[string]any{"id": call.ID, "name": call.Function.Name, "output": chunk})
+		}
+	}
+	ctx = tools.WithOutput(ctx, output)
 	if res, refused := a.lockdownRefuse(t, call); refused {
 		a.toolRefused = true
 		return res
