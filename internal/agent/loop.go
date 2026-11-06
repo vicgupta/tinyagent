@@ -1513,7 +1513,9 @@ func (a *Agent) recordWebSearches() {
 		}
 		for _, at := range r.Attempts {
 			if at.Error != "" {
-				fmt.Fprintf(a.Err, "web_search: %q via %s failed: %s (%dms)\n", r.Query, at.Provider, at.Error, at.Duration.Milliseconds())
+				fmt.Fprintf(a.Err, "web_search: %q via %s failed after %d tries (%s): %s (%dms)\n", r.Query, at.Provider, at.Tries, at.Category, at.Error, at.Duration.Milliseconds())
+			} else if at.Tries > 1 {
+				fmt.Fprintf(a.Err, "web_search: %q via %s -> %d results after %d tries (%dms)\n", r.Query, at.Provider, at.Results, at.Tries, at.Duration.Milliseconds())
 			} else {
 				fmt.Fprintf(a.Err, "web_search: %q via %s -> %d results (%dms)\n", r.Query, at.Provider, at.Results, at.Duration.Milliseconds())
 			}
