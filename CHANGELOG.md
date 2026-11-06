@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `web_search` handles provider trouble more predictably. Each failure is classified (`rate_limited`, `challenged`, `transient`, `malformed_response`, `empty_results`, `blocked_address`, `http_error`, `unreachable`, `provider_error`, `canceled`). Transient failures (timeouts, resets, EOF, HTTP 408/500/502/503/504) are retried on the same provider up to twice with exponential backoff and jitter; a 429 or Exa rate-limit reply is retried once, waiting a `Retry-After` (seconds or HTTP date) of up to 2 s; a longer `Retry-After`, a bot challenge, other 4xx statuses and malformed replies move to the backup at once. Retries stay within the provider's `timeout_seconds`. A canceled call stops at once without the backup. A DuckDuckGo page with a changed layout, unreadable or truncated Exa JSON/SSE, JSON-RPC errors and malformed SearXNG JSON now fall back instead of passing as empty; invalid entries are skipped, duplicate URLs dropped, and snippets cut on character boundaries. When every provider finds nothing the result is a plain `0 results` line; when they fail, the error lists each provider's tries, category and reason plus a hint. `--json`/`--log-db` attempts gain `tries`, `category` and `retry_delays_ms`. See [Web search](docs/long-runs.md#web-search).
+
 ## [v0.18.0] - 2026-11-05
 
 ### Added

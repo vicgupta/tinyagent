@@ -143,7 +143,7 @@ web_search:               # free, keyless; see Web search in long-runs.md
   providers: [duckduckgo, exa]  # tried in order until one answers; also searxng
   searxng_url: ""         # your own SearXNG instance; when set, providers default to [searxng, duckduckgo, exa]
   max_results: 6          # 1 to 10
-  timeout_seconds: 15     # per provider; 1 to 60
+  timeout_seconds: 15     # per provider, retries included; 1 to 60
 lsp:                      # language servers; see Language servers (LSP)
   enabled: false          # same as --lsp
   diagnostics_after_edit: true  # append diagnostics to edit results; false keeps only the lsp tool

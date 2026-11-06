@@ -289,7 +289,10 @@ run's first stderr line must allow the `web_fetch: any public host` startup line
 `web_search: duckduckgo → exa`, `--no-web-search`): it must stay keyless, keep
 the non-public check on every provider except the configured SearXNG host, be
 refused after lockdown taint, and its tests must use `httptest` fakes, never
-the real DuckDuckGo or Exa endpoints.
+the real DuckDuckGo or Exa endpoints. Retry tests replace the searcher's
+`retry.sleep` and `retry.jitter` (see `noSleep` in
+`internal/tools/websearch_retry_test.go`) so they never wait; a caller's
+cancellation must stop a search without retrying or falling back.
 Only run it on code you trust. If you find a security issue, please report it
 privately rather than opening a public issue.
 
