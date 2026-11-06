@@ -75,3 +75,28 @@ func TestToolSummary(t *testing.T) {
 		}
 	}
 }
+
+func TestChatActivityLiveOutput(t *testing.T) {
+	var out strings.Builder
+	a := newChatActivity(&out, styler{on: true})
+	a.toolCall("bash", map[string]any{"command": "build"})
+	a.mu.Lock()
+	a.draw()
+	a.mu.Unlock()
+	a.toolOutput("first\npartial\x1b[2J\r\a")
+	before := out.String()
+	if !strings.Contains(before, "\r\x1b[2Kfirst\npartial[2J") {
+		t.Fatalf("spinner was not cleared: %q", before)
+	}
+	a.mu.Lock()
+	a.draw() // partial output must prevent a spinner overwrite
+	a.mu.Unlock()
+	if out.String() != before || strings.Contains(out.String(), "\x1b[2J") || strings.Contains(out.String(), "\a") {
+		t.Fatalf("terminal state corrupted: %q", out.String())
+	}
+	a.toolResult(false)
+	if !strings.HasSuffix(out.String(), "\n") || a.midline {
+		t.Fatalf("result did not close partial line: %q", out.String())
+	}
+	a.finish()
+}

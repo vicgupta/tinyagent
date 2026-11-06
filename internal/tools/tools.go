@@ -39,8 +39,9 @@ type Executor struct {
 	// Env decides where bash and start_process commands run. nil means
 	// Local{}: on the host, unsandboxed.
 	Env Environment
-	// Stream receives bash output as it is produced when a call sets
-	// stream: true. nil discards it (the result is unchanged either way).
+	// Stream receives live bash output for direct callers using stream: true.
+	// WithOutput supplies a per-call callback instead, including command tools.
+	// Live output is bounded and redacted; the final result is unchanged.
 	Stream io.Writer
 	// CommandTools are the configured command_tools (never offered or run
 	// in read-only mode). CommandLog, when set, gets one line per call
@@ -185,7 +186,7 @@ func Specs(readOnly ...bool) []model.ToolSpec {
 		spec("grep", "Search files recursively for a Go regular expression (default), or literal text with fixed_strings: true. Returns file:line: content; context_lines optionally adds surrounding lines.",
 			props{"pattern": "Go regular expression by default; literal text when fixed_strings is true", "path": "File or directory to search (default .)", "include": "Optional glob to filter files, e.g. *.go (a glob with / matches paths relative to path)", "ignore_case": "Optional: match file contents case-insensitively (default false)", "fixed_strings": "Optional: treat the entire pattern as literal text instead of a regular expression (default false)", "context_lines": "Optional surrounding lines before and after each match (default 0; integer from 0 to 20)"}, "pattern"),
 		spec("bash", "Run a command with bash -c in the working directory and wait for it to finish. Each call is a fresh process. Returns the exit code and combined stdout/stderr. For servers, watchers, or anything long-running, use start_process instead.",
-			props{"command": "Shell command", "timeout": "Optional timeout in seconds for this command (default: the configured bash timeout, max 600)", "stream": "Optional: also show output to the user live as it is produced (default false); the returned result is the same"}, "command"),
+			props{"command": "Shell command", "timeout": "Optional timeout in seconds for this command (default: the configured bash timeout, max 600)", "stream": "Optional: false silences live output for this call; otherwise stream when run streaming is enabled. true requests immediate human CLI output; the returned result is unchanged"}, "command"),
 		spec("start_process", "Start a command with bash -c in the background, in the working directory, and return its process id plus its first output. It keeps running across steps until stop_process or the end of the run.",
 			props{"command": "Shell command, e.g. a dev server or watch mode"}, "command"),
 		spec("read_process", "Return a background process's output produced since the last read (never repeated), and whether it is still running.",
@@ -275,6 +276,11 @@ func (e *Executor) RunResult(ctx context.Context, call model.ToolCall) Result {
 		return notOffered(call.Function.Name)
 	}
 	e.markUntrusted(call.Function.Name)
+	live := e.liveOutput(ctx, call)
+	if live != nil {
+		defer live.Close()
+	}
+	ctx = context.WithValue(ctx, liveWriterKey{}, live)
 	if e.Images && !e.ReadOnly && e.ExternalCallImages != nil {
 		if out, images, isErr, ok := e.ExternalCallImages(ctx, call.Function.Name, call.Function.Arguments); ok {
 			r := e.limit(call, out, isErr)
@@ -571,14 +577,11 @@ func (e *Executor) run(ctx context.Context, name, raw string, edited *[]string) 
 		if secs > 0 {
 			timeout = time.Duration(secs) * time.Second
 		}
-		stream, err := boolArg("stream", a.Stream)
+		_, err = boolArg("stream", a.Stream)
 		if err != nil {
 			return "", err
 		}
-		var live io.Writer
-		if stream {
-			live = e.Stream
-		}
+		live := outputWriter(ctx)
 		return bashStream(ctx, e.Env, e.Root, a.Command, timeout, live)
 	case "start_process":
 		return e.StartProcess(a.Command)

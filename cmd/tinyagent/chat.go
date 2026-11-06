@@ -356,6 +356,9 @@ func (c *chat) turn(msg string, asFollowUp bool) {
 			mu.Unlock()
 			name, _ := fields["name"].(string)
 			act.toolCall(name, fields["arguments"])
+		case "tool.output":
+			chunk, _ := fields["output"].(string)
+			act.toolOutput(chunk)
 		case "tool.result":
 			isErr, _ := fields["is_error"].(bool)
 			act.toolResult(isErr)

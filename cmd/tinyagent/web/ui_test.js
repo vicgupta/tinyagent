@@ -34,3 +34,5 @@ assert(h.includes('class="tok-dd">-old') && h.includes('class="tok-da">+new'), h
 assert(!looksLikeDiff("just - a list\n+ plus"));
 
 console.log("ok");
+
+require("./tool_output_test.js");

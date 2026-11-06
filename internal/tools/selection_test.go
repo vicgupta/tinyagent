@@ -2,6 +2,7 @@ package tools
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/vicgupta/tinyagent/internal/model"
@@ -115,4 +116,22 @@ func TestExecutorCatalogIsSelection(t *testing.T) {
 			t.Errorf("%s offered but not permitted", s.Function.Name)
 		}
 	}
+}
+
+// Updating live-preview guidance must not change the resume contract or leak
+// the historical fingerprint wording back into the model's actual catalog.
+func TestStreamingGuidanceDoesNotChangeResumeContract(t *testing.T) {
+	sel := Selection{}
+	_ = sel.Signature()
+	for _, sp := range sel.Specs() {
+		if sp.Function.Name == "bash" {
+			properties := sp.Function.Parameters["properties"].(map[string]any)
+			desc := properties["stream"].(map[string]any)["description"].(string)
+			if !strings.Contains(desc, "false silences") || strings.Contains(desc, "default false") {
+				t.Fatalf("stream guidance = %q", desc)
+			}
+			return
+		}
+	}
+	t.Fatal("bash missing")
 }

@@ -307,3 +307,7 @@ git tag v0.x.y && git push origin v0.x.y
 
 `make dist` reproduces the exact artifacts locally. `install.sh` verifies
 checksums, so tag only after the full suite is green on `main`.
+
+### Live command-output tests
+
+Tool preview coverage lives in `internal/tools/stream_test.go`, CLI/JSONL and persistence tests in `cmd/tinyagent/tool_output_test.go`, and the live web-card tests in `cmd/tinyagent/web/tool_output_test.js` (also run by `node cmd/tinyagent/web/ui_test.js`). Use pipes or channels to hold a command open until its first live chunk is observed; do not use timing sleeps to prove streaming. Keep `tool.output` ephemeral: it must not enter SQLite, OpenTelemetry or saved trajectories. Preserve `streamTo`/`outputTo` routing so `--output-schema` stdout stays a single compact JSON object.

@@ -55,6 +55,10 @@ chat ended · 1 turn · 2 steps · 1,204 in / 96 out tokens · $0.0040 · 5s
 
 Without color (`--color never`, `NO_COLOR`, or output that isn't a terminal) the structure stays and no escape codes are written: headings keep their `#`, bullets are `-`, code blocks use `+--` and `|`, and the tool line starts with `#`. `/raw`, or config `chat_markdown: false`, shows replies as raw Markdown. Saved checkpoints and `--json` always hold the raw Markdown.
 
+## Live tool output
+
+`bash` and configured `command_tools` display output on stderr while running, without requiring `stream: true`; `read_process` previews output from its wait too. The spinner clears before each chunk and does not overwrite partial lines. Terminal controls are removed from previews. `--no-stream` disables them, and explicit bash `stream: false` silences one call. Previews use configured secret redaction (complete-line buffering), are capped at 256 KiB per call, and are never saved in checkpoints, event logs or traces. Final tool results remain authoritative.
+
 ## Keys
 
 | Key | Action |

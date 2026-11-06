@@ -293,6 +293,11 @@ func TestWebMessageStreamsTextAndToolCalls(t *testing.T) {
 	if len(calls) != 1 || calls[0]["name"] != "bash" || !strings.Contains(fmtJSON(calls[0]["arguments"]), "hi-from-tool") {
 		t.Fatalf("tool_call = %v", calls)
 	}
+	outputs := kinds(es, "tool_output")
+	if len(outputs) != 1 || outputs[0]["id"] != calls[0]["id"] || outputs[0]["name"] != "bash" || outputs[0]["output"] != "hi-from-tool\n" {
+		t.Errorf("tool_output = %v", outputs)
+	}
+
 	results := kinds(es, "tool_result")
 	if len(results) != 1 || !strings.Contains(results[0]["output"].(string), "hi-from-tool") || results[0]["id"] != calls[0]["id"] {
 		t.Errorf("tool_result = %v", results)
@@ -746,5 +751,27 @@ func TestWebFlagValidation(t *testing.T) {
 	}
 	if _, sh, _ := expandSubcommand([]string{"web", "--help"}); sh == nil {
 		t.Error("web --help shows no help")
+	}
+}
+
+func TestWebToolOutputSuppression(t *testing.T) {
+	for _, mode := range []string{"no-stream", "explicit-false"} {
+		t.Run(mode, func(t *testing.T) {
+			args := `{"command":"echo tool-output","stream":true}`
+			var flags []string
+			if mode == "no-stream" {
+				flags = []string{"--no-stream"}
+			} else {
+				args = `{"command":"echo tool-output","stream":false}`
+			}
+			newACPProvider(t, acpReply{tool: "bash", args: args})
+			c := startWeb(t, acpWorkspace(t), flags...)
+			ev := c.events()
+			c.post("/api/message", map[string]any{"text": "build"})
+			es := until(t, ev, "turn_end")
+			if len(kinds(es, "tool_output")) != 0 || len(kinds(es, "tool_result")) != 1 {
+				t.Fatalf("events = %v", es)
+			}
+		})
 	}
 }
