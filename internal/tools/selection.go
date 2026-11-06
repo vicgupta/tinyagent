@@ -208,5 +208,15 @@ func (s Selection) fingerprintSpecs() []model.ToolSpec {
 	b.Remember, b.MemoryTools = false, false
 	b.Skills = nil
 	b.CommandTools, b.External = nil, nil
-	return b.specs(false)
+	specs := b.specs(false)
+	// Live previews do not change tool arguments or authoritative results.
+	// Keep the historical documentation-only stream description in the
+	// fingerprint so pre-streaming checkpoints remain resumable.
+	for _, sp := range specs {
+		if sp.Function.Name == "bash" {
+			properties := sp.Function.Parameters["properties"].(map[string]any)
+			properties["stream"].(map[string]any)["description"] = "Optional: also show output to the user live as it is produced (default false); the returned result is the same"
+		}
+	}
+	return specs
 }

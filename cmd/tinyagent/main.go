@@ -921,6 +921,7 @@ func run() int {
 	describeScopedTools(os.Stderr, a.Tools.Only)
 	events = startEvents(os.Stdout, o.jsonOutput, a, false, stop, db, tr)
 	deltas.events = events
+	streamToolProgress(a, o, streamTo(jsonStream(o.jsonOutput), progress), os.Stderr)
 	if events.err != nil {
 		events.close()
 		return 1
@@ -1448,6 +1449,7 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	describeScopedTools(os.Stderr, a.Tools.Only)
 	events = startEvents(os.Stdout, o.jsonOutput, a, true, stop, db, tr)
 	deltas.events = events
+	streamToolProgress(a, *o, jsonStream(o.jsonOutput), os.Stderr)
 	if events.err != nil {
 		events.close()
 		return 1
@@ -2330,7 +2332,7 @@ func fail(err error) int {
 
 // runEvents fans run events out to the enabled sinks: the --json JSONL
 // stream, the SQLite log and the OpenTelemetry exporter. All receive the
-// same events.
+// same durable events; live chunks go only to JSONL.
 type runEvents struct {
 	fan  eventlog.Fanout
 	json *eventlog.JSONL
@@ -2340,7 +2342,13 @@ type runEvents struct {
 }
 
 func (e *runEvents) emit(kind string, fields map[string]any) {
-	e.fan.Emit(kind, fields)
+	if kind == "tool.output" {
+		if e.json != nil {
+			e.json.Emit(kind, fields)
+		}
+	} else {
+		e.fan.Emit(kind, fields)
+	}
 	if e.json != nil && e.err == nil {
 		e.err = e.json.Err()
 	}

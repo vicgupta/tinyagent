@@ -298,7 +298,10 @@ run's first stderr line must allow the `web_fetch: any public host` startup line
 `web_search: duckduckgo → exa`, `--no-web-search`): it must stay keyless, keep
 the non-public check on every provider except the configured SearXNG host, be
 refused after lockdown taint, and its tests must use `httptest` fakes, never
-the real DuckDuckGo or Exa endpoints.
+the real DuckDuckGo or Exa endpoints. Retry tests replace the searcher's
+`retry.sleep` and `retry.jitter` (see `noSleep` in
+`internal/tools/websearch_retry_test.go`) so they never wait; a caller's
+cancellation must stop a search without retrying or falling back.
 Only run it on code you trust. If you find a security issue, please report it
 privately rather than opening a public issue.
 
@@ -313,3 +316,7 @@ git tag v0.x.y && git push origin v0.x.y
 
 `make dist` reproduces the exact artifacts locally. `install.sh` verifies
 checksums, so tag only after the full suite is green on `main`.
+
+### Live command-output tests
+
+Tool preview coverage lives in `internal/tools/stream_test.go`, CLI/JSONL and persistence tests in `cmd/tinyagent/tool_output_test.go`, and the live web-card tests in `cmd/tinyagent/web/tool_output_test.js` (also run by `node cmd/tinyagent/web/ui_test.js`). Use pipes or channels to hold a command open until its first live chunk is observed; do not use timing sleeps to prove streaming. Keep `tool.output` ephemeral: it must not enter SQLite, OpenTelemetry or saved trajectories. Preserve `streamTo`/`outputTo` routing so `--output-schema` stdout stays a single compact JSON object.

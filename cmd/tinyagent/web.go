@@ -1053,6 +1053,8 @@ func (w *webUI) runTurn(ctx context.Context, cancel context.CancelFunc, a *agent
 			text.flush()
 			tmu.Unlock()
 			w.broadcast("tool_call", map[string]any{"id": fields["id"], "name": fields["name"], "arguments": fields["arguments"]})
+		case "tool.output":
+			w.broadcast("tool_output", map[string]any{"id": fields["id"], "name": fields["name"], "output": fields["output"]})
 		case "tool.result":
 			out, _ := fields["output"].(string)
 			if len(out) > 200<<10 {

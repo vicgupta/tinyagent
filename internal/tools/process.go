@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -258,7 +259,11 @@ func (e *Executor) ReadProcess(ctx context.Context, id string, waitMs, tail int)
 			t.Stop()
 		}
 	}
-	return fmt.Sprintf("<status>%s</status>\n<output>\n%s</output>", p.status(), p.unread(tail, e.Redactor)), nil
+	out := p.unread(tail, e.Redactor)
+	if live := outputWriter(ctx); live != nil {
+		_, _ = io.WriteString(live, out)
+	}
+	return fmt.Sprintf("<status>%s</status>\n<output>\n%s</output>", p.status(), out), nil
 }
 
 // StopProcess kills id's whole process group and reports its exit status and

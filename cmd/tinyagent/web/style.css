@@ -131,3 +131,7 @@ kbd { font-family: ui-monospace, monospace; font-size: 12px; border: 1px solid v
   #palette-btn { display: none; }
   #messages, .empty, .composer { padding-left: 10px; padding-right: 10px; }
 }
+
+/* Live previews stay bounded while a tool is running. */
+.tool .live-output pre { max-height: 24rem; overflow: auto; white-space: pre-wrap; }
+.tool .live-output h4 { color: var(--fg2); }

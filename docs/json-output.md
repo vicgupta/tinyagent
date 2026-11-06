@@ -2,7 +2,7 @@
 
 ### Machine-readable output
 
-`--json` makes stdout a UTF-8 JSONL event stream, with one complete JSON object and newline per event. It can be combined with `--no-stream`, `--read-only`, `--resume`, and `-o` (which still writes the trajectory JSON to its file). In this mode, streamed assistant text arrives as `assistant.delta` events while the model generates (unless `--no-stream`), live bash output is represented by events, and `--verbose` has no effect because tool calls and results are already events; the human summary and warnings remain on stderr. Setup failures before a run starts may leave stdout empty. With `--update`, stdout carries `update.step` and `update.result` events instead (see [Updating](subcommands.md#updating)).
+`--json` makes stdout a UTF-8 JSONL event stream, with one complete JSON object and newline per event. It can be combined with `--no-stream`, `--read-only`, `--resume`, and `-o` (which still writes the trajectory JSON to its file). In this mode, streamed assistant text arrives as `assistant.delta` events while the model generates (unless `--no-stream`), live command output arrives as `tool.output` events, and `--verbose` has no effect because tool calls and results are already events; the human summary and warnings remain on stderr. Setup failures before a run starts may leave stdout empty. With `--update`, stdout carries `update.step` and `update.result` events instead (see [Updating](subcommands.md#updating)).
 
 Every event has a `type`. Event names and fields in schema version 1 are:
 
@@ -13,6 +13,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 | `assistant.message` | `text` (complete assistant message) |
 | `assistant.delta` | `text` (one streamed chunk of assistant text, raw as the model sent it, including any submit marker); emitted as chunks arrive, before that response's `model.request` and `assistant.message`, whose `text` is authoritative. Not emitted with `--no-stream`, and only on the `--json` stream (not `--log-db` or `--otel`) |
 | `tool.call` | `id`, `name`, `arguments` (decoded JSON value, or a string if malformed) |
+| `tool.output` | `id`, `name`, `output` (one live command-output chunk); emitted between `tool.call` and `tool.result` when streaming is enabled, except bash `stream: false`. Live JSONL/UI only: never stored in `--log-db`, `--otel` or `-o` trajectories |
 | `tool.result` | `id`, `name`, `output` (same configured truncation as tool output), `is_error`; with [tool output files](long-runs.md#tool-output-files), a saved result also has `output_file` (path relative to `--cwd`) and `output_bytes`; with [secret redaction](permissions.md#redacting-secrets-from-tool-output), `redactions` (count, only when > 0) |
 | `hook` | `event` (`pre_tool`, `post_tool`, or `stop`), `tool_call_id`, `tool_name`, `command`, `decision` (`allow`, `deny`, `feedback`, `continue`, or `error`), `duration_ms`; tool hooks are emitted between the call's `tool.call` and `tool.result`, and `stop` events have no tool fields |
 | `plan.updated` | `step`, `version`, `items` (`id`, `text`, `status`), `note`, `diff` |
@@ -132,7 +133,7 @@ At the default `level: metadata` no prompt, message, argument, or output bodies 
 
 ### OpenTelemetry export
 
-`--otel` (or `otel.enabled: true` in config) sends each invocation to an OpenTelemetry backend (an OpenTelemetry Collector, Jaeger, Grafana Tempo, Honeycomb, Datadog, ...) as one trace over OTLP/HTTP. It is off by default, and the standard `OTEL_*` variables alone never turn it on, so a CI job that sets them for other tools exports nothing until you opt in. Spans are built from the same events as `--json` and `--log-db`, so the three always agree.
+`--otel` (or `otel.enabled: true` in config) sends each invocation to an OpenTelemetry backend (an OpenTelemetry Collector, Jaeger, Grafana Tempo, Honeycomb, Datadog, ...) as one trace over OTLP/HTTP. It is off by default, and the standard `OTEL_*` variables alone never turn it on, so a CI job that sets them for other tools exports nothing until you opt in. Spans are built from the same events as `--json` and `--log-db`, so their durable events agree; live `assistant.delta` and `tool.output` chunks are excluded from the log and trace.
 
 | Span | Kind | Attributes |
 |---|---|---|
@@ -176,5 +177,11 @@ Span and attribute names follow the OpenTelemetry GenAI semantic conventions, wh
 ### Streaming
 
 Assistant text streams as it arrives (OpenAI chat and Responses, Anthropic, Codex, Ollama and configured providers; ACP sends `agent_message_chunk`). With `--json`, each chunk is an `assistant.delta` event (`{"text": ...}`) that comes before the step's `model.request` and `assistant.message`; `assistant.message` stays the full, authoritative text. Deltas go only to the `--json` stream, not to `--log-db` or `--otel`. `assistant.delta` is an optional event type, so `schema_version` stays 1. `--no-stream` waits for whole responses and sends no deltas.
+
+`bash` and configured `command_tools` stream output during execution by default. `read_process` also previews output when its wait returns. Each `tool.output` event carries the call's `id`, tool `name` and an `output` chunk; concatenate chunks for a live preview, then replace it with the authoritative `tool.result`. Chunk boundaries are not stable. Bash `stream: false` silences that call. `--no-stream` sends neither `assistant.delta` nor `tool.output`, even if a bash call requests `stream: true`.
+
+Live tool output is capped at 256 KiB per call, including a short `[live output truncated]` marker when needed; the marker never changes the final result. With configured secret redaction, output is buffered by complete lines before redaction, including secrets split across writes. A final partial line flushes on completion; oversized unterminated lines are discarded rather than leaked or buffered indefinitely. These ephemeral chunks go only to live JSONL and UI callbacks, never to `--log-db`, `--otel` or `-o` trajectories. Schema version remains `1`.
+
+In one-shot non-JSON human mode, short implicit commands stay quiet. After one second the bounded preview is shown on stderr; `-v` shows it immediately. Explicit bash `stream: true` uses the normal progress writer immediately (stdout normally, stderr with `--output-schema`). Stdout in `--output-schema` mode remains reserved for the final compact JSON object.
 
 If a server ignores `stream: true` and returns a plain JSON body, the OpenAI chat, Responses and Anthropic clients read it as a non-streamed response: the text is reported once and tool calls are kept.

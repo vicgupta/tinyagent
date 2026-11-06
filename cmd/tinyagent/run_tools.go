@@ -22,7 +22,8 @@ import (
 type toolWiring struct {
 	root string
 	env  tools.Environment
-	// stream receives bash output as it runs; nil turns streaming off.
+	// stream is the legacy explicit bash writer. Agent-scoped live output
+	// uses tools.WithOutput and OnEvent instead (nil disables that writer).
 	stream io.Writer
 
 	cmdTools []*tools.CommandTool

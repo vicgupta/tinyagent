@@ -121,10 +121,34 @@ func (a *chatActivity) toolCall(name string, args any) {
 	a.start = time.Now()
 }
 
+// toolOutput writes a plain-text preview under the spinner lock. Drop terminal
+// controls (including ESC) rather than letting tool output move the cursor or
+// change terminal state. Newlines/tabs remain readable; partial lines prevent
+// the spinner from drawing until the result closes them.
+func (a *chatActivity) toolOutput(chunk string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.clear()
+	chunk = strings.Map(func(r rune) rune {
+		if (r < 32 && r != '\n' && r != '\t') || (r >= 127 && r < 160) {
+			return -1
+		}
+		return r
+	}, chunk)
+	if chunk != "" {
+		_, _ = io.WriteString(a.errw, chunk)
+		a.midline = !strings.HasSuffix(chunk, "\n")
+	}
+}
+
 // toolResult notes a tool.result event.
 func (a *chatActivity) toolResult(isError bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.midline {
+		_, _ = io.WriteString(a.errw, "\n")
+		a.midline = false
+	}
 	if isError {
 		a.failed++
 	}

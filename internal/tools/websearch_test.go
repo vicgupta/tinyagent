@@ -30,7 +30,7 @@ const ddgPage = `<html><body>
 const exaSSE = "event: message\ndata: " + `{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"Title: Context docs\nURL: https://pkg.go.dev/context\nPublished: 2026-01-01\nAuthor: N/A\nHighlights:\nPackage context defines\nthe Context type.\n\n---\n\nTitle: Blog\nURL: https://go.dev/blog/context\nText: # Heading\nbody"}]}}` + "\n\n"
 
 func TestParseDuckDuckGo(t *testing.T) {
-	got := parseDuckDuckGo(ddgPage)
+	got := parseDuckDuckGo(ddgPage).results
 	if len(got) != 2 {
 		t.Fatalf("got %d results: %+v", len(got), got)
 	}
@@ -55,7 +55,7 @@ func TestParseExa(t *testing.T) {
 			t.Errorf("second = %+v", got[1])
 		}
 	}
-	if _, err := parseExa([]byte(`{"jsonrpc":"2.0","id":1,"result":{"isError":true,"content":[{"type":"text","text":"You've hit Exa's free rate limit"}]}}`)); err == nil || !strings.Contains(err.Error(), "rate limited") {
+	if _, err := parseExa([]byte(`{"jsonrpc":"2.0","id":1,"result":{"isError":true,"content":[{"type":"text","text":"You've hit Exa's free rate limit"}]}}`)); err == nil || !strings.Contains(err.Error(), "rate_limited") {
 		t.Errorf("isError reply: %v", err)
 	}
 }
@@ -87,6 +87,7 @@ func newTestSearcher(t *testing.T, f fakeSearch, providers ...string) *WebSearch
 	if err != nil {
 		t.Fatal(err)
 	}
+	noSleep(s)
 	return s
 }
 
@@ -145,13 +146,13 @@ func TestWebSearchFallsBack(t *testing.T) {
 		ddg  http.HandlerFunc
 		why  string
 	}{
-		{"429", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(429) }, "rate limited"},
+		{"429", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(429) }, "rate_limited"},
 		{"202 challenge", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(202)
 			io.WriteString(w, "<div class=anomaly-modal>")
 		}, "challenged"},
 		{"5xx", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(503) }, "HTTP 503"},
-		{"empty", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "<html>No results.</html>") }, "no results"},
+		{"empty", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "<html>No results.</html>") }, "empty_results"},
 		{"timeout", func(w http.ResponseWriter, r *http.Request) { time.Sleep(3 * time.Second) }, "timed out"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -160,11 +161,11 @@ func TestWebSearchFallsBack(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.HasPrefix(out, `[web_search "go context" → exa, 2 results; fell back after duckduckgo: `) || !strings.Contains(out, c.why) {
+			if !strings.HasPrefix(out, `[web_search "go context" → exa, 2 results; fell back after duckduckgo (`) || !strings.Contains(out, c.why) {
 				t.Errorf("out:\n%s", out)
 			}
 			r := s.TakeRecords()[0]
-			if r.Provider != "exa" || len(r.Attempts) != 2 || !strings.Contains(r.Attempts[0].Error, c.why) {
+			if r.Provider != "exa" || len(r.Attempts) != 2 || !strings.Contains(r.Attempts[0].Category+": "+r.Attempts[0].Error, c.why) {
 				t.Errorf("record %+v", r)
 			}
 		})
@@ -177,7 +178,7 @@ func TestWebSearchAllFail(t *testing.T) {
 		exa: func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(429) },
 	}, "duckduckgo", "exa")
 	_, err := s.Search(context.Background(), "go context")
-	if err == nil || !strings.Contains(err.Error(), "duckduckgo: rate limited") || !strings.Contains(err.Error(), "exa: rate limited") {
+	if err == nil || !strings.Contains(err.Error(), "duckduckgo (2 attempts, rate_limited: HTTP 429") || !strings.Contains(err.Error(), "exa (2 attempts, rate_limited: HTTP 429") {
 		t.Fatalf("err = %v", err)
 	}
 	if _, err := s.Search(context.Background(), " "); err == nil {
