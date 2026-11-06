@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Optional per-task tool scoping.** Agents default to their full configured catalog (same as v0.18.0). Opt in with `--tools name[,name...]` (repeatable; comma-separated OK), `tools: [...]` in `tinyagent.yaml` / profiles, a workflow `defaults.tools` / `stages[].tools` / skill frontmatter `tools:`, or a per-call `tools` argument on `delegate` and `worker`. `--tools` overrides config; `--no-tool-scope` or `--tools=*` / `--tools=""` clears a profile/config list. Unknown, empty, duplicate, or unavailable names (e.g. `--read-only --tools write_file`) exit 2 before any model call. Checkpoints record `scoped_tools` when active (omitted when unset so old checkpoints resume unchanged); `--resume` restores/verifies the list. `run.started` includes `scoped_tools` when set; `--check`/`-v` print a `tool_scope:` / `tools:` line; chat `/tools` shows the active scope. See [Tasks](docs/tasks.md#tool-scoping), [Config](docs/config.md), [Workflows](docs/workflows.md).
+
 ## [v0.18.0] - 2026-11-05
 
 ### Added

@@ -227,8 +227,13 @@ type Trajectory struct {
 	// substituted and AGENTS.md appended) the run used.
 	SystemPrompt string `json:"system_prompt,omitempty"`
 	// SkipAgentsMD records whether AGENTS.md was excluded from the prompt.
-	SkipAgentsMD          bool     `json:"skip_agents_md"`
-	Tools                 []string `json:"tools,omitempty"`          // tool names, in spec order
+	SkipAgentsMD bool     `json:"skip_agents_md"`
+	Tools        []string `json:"tools,omitempty"` // tool names, in spec order
+	// ScopedTools is the optional --tools / config tools: filter applied to
+	// this run. Empty (omitted) means no scoping: the full catalog was
+	// offered. When set, Catalog and Execute are restricted to these names;
+	// resume restores and verifies the same list.
+	ScopedTools           []string `json:"scoped_tools,omitempty"`
 	ToolSignature         string   `json:"tool_signature,omitempty"` // versioned spec/semantics fingerprint
 	MCPEnabled            bool     `json:"mcp_enabled,omitempty"`
 	ExternalTools         []string `json:"external_tools,omitempty"`

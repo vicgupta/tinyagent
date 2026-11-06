@@ -80,8 +80,14 @@ func (e *Executor) Selection() Selection {
 }
 
 // Specs returns the tool definitions the model is offered, in catalog
-// order.
+// order. Delegate and worker include an optional tools parameter so a
+// call can further restrict the child's catalog; the fingerprint hashes
+// them without that parameter so existing checkpoints keep resuming.
 func (s Selection) Specs() []model.ToolSpec {
+	return s.specs(true)
+}
+
+func (s Selection) specs(toolsParam bool) []model.ToolSpec {
 	out := Specs(s.ReadOnly)
 	if s.Plan {
 		out = append(out, PlanSpec())
@@ -93,10 +99,18 @@ func (s Selection) Specs() []model.ToolSpec {
 		out = append(out, ApplyPatchSpec())
 	}
 	if s.Delegate {
-		out = append(out, WithTaskType(DelegateSpec(), s.TaskTypes))
+		sp := WithTaskType(DelegateSpec(), s.TaskTypes)
+		if toolsParam {
+			sp = WithToolsParam(sp)
+		}
+		out = append(out, sp)
 	}
 	if s.Workers && !s.ReadOnly {
-		out = append(out, WithTaskType(WorkerSpec(), s.TaskTypes), ApplyWorkerSpec())
+		sp := WithTaskType(WorkerSpec(), s.TaskTypes)
+		if toolsParam {
+			sp = WithToolsParam(sp)
+		}
+		out = append(out, sp, ApplyWorkerSpec())
 	}
 	if s.WebFetch {
 		out = append(out, WebFetchSpec())
@@ -183,9 +197,10 @@ func (s Selection) Signature() string {
 }
 
 // fingerprintSpecs is the subset of Specs that Signature hashes: the
-// built-in tools, with delegate in its plain form. Workers, memory, skill,
-// command and external tools are left out (resume checks them by name or
-// refuses them), which keeps the hash of existing checkpoints unchanged.
+// built-in tools, with delegate in its plain form (no task_type, no tools
+// parameter). Workers, memory, skill, command and external tools are left
+// out (resume checks them by name or refuses them), which keeps the hash
+// of existing checkpoints unchanged.
 func (s Selection) fingerprintSpecs() []model.ToolSpec {
 	b := s
 	b.TaskTypes = nil
@@ -193,5 +208,5 @@ func (s Selection) fingerprintSpecs() []model.ToolSpec {
 	b.Remember, b.MemoryTools = false, false
 	b.Skills = nil
 	b.CommandTools, b.External = nil, nil
-	return b.Specs()
+	return b.specs(false)
 }

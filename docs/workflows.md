@@ -261,3 +261,7 @@ workflows:
 ```
 
 **Trust:** skills are prompt input, and `check` commands run with your permissions. Only run workflow files you trust.
+
+## Tool scoping in workflows
+
+Stages may set optional `tools: [read_file, grep, …]` under `defaults`, on a stage, or in skill YAML frontmatter. Precedence: stage `tools` > skill frontmatter `tools` > workflow `defaults.tools` > unset (all tools). The harness passes `--tools` when a stage opts in. `tinyagent skills validate` rejects empty or duplicate names. See [Tool scoping](tasks.md#tool-scoping).

@@ -88,6 +88,8 @@ type options struct {
 	costLimit                                        float64
 	verbose, noStream, noAgentsMD, noCompact         bool
 	readOnly, sandbox, sandboxNetwork                bool
+	tools                                            toolsFlag
+	noToolScope                                      bool
 	sandboxAllowDomains                              domainList
 	sandboxBackend                                   string
 	addDirRead, addDirWrite                          dirList
@@ -166,6 +168,8 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.scopedAgentsMD, "scoped-agents-md", false, "also deliver AGENTS.md files in directories below --cwd, appended to the first file tool result that touches a path there (default off; config scoped_agents_md)")
 	fs.BoolVar(&o.noCompact, "no-compact", false, "don't compact the history when it nears the context window")
 	fs.BoolVar(&o.readOnly, "read-only", false, "allow only read_file, list_files, and grep; blocks edits and commands")
+	fs.Var(&o.tools, "tools", "restrict this run to these tool names (comma-separated and/or repeatable); overrides config/profile tools:; --tools=\"\" or --tools=* clears a config list (same as --no-tool-scope)")
+	fs.BoolVar(&o.noToolScope, "no-tool-scope", false, "ignore config/profile tools: and offer the full catalog; same as --tools=*")
 	fs.BoolVar(&o.sandbox, "sandbox", false, "confine bash and start_process commands: writes only under --cwd, a temp dir and sandbox_writable_paths")
 	fs.BoolVar(&o.sandboxNetwork, "sandbox-network", false, "with --sandbox, allow commands to use the network")
 	fs.StringVar(&o.sandboxBackend, "sandbox-backend", "", "with --sandbox on Linux, the engine: auto (bwrap with Landlock inside, else Landlock), landlock or bwrap (default: config's sandbox_backend, else auto)")
@@ -559,6 +563,10 @@ func run() int {
 	if flagWasSet(fs, "read-only") {
 		cfg.ReadOnly = o.readOnly
 	}
+	if _, err := resolveScopedTools(fs, o, &cfg); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	}
 	if review != nil {
 		cfg.ReadOnly = true
 	}
@@ -906,6 +914,11 @@ func run() int {
 	db, dbErr := openLogDB(fs, o, cfg, root, task, o.modelName, false, a, warn)
 	tr, trWarn := startOTel(otelCfg, cfg, a, task, false, o.verbose)
 	a.Plugins = pluginRecords(cfg, root, !cfg.ReadOnly)
+	if err := validateRunTools(a.Tools); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 2
+	}
+	describeScopedTools(os.Stderr, a.Tools.Only)
 	events = startEvents(os.Stdout, o.jsonOutput, a, false, stop, db, tr)
 	deltas.events = events
 	if events.err != nil {
@@ -1174,6 +1187,10 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	if code := checkResumeFlags(fs, *o, src); code != 0 {
 		return code
 	}
+	if err := checkResumeScopedTools(fs, *o, src); err != nil {
+		fmt.Fprintln(os.Stderr, "error: resume:", err)
+		return 2
+	}
 	// The checkpoint's recorded settings win; from here on the run is
 	// assembled from cfg exactly like a fresh run.
 	resume.Apply(src, &cfg)
@@ -1424,6 +1441,11 @@ func runResume(o *options, fs *flag.FlagSet) int {
 	db, dbErr := openLogDB(fs, *o, cfg, root, src.Task, modelName, true, a, warn)
 	tr, trWarn := startOTel(otelCfg, cfg, a, a.FollowUp, true, o.verbose)
 	a.Plugins = pluginRecords(cfg, root, false)
+	if err := validateRunTools(a.Tools); err != nil {
+		fmt.Fprintln(os.Stderr, "error: resume:", err)
+		return 2
+	}
+	describeScopedTools(os.Stderr, a.Tools.Only)
 	events = startEvents(os.Stdout, o.jsonOutput, a, true, stop, db, tr)
 	deltas.events = events
 	if events.err != nil {
@@ -1939,7 +1961,7 @@ var usageGroups = []struct {
 	{"Task", [][3]string{{"t", "task", "string"}, {"m", "model", "string"}, {"", "reasoning-effort", "level"}, {"", "fallback-model", "spec"}, {"", "no-fallback", ""}, {"", "openai-api", "api"}, {"c", "config", "path"}, {"", "profile", "name"}, {"", "cwd", "dir"}, {"", "worktree", "[=name]"}, {"", "resume", "path"}, {"", "ask-user", ""}, {"i", "interactive", ""}, {"", "no-chat-history", ""}, {"", "web", ""}, {"", "web-port", "port"}, {"", "web-no-open", ""}, {"", "acp", ""}}},
 	{"Review", [][3]string{{"", "review", ""}, {"", "review-base", "ref"}, {"", "review-commit", "rev"}}},
 	{"Limits", [][3]string{{"", "step-limit", "n"}, {"", "cost-limit", "usd"}, {"", "token-limit", "n"}, {"", "time-limit", "sec"}, {"", "max-format-errors", "n"}, {"", "max-output-tokens", "n"}, {"", "no-compact", ""}}},
-	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "color", "when"}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "otel", ""}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-backend", "name"}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
+	{"Output", [][3]string{{"o", "output", "path"}, {"v", "verbose", ""}, {"", "no-stream", ""}, {"", "json", ""}, {"", "color", "when"}, {"", "output-schema", "path"}, {"", "log-db", "[=path]"}, {"", "otel", ""}, {"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "read-only", ""}, {"", "tools", "names"}, {"", "no-tool-scope", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-backend", "name"}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "snapshots", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
 	{"Other", [][3]string{{"V", "version", ""}, {"", "update", ""}, {"", "check", ""}, {"", "list-profiles", ""}, {"", "list-plugins", ""}, {"", "plugins-prune", ""}, {"", "plugins-keep", "n"}, {"", "plugins-rollback", "module@sha256"}, {"", "tinygo-install", ""}, {"", "tinygo-update", ""}, {"", "tinygo-status", ""}, {"", "transcript", "path"}, {"", "init-config", ""}, {"", "init-force", ""}, {"", "init-migrate", ""}, {"", "trust-config", ""}, {"", "completion", "shell"}}},
 }
@@ -2400,6 +2422,9 @@ func startEvents(out io.Writer, enabled bool, a *agent.Agent, resumed bool, stop
 		return events
 	}
 	started := map[string]any{"schema_version": 1, "model": a.ModelName, "root": a.Tools.Root, "read_only": a.Tools.ReadOnly, "resumed": resumed}
+	if len(a.Tools.Only) > 0 {
+		started["scoped_tools"] = append([]string(nil), a.Tools.Only...)
+	}
 	addAttemptLink(started)
 	if len(a.Routes) > 0 {
 		started["models"] = routing.Info(a.Routes)

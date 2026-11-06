@@ -188,9 +188,10 @@ type workerJob struct {
 // child agent; ok is false with the error result when it did not start.
 func (a *Agent) prepareWorker(t *trajectory.Trajectory, call model.ToolCall, id string) (*workerJob, tools.Result, bool) {
 	var args struct {
-		Task     string `json:"task"`
-		Label    string `json:"label"`
-		TaskType string `json:"task_type"`
+		Task     string   `json:"task"`
+		Label    string   `json:"label"`
+		TaskType string   `json:"task_type"`
+		Tools    []string `json:"tools"`
 	}
 	if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
 		return nil, toolErr("invalid worker arguments: %s", err), false
@@ -224,6 +225,16 @@ func (a *Agent) prepareWorker(t *trajectory.Trajectory, call model.ToolCall, id 
 	only := a.workerTools()
 	if len(only) == 0 {
 		return nil, toolErr("worker %s not started: none of the configured worker tools are available in this run", id), false
+	}
+	if len(args.Tools) > 0 {
+		narrowed, err := intersectScopedTools(args.Tools, only)
+		if err != nil {
+			return nil, toolErr("worker %s tools: %s", id, err), false
+		}
+		only = narrowed
+		if len(only) == 0 {
+			return nil, toolErr("worker %s not started: none of the requested tools are available to this worker", id), false
+		}
 	}
 
 	top, err := gitwt.Top(a.Tools.Root)

@@ -189,3 +189,7 @@ Submitted after 12 steps in 1m42s (48,213 input / 3,104 output tokens, $0.23)
 ```
 
 Cost is shown only when it's above zero, and the token/cost part is left out if the run ended before any model response. When some input was read from the prompt cache, the line also shows how much, e.g. `(48,213 input / 3,104 output tokens, 41,900 cached, $0.09)`. With `-o`, the trajectory JSON also records `input_tokens` and `output_tokens` totals, plus `cache_read_tokens` and `cache_write_tokens` when they're non-zero.
+
+## Tool scoping
+
+One-shot, `chat`, `web`, and `eval` accept `--tools` / `--no-tool-scope` (and config `tools:`) to optionally restrict the catalog for that task. See [Tool scoping](tasks.md#tool-scoping).

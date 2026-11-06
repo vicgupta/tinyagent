@@ -34,6 +34,9 @@ type Skill struct {
 	Intent       string   `json:"intent"`
 	Inputs       []string `json:"inputs"`
 	SuccessCheck string   `json:"success_check,omitempty"`
+	// Tools is an optional frontmatter tools: list that scopes the stage
+	// run; workflow stage/defaults tools override it.
+	Tools []string `json:"tools,omitempty"`
 	// Body is the file's Markdown with any YAML frontmatter removed; it
 	// is the stage's instructions.
 	Body string `json:"-"`
@@ -59,8 +62,9 @@ func ParseSkill(name, path string, data []byte) (*Skill, error) {
 	s := &Skill{Name: name, Path: path}
 	text := strings.ReplaceAll(string(data), "\r\n", "\n")
 	var front struct {
-		Name        string `yaml:"name"`
-		Description string `yaml:"description"`
+		Name        string   `yaml:"name"`
+		Description string   `yaml:"description"`
+		Tools       []string `yaml:"tools"`
 	}
 	if strings.HasPrefix(text, "---\n") {
 		end := strings.Index(text[4:], "\n---")
@@ -70,6 +74,10 @@ func ParseSkill(name, path string, data []byte) (*Skill, error) {
 		if err := yaml.Unmarshal([]byte(text[4:4+end]), &front); err != nil {
 			return nil, fmt.Errorf("skill %s: %s: frontmatter: %v", name, path, err)
 		}
+		if err := checkToolsList("skill "+name+" frontmatter", front.Tools); err != nil {
+			return nil, err
+		}
+		s.Tools = append([]string(nil), front.Tools...)
 		text = strings.TrimLeft(text[4+end+4:], "\n")
 	}
 	s.Body = strings.TrimSpace(text)

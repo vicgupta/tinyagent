@@ -38,6 +38,10 @@ type Settings struct {
 	TimeLimit    *int     `yaml:"time_limit" json:"time_limit,omitempty"`
 	Retries      *int     `yaml:"retries" json:"retries,omitempty"`
 	CheckTimeout *int     `yaml:"check_timeout" json:"check_timeout,omitempty"`
+	// Tools restricts the stage run to these tool names (--tools). Empty
+	// leaves the full catalog. Stage tools override skill frontmatter
+	// tools, which override defaults.tools.
+	Tools []string `yaml:"tools" json:"tools,omitempty"`
 }
 
 // Stage is one resolved workflow step.
@@ -62,6 +66,7 @@ type Stage struct {
 	CostLimit    float64           `json:"cost_limit,omitempty"`
 	TokenLimit   int               `json:"token_limit,omitempty"`
 	TimeLimit    int               `json:"time_limit,omitempty"`
+	Tools        []string          `json:"tools,omitempty"`
 	Inputs       map[string]string `json:"inputs,omitempty"`
 }
 
@@ -216,6 +221,9 @@ func (w *Workflow) resolve(fs fileStage) (Stage, error) {
 		return Stage{}, fmt.Errorf("skill %s has no \"Success check:\" line, so the stage needs a check command", sk.Name)
 	}
 	st := w.single(sk)
+	if len(sk.Tools) > 0 {
+		st.Tools = append([]string(nil), sk.Tools...)
+	}
 	st.Check = fs.Check
 	if fs.Behavior != nil {
 		st.Behavior = *fs.Behavior
@@ -258,6 +266,9 @@ func apply(st *Stage, s Settings) {
 	if s.CheckTimeout != nil {
 		st.CheckTimeout = *s.CheckTimeout
 	}
+	if len(s.Tools) > 0 {
+		st.Tools = append([]string(nil), s.Tools...)
+	}
 }
 
 func checkSettings(where string, s Settings) error {
@@ -274,6 +285,26 @@ func checkSettings(where string, s Settings) error {
 		return fmt.Errorf("%s: retries must be between 0 and %d", where, MaxRetries)
 	case s.CheckTimeout != nil && *s.CheckTimeout <= 0:
 		return fmt.Errorf("%s: check_timeout must be > 0", where)
+	}
+	if err := checkToolsList(where, s.Tools); err != nil {
+		return err
+	}
+	return nil
+}
+
+func checkToolsList(where string, tools []string) error {
+	seen := map[string]bool{}
+	for _, t := range tools {
+		if strings.TrimSpace(t) == "" {
+			return fmt.Errorf("%s: tools: empty tool name", where)
+		}
+		if t != strings.TrimSpace(t) {
+			return fmt.Errorf("%s: tools: tool name %q has leading or trailing space", where, t)
+		}
+		if seen[t] {
+			return fmt.Errorf("%s: tools: duplicate tool %q", where, t)
+		}
+		seen[t] = true
 	}
 	return nil
 }

@@ -32,6 +32,7 @@ func Apply(t *trajectory.Trajectory, cfg *config.AgentConfig) {
 	cfg.ScopedAgentsMD = t.ScopedAgentsMDEnabled
 	cfg.Skills = config.BoolPtr(t.SkillsEnabled)
 	cfg.Memory.Enabled = t.MemoryEnabled
+	cfg.Tools = append([]string(nil), t.ScopedTools...)
 }
 
 // setWorkers turns the workers pool on or off without mutating a Workers

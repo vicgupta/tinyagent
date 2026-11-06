@@ -24,6 +24,11 @@ import (
 
 type AgentConfig struct {
 	ReadOnly bool `yaml:"read_only"`
+	// Tools, when non-empty, restricts the run to these tool names
+	// (intersected with the offered catalog). Empty (the default) leaves
+	// every enabled tool available. --tools overrides; --no-tool-scope or
+	// --tools=* clears a config/profile list.
+	Tools []string `yaml:"tools,omitempty"`
 	// Sandbox confines bash and start_process commands at the OS level:
 	// writes only under --cwd, a per-run temp dir and SandboxWritablePaths.
 	Sandbox bool `yaml:"sandbox"`
@@ -474,6 +479,25 @@ var DefaultWorkerTools = []string{"read_file", "list_files", "grep", "write_file
 
 // WorkerToolChoices are the tool names subagents.workers.tools accepts.
 var WorkerToolChoices = []string{"read_file", "list_files", "grep", "write_file", "edit_file", "apply_patch", "bash", "start_process", "read_process", "stop_process"}
+
+// validateTools checks a top-level or profile tools: list: non-empty names,
+// no duplicates. Offerability against the run catalog is checked later.
+func validateTools(tools []string) error {
+	seen := map[string]bool{}
+	for _, t := range tools {
+		if strings.TrimSpace(t) == "" {
+			return fmt.Errorf("tools: empty tool name")
+		}
+		if t != strings.TrimSpace(t) {
+			return fmt.Errorf("tools: tool name %q has leading or trailing space", t)
+		}
+		if seen[t] {
+			return fmt.Errorf("tools: duplicate tool %q", t)
+		}
+		seen[t] = true
+	}
+	return nil
+}
 
 // validateWorkers checks subagents.workers.
 func validateWorkers(w *Workers) error {
@@ -1295,6 +1319,9 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		return cfg, fmt.Errorf("config %s: max_output_tokens must be a whole number >= 0, got %d", src, cfg.MaxOutputTokens)
 	}
 	if err := validateWorkers(cfg.Subagents.Workers); err != nil {
+		return cfg, fmt.Errorf("config %s: %w", src, err)
+	}
+	if err := validateTools(cfg.Tools); err != nil {
 		return cfg, fmt.Errorf("config %s: %w", src, err)
 	}
 	if err := validateModels(&cfg); err != nil {
