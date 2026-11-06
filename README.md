@@ -4,7 +4,7 @@
 curl -fsSL https://raw.githubusercontent.com/vicgupta/tinyagent/main/install.sh | sh
 ```
 
-A minimal coding agent in a single static Go binary. It gives an LLM ten base tools (`read_file`, `write_file`, `edit_file`, `undo_file`, `list_files`, `grep`, `bash`, and `start_process`, `read_process`, `stop_process` for background commands), plus `web_fetch` (on by default for public hosts; `--no-web-fetch` turns it off), the keyless `web_search` (on by default; DuckDuckGo with Exa as backup; `--no-web-search` turns it off) and the opt-in `update_plan`, `skill`, `view_image`, `apply_patch`, `delegate`, `lsp`, and MCP resource (`list_mcp_resources`, `read_mcp_resource`) tools, and keeps a linear message history until the model submits.
+A minimal coding agent in a single static Go binary. It gives an LLM ten base tools (`read_file`, `write_file`, `edit_file`, `undo_file`, `list_files`, `grep`, `bash`, and `start_process`, `read_process`, `stop_process` for background commands), plus `web_fetch` (on by default for public hosts; `--no-web-fetch` turns it off), the keyless `web_search` (on by default; DuckDuckGo with Exa as backup, with retries for transient failures and rate limits; `--no-web-search` turns it off) and the opt-in `update_plan`, `skill`, `view_image`, `apply_patch`, `delegate`, `lsp`, and MCP resource (`list_mcp_resources`, `read_mcp_resource`) tools, and keeps a linear message history until the model submits.
 
 ## Install
 
