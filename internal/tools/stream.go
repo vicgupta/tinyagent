@@ -152,3 +152,21 @@ func (w *liveOutput) truncate() {
 }
 
 func (w *liveOutput) Close() { w.flush(len(w.pending)) }
+
+// livePreview is one activity's writer. Close matches io.WriteCloser.
+type livePreview struct{ *liveOutput }
+
+func (p livePreview) Close() error {
+	p.liveOutput.Close()
+	return nil
+}
+
+// NewLivePreview returns a writer that applies the same secret redaction and
+// 256 KiB cap as a bash live preview, then calls emit. A nil redactor only
+// caps. Close flushes a trailing partial line. emit may be nil.
+func NewLivePreview(emit func(string), red *eventlog.Redactor) io.WriteCloser {
+	if emit == nil {
+		emit = func(string) {}
+	}
+	return livePreview{&liveOutput{emit: emit, red: red}}
+}

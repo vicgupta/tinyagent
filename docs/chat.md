@@ -59,6 +59,8 @@ Without color (`--color never`, `NO_COLOR`, or output that isn't a terminal) the
 
 `bash` and configured `command_tools` display output on stderr while running, without requiring `stream: true`; `read_process` previews output from its wait too. The spinner clears before each chunk and does not overwrite partial lines. Terminal controls are removed from previews. `--no-stream` disables them, and explicit bash `stream: false` silences one call. Previews use configured secret redaction (complete-line buffering), are capped at 256 KiB per call, and are never saved in checkpoints, event logs or traces. Final tool results remain authoritative.
 
+A [CLI handoff](models.md#cli-handoff-providers) provider (`claude-code`, `codex-exec`, `opencode`) streams the CLI's assistant text into the reply as it is produced, and shows the CLI's own tool and command activity with the same preview (the spinner names the CLI tool). The saved turn is still only the CLI's final answer, which is not printed again when it was already streamed. `--no-stream` waits for that answer.
+
 ## Keys
 
 | Key | Action |

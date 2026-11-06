@@ -241,8 +241,17 @@ so they pass both locally and on CI.
   `cmd/tinyagent/check.go`, its `<name>.path` config key (`config.go`,
   `locate.go`), and test it with a fake binary on PATH.
 - Keep handoff CLI flags to ones every supported version of that CLI accepts.
-  Set the working directory with `cmd.Dir`, not a CLI flag (OpenCode v2
-  dropped `run --dir`), and fall back when an optional flag is rejected.
+  `--no-stream` (a nil text callback) must keep today's flags. Streaming may
+  add flags that CLI's docs require for a live JSONL stream (`claude
+  --output-format stream-json --verbose --include-partial-messages`); if the
+  CLI rejects one, retry down to the non-streaming invocation. `codex exec
+  --json` and `opencode run --format json` are already streams: read them as
+  they arrive, don't add flags. Set the working directory with `cmd.Dir`,
+  not a CLI flag (OpenCode v2 dropped `run --dir`), and fall back when an
+  optional flag is rejected. Streamed assistant text goes through the model's
+  text callback once; CLI tool and command chunks go through
+  `tools.NewLivePreview` (secret redaction and the 256 KiB cap) and
+  `tool.output`. Don't read, copy or proxy the CLI's credentials.
 
 ## Pull request checklist
 
@@ -319,4 +328,4 @@ checksums, so tag only after the full suite is green on `main`.
 
 ### Live command-output tests
 
-Tool preview coverage lives in `internal/tools/stream_test.go`, CLI/JSONL and persistence tests in `cmd/tinyagent/tool_output_test.go`, and the live web-card tests in `cmd/tinyagent/web/tool_output_test.js` (also run by `node cmd/tinyagent/web/ui_test.js`). Use pipes or channels to hold a command open until its first live chunk is observed; do not use timing sleeps to prove streaming. Keep `tool.output` ephemeral: it must not enter SQLite, OpenTelemetry or saved trajectories. Preserve `streamTo`/`outputTo` routing so `--output-schema` stdout stays a single compact JSON object.
+Tool preview coverage lives in `internal/tools/stream_test.go`, CLI/JSONL and persistence tests in `cmd/tinyagent/tool_output_test.go`, and the live web-card tests in `cmd/tinyagent/web/tool_output_test.js` (also run by `node cmd/tinyagent/web/ui_test.js`). Handoff streaming coverage lives in `internal/model/handoff_stream_test.go` and `internal/agent/handoff_stream_test.go`: fake CLI scripts emit events line by line, and a fifo holds the script open until the first live chunk is observed. Use pipes or channels to hold a command open until its first live chunk is observed; do not use timing sleeps to prove streaming. Keep `tool.output` ephemeral: it must not enter SQLite, OpenTelemetry or saved trajectories. Preserve `streamTo`/`outputTo` routing so `--output-schema` stdout stays a single compact JSON object.

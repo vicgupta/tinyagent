@@ -548,7 +548,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		}
 
 		queried := time.Now()
-		msg, cost, err := a.Model.Query(ctx, a.request(t, v), specs)
+		msg, cost, err := a.queryModel(ctx, a.request(t, v), specs)
 		a.requested(t, queried, cost, err)
 		if err != nil && !a.NoCompact && model.IsContextOverflow(err) && ctx.Err() == nil {
 			if cerr := a.compact(ctx, t, v, "overflow"); cerr != nil {
@@ -558,7 +558,7 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 				return a.finish(t, status, "")
 			}
 			queried = time.Now()
-			msg, cost, err = a.Model.Query(ctx, a.request(t, v), specs)
+			msg, cost, err = a.queryModel(ctx, a.request(t, v), specs)
 			a.requested(t, queried, cost, err)
 			if err != nil && model.IsContextOverflow(err) {
 				err = fmt.Errorf("%w: %v", errStillTooLong, err)

@@ -13,10 +13,15 @@ import (
 
 // Handoff providers (claude-code, codex-exec, opencode) run a coding-agent CLI the
 // user installed and signed in to themselves, hand it the task, and return
-// its final answer as one assistant message with no tool calls. They never
-// read, copy, store, refresh or proxy the CLI's credentials and never set
-// auth environment variables: the child inherits tinyagent's environment
-// unchanged and the CLI authenticates itself.
+// its final answer as one assistant message with no tool calls. When the
+// model is built with a text callback (streaming; not --no-stream), stdout
+// is read as it arrives: assistant text is reported through that callback
+// and the CLI's own tool or command activity through WithActivity. The
+// parsed final answer, session id, cost and usage are unchanged, and the
+// callback is not given that answer again when it was already streamed.
+// They never read, copy, store, refresh or proxy the CLI's credentials and
+// never set auth environment variables: the child inherits tinyagent's
+// environment unchanged and the CLI authenticates itself.
 
 // IsHandoff reports whether spec names a handoff provider (claude-code,
 // codex-exec, opencode): one that runs an installed CLI and returns only its

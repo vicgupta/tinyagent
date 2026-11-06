@@ -218,11 +218,26 @@ func NewWith(spec string, onText func(string), opts Options) (Model, error) {
 		c.Runtime = rt
 		return c, nil
 	case ClaudeCodeProvider:
-		return NewClaudeCode(name, opts.Handoff)
+		m, err := NewClaudeCode(name, opts.Handoff)
+		if err != nil {
+			return nil, err
+		}
+		m.OnText = onText
+		return m, nil
 	case CodexExecProvider:
-		return NewCodexExec(name, opts.Handoff)
+		m, err := NewCodexExec(name, opts.Handoff)
+		if err != nil {
+			return nil, err
+		}
+		m.OnText = onText
+		return m, nil
 	case OpenCodeProvider:
-		return NewOpenCode(name, opts.Handoff)
+		m, err := NewOpenCode(name, opts.Handoff)
+		if err != nil {
+			return nil, err
+		}
+		m.OnText = onText
+		return m, nil
 	default:
 		if d, ok := ConfiguredProvider(spec); ok {
 			return newConfigured(d, spec, name, onText, rt)

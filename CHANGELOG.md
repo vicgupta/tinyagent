@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **CLI handoff providers stream.** `claude-code`, `codex-exec` and `opencode` show assistant text as the CLI produces it (terminal, web SSE `delta`, `--json` `assistant.delta`) and show the CLI's own tool and command activity as a live preview (`tool.output` / web `tool_output`), with the same secret redaction and 256 KiB cap as other live previews. The saved reply, session id, cost and usage are unchanged, and the final answer is not printed again. `--no-stream` keeps the previous CLI flags and waits for the final answer. Ctrl-C still kills the child process. `claude` streaming uses `--output-format stream-json --verbose --include-partial-messages` and falls back when a build rejects those flags; `codex exec --json` and `opencode run --format json` are unchanged. See [CLI handoff providers](docs/models.md#cli-handoff-providers).
+
 ## [v0.19.0] - 2026-11-06
 
 ### Added

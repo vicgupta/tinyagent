@@ -357,7 +357,11 @@ func (c *chat) turn(msg string, asFollowUp bool) {
 			name, _ := fields["name"].(string)
 			act.toolCall(name, fields["arguments"])
 		case "tool.output":
+			name, _ := fields["name"].(string)
 			chunk, _ := fields["output"].(string)
+			if name != "" {
+				act.toolLabel(name)
+			}
 			act.toolOutput(chunk)
 		case "tool.result":
 			isErr, _ := fields["is_error"].(bool)
