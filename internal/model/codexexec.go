@@ -11,7 +11,14 @@ package model
 //     turn.completed with usage, turn.failed, item.*, error; agent_message
 //     items carry the answer text), stdout being only the final message
 //     without --json, default read-only sandbox, exec reusing saved CLI
-//     authentication.
+//     authentication. Item types include agent messages, reasoning, command
+//     executions, file changes, MCP tool calls, web searches and plan
+//     updates. command_execution items carry command, aggregated_output,
+//     exit_code and status (in_progress, then completed or failed).
+//   - https://github.com/openai/codex/blob/main/codex-rs/exec/src/exec_events.rs
+//     item.started / item.updated / item.completed share one item id;
+//     agent_message.text is the answer; command_execution.aggregated_output
+//     grows across events (the new suffix is the live output).
 //   - https://developers.openai.com/codex/cli/reference
 //     exec flags: --json, --cd/-C, --sandbox/-s (read-only,
 //     workspace-write), --model/-m.
@@ -48,8 +55,9 @@ var codexAuthMarkers = []string{"codex login", "not logged in", "unauthorized", 
 
 // CodexExec runs `codex exec --json` for each query.
 type CodexExec struct {
-	Path  string // resolved codex binary
-	Model string // "" or HandoffDefaultModel sends no -m
+	Path   string       // resolved codex binary
+	Model  string       // "" or HandoffDefaultModel sends no -m
+	OnText func(string) // if set, read the JSONL as it arrives; flags stay --json
 	HandoffOptions
 }
 
@@ -146,7 +154,17 @@ func parseCodexOutput(stdout []byte) codexRun {
 }
 
 func (c *CodexExec) Query(ctx context.Context, messages []Message, _ []ToolSpec) (Message, Cost, error) {
-	res, err := runCLI(ctx, CodexExecProvider, c.Path, c.Args(), c.Dir, handoffPrompt(messages))
+	var live *codexLive
+	run := runCLI
+	if c.OnText != nil {
+		// --json is already a JSONL stream (developers.openai.com/codex/noninteractive).
+		// Streaming does not change the flags; it only reads each line as it arrives.
+		live = &codexLive{text: textSink{onText: c.OnText}, activity: activityFrom(ctx)}
+		run = func(ctx context.Context, provider, path string, args []string, dir, stdin string) (cliResult, error) {
+			return runCLIStream(ctx, provider, path, args, dir, stdin, nil, live.line)
+		}
+	}
+	res, err := run(ctx, CodexExecProvider, c.Path, c.Args(), c.Dir, handoffPrompt(messages))
 	if err != nil {
 		return Message{}, Cost{}, err
 	}
@@ -175,9 +193,150 @@ func (c *CodexExec) Query(ctx context.Context, messages []Message, _ []ToolSpec)
 	if !r.parsed {
 		text = strings.TrimSpace(string(res.stdout))
 	}
+	if live != nil {
+		live.text.finish(text)
+	}
 	out := Message{Role: "assistant", Content: text}
 	if r.threadID != "" {
 		out.Extra = map[string]any{"handoff_session_id": r.threadID}
 	}
 	return out, cost, nil
+}
+
+// codexLive reports agent_message text and command/tool activity from JSONL
+// events as they arrive. parseCodexOutput still owns the final answer and usage.
+//
+// https://developers.openai.com/codex/noninteractive
+// https://github.com/openai/codex/blob/main/codex-rs/exec/src/exec_events.rs
+type codexLive struct {
+	text     textSink
+	activity activityFunc
+	sent     map[string]string // item id -> agent text already emitted
+	out      map[string]string // item id -> command output already emitted
+	started  map[string]bool
+}
+
+func (s *codexLive) line(line string) {
+	var e struct {
+		Type string `json:"type"`
+		Item *struct {
+			ID               string `json:"id"`
+			Type             string `json:"type"`
+			Text             string `json:"text"`
+			Command          string `json:"command"`
+			AggregatedOutput string `json:"aggregated_output"`
+			Status           string `json:"status"`
+			Server           string `json:"server"`
+			Tool             string `json:"tool"`
+			Query            string `json:"query"`
+			Changes          []struct {
+				Path string `json:"path"`
+				Kind string `json:"kind"`
+			} `json:"changes"`
+		} `json:"item"`
+	}
+	if json.Unmarshal([]byte(line), &e) != nil || e.Item == nil || e.Item.Type == "" {
+		return
+	}
+	if e.Type != "item.started" && e.Type != "item.updated" && e.Type != "item.completed" {
+		return
+	}
+	it := e.Item
+	id := it.ID
+	if id == "" {
+		id = it.Type
+	}
+	switch it.Type {
+	case "agent_message":
+		s.emitText(id, it.Text)
+	case "command_execution":
+		if it.Command != "" && !s.started[id] {
+			s.markStarted(id)
+			s.act(id, "command", "$ "+oneLine(it.Command)+"\n")
+		}
+		s.emitOut(id, "command", it.AggregatedOutput)
+	case "mcp_tool_call":
+		name := strings.Trim(it.Server+"/"+it.Tool, "/")
+		if name == "" {
+			name = "mcp"
+		}
+		if !s.started[id] {
+			s.markStarted(id)
+			s.act(id, name, name+"\n")
+		}
+	case "web_search":
+		if e.Type == "item.completed" && !s.started[id] {
+			s.markStarted(id)
+			line := "web_search"
+			if it.Query != "" {
+				line += " " + oneLine(it.Query)
+			}
+			s.act(id, "web_search", line+"\n")
+		}
+	case "file_change":
+		if e.Type == "item.completed" && !s.started[id] && len(it.Changes) > 0 {
+			s.markStarted(id)
+			var b strings.Builder
+			for _, c := range it.Changes {
+				fmt.Fprintf(&b, "%s %s\n", c.Kind, c.Path)
+			}
+			s.act(id, "file_change", b.String())
+		}
+	}
+}
+
+func (s *codexLive) markStarted(id string) {
+	if s.started == nil {
+		s.started = map[string]bool{}
+	}
+	s.started[id] = true
+}
+
+func (s *codexLive) emitText(id, text string) {
+	if text == "" {
+		return
+	}
+	prev := s.sent[id]
+	if prev == text || (prev != "" && !strings.HasPrefix(text, prev)) {
+		return
+	}
+	if s.sent == nil {
+		s.sent = map[string]string{}
+	}
+	s.sent[id] = text
+	s.text.write(text[len(prev):])
+}
+
+func (s *codexLive) emitOut(id, name, text string) {
+	if text == "" {
+		return
+	}
+	prev := s.out[id]
+	if prev == text || (prev != "" && !strings.HasPrefix(text, prev)) {
+		return
+	}
+	if s.out == nil {
+		s.out = map[string]string{}
+	}
+	s.out[id] = text
+	chunk := text[len(prev):]
+	if !strings.HasSuffix(chunk, "\n") {
+		chunk += "\n"
+	}
+	s.act(id, name, chunk)
+}
+
+func (s *codexLive) act(id, name, chunk string) {
+	if s.activity == nil || chunk == "" {
+		return
+	}
+	s.activity(id, name, chunk)
+}
+
+func oneLine(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > 200 {
+		s = s[:200] + "…"
+	}
+	return s
 }

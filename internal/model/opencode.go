@@ -10,7 +10,8 @@ package model
 //     formatted text); --agent picks the agent; --auto auto-approves
 //     permissions (not used here);
 //     --version/-v prints the version; OPENCODE_CONFIG_CONTENT is inline
-//     JSON config.
+//     JSON config. --format json is one JSON object per line, written as
+//     the session runs (packages/opencode/src/cli/cmd/run.ts emit()).
 //   - https://opencode.ai/docs/config/
 //     OPENCODE_CONFIG_CONTENT is loaded after the global and project
 //     configs ("runtime overrides"); only managed settings outrank it.
@@ -27,13 +28,20 @@ package model
 //     brew) and https://github.com/anomalyco/opencode (README).
 //
 // The docs don't describe the JSON event schema. Read-only inspection of
-// the source (packages/cli/src/run/noninteractive.ts and run.ts in
-// anomalyco/opencode) shows one JSON object per line with "type"
-// (step_start, text, reasoning, tool_use, step_finish, error), "timestamp",
-// "sessionID" and a "part" ("text" on text parts; "cost" and "tokens" on
-// step_finish), errors as {"type":"error","error":{"message":...}}, and
-// exit status 1 on failure. It is parsed defensively: unknown events are
-// ignored, and when no JSON event parses the raw stdout is the answer.
+// the source (packages/opencode/src/cli/cmd/run.ts emit(), and the older
+// packages/cli/src/run/noninteractive.ts) shows one JSON object per line
+// with "type" (step_start, text, reasoning, tool_use, step_finish, error),
+// "timestamp", "sessionID" and a "part" ("text" on text parts; "cost" and
+// "tokens" on step_finish; tool_use parts have "tool" and "state" with
+// status, title, input and output). Errors are
+// {"type":"error","error":{"message":...}}, and the exit status is 1 on
+// failure. Newer builds also emit part_delta lines
+// ({"type":"part_delta","partID","delta","partType"}) for incremental text;
+// the completed text part is still emitted afterwards
+// (https://github.com/anomalyco/opencode/pull/38504). It is parsed
+// defensively: unknown events are ignored, and when no JSON event parses
+// the raw stdout is the answer. Streaming reads the same lines as they
+// arrive and does not change the flags.
 //
 // Flag compatibility, checked against the run command's source
 // (packages/opencode/src/cli/cmd/run.ts in v0.x/v1.x, and
@@ -84,8 +92,9 @@ const openCodeReadOnlyConfig = `{"permission":` + openCodeReadOnlyPermission + `
 
 // OpenCode runs `opencode run --format json` for each query.
 type OpenCode struct {
-	Path  string // resolved opencode binary
-	Model string // "" or HandoffDefaultModel sends no --model
+	Path   string       // resolved opencode binary
+	Model  string       // "" or HandoffDefaultModel sends no --model
+	OnText func(string) // if set, read the JSONL as it arrives; flags stay --format json
 	HandoffOptions
 }
 
@@ -259,12 +268,15 @@ func unrecognizedFlag(output, flag string) bool {
 
 func (c *OpenCode) Query(ctx context.Context, messages []Message, _ []ToolSpec) (Message, Cost, error) {
 	prompt := handoffPrompt(messages)
-	res, err := runCLIEnv(ctx, OpenCodeProvider, c.Path, c.args(prompt, true), c.Dir, "", c.Env())
+	var live *openCodeLive
+	res, err := c.exec(ctx, c.args(prompt, true), &live)
 	if err != nil {
 		return Message{}, Cost{}, err
 	}
 	if res.exitCode != 0 && unrecognizedFlag(string(res.stderr)+"\n"+string(res.stdout), "format") {
 		// An OpenCode without --format: retry once and read plain text.
+		// The rejected run produced no events, so nothing was streamed.
+		live = nil
 		res, err = runCLIEnv(ctx, OpenCodeProvider, c.Path, c.args(prompt, false), c.Dir, "", c.Env())
 		if err != nil {
 			return Message{}, Cost{}, err
@@ -300,11 +312,150 @@ func (c *OpenCode) Query(ctx context.Context, messages []Message, _ []ToolSpec) 
 	if !r.parsed {
 		text = strings.TrimSpace(string(res.stdout))
 	}
+	if live != nil {
+		live.text.finish(text)
+	} else if c.OnText != nil && text != "" {
+		c.OnText(text)
+	}
 	out := Message{Role: "assistant", Content: text}
 	if r.sessionID != "" {
 		out.Extra = map[string]any{"handoff_session_id": r.sessionID}
 	}
 	return out, cost, nil
+}
+
+// exec runs args. With OnText set, stdout is read line by line into live.
+func (c *OpenCode) exec(ctx context.Context, args []string, live **openCodeLive) (cliResult, error) {
+	if c.OnText == nil {
+		return runCLIEnv(ctx, OpenCodeProvider, c.Path, args, c.Dir, "", c.Env())
+	}
+	*live = &openCodeLive{text: textSink{onText: c.OnText}, activity: activityFrom(ctx), deltas: map[string]bool{}}
+	return runCLIStream(ctx, OpenCodeProvider, c.Path, args, c.Dir, "", c.Env(), (*live).line)
+}
+
+// openCodeLive reports text parts and tool_use output as they arrive.
+// parseOpenCodeOutput still owns the final answer, session id and cost.
+//
+// https://opencode.ai/docs/cli/ (--format json)
+// https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/cli/cmd/run.ts
+type openCodeLive struct {
+	text     textSink
+	activity activityFunc
+	deltas   map[string]bool // part id -> incremental part_delta already emitted
+	parts    int
+}
+
+func (s *openCodeLive) line(line string) {
+	var e struct {
+		Type     string `json:"type"`
+		PartID   string `json:"partID"`
+		Delta    string `json:"delta"`
+		PartType string `json:"partType"`
+		Part     *struct {
+			ID        string `json:"id"`
+			MessageID string `json:"messageID"`
+			Text      string `json:"text"`
+			Tool      string `json:"tool"`
+			CallID    string `json:"callID"`
+			State     *struct {
+				Status string         `json:"status"`
+				Title  string         `json:"title"`
+				Output string         `json:"output"`
+				Error  string         `json:"error"`
+				Input  map[string]any `json:"input"`
+			} `json:"state"`
+		} `json:"part"`
+	}
+	if json.Unmarshal([]byte(line), &e) != nil || e.Type == "" {
+		return
+	}
+	switch e.Type {
+	case "part_delta":
+		// Incremental text. The completed text part repeats it.
+		// https://github.com/anomalyco/opencode/pull/38504
+		if e.PartType == "reasoning" || e.Delta == "" {
+			return
+		}
+		if e.PartID != "" {
+			s.deltas[e.PartID] = true
+		}
+		s.text.write(e.Delta)
+	case "text":
+		if e.Part == nil || strings.TrimSpace(e.Part.Text) == "" {
+			return
+		}
+		if e.Part.ID != "" && s.deltas[e.Part.ID] {
+			return
+		}
+		if s.parts > 0 {
+			s.text.write("\n")
+		}
+		s.parts++
+		s.text.write(e.Part.Text)
+	case "tool_use":
+		s.tool(e.Part)
+	}
+}
+
+func (s *openCodeLive) tool(part *struct {
+	ID        string `json:"id"`
+	MessageID string `json:"messageID"`
+	Text      string `json:"text"`
+	Tool      string `json:"tool"`
+	CallID    string `json:"callID"`
+	State     *struct {
+		Status string         `json:"status"`
+		Title  string         `json:"title"`
+		Output string         `json:"output"`
+		Error  string         `json:"error"`
+		Input  map[string]any `json:"input"`
+	} `json:"state"`
+}) {
+	if part == nil {
+		return
+	}
+	name := part.Tool
+	if name == "" {
+		name = "tool"
+	}
+	id := part.CallID
+	if id == "" {
+		id = part.ID
+	}
+	if id == "" {
+		id = name
+	}
+	var b strings.Builder
+	if part.State != nil {
+		switch {
+		case part.State.Title != "":
+			b.WriteString(part.State.Title)
+			b.WriteByte('\n')
+		case part.State.Input != nil:
+			if cmd, _ := part.State.Input["command"].(string); cmd != "" {
+				b.WriteString("$ ")
+				b.WriteString(oneLine(cmd))
+				b.WriteByte('\n')
+			}
+		}
+		if part.State.Output != "" {
+			b.WriteString(part.State.Output)
+			if !strings.HasSuffix(part.State.Output, "\n") {
+				b.WriteByte('\n')
+			}
+		}
+		if part.State.Error != "" {
+			b.WriteString(part.State.Error)
+			b.WriteByte('\n')
+		}
+	}
+	if b.Len() == 0 {
+		b.WriteString(name)
+		b.WriteByte('\n')
+	}
+	if s.activity != nil {
+		s.activity(id, name, b.String())
+	}
 }
 
 // Version runs `opencode --version` with a short timeout and returns its

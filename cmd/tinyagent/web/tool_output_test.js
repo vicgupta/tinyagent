@@ -63,4 +63,17 @@ context.next = context.toolCard("next", "bash", {});
 handlers.tool_output({ data: JSON.stringify({ id: "next", name: "bash", output: "live SSE" }) });
 assert.equal(context.next.querySelector(".live-output").querySelector("pre").textContent, "live SSE");
 assert.equal(scrolls, 1);
+// A handoff CLI has no preceding tool_call. tool_output opens the card.
+const host = new Element("div", "msg");
+context.S = { cur: { msg: host, seg: {} } };
+handlers.tool_output({ data: JSON.stringify({ id: "cli-1", name: "Bash", output: "$ ls\n" }) });
+const created = host.children[0];
+assert.equal(created.dataset.tool, "cli-1");
+assert.equal(created.querySelector(".name").textContent, "Bash");
+assert.equal(created.querySelector(".live-output").querySelector("pre").textContent, "$ ls\n");
+const previous = context.findCard;
+context.findCard = id => id === "cli-1" ? created : previous(id);
+handlers.tool_output({ data: JSON.stringify({ id: "cli-1", name: "Bash", output: "a.go\n" }) });
+assert.equal(host.children.length, 1, "a later chunk must reuse the card");
+assert.equal(created.querySelector(".live-output").querySelector("pre").textContent, "$ ls\na.go\n");
 console.log("tool output ok");

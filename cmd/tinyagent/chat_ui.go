@@ -121,6 +121,18 @@ func (a *chatActivity) toolCall(name string, args any) {
 	a.start = time.Now()
 }
 
+// toolLabel sets the spinner to the CLI's own tool name. It is not a
+// tinyagent tool.call, so it does not join the collapsed summary.
+func (a *chatActivity) toolLabel(name string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if name == "" || a.label == name || strings.HasPrefix(a.label, name+" ") {
+		return
+	}
+	a.label = name
+	a.start = time.Now()
+}
+
 // toolOutput writes a plain-text preview under the spinner lock. Drop terminal
 // controls (including ESC) rather than letting tool output move the cursor or
 // change terminal state. Newlines/tabs remain readable; partial lines prevent

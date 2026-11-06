@@ -92,6 +92,12 @@ func (p *toolProgress) chunk(s string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.to == nil {
+		// A handoff CLI reports its own tools without a tinyagent tool.call.
+		// Show that preview immediately; bash still waits on tool.call.
+		p.to = p.progress
+		p.visible = true
+	}
+	if p.to == nil {
 		return
 	}
 	if p.visible {
