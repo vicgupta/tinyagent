@@ -197,6 +197,13 @@ stays unchanged.
   must keep validating the spec like `-m`, preserve history, and leave role
   models that have their own config alone; cover show/switch/invalid in tests
   with the fake provider only.
+- **Goal mode is a flag wrapper.** `tinyagent goal` rewrites to
+  `--plan --plan-first --verify-on-stop` (and `--check` to `--verify-check`) in
+  `expandSubcommand`. Do not add a separate goal loop or engine. Tests for
+  composition and help live in `cmd/tinyagent/goal_test.go`. There is no
+  `/goal` chat command: those settings are start-of-run flags; start chat with
+  `tinyagent goal -i` or pass the flags to `tinyagent chat`. See
+  [Goal mode](docs/tasks.md#goal-mode).
 
 ### Continuous integration
 

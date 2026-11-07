@@ -7,6 +7,7 @@ tinyagent chat                          # start a session in the current directo
 tinyagent chat -t "explain main.go"     # send a first message, then keep chatting
 tinyagent chat -- explain main.go       # the same, without quoting
 tinyagent chat --resume .tinyagent/chats/20261031-115411.json --cwd .   # pick a session back up
+tinyagent goal -i                      # chat with plan-first and verify-on-stop; see [Goal mode](tasks.md#goal-mode)
 ```
 
 Chat reads the model, API keys and other settings exactly as a normal run does, including from [`./.env`](config.md#env-file) in `--cwd`: an `AGENT_MODEL` there picks the chat model when neither `-m` nor a real `$AGENT_MODEL` is set.
