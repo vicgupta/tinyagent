@@ -230,7 +230,7 @@ func TestChatSlashCommands(t *testing.T) {
 	if r.code != 0 {
 		t.Fatalf("exit %d\n%s", r.code, r.stderr)
 	}
-	for _, want := range []string{"/exit, /quit", "no turns yet", "nothing to save yet", "unknown command /bogus", "did you mean /compact?", "turns   1", "compacted context", "compacts the conversation first", "saved " + filepath.Join(root, "s.json"), "new conversation"} {
+	for _, want := range []string{"/exit, /quit", "/context", "no turns yet", "nothing to save yet", "unknown command /bogus", "did you mean /compact?", "turns   1", "compacted context", "compacts the conversation first", "saved " + filepath.Join(root, "s.json"), "new conversation"} {
 		if !strings.Contains(r.stderr, want) {
 			t.Errorf("stderr lacks %q", want)
 		}
@@ -253,6 +253,28 @@ func TestChatSlashCommands(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join(root, ".tinyagent", "chats", "*.json"))
 	if len(files) != 2 {
 		t.Errorf("/new checkpoints %v", files)
+	}
+}
+
+func TestChatContextCommand(t *testing.T) {
+	root := acpWorkspace(t)
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("Use go test."), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	newACPProvider(t)
+	r := runChatTest(t, root, strings.NewReader("/context\nhi\n/context\n/exit\n"), nil, "-m", "openai/gpt-4o")
+	if r.code != 0 {
+		t.Fatalf("exit %d\n%s", r.code, r.stderr)
+	}
+	parts := strings.Split(r.stderr, "context  openai/gpt-4o")
+	if len(parts) < 3 {
+		t.Fatalf("want two /context reports\n%s", r.stderr)
+	}
+	if !strings.Contains(parts[1], "128,000 token window") || !strings.Contains(parts[1], "estimated") || !strings.Contains(parts[1], "AGENTS.md") || !strings.Contains(parts[1], "system prompt") {
+		t.Errorf("preview =\n%s", parts[1])
+	}
+	if !strings.Contains(parts[2], "last turn") || !strings.Contains(parts[2], "100 in + 10 out") || !strings.Contains(parts[2], "free") || !strings.Contains(parts[2], "until auto-compact") {
+		t.Errorf("after a turn =\n%s", parts[2])
 	}
 }
 

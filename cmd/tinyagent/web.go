@@ -476,6 +476,7 @@ var webCommands = []map[string]string{
 	{"name": "/help", "desc": "show commands and keyboard shortcuts"},
 	{"name": "/new", "alias": "/clear", "desc": "start a fresh conversation (new checkpoint)"},
 	{"name": "/cost", "desc": "tokens and cost so far"},
+	{"name": "/context", "desc": "show how the context window is used"},
 	{"name": "/save", "desc": "save the checkpoint now, or to /save <path>"},
 	{"name": "/compact", "desc": "compact the conversation before the next request"},
 	{"name": "/raw", "desc": "toggle showing replies as raw Markdown"},
@@ -902,6 +903,10 @@ func (w *webUI) apiCommand(body map[string]any) (any, error) {
 	}
 	s := w.s
 	switch name {
+	case "/context":
+		text := formatContext(s.contextReport(), styler{})
+		w.broadcast("log", map[string]any{"text": text})
+		return map[string]any{"ok": true, "text": text}, nil
 	case "/cost":
 		t := s.traj
 		if t == nil {

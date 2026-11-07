@@ -215,6 +215,10 @@ type Trajectory struct {
 	// Compactions records each time the context sent to the model was
 	// compacted. Messages always keeps the full, original history.
 	Compactions []Compaction `json:"compactions,omitempty"`
+	// LastUsage is the provider-reported usage of the latest main-loop
+	// model request. /context uses it when the view still matches that
+	// request. Nil when the provider reported no input tokens.
+	LastUsage *LastUsage `json:"last_usage,omitempty"`
 	// BackgroundProcesses summarizes background processes still registered
 	// when the run ended (all are killed): status and output tail of each.
 	BackgroundProcesses string `json:"background_processes,omitempty"`
@@ -495,6 +499,17 @@ type ModelSwitch struct {
 	From   string `json:"from"`
 	To     string `json:"to"`
 	Reason string `json:"reason"`
+}
+
+// LastUsage is one main-loop model request's provider-reported usage.
+// Messages is len(Messages) after that response was appended, and Step is
+// Steps at that moment, so a later compaction (recorded with Step >= this
+// Step) is not mistaken for the request that was measured.
+type LastUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	Messages     int `json:"messages"`
+	Step         int `json:"step"`
 }
 
 // Compaction describes one compaction of the model's view of the history.

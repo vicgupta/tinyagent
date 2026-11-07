@@ -49,6 +49,7 @@ The same as [chat](chat.md#slash-commands), plus a few for the browser.
 | `/help` | Commands and keyboard shortcuts |
 | `/new`, `/clear` | Start a fresh conversation with a new checkpoint |
 | `/cost` | Steps, tokens and cost so far |
+| `/context` | How the context window is used, the same report as in [chat](chat.md#slash-commands) |
 | `/save [path]` | Save the checkpoint now, or a copy to `path` (relative to `--cwd`) |
 | `/compact` | Compact the conversation before the next request (refused with `--no-compact`) |
 | `/raw` | Toggle rendered Markdown off and on |

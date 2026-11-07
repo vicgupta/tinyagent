@@ -586,6 +586,16 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 		t.Messages = append(t.Messages, msg)
 		v.add(t, msg)
 		v.pendingChars = 0 // already counted in cost.OutputTokens
+		// The provider's count is the context that request actually
+		// sent, plus this reply. Anything appended after it is estimated.
+		if cost.InputTokens > 0 {
+			t.LastUsage = &trajectory.LastUsage{
+				InputTokens:  cost.InputTokens,
+				OutputTokens: cost.OutputTokens,
+				Messages:     len(t.Messages),
+				Step:         t.Steps,
+			}
+		}
 		a.logAssistant(msg)
 		if msg.Content != "" {
 			a.event("assistant.message", map[string]any{"text": msg.Content})

@@ -85,6 +85,7 @@ Line editing works on Linux and macOS. Elsewhere chat reads plain lines (no arro
 | `/help` | List the commands |
 | `/exit`, `/quit` | End the session |
 | `/cost` | Turns, steps, tokens and cost so far |
+| `/context` | How the context window is used: the model and its limit, and the tokens in the system prompt, AGENTS.md, tool definitions (including MCP and plugin tools), skills, messages and a compaction summary. Free space and the distance to the auto-compact threshold (80%) are included. Category sizes are estimates (~4 characters per token). When the last turn reported usage and the conversation still matches that request, the total is that usage (plus an estimate of anything appended since) and the line says so |
 | `/new`, `/clear` | Start a fresh conversation with a new checkpoint |
 | `/save [path]` | Save the checkpoint now, or a copy to `path` |
 | `/compact` | Compact the conversation before the next request (refused with `--no-compact`) |
