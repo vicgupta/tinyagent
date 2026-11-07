@@ -2,9 +2,11 @@
 
 ## [Unreleased]
 
+## [v0.21.0] - 2026-11-07
+
 ### Added
 
-- **`/context` in chat and the web UI.** Shows how the context window is used: the model and its limit, estimated tokens and percent for the system prompt, AGENTS.md, memory, project rules, tool definitions (per tool, with MCP and plugin tools grouped by name), loaded skills, the conversation (user, assistant, tool results, and the largest tool results) and a compaction summary, plus free space and the distance to the auto-compact threshold (80%). The total uses the last turn's provider-reported usage when the conversation still matches that request, and the character estimator otherwise; estimates are labeled. A CLI handoff model reports the CLI's usage without a TinyAgent breakdown, because the CLI owns the prompt. See [Interactive chat](docs/chat.md#slash-commands) and [Web UI](docs/web.md#slash-commands).
+- **`/context` in chat and the web UI.** Shows how the context window is used: the model and its limit, estimated tokens and percent for the system prompt, AGENTS.md, memory, project rules, tool definitions (per tool, with MCP and plugin tools grouped by name), loaded skills, the conversation (user, assistant, tool results, and the largest tool results) and a compaction summary, plus free space and the distance to the auto-compact threshold (80%). The total uses the last turn's provider-reported usage when the conversation still matches that request, and the character estimator otherwise; estimates are labeled. A CLI handoff model reports the CLI's usage without a TinyAgent breakdown, because the CLI owns the prompt. See [Interactive chat](docs/chat.md#slash-commands) and [Web UI](docs/web.md#slash-commands). (#376)
 
 ## [v0.20.0] - 2026-11-07
 
