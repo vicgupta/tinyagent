@@ -659,11 +659,13 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 
 		if a.Snapshots != nil && mutating(msg.ToolCalls) {
 			if err := a.snapshot(t, "step"); err != nil {
-				// No tool runs without its snapshot; record why.
+				// No tool runs without its snapshot; record why, with a tool
+				// result for every call so the history stays a complete turn.
 				reason := fmt.Sprintf("workspace snapshot before step %d failed: %v", t.Steps, err)
+				out := "error: not run: " + reason
 				for _, call := range msg.ToolCalls {
-					t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: call.ID, Content: "error: not run: " + reason})
-					v.add(t, t.Messages[len(t.Messages)-1])
+					a.event("tool.call", map[string]any{"id": call.ID, "name": call.Function.Name, "arguments": eventArguments(call.Function.Arguments)})
+					a.recordToolResult(t, v, call, out, true)
 				}
 				return a.finish(t, StatusError, reason+"; the tool calls were not run")
 			}
@@ -1564,11 +1566,15 @@ const interruptedResult = "[interrupted: tool did not complete before the agent 
 	"it may have partially run — verify state before retrying]"
 
 // closeInterrupted gives every pending call of a resumed checkpoint an error
-// result, so the history is a complete tool turn again.
+// result, so the history is a complete tool turn again. It emits both
+// resume.interrupted_call (resume-specific) and tool.result (every call must
+// have a matching result before the next model request).
 func (a *Agent) closeInterrupted(t *trajectory.Trajectory) {
 	for _, c := range t.PendingCalls {
-		t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: c.ID, Content: "error: " + interruptedResult})
+		out := "error: " + interruptedResult
+		t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: c.ID, Content: out})
 		a.event("resume.interrupted_call", map[string]any{"id": c.ID, "name": c.Name})
+		a.event("tool.result", map[string]any{"id": c.ID, "name": c.Name, "output": out, "is_error": true})
 		fmt.Fprintf(a.Err, "resume: tool call %s (%s) was interrupted; it was not re-run\n", c.ID, c.Name)
 	}
 	t.PendingCalls = nil

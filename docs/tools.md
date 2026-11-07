@@ -32,3 +32,5 @@ Examples:
 | MCP tools | `MCP server docs call failed: …` | `fix the server or its config, then start a new run` |
 
 Permission and `file_access` denials follow the same pattern. New tool error paths should use `tools.Actionable` / `tools.Actionablef` (or the MCP helpers) so tests can assert the wording.
+
+A denial or timeout is still a result: every call path (including permission/hook/lockdown refusals and resume closes of interrupted calls) must emit a `tool.result` event and a matching tool message in history. See [Tool results](json-output.md#tool-results).

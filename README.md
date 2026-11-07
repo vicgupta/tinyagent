@@ -169,6 +169,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 - `tinyagent --check`: a setup summary table (model, provider, API key set/missing, sandbox, permissions, lockdown, config source) with no model request, or `--check --json` for CI and scripts.
 - Setup hints: a known setup failure (missing API key, invalid config setting, unavailable sandbox, missing `claude`/`codex` CLI) prints one `hint:` line naming the next action, including the config path and rule; see [Troubleshooting](docs/troubleshooting.md#troubleshooting).
 - Actionable tool errors: each tool error the model sees states the cause and what to try next (same shape as `edit_file`'s unique-match message); see [Tool error messages](docs/tools.md#tool-error-messages).
+- Every tool call gets a tool result: denials, errors, timeouts, lockdown refusals, ask_user answers and resume-interrupted calls always emit `tool.result` and a matching history message; see [Tool results](docs/json-output.md#tool-results).
 - `tinyagent --update`: checksum-verified self-update with step-by-step progress and a `#` download bar.
 - Undo for file edits, workspace rewind, resume and follow-up runs.
 - Sandboxed commands (Linux: Bubblewrap with Landlock stacked inside, or Landlock alone, via `--sandbox-backend`; macOS: Seatbelt) with a network allowlist, permission rules, hooks, untrusted-content lockdown and file-access rules.

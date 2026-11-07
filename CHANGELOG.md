@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Every tool call gets a tool result.** Denied, errored, timed-out, ask_user (when answered or rejected), lockdown-refused, snapshot-skipped, and resume-interrupted calls always emit a `tool.result` event and a matching tool message in history — a denial is still an answer, and a missing result breaks every later model request. `resume.interrupted_call` still fires on resume; it now also emits `tool.result`. See [Tool results](docs/json-output.md#tool-results) and CONTRIBUTING. (#379)
+
 ### Changed
 
 - **Tool errors are actionable.** Every built-in tool error the model sees (bash, LSP, MCP, `web_fetch`, `web_search`, file tools, permission/`file_access` denials, and related paths) states the cause and a concrete next step, joined by a semicolon — the same shape as `edit_file`'s unique-match error. Bare `failed` messages are avoided so the model can fix the call instead of retrying blindly. New tool errors should use `tools.Actionable` / `tools.Actionablef` (or the MCP helpers); see [Tool error messages](docs/tools.md#tool-error-messages) and CONTRIBUTING. (#378)
