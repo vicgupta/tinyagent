@@ -67,11 +67,18 @@ func TestCrashPointsBeforeDuringAndAfterTools(t *testing.T) {
 				t.Fatal(err)
 			}
 			rm := &scripted{replies: []model.Message{{Role: "assistant", Content: "done"}}}
-			var events []string
+			var events, resultIDs []string
 			r := &Agent{Model: rm, ModelName: "fake", Tools: &tools.Executor{Root: a.Tools.Root}, Config: a.Config, Resume: tr,
 				OnEvent: func(kind string, f map[string]any) {
-					if kind == "resume.interrupted_call" {
+					switch kind {
+					case "resume.interrupted_call":
 						events = append(events, f["id"].(string))
+					case "tool.result":
+						if f["is_error"] == true {
+							if out, _ := f["output"].(string); strings.Contains(out, "[interrupted:") {
+								resultIDs = append(resultIDs, f["id"].(string))
+							}
+						}
 					}
 				}}
 			r.Config.StepLimit = 0
@@ -92,8 +99,8 @@ func TestCrashPointsBeforeDuringAndAfterTools(t *testing.T) {
 					interrupted++
 				}
 			}
-			if interrupted != wantPending || len(events) != wantPending {
-				t.Fatalf("interrupted results %d events %v, want %d", interrupted, events, wantPending)
+			if interrupted != wantPending || len(events) != wantPending || len(resultIDs) != wantPending {
+				t.Fatalf("interrupted results %d resume events %v tool.result %v, want %d", interrupted, events, resultIDs, wantPending)
 			}
 			if !strings.HasPrefix(sent[5].Content, trajectory.ContinuationNotice) {
 				t.Fatal("missing continuation notice")

@@ -106,6 +106,13 @@ embed/prompts/        system prompt templates
   `tools.Actionable` / `tools.Actionablef` (or the MCP `actionable` helpers);
   add a wording assertion for each new key error. See
   [Tool error messages](docs/tools.md#tool-error-messages).
+- **Every tool call path must emit a tool result.** A denial, error, timeout,
+  lockdown refusal, format error, ask_user answer/rejection, or resume close of
+  an interrupted call still needs a `tool.result` event and a matching tool
+  message in history before the next model request. A missing result breaks
+  every later request. Prefer `recordToolResult` / `recordResult` (or the same
+  fields the tool loop emits) over appending a bare tool message. See
+  [Tool results](docs/json-output.md#tool-results).
 - Prefer the standard library; add dependencies only with justification.
 - Terminal output must degrade cleanly without color: with `--color never`,
   `NO_COLOR` or a non-terminal, keep the structure (plain ASCII markers such
