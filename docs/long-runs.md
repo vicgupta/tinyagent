@@ -16,6 +16,26 @@ The window comes from a small built-in table (`internal/model/context.go`), a na
 
 Summaries lose detail. Put instructions that must hold for the whole run in `AGENTS.md`, which is part of the system prompt and never compacted. Scoped `AGENTS.md` files from [`--scoped-agents-md`](project-context.md#scoped-agentsmd-in-subdirectories) live in tool results instead, so they can be compacted away; they are sent again the next time the agent touches their directory. `--no-compact` turns all of this off.
 
+### Append-only history and prompt caching
+
+tinyagent treats the history it has already sent as append-only: every request is the previous request plus new messages at the end, and nothing that was sent is rewritten, reordered or dropped. This keeps provider prompt caches hitting step after step (the long, unchanged prefix is read from the cache at a fraction of the input price) and keeps the model's earlier reasoning consistent with what it sees.
+
+- **System prompt.** Built once when a run starts, including `AGENTS.md`, the project memory snapshot, project rules and the skills catalog, and then sent byte for byte on every step. Editing `AGENTS.md` mid-run has no effect until the next run, and `--resume` refuses a checkpoint whose effective system prompt no longer matches (`effective system prompt, AGENTS.md, ... has changed; start a fresh task`).
+- **Tool definitions.** Fixed for the run and identical on every request.
+- **Ordinary steps.** The model's reply is stored and resent exactly as returned, then its tool results (including denials, errors, timeouts and malformed-call errors) and any notices (submit reminder, budget warning, verify-on-stop, truncation) are appended after it.
+- **Resume and follow-up.** `--resume` sends the checkpoint's history unchanged and appends one user message: the continuation notice (or the follow-up task), plus notes such as changed additional directories, changed command tools or lost background processes. Calls cut off by the interruption get appended `interrupted` results. Nothing earlier is edited, so a resumed run can still hit a warm cache.
+- **Scoped `AGENTS.md`.** Files from `--scoped-agents-md` arrive inside tool results, so they are appended too.
+
+Exceptions, all deliberate:
+
+- **Compaction.** When it triggers (see [Long runs](#long-runs)), compaction replaces the compacted part of the model's view: old tool outputs become `[output elided: ...]` placeholders, or older turns are replaced by one summary message placed right after the task. The system prompt and the task are never touched, and the stored history (the trajectory with `-o`, and the checkpoint) keeps every original message; only the view sent to the model changes. The first request after a compaction therefore pays to write a new cache entry; from then on the invariant holds again, and the summary itself is resent byte for byte until the next compaction. `--no-compact` keeps the history strictly append-only, at the risk of running out of context.
+- **Plan block.** With [`--plan`](planner.md), the `[Current plan]` block is pinned to the end of the task message (or of the summary after a summarizing compaction) so it survives compaction. A step that calls `update_plan` changes that block, so the cache is rewritten from the task message onward on the next request. Steps that leave the plan alone keep the whole prefix stable.
+- **Retained skill instructions.** After a summarizing compaction, instructions of skills that were loaded in the summarized part are re-attached to the summary message, so they can change when a later compaction happens or the skill is loaded again.
+
+How caching is used per provider: `anthropic` turns on automatic [prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) on every request (see [Tools](tools.md)); `openai` on the Responses API and `codex` send a `prompt_cache_key` that stays the same for the run; OpenAI Chat Completions and OpenRouter rely on the provider's own automatic prefix caching. Cache reads and writes are reported as `cache_read_tokens` and `cache_write_tokens` in the summary line, `--json` `model.request` and `result` events, and the trajectory. Changing the model, `--reasoning-effort` or the tool set between runs starts a new cache.
+
+Tests in `internal/agent/append_only_test.go` hash each request's message prefix before and after every step and fail if any already-sent message changes outside a compaction.
+
 ### Images
 
 `--images` (or `images: {enabled: true}`) lets vision-capable models see images. It is off by default; with it off, requests, tools, and checkpoints are unchanged.
