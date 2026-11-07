@@ -27,7 +27,7 @@ make test       # go test -count=1 ./...  (same as CI)
 make test-race  # go test -race -count=1 ./...  (same as the CI race job)
 make fmt        # fails and lists files if gofmt -l . is not empty (same as CI)
 make lint       # go vet ./..., then staticcheck ./... if staticcheck is installed
-make dist       # linux/darwin/windows x amd64/arm64 in dist/
+make dist       # linux/darwin/windows x amd64/arm64 in dist/, plus Windows zips
 ```
 
 `make lint` skips staticcheck with a hint when it isn't on your `PATH`; install it
@@ -316,15 +316,86 @@ privately rather than opening a public issue.
 
 ## Releasing (maintainers)
 
-Releases are cut by pushing a tag — the `release.yml` workflow builds all
-platforms and attaches `SHA256SUMS`:
+Releases are cut by pushing a tag. The `release.yml` workflow builds all
+platforms, attaches `SHA256SUMS`, and then publishes WinGet when it can.
+The same steps are written up in [docs/release.md](docs/release.md).
 
 ```bash
 git tag v0.x.y && git push origin v0.x.y
 ```
 
-`make dist` reproduces the exact artifacts locally. `install.sh` verifies
-checksums, so tag only after the full suite is green on `main`.
+`make dist` reproduces the artifacts locally. It needs the `zip` command.
+Unix and macOS builds are bare binaries. Windows builds are
+`tinyagent-windows-amd64.zip` and `tinyagent-windows-arm64.zip` only. Each
+zip contains one file, `tinyagent.exe`. The bare `.exe` is removed before
+`SHA256SUMS` is written, and the release workflow rejects a `dist/` that
+still has one. `tinyagent --update` on Windows downloads the zip. An older
+release that only has `tinyagent-windows-<arch>.exe` still installs from
+that file. `install.sh` verifies checksums, so tag only after the full
+suite is green on `main`.
+
+### WinGet
+
+The `winget` job runs after the GitHub release is published. It opens a pull
+request to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs)
+for package `VicGupta.TinyAgent` using
+[vedantmgoyal9/winget-releaser](https://github.com/vedantmgoyal9/winget-releaser)
+(komac under the hood). The release job does not wait on that pull request.
+
+One-time setup, on the `vicgupta` account:
+
+1. Fork `microsoft/winget-pkgs` to `vicgupta/winget-pkgs`. Leave the fork
+   named `winget-pkgs`. The action pushes the manifest branch there
+   (`fork-user` defaults to the repository owner, `vicgupta`).
+2. Create a **classic** personal access token on that same account
+   (Settings → Developer settings → Personal access tokens → Tokens
+   (classic)). Fine-grained tokens can commit but cannot open the pull
+   request. Scopes:
+   - `public_repo` (required): read the fork and open a public pull request.
+   - `workflow`: so fork sync can update workflow files from upstream. Without
+     it, `komac sync-fork` fails with an `UpdateRef` error until someone
+     syncs the fork in the browser.
+3. On `vicgupta/tinyagent`, add the token as an Actions repository secret
+   named `WINGET_GITHUB_TOKEN` (Settings → Secrets and variables → Actions).
+   Do not put the token in the workflow file.
+
+When `WINGET_GITHUB_TOKEN` is unset, the job logs a notice and succeeds, and
+the GitHub release is already published. The same skip happens for a tag that
+is not `vX.Y.Z` (for example a release candidate) and when
+`VicGupta.TinyAgent` is not in winget-pkgs yet.
+
+The releaser only updates a package that already exists. The first submission
+is a separate pull request, opened by hand, and **Microsoft reviews that
+first submission manually** (later version bumps are usually validated by the
+winget-pkgs automation). After the zips for `vX.Y.Z` are on the GitHub
+release, run this locally in a terminal (komac prompts; it will not finish
+unattended):
+
+```bash
+komac new VicGupta.TinyAgent \
+  --version X.Y.Z \
+  --urls \
+    "https://github.com/vicgupta/tinyagent/releases/download/vX.Y.Z/tinyagent-windows-amd64.zip" \
+    "https://github.com/vicgupta/tinyagent/releases/download/vX.Y.Z/tinyagent-windows-arm64.zip" \
+  --publisher "Vic Gupta" \
+  --publisher-url "https://github.com/vicgupta" \
+  --package-name "TinyAgent" \
+  --package-url "https://github.com/vicgupta/tinyagent" \
+  --license "MIT" \
+  --license-url "https://github.com/vicgupta/tinyagent/blob/vX.Y.Z/LICENSE" \
+  --short-description "A minimal coding agent in a single static Go binary" \
+  --moniker "tinyagent" \
+  --release-notes-url "https://github.com/vicgupta/tinyagent/releases/tag/vX.Y.Z" \
+  --submit
+```
+
+Set `GITHUB_TOKEN` to the same classic PAT before running it, or pass
+`--token`. At the prompts, select the nested file `tinyagent.exe` for each
+zip and set the portable command alias to `tinyagent`. The installer type is
+`zip` and the nested installer type is `portable`. amd64 is x64 and arm64 is
+arm64. Accept or skip the other installer prompts. Later tags copy this
+shape, so the alias and the `tinyagent.exe` path have to match what `make
+dist` puts in the zip.
 
 ### Live command-output tests
 

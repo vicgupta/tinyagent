@@ -2,6 +2,7 @@
 package update
 
 import (
+	"archive/zip"
 	"bufio"
 	"bytes"
 	"context"
@@ -18,6 +19,9 @@ import (
 	"strings"
 	"time"
 )
+
+// maxUpdateExe is the largest tinyagent.exe accepted from a release zip.
+const maxUpdateExe = 256 << 20
 
 const DefaultAPIURL = "https://api.github.com/repos/vicgupta/tinyagent/releases/latest"
 
@@ -79,21 +83,22 @@ func (u *Updater) Run(ctx context.Context) (string, error) {
 	}
 	r.Step(StepQuery, fmt.Sprintf("found %s (current %s)", rel.TagName, u.Current))
 
-	name := fmt.Sprintf("tinyagent-%s-%s", u.GOOS, u.GOARCH)
-	if u.GOOS == "windows" {
-		name += ".exe"
-	}
 	urls := map[string]string{}
 	for _, a := range rel.Assets {
 		urls[a.Name] = a.URL
 	}
-	if urls[name] == "" {
+	name, legacy, ok := releaseAsset(urls, u.GOOS, u.GOARCH)
+	if !ok {
 		return fail(StepSelect, fmt.Errorf("release %s has no binary for %s/%s", rel.TagName, u.GOOS, u.GOARCH))
 	}
 	if urls["SHA256SUMS"] == "" {
 		return fail(StepSelect, fmt.Errorf("release %s has no SHA256SUMS", rel.TagName))
 	}
-	r.Step(StepSelect, fmt.Sprintf("%s for %s/%s", name, u.GOOS, u.GOARCH))
+	detail := fmt.Sprintf("%s for %s/%s", name, u.GOOS, u.GOARCH)
+	if legacy {
+		detail += " (legacy exe; no zip in this release)"
+	}
+	r.Step(StepSelect, detail)
 
 	r.Step(StepChecksum, "SHA256SUMS")
 	sums, err := u.get(ctx, urls["SHA256SUMS"])
@@ -118,12 +123,87 @@ func (u *Updater) Run(ctx context.Context) (string, error) {
 	}
 	r.Step(StepVerify, "sha256 "+want+" matches SHA256SUMS")
 
-	r.Step(StepInstall, "replacing "+u.ExePath)
-	if err := replace(u.ExePath, bin); err != nil {
+	payload := bin
+	installDetail := "replacing " + u.ExePath
+	if strings.HasSuffix(name, ".zip") {
+		payload, err = exeFromZip(bin)
+		if err != nil {
+			return fail(StepInstall, err)
+		}
+		installDetail = "extracted tinyagent.exe; replacing " + u.ExePath
+	}
+	r.Step(StepInstall, installDetail)
+	if err := replace(u.ExePath, payload); err != nil {
 		return fail(StepInstall, err)
 	}
 	r.Step(StepDone, fmt.Sprintf("updated %s -> %s at %s", u.Current, rel.TagName, u.ExePath))
 	return fmt.Sprintf("updated %s -> %s (%s)", u.Current, rel.TagName, u.ExePath), nil
+}
+
+// releaseAsset picks the file to install. Unix and macOS use
+// tinyagent-<os>-<arch>. Windows releases publish tinyagent-windows-<arch>.zip
+// (one entry, tinyagent.exe). When that zip is not in the release, the legacy
+// bare tinyagent-windows-<arch>.exe is used so older tags still update.
+func releaseAsset(urls map[string]string, goos, goarch string) (name string, legacy, ok bool) {
+	base := fmt.Sprintf("tinyagent-%s-%s", goos, goarch)
+	if goos != "windows" {
+		if urls[base] == "" {
+			return "", false, false
+		}
+		return base, false, true
+	}
+	if urls[base+".zip"] != "" {
+		return base + ".zip", false, true
+	}
+	if urls[base+".exe"] != "" {
+		return base + ".exe", true, true
+	}
+	return "", false, false
+}
+
+// exeFromZip returns the tinyagent.exe entry from a release zip. The archive
+// must contain that one regular file and nothing else.
+func exeFromZip(data []byte) ([]byte, error) {
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, fmt.Errorf("invalid zip: %w", err)
+	}
+	var found *zip.File
+	for _, f := range zr.File {
+		name := filepath.ToSlash(f.Name)
+		if f.FileInfo().IsDir() || name == "" {
+			return nil, fmt.Errorf("zip entry %q is not tinyagent.exe", f.Name)
+		}
+		if name != "tinyagent.exe" || !f.Mode().IsRegular() {
+			return nil, fmt.Errorf("zip entry %q is not tinyagent.exe", f.Name)
+		}
+		if found != nil {
+			return nil, fmt.Errorf("zip contains more than one tinyagent.exe")
+		}
+		found = f
+	}
+	if found == nil {
+		return nil, fmt.Errorf("zip has no tinyagent.exe")
+	}
+	if found.UncompressedSize64 > maxUpdateExe {
+		return nil, fmt.Errorf("tinyagent.exe in zip is %d bytes, over the %d byte limit", found.UncompressedSize64, maxUpdateExe)
+	}
+	rc, err := found.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	exe, err := io.ReadAll(io.LimitReader(rc, maxUpdateExe+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(exe) > maxUpdateExe {
+		return nil, fmt.Errorf("tinyagent.exe in zip is over the %d byte limit", maxUpdateExe)
+	}
+	if len(exe) == 0 {
+		return nil, fmt.Errorf("tinyagent.exe in zip is empty")
+	}
+	return exe, nil
 }
 
 // replace swaps the file at path for data via a rename in the same directory,
