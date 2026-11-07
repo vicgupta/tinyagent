@@ -420,6 +420,11 @@ func TestWebSlashCommands(t *testing.T) {
 	if r := c.post("/api/command", map[string]any{"line": "/cost"}); r["text"] != "no turns yet" {
 		t.Errorf("/cost = %v", r)
 	}
+	preview := c.post("/api/command", map[string]any{"line": "/context"})
+	previewText, _ := preview["text"].(string)
+	if !strings.Contains(previewText, "token window") || !strings.Contains(previewText, "estimated") {
+		t.Errorf("/context before a turn = %v", preview)
+	}
 	c.post("/api/message", map[string]any{"text": "//etc/hosts is a path"})
 	until(t, ev, "turn_end")
 	if got := lastUser(t, p.bodies[0]); got != "/etc/hosts is a path" {
@@ -427,6 +432,11 @@ func TestWebSlashCommands(t *testing.T) {
 	}
 	if r := c.post("/api/message", map[string]any{"text": "/cost"}); !strings.Contains(r["text"].(string), "tokens") {
 		t.Errorf("/cost via message = %v", r)
+	}
+	after := c.post("/api/command", map[string]any{"line": "/context"})
+	afterText, _ := after["text"].(string)
+	if !strings.Contains(afterText, "last turn") || !strings.Contains(afterText, "100 in") {
+		t.Errorf("/context after a turn = %v", after)
 	}
 	if r := c.post("/api/command", map[string]any{"line": "/compact"}); !strings.Contains(r["text"].(string), "compacts") {
 		t.Errorf("/compact = %v", r)
@@ -455,7 +465,7 @@ func TestWebSlashCommands(t *testing.T) {
 		t.Errorf("unknown command = %d %s", code, b)
 	}
 	_, b = c.do("GET", "/api/commands", nil, nil)
-	for _, want := range []string{"/help", "/new", "/cost", "/save", "/compact", "/raw", "/model", "/history", "/stop", "/exit"} {
+	for _, want := range []string{"/help", "/new", "/cost", "/context", "/save", "/compact", "/raw", "/model", "/history", "/stop", "/exit"} {
 		if !strings.Contains(string(b), `"`+want+`"`) {
 			t.Errorf("/api/commands lacks %s", want)
 		}

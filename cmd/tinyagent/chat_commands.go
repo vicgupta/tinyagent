@@ -10,6 +10,7 @@ var chatCommands = []struct{ name, alias, desc string }{
 	{"/help", "", "show this list"},
 	{"/exit", "/quit", "end the session (also Ctrl-D)"},
 	{"/cost", "", "tokens and cost so far"},
+	{"/context", "", "show how the context window is used"},
 	{"/tools", "", "list tools available for this session"},
 	{"/new", "/clear", "start a fresh conversation (new checkpoint)"},
 	{"/save", "", "save the checkpoint now, or to /save <path>"},
@@ -48,6 +49,8 @@ func (c *chat) command(line string) bool {
 			return false
 		}
 		fmt.Fprint(w, c.costText())
+	case "/context":
+		fmt.Fprint(w, formatContext(c.s.contextReport(), c.st))
 	case "/new", "/clear":
 		c.s.traj, c.source, c.cont, c.turns, c.compact = nil, "", false, 0, false
 		c.s.remember = nil

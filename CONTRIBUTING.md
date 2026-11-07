@@ -156,6 +156,14 @@ stays unchanged.
   cursor moves, clears, rune widths and autowrap. Assert on the screen and on
   `lineFeeds`, not on raw bytes, and cover a colour prompt, a `NO_COLOR` prompt
   and multibyte input.
+- **Slash commands** live in `chatCommands` (`cmd/tinyagent/chat_commands.go`)
+  and are printed by `/help`. The web UI's list is `webCommands` in
+  `cmd/tinyagent/web.go`, served at `/api/commands`, which fills the slash menu
+  and the help dialog; handle the command in `apiCommand` too. Document a new
+  command in `docs/chat.md` and, when the web UI has it, `docs/web.md`, and
+  mention it in the README feature list. `/context` (the breakdown in
+  `internal/agent/context_usage.go`, rendered by `formatContext`) must keep
+  using the compaction character estimate and label estimates as estimates.
 
 ### Continuous integration
 

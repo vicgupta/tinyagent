@@ -82,6 +82,12 @@ func TestRunSubmits(t *testing.T) {
 	if tr.InputTokens != 200 || tr.OutputTokens != 40 {
 		t.Errorf("tokens = %d in / %d out, want 200 / 40", tr.InputTokens, tr.OutputTokens)
 	}
+	if tr.LastUsage == nil || tr.LastUsage.InputTokens != 100 || tr.LastUsage.OutputTokens != 20 || tr.LastUsage.Step != 2 || tr.LastUsage.Messages != len(tr.Messages) {
+		t.Errorf("last usage = %+v, messages %d", tr.LastUsage, len(tr.Messages))
+	}
+	if saved, err := trajectory.Load(out); err != nil || saved.LastUsage == nil || saved.LastUsage.InputTokens != 100 {
+		t.Errorf("saved last usage = %v %+v", err, saved)
+	}
 	// Write-ahead before the tool, after its result, and at termination.
 	if saves != 3 {
 		t.Errorf("saved %d times, want 3", saves)
