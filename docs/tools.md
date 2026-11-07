@@ -15,3 +15,20 @@
 - Path sandboxing is lexical: `..` and absolute paths outside `--cwd` are rejected, but a symlink inside the root that points outside it is followed. `bash` isn't sandboxed unless you pass `--sandbox` or `--env container` (see Sandboxing commands and Execution environments); without them, only run it on code you trust.
 - Cost uses a small built-in price table (`internal/model/runtime.go`). Unknown models cost $0 unless you set the price in the config (top level, or per model under a [named provider](providers.md#named-providers)), so `--cost-limit` does nothing for them. With a positive cost limit, tinyagent prints a warning on stderr before the first request when the `openai`, `openrouter`, `anthropic` or named-provider model has no price, naming `input_price_per_mtok` and `output_price_per_mtok`. The run continues as normal.
 - The `anthropic` provider turns on [prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) for every request, so each step reads the history the previous step already sent from the cache instead of paying full price for it again. Input tokens in the summary and trajectory include cached tokens. Cost prices cache writes at 1.25× the input price and cache reads at 0.1× (less on models where Anthropic charges less, such as 0.05× for Claude Opus 5.5 and Sonnet 5.5). `input_price_per_mtok` overrides the base price and the multipliers apply on top.
+
+## Tool error messages
+
+Every tool error the model sees states **what went wrong** and **what to try next**, joined by a semicolon — the same shape as `edit_file`'s unique-match error (`old_str occurs 3 times in x.go; add surrounding context to make it unique`). A bare `failed` is avoided so the model can fix the call instead of retrying blindly.
+
+Examples:
+
+| Tool | Cause (excerpt) | Next step (excerpt) |
+|------|-----------------|---------------------|
+| `edit_file` | `old_str not found in x.go` | `read the file and copy the exact text to replace` |
+| `bash` | `command timed out after 30s and was killed` | `retry with a higher timeout … or split the work` |
+| `web_fetch` | `host … is not in web_fetch.allowed_domains` | `pick an allowed host or ask to update …` |
+| `web_search` | `all providers failed: …` | `Try again in a minute or rephrase …; … web_fetch` |
+| `lsp` | `no lsp server configured for .rs files` | `configure an lsp.servers entry …` |
+| MCP tools | `MCP server docs call failed: …` | `fix the server or its config, then start a new run` |
+
+Permission and `file_access` denials follow the same pattern. New tool error paths should use `tools.Actionable` / `tools.Actionablef` (or the MCP helpers) so tests can assert the wording.

@@ -218,11 +218,11 @@ func TestLSPReferencesFiltered(t *testing.T) {
 		t.Errorf("lsp outside the root: %+v", r)
 	}
 	r = callResult(t, e, LSPToolName, map[string]any{"operation": "definition", "path": "x.rs", "line": 1, "column": 1})
-	if !r.IsError || !strings.Contains(r.Text, "no lsp server configured for .rs files") {
+	if !r.IsError || !strings.Contains(r.Text, "no lsp server configured for .rs files") || !strings.Contains(r.Text, "configure an lsp.servers") {
 		t.Errorf("unhandled extension: %+v", r)
 	}
 	r = callResult(t, e, LSPToolName, map[string]any{"operation": "hover", "path": "a.go"})
-	if !r.IsError {
+	if !r.IsError || !strings.Contains(r.Text, "operation must be") || !strings.Contains(r.Text, "diagnostics") {
 		t.Errorf("bad operation: %+v", r)
 	}
 	r = callResult(t, e, LSPToolName, map[string]any{"operation": "definition", "path": "a.go"})

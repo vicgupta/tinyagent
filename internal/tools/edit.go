@@ -15,7 +15,7 @@ func EditFile(root, path, oldStr, newStr string, replaceAll bool) (int, error) {
 // editFile is EditFile that refuses paths the scope denies for writing.
 func editFile(root, path, oldStr, newStr string, replaceAll bool, sc *scope) (int, error) {
 	if oldStr == "" {
-		return 0, fmt.Errorf("old_str must not be empty")
+		return 0, Actionable("old_str must not be empty", "pass the exact text to replace from the file")
 	}
 	full, err := sc.resolve(root, path)
 	if err != nil {
@@ -32,7 +32,7 @@ func editFile(root, path, oldStr, newStr string, replaceAll bool, sc *scope) (in
 	n := strings.Count(content, oldStr)
 	switch {
 	case n == 0:
-		return 0, fmt.Errorf("old_str not found in %s", path)
+		return 0, Actionablef("read the file and copy the exact text to replace", "old_str not found in %s", path)
 	case n > 1 && !replaceAll:
 		return 0, fmt.Errorf("old_str occurs %d times in %s; add surrounding context to make it unique", n, path)
 	}

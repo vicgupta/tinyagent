@@ -79,7 +79,7 @@ type DeniedError struct {
 }
 
 func (e *DeniedError) Error() string {
-	return fmt.Sprintf("%s is denied by file_access.%s rule %q", e.Path, e.List, e.Pattern)
+	return fmt.Sprintf("%s is denied by file_access.%s rule %q; choose a different path or ask to update the file_access rules", e.Path, e.List, e.Pattern)
 }
 
 // foldCase reports whether file_access matching ignores case: on macOS and

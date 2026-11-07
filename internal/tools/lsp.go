@@ -206,10 +206,10 @@ func fileLines(path string) []string {
 func (e *Executor) lspTool(ctx context.Context, a args) (string, error) {
 	op := a.Operation
 	if op != "diagnostics" && op != "definition" && op != "references" {
-		return "", fmt.Errorf("operation must be diagnostics, definition or references, got %q", op)
+		return "", Actionablef(`pass "diagnostics", "definition" or "references"`, "operation must be diagnostics, definition or references, got %q", op)
 	}
 	if strings.TrimSpace(a.Path) == "" {
-		return "", errors.New("path is required")
+		return "", Actionable("path is required", "pass the path of a file under the working directory")
 	}
 	sc := e.scope()
 	full, err := sc.resolve(e.Root, a.Path)
@@ -220,13 +220,13 @@ func (e *Executor) lspTool(ctx context.Context, a args) (string, error) {
 		return "", err
 	}
 	if isDir(full) {
-		return "", fmt.Errorf("%s is a directory", a.Path)
+		return "", Actionablef("pass a file path, not a directory", "%s is a directory", a.Path)
 	}
 	if _, ok := e.LSP.Manager.ServerFor(full); !ok {
 		if ext := filepath.Ext(full); ext != "" {
-			return "", fmt.Errorf("no lsp server configured for %s files", ext)
+			return "", Actionablef("configure an lsp.servers entry for that extension, or use a file type that has one", "no lsp server configured for %s files", ext)
 		}
-		return "", fmt.Errorf("no lsp server configured for files without an extension (%s)", a.Path)
+		return "", Actionablef("configure an lsp.servers entry, or use a file with a configured extension", "no lsp server configured for files without an extension (%s)", a.Path)
 	}
 	if _, err := os.Stat(full); err != nil {
 		return "", err
@@ -257,11 +257,11 @@ func (e *Executor) lspTool(ctx context.Context, a args) (string, error) {
 		return "", err
 	}
 	if line < 1 || col < 1 {
-		return "", fmt.Errorf("%s needs a 1-based line and column, got line %d column %d", op, line, col)
+		return "", Actionablef("pass 1-based line and column from read_file or diagnostics", "%s needs a 1-based line and column, got line %d column %d", op, line, col)
 	}
 	lines := fileLines(full)
 	if line > len(lines) {
-		return "", fmt.Errorf("line %d is past the end of %s (%d lines)", line, a.Path, len(lines))
+		return "", Actionablef("read the file and use a line within its length", "line %d is past the end of %s (%d lines)", line, a.Path, len(lines))
 	}
 	pos := lsp.Position{Line: line - 1, Character: lsp.RuneToUTF16(lines[line-1], col-1)}
 	var locs []lsp.Location
@@ -272,7 +272,7 @@ func (e *Executor) lspTool(ctx context.Context, a args) (string, error) {
 	}
 	if err != nil {
 		if errors.Is(err, lsp.ErrNoServer) {
-			return "", fmt.Errorf("no lsp server configured for %s files", filepath.Ext(full))
+			return "", Actionablef("configure an lsp.servers entry for that extension, or use a file type that has one", "no lsp server configured for %s files", filepath.Ext(full))
 		}
 		return "", err
 	}

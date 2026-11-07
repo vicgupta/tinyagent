@@ -389,11 +389,11 @@ func (s *WebSearcher) Search(ctx context.Context, query string) (string, error) 
 	}()
 	if query == "" {
 		rec.Error = "query is required"
-		return "", errors.New(rec.Error)
+		return "", Actionable("query is required", "pass a non-empty search query")
 	}
 	if len(query) > maxWebSearchQueryLen {
 		rec.Error = fmt.Sprintf("query is longer than %d characters", maxWebSearchQueryLen)
-		return "", errors.New(rec.Error)
+		return "", Actionablef("shorten the query", "query is longer than %d characters", maxWebSearchQueryLen)
 	}
 	var tried []string
 	errored := 0
@@ -410,7 +410,7 @@ func (s *WebSearcher) Search(ctx context.Context, query string) (string, error) 
 		rec.Attempts = append(rec.Attempts, a)
 		if o.err != nil && o.err.Category == WebSearchFailCanceled {
 			rec.Error = "canceled"
-			return "", fmt.Errorf("web_search canceled: %v", context.Cause(ctx))
+			return "", Actionablef("retry the search if it was stopped early", "web_search canceled: %v", context.Cause(ctx))
 		}
 		if o.err == nil && len(o.results) > 0 {
 			rec.Provider, rec.Results = p.name, len(o.results)
@@ -485,10 +485,17 @@ func (s *WebSearcher) call(ctx, pctx context.Context, p searchProvider, query st
 	if err != nil && ctx.Err() != nil {
 		return nil, failf(WebSearchFailCanceled, "canceled")
 	}
-	if err != nil && errors.Is(pctx.Err(), context.DeadlineExceeded) {
+	if err != nil && (errors.Is(pctx.Err(), context.DeadlineExceeded) || timeoutReason(err.Reason)) {
+		// ResponseHeaderTimeout can win the race with the context deadline;
+		// keep one wording so the model (and tests) see "timed out after …".
 		return nil, failf(WebSearchFailTransient, "timed out after %s", s.Timeout)
 	}
 	return res, err
+}
+
+func timeoutReason(reason string) bool {
+	r := strings.ToLower(reason)
+	return strings.Contains(r, "timeout") || strings.Contains(r, "deadlineexceeded")
 }
 
 func formatSearch(query, provider string, o providerOutcome, tried []string) string {

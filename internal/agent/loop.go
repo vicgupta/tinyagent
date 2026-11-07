@@ -1018,14 +1018,15 @@ func (a *Agent) permit(ctx context.Context, t *trajectory.Trajectory, call model
 
 // deniedMessage renders the tool result for a policy deny.
 func deniedMessage(res permissions.Result) string {
+	const next = "; choose a different tool, path or command that the policy allows, or ask to update permissions"
 	if res.Rule >= 0 {
 		msg := fmt.Sprintf("error: denied by permission rule %d", res.Rule)
 		if res.Message != "" {
 			msg += ": " + res.Message
 		}
-		return msg
+		return msg + next
 	}
-	return "error: denied by permission policy"
+	return "error: denied by permission policy" + next
 }
 
 // askPermission answers a policy ask: through the approver when one is set,

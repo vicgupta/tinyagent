@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -17,10 +16,10 @@ func ReadFile(root, path string, offset, limit int) (string, error) {
 // readFile is ReadFile that refuses paths the scope denies for reading.
 func readFile(root, path string, offset, limit int, sc *scope) (string, error) {
 	if offset < 0 {
-		return "", errors.New("offset must be a line number >= 1")
+		return "", Actionable("offset must be a line number >= 1", "pass a 1-based start line, or omit offset to read from the start")
 	}
 	if limit < 0 {
-		return "", errors.New("limit must be >= 0")
+		return "", Actionable("limit must be >= 0", "pass a non-negative max line count, or omit limit to read through the end")
 	}
 	full, err := sc.resolve(root, path)
 	if err != nil {
@@ -51,7 +50,7 @@ func readFile(root, path string, offset, limit int, sc *scope) (string, error) {
 		if offset == 1 {
 			return "", nil // empty file
 		}
-		return "", fmt.Errorf("offset %d is past the end of the file (%d lines)", offset, len(lines))
+		return "", Actionablef("use a smaller offset, or omit offset to read from the start", "offset %d is past the end of the file (%d lines)", offset, len(lines))
 	}
 	end := len(lines)
 	if limit > 0 && offset-1+limit < end {

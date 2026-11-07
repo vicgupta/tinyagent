@@ -297,16 +297,16 @@ func (r *Registry) call(ctx context.Context, name, raw string, maxImageBytes int
 		return "", nil, false, false
 	}
 	if t.server.failed {
-		return "error: MCP server " + t.server.alias + " connection is unavailable after an earlier failure", nil, true, true
+		return actionable("MCP server "+t.server.alias+" connection is unavailable after an earlier failure", "restart the run or fix that server's command/config, then retry"), nil, true, true
 	}
 	var args map[string]any
 	decoder := json.NewDecoder(bytes.NewBufferString(raw))
 	decoder.UseNumber()
 	if err := decoder.Decode(&args); err != nil || args == nil {
-		return "error: invalid arguments JSON object", nil, true, true
+		return actionable("invalid arguments JSON object", "resend a single JSON object matching the tool schema"), nil, true, true
 	}
 	if decoder.Decode(new(any)) != io.EOF {
-		return "error: invalid arguments JSON object", nil, true, true
+		return actionable("invalid arguments JSON object", "resend a single JSON object matching the tool schema"), nil, true, true
 	}
 	cctx, cancel := context.WithTimeout(ctx, t.server.timeout)
 	defer cancel()
@@ -316,12 +316,12 @@ func (r *Registry) call(ctx context.Context, name, raw string, maxImageBytes int
 		// usable. Any other error means the connection itself is suspect.
 		if cctx.Err() != nil {
 			if ctx.Err() == nil {
-				return fmt.Sprintf("error: MCP tool %s timed out after %s", name, t.server.timeout), nil, true, true
+				return actionablef("retry with simpler arguments, or raise the server's call_timeout_seconds", "MCP tool %s timed out after %s", name, t.server.timeout), nil, true, true
 			}
-			return "error: MCP tool " + name + " was interrupted: " + ctx.Err().Error(), nil, true, true
+			return actionable("MCP tool "+name+" was interrupted: "+ctx.Err().Error(), "retry the call if the run was not cancelled on purpose"), nil, true, true
 		}
 		t.server.failed = true
-		return truncate("error: MCP server " + t.server.alias + " call failed: " + err.Error()), nil, true, true
+		return truncate(actionable("MCP server "+t.server.alias+" call failed: "+err.Error(), "fix the server or its config, then start a new run")), nil, true, true
 	}
 	var b strings.Builder
 	for _, c := range res.Content {
@@ -356,7 +356,7 @@ func (r *Registry) call(ctx context.Context, name, raw string, maxImageBytes int
 		b.Write(data)
 	}
 	if res.NeedsInput() {
-		return "error: MCP tool requested unsupported interactive input", nil, true, true
+		return actionable("MCP tool requested unsupported interactive input", "use a different tool or non-interactive arguments; tinyagent cannot answer MCP prompts"), nil, true, true
 	}
 	text := b.String()
 	if res.IsError {
