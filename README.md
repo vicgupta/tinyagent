@@ -133,9 +133,10 @@ tinyagent -m opencode/big-pickle -t "..."                    # an OpenCode Zen m
 cat task.md | tinyagent -t -               # read a long or multi-line task from stdin
 tinyagent --read-only --cwd ~/src/project -t "Review error handling in pkg/api"
 cat review-task.md | tinyagent --read-only -t - -o review.json
+tinyagent goal "fix the failing test in pkg/foo" --check "go test ./..."
 ```
 
-Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: usage, two examples, the common options (`-t/--task`, including `-t -` for stdin; `-m/--model` with its providers and default; `-c`, `--cwd`, `--resume`, `--read-only`; optional `--tools` to scope a task to named tools ([docs](docs/tasks.md#tool-scoping)), `-o`, `--json`, `--check`, `--update`, `-V`) and the subcommands, and `tinyagent --help --verbose` for every flag. Subcommands are shortcuts for common flags: `tinyagent sandbox`, `tinyagent memory list`, `tinyagent ratchet list`, `tinyagent planner --first`, `tinyagent plugins list`, `tinyagent triage issues.json`, `tinyagent tinygo status` (see [CLI reference](docs/subcommands.md)); each one alone, such as `tinyagent sandbox`, prints its help.
+Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: usage, two examples, the common options (`-t/--task`, including `-t -` for stdin; `-m/--model` with its providers and default; `-c`, `--cwd`, `--resume`, `--read-only`; optional `--tools` to scope a task to named tools ([docs](docs/tasks.md#tool-scoping)), `-o`, `--json`, `--check`, `--update`, `-V`) and the subcommands, and `tinyagent --help --verbose` for every flag. Subcommands are shortcuts for common flags: `tinyagent sandbox`, `tinyagent memory list`, `tinyagent ratchet list`, `tinyagent planner --first`, `tinyagent goal "..."`, `tinyagent plugins list`, `tinyagent triage issues.json`, `tinyagent tinygo status` (see [CLI reference](docs/subcommands.md)); each one alone, such as `tinyagent sandbox`, prints its help.
 
 ## Features
 
@@ -154,6 +155,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 - Prompt-cache-friendly history: the system prompt (with `AGENTS.md`) and everything already sent stay byte-identical from step to step, resume and follow-ups only append, and compaction never touches the system prompt or the task, so provider prompt caches keep hitting; see [Append-only history and prompt caching](docs/long-runs.md#append-only-history-and-prompt-caching).
 - Project rules from agent failures (`tinyagent ratchet add`): each rule records its incident and an expiry or review condition, is added to the system prompt, and can be enforced as a permission deny rule; see [Project rules](docs/ratchet.md).
 - A task planner that can require a plan before any change.
+- Goal mode (`tinyagent goal "..."`): a shortcut that plans first, runs the task, and verifies before stop; optional `--check <cmd>` is the success-condition command (`--verify-check`). See [Goal mode](docs/tasks.md#goal-mode).
 - Run budgets: turn cap, cost limit and token limit (`--token-limit`), with an 80% warning to the model; delegates, workers and `--attempts` share the budget, and a run that hits it can be resumed.
 - Verify before stop (`--verify-on-stop`): a run that changed files isn't accepted until a test or build command passes; otherwise it is marked unverified. On by default for every `--workflow` stage (`--verify-on-stop=false` opts out); see [Default on for workflow runs](docs/verify.md#default-on-for-workflow-runs). Optional computational checks (`--verify-check`, e.g. lint, type check, tests) run in order, cheapest first, before the run may finish; see [Computational checks](docs/verify.md#computational-checks). An optional inferential review (`--verify-review`) runs last, once every check passes, and reports the model's findings; see [Inferential review](docs/verify.md#inferential-review).
 - Skill workflows (`--workflow file.yaml -t ...`): run a task through fixed stages (plan, code, vet, test, verify behavior), each gated by a success check, with intent routing or `--workflow-name`; `tinyagent help workflows` at the terminal, full guide in [docs/workflows.md](docs/workflows.md).
@@ -194,7 +196,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 |---|---|
 | Interactive chat (`tinyagent chat`) | [docs/chat.md](docs/chat.md) |
 | Web UI (`tinyagent web`) | [docs/web.md](docs/web.md) |
-| Tasks: passing a task, task types, task-based routing | [docs/tasks.md](docs/tasks.md) |
+| Tasks: passing a task, goal mode, task types, task-based routing | [docs/tasks.md](docs/tasks.md) |
 | Reviews, worktrees, best-of-N, resume, transcripts, follow-ups, asking for input, token and cost budgets | [docs/runs.md](docs/runs.md) |
 | Long runs, session handoff, images, tool output files (MCP results capped at 256 KiB), apply_patch, subagents (read-only researchers), workers (read-write builders), web fetch, web search, LSP | [docs/long-runs.md](docs/long-runs.md) |
 | Planner (`update_plan`, `--plan-first`) | [docs/planner.md](docs/planner.md) |

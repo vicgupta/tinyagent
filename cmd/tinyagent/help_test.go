@@ -22,8 +22,8 @@ func TestDefaultHelpIsBrief(t *testing.T) {
 			t.Fatalf("%v exit = %d", args, code)
 		}
 		lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
-		if len(lines) > 40 {
-			t.Errorf("%v: %d lines, want <= 40:\n%s", args, len(lines), got)
+		if len(lines) > 42 {
+			t.Errorf("%v: %d lines, want <= 42:\n%s", args, len(lines), got)
 		}
 		for _, l := range lines {
 			if len(l) > helpWidth {

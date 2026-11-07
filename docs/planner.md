@@ -8,6 +8,6 @@ A checkpoint records whether the plan tool was enabled, and `--resume` keeps tha
 
 ### Plan first
 
-`--plan-first` (config `plan.require_first: true`, or `tinyagent planner --first`) implies `--plan` and makes the plan come before any change: a workspace-changing tool call is refused until the model has called `update_plan`, and a `plan.required` event is emitted. Read-only tools, `ask_user` and `submit` are never held back. Until a plan exists, the pinned `[Current plan]` block asks for one. It is off by default so trivial tasks are not slowed down. `--plan-first --plan=false` is a usage error.
+`--plan-first` (config `plan.require_first: true`, or `tinyagent planner --first`) implies `--plan` and makes the plan come before any change: a workspace-changing tool call is refused until the model has called `update_plan`, and a `plan.required` event is emitted. Read-only tools, `ask_user` and `submit` are never held back. Until a plan exists, the pinned `[Current plan]` block asks for one. It is off by default so trivial tasks are not slowed down. `--plan-first --plan=false` is a usage error. [`tinyagent goal`](tasks.md#goal-mode) turns on plan-first and verify-on-stop together.
 
 Steps can also be marked `failed` (shown as `[-]`), alongside `pending`, `in_progress`, `done` and `blocked`. Each update prints `plan updated:` with the plan to stdout (not in `--json` mode).

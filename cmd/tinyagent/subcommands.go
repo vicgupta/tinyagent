@@ -17,12 +17,14 @@ import (
 //	tinyagent sandbox --backend bwrap -t "x"  == tinyagent --sandbox --sandbox-backend bwrap -t "x"
 //	tinyagent memory list                     == tinyagent --memory-list
 //	tinyagent planner --first -- fix the bug  == tinyagent --plan --plan-first -t "fix the bug"
+//	tinyagent goal "ship it" --check "go test ./..."  == tinyagent --plan --plan-first --verify-on-stop --verify-check "go test ./..." -t "ship it"
 //
 // argv[1] is a subcommand only when it is exactly a subcommand name and is
-// alone or followed by an option (-x), "--", or one of that subcommand's
-// actions. Anything else (e.g. "tinyagent memory leaks in the parser") is
-// left to the normal parser; pass a task that starts with such a word with
-// -t "memory leaks ...", which never starts with a subcommand.
+// alone or followed by an option (-x), "--", one of that subcommand's
+// actions, or (when it has a positional) a non-option word. Anything else
+// (e.g. "tinyagent memory leaks in the parser") is left to the normal
+// parser; pass a task that starts with such a word with -t "memory leaks
+// ...", which never starts with a subcommand.
 type subcommand struct {
 	name    string
 	summary string
@@ -112,6 +114,13 @@ var subcommands = []subcommand{
 		options: map[string]string{"first": "plan-first", "file": "plan-file"},
 	},
 	{
+		name: "goal", brief: "plan first, run, and verify the goal (--check)", summary: "run a goal with a plan first and verify-on-stop (same as --plan --plan-first --verify-on-stop); optional --check <cmd> is --verify-check",
+		base:          []string{"--plan", "--plan-first", "--verify-on-stop"},
+		options:       map[string]string{"check": "verify-check"},
+		positional:    "task",
+		positionalArg: "goal",
+	},
+	{
 		name: "plugins", brief: "manage plugins: list|prune|rollback", summary: "inspect and manage plugins and stored plugin modules (same as --list-plugins and --plugins-*)",
 		actions: map[string]subAction{
 			"list":     {flag: "list-plugins", desc: "print each plugin, its skills and servers, then exit (--list-plugins)"},
@@ -198,6 +207,7 @@ func expandSubcommand(args []string) ([]string, *subHelp, error) {
 	gfs := newFlagSet(&options{})
 	var out []string
 	action := false
+	tookPositional := false
 	for i := 0; i < len(rest); i++ {
 		a := rest[i]
 		if a == "help" && i == 0 {
@@ -231,8 +241,11 @@ func expandSubcommand(args []string) ([]string, *subHelp, error) {
 			}
 			continue
 		}
-		if s.positional != "" && i == 0 && (!strings.HasPrefix(a, "-") || a == "-") {
+		// A positional may appear after options (tinyagent goal --check "cmd" "the goal")
+		// as well as first (tinyagent goal "the goal" --check "cmd"); only one is taken.
+		if s.positional != "" && !tookPositional && (!strings.HasPrefix(a, "-") || a == "-") {
 			out = append(out, "--"+s.positional, a)
+			tookPositional = true
 			continue
 		}
 		if a == "--" {
