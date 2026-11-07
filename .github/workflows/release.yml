@@ -23,3 +23,52 @@ jobs:
         with:
           generate_release_notes: true
           files: dist/*
+
+  # Opens a pull request to microsoft/winget-pkgs for VicGupta.TinyAgent.
+  # A missing WINGET_GITHUB_TOKEN, a non-stable tag, or a package that is
+  # not in winget-pkgs yet logs a notice and leaves this job green.
+  winget:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide whether to publish
+        id: winget
+        env:
+          WINGET_GITHUB_TOKEN: ${{ secrets.WINGET_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${WINGET_GITHUB_TOKEN}" ]; then
+            echo "::notice title=WinGet skipped::WINGET_GITHUB_TOKEN is not set; skipping WinGet publish. See CONTRIBUTING.md."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          tag="${GITHUB_REF_NAME:-}"
+          if ! printf '%s\n' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::notice title=WinGet skipped::Tag ${tag} is not a stable vX.Y.Z release; skipping WinGet publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          set +e
+          listing=$(gh api "repos/microsoft/winget-pkgs/contents/manifests/v/VicGupta/TinyAgent" 2>&1)
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if printf '%s\n' "$listing" | grep -q 'HTTP 404'; then
+            echo "::notice title=WinGet skipped::VicGupta.TinyAgent is not in winget-pkgs yet. Open the first submission by hand; Microsoft reviews that pull request manually. See CONTRIBUTING.md."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s\n' "$listing" >&2
+          exit "$rc"
+
+      - name: Publish to WinGet
+        if: steps.winget.outputs.publish == 'true'
+        uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: VicGupta.TinyAgent
+          installers-regex: 'tinyagent-windows-.+\.zip$'
+          release-tag: ${{ github.ref_name }}
+          token: ${{ secrets.WINGET_GITHUB_TOKEN }}

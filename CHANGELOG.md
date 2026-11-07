@@ -4,6 +4,8 @@
 
 ### Added
 
+- **WinGet install.** `winget install VicGupta.TinyAgent` installs the Windows build. `make dist` attaches `tinyagent-windows-amd64.zip` and `tinyagent-windows-arm64.zip` (each contains `tinyagent.exe`) alongside `tinyagent-windows-amd64.exe` and `tinyagent-windows-arm64.exe`, which `--update` and direct download use. Pushing a stable `vX.Y.Z` tag publishes the GitHub release. When the `WINGET_GITHUB_TOKEN` secret is set and `VicGupta.TinyAgent` is already in [winget-pkgs](https://github.com/microsoft/winget-pkgs), the release workflow opens an update pull request. A missing secret, a non-stable tag, or a package that is not in winget-pkgs yet logs a notice and the GitHub release succeeds. The first submission is reviewed manually by Microsoft. No CLI change. See [Install](docs/install.md) and [Releasing](docs/release.md).
+
 - **CLI handoff providers stream.** `claude-code`, `codex-exec` and `opencode` show assistant text as the CLI produces it (terminal, web SSE `delta`, `--json` `assistant.delta`) and show the CLI's own tool and command activity as a live preview (`tool.output` / web `tool_output`), with the same secret redaction and 256 KiB cap as other live previews. The saved reply, session id, cost and usage are unchanged, and the final answer is not printed again. `--no-stream` keeps the previous CLI flags and waits for the final answer. Ctrl-C still kills the child process. `claude` streaming uses `--output-format stream-json --verbose --include-partial-messages` and falls back when a build rejects those flags; `codex exec --json` and `opencode run --format json` are unchanged. See [CLI handoff providers](docs/models.md#cli-handoff-providers).
 
 ## [v0.19.0] - 2026-11-06

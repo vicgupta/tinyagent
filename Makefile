@@ -2,8 +2,9 @@ BIN := tinyagent
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64
+DISTDIR ?= dist
 
-.PHONY: build test test-race lint fmt dist clean
+.PHONY: build test test-race lint fmt dist windows-zips clean
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN) ./cmd/$(BIN)
@@ -37,17 +38,38 @@ fmt:
 	fi
 
 dist:
-	@mkdir -p dist
-	@rm -f dist/SHA256SUMS
+	@mkdir -p $(DISTDIR)
+	@rm -f $(DISTDIR)/SHA256SUMS $(DISTDIR)/$(BIN)-windows-*.zip
 	@for p in $(PLATFORMS); do \
 		os=$${p%/*}; arch=$${p#*/}; ext=; [ $$os = windows ] && ext=.exe; \
-		echo "dist/$(BIN)-$$os-$$arch$$ext"; \
+		echo "$(DISTDIR)/$(BIN)-$$os-$$arch$$ext"; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags="$(LDFLAGS)" \
-			-o dist/$(BIN)-$$os-$$arch$$ext ./cmd/$(BIN) || exit 1; \
+			-o $(DISTDIR)/$(BIN)-$$os-$$arch$$ext ./cmd/$(BIN) || exit 1; \
 	done
-	@cd dist && { command -v sha256sum >/dev/null 2>&1 \
+	@$(MAKE) --no-print-directory windows-zips
+	@cd $(DISTDIR) && { command -v sha256sum >/dev/null 2>&1 \
 		&& sha256sum $(BIN)-* > SHA256SUMS \
 		|| shasum -a 256 $(BIN)-* > SHA256SUMS; }
+
+# windows-zips packs each Windows exe into a zip whose only entry is
+# tinyagent.exe. WinGet installs those zips. The bare .exe stays beside
+# them for tinyagent --update and direct download. Requires the zip command.
+windows-zips:
+	@set -eu; \
+	command -v zip >/dev/null 2>&1 || { echo "windows-zips: zip is required to pack tinyagent.exe for WinGet" >&2; exit 1; }; \
+	mkdir -p "$(DISTDIR)"; \
+	for arch in amd64 arm64; do \
+		exe="$(DISTDIR)/$(BIN)-windows-$$arch.exe"; \
+		zipf="$(DISTDIR)/$(BIN)-windows-$$arch.zip"; \
+		stage="$(DISTDIR)/.zip-$$arch"; \
+		test -f "$$exe" || { echo "windows-zips: missing $$exe" >&2; exit 1; }; \
+		rm -rf "$$stage" "$$zipf"; \
+		mkdir -p "$$stage"; \
+		cp "$$exe" "$$stage/$(BIN).exe"; \
+		( cd "$$stage" && zip -q -X "../$(BIN)-windows-$$arch.zip" "$(BIN).exe" ); \
+		rm -rf "$$stage"; \
+		echo "$$zipf"; \
+	done
 
 clean:
 	rm -rf $(BIN) dist
