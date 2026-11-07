@@ -197,7 +197,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.planFile, "plan-file", "", "with the plan enabled, also export the current plan as Markdown to this file after each save")
 	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "provider reasoning effort: none, minimal, low, medium, high, xhigh, or max")
 	fs.Var(&o.fallbackModels, "fallback-model", "provider/model to switch to when requests still fail with 429/5xx/network errors after retries (repeatable, tried in order; replaces fallback_models)")
-	fs.StringVar(&o.auxModel, "aux-model", "", "provider/model for auxiliary helper calls (context compaction, verify review); replaces models.auxiliary.model")
+	fs.StringVar(&o.auxModel, "aux-model", "", "provider/model for auxiliary helper calls (context compaction, verify review, permission judge); replaces models.auxiliary.model")
 	fs.StringVar(&o.delegateModel, "delegate-model", "", "provider/model for delegated children (delegate subagents, workers); replaces models.delegated.model")
 	fs.BoolVar(&o.noRouting, "no-routing", false, "ignore the models: section, --aux-model, --delegate-model and --route: every task uses the main model (subagents.model and subagents.workers.model still apply)")
 	fs.Var(&o.routes, "route", "route one task to its own model, task=provider/model (repeatable; tasks: compaction, review, delegate, worker); beats models.<role>.tasks")

@@ -112,7 +112,7 @@ opencode run --format json [--model <provider/model>] [--agent plan] "<prompt>" 
 The `models:` section picks models per role. Every key is optional and nothing changes when it is unset.
 
 - **main** is the model from `--model`, `$AGENT_MODEL` or `model:`; it runs the agent loop.
-- **auxiliary** covers helper calls made outside the agent loop: `compaction` (summarizing context, see [Long runs](long-runs.md#long-runs)) and `review` (the `verify_on_stop.review` pass). A task's model is `--route <task>=`, then `models.auxiliary.tasks.<task>`, then `--aux-model`, then `models.auxiliary.model`, then the main model. If the routed model fails, the call is retried once on the main model (a stderr warning says so). Helper calls are not steps, but their cost and tokens count toward `--cost-limit` and `--token-limit` as before.
+- **auxiliary** covers helper calls made outside the agent loop: `compaction` (summarizing context, see [Long runs](long-runs.md#long-runs)), `review` (the `verify_on_stop.review` pass) and `permission` (the optional [AI permission judge](permissions.md#ai-permission-judge)). A task's model is `--route <task>=`, then `models.auxiliary.tasks.<task>`, then `--aux-model`, then `models.auxiliary.model`, then the main model. If the routed model fails, compaction and review are retried once on the main model (a stderr warning says so); the permission judge does not retry — a failed judge falls back to the human prompt. Helper calls are not steps, but their cost and tokens count toward `--cost-limit` and `--token-limit` as before.
 - **delegated** covers the children started by the [delegate and worker tools](long-runs.md#subagents-and-workers-at-a-glance): read-only researcher subagents and read-write builder workers. The `delegate` task's model is `--route delegate=`, then `models.delegated.tasks.delegate` (or its alias `subagents.model`), then `--delegate-model`, then `models.delegated.model`, then the main model; the `worker` task resolves the same way with `models.delegated.tasks.worker` and its alias `subagents.workers.model`.
 
 The matching flags are `--aux-model <spec>`, `--delegate-model <spec>` and `--route <task>=<spec>` (see the [CLI reference](subcommands.md)). `--no-routing` ignores them all for one run; see [Turning routing off](tasks.md#turning-routing-off). The config keys are listed in [Configuration](config.md#model-roles).
@@ -123,12 +123,13 @@ models:
     model: openai/gpt-5-mini
     tasks:
       review: anthropic/claude-sonnet-4
+      permission: openai/gpt-5-mini
   delegated:
     model: openai/gpt-5-mini
     fallback_models: [anthropic/claude-sonnet-4-5]
 ```
 
-`subagents.model` and `subagents.workers.model` remain supported as aliases of the task keys; setting an alias and its task key to different models is a config error. Unknown task names, empty values and specs containing whitespace are rejected. `--check` prints a `compaction:` and `review:` line when those tasks are routed away from the main model, and a `delegate:` and `worker:` line when those tools are on (each with the model, role, the key or flag it came from and any fallback chain); `run.started` lists the resolved routes as `models` (keyed by task: `role`, `model`, `source`).
+`subagents.model` and `subagents.workers.model` remain supported as aliases of the task keys; setting an alias and its task key to different models is a config error. Unknown task names, empty values and specs containing whitespace are rejected. `--check` prints a `compaction:`, `review:` and `permission:` line when those tasks are routed away from the main model, and a `delegate:` and `worker:` line when those tools are on (each with the model, role, the key or flag it came from and any fallback chain); `run.started` lists the resolved routes as `models` (keyed by task: `role`, `model`, `source`).
 
 ## Per-role fallback chains
 
@@ -136,4 +137,4 @@ Each role may set `fallback_models`, its own [fallback chain](providers.md#model
 
 ## Usage by role
 
-Every model request is counted under its role and task: `main`/`main` for the agent loop, `auxiliary`/`compaction` and `auxiliary`/`review` for the helpers, `delegated`/`delegate` and `delegated`/`worker` for children (including their own helpers' role), split again by the model that served it. When anything other than the main loop made requests, the trajectory (`-o`), the `result` event, the [event log database](json-output.md#event-log-database) (`run_usage` table) and [eval](eval-framework.md) results and reports carry `usage_by_role`, and the summary line ends with `; by role: ...`. The split always adds up to the run's totals. `model.request` events carry `role` and `task`.
+Every model request is counted under its role and task: `main`/`main` for the agent loop, `auxiliary`/`compaction`, `auxiliary`/`review` and `auxiliary`/`permission` for the helpers, `delegated`/`delegate` and `delegated`/`worker` for children (including their own helpers' role), split again by the model that served it. When anything other than the main loop made requests, the trajectory (`-o`), the `result` event, the [event log database](json-output.md#event-log-database) (`run_usage` table) and [eval](eval-framework.md) results and reports carry `usage_by_role`, and the summary line ends with `; by role: ...`. The split always adds up to the run's totals. `model.request` events carry `role` and `task`.

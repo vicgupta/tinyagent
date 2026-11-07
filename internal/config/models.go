@@ -11,8 +11,9 @@ import (
 // every task on the main model, exactly as without it.
 type Models struct {
 	// Auxiliary is the role of helper calls made outside the agent loop:
-	// context compaction (task "compaction") and the verify_on_stop
-	// review (task "review").
+	// context compaction (task "compaction"), the verify_on_stop review
+	// (task "review"), and the optional permission judge (task
+	// "permission").
 	Auxiliary RoleModels `yaml:"auxiliary,omitempty"`
 	// Delegated is the role of the child agents: the delegate tool's
 	// read-only subagents (task "delegate") and workers (task "worker").
@@ -57,7 +58,7 @@ type ModelRoute struct {
 }
 
 // AuxiliaryTasks are the task names models.auxiliary.tasks accepts.
-var AuxiliaryTasks = []string{"compaction", "review"}
+var AuxiliaryTasks = []string{"compaction", "review", "permission"}
 
 // DelegatedTasks are the task names models.delegated.tasks accepts.
 var DelegatedTasks = []string{"delegate", "worker"}

@@ -62,6 +62,7 @@ type checkPermissions struct {
 	Rules          int    `json:"rules"`
 	Default        string `json:"default"`
 	NonInteractive string `json:"non_interactive"`
+	Judge          bool   `json:"judge,omitempty"`
 }
 
 type checkLockdownSum struct {

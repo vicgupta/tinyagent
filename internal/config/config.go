@@ -672,6 +672,9 @@ type Permissions struct {
 	// patterns match, and an allow matches only when every compound-command
 	// segment is covered. A profile's rules replace the base list.
 	Rules []PermissionRule `yaml:"rules,omitempty"`
+	// Judge is the optional AI tier consulted when a rule (or the default)
+	// would ask the user. Off by default; see PermissionJudge.
+	Judge PermissionJudge `yaml:"judge,omitempty"`
 }
 
 // PermissionRule is one permissions.rules entry.
@@ -697,7 +700,7 @@ type PermissionRule struct {
 
 // Configured reports whether any permission rule or setting is present.
 func (p Permissions) Configured() bool {
-	return p.Default != "" || p.NonInteractive != "" || len(p.Rules) > 0
+	return p.Default != "" || p.NonInteractive != "" || len(p.Rules) > 0 || p.Judge.On()
 }
 
 // Permissions decisions.
@@ -725,7 +728,7 @@ func (p Permissions) Validate() error {
 			return err
 		}
 	}
-	return nil
+	return p.Judge.Validate()
 }
 
 func (r PermissionRule) validate(i int) error {

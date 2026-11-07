@@ -44,7 +44,24 @@ An `ask` is answered through the channel the run has:
 
 A denied call does not run and no `pre_tool` hook runs for it; the model gets `error: denied by permission rule <index>: <message>` (or `... by user: <reason>`), and the run continues. An allowed call then runs its [`pre_tool` hooks](#tool-hooks) as usual, which can still deny it — but a hook can never cause a policy-denied call to run. Rules come only from `-c`, a trusted `./tinyagent.yaml` (`--trust-config`) or a profile, never from the repository, with one exception: [project rules](ratchet.md) with a `deny` table in `.tinyagent/ratchet.toml` are appended as `deny` rules (they can only block calls, never allow them; `--no-ratchet` skips them). A profile's `rules` replace the base list. Validation errors (unknown keys, an empty `tool`, an invalid decision, two matchers in one rule, a matcher/tool mismatch) exit 2 before any model request, naming the file, profile and rule index.
 
-Every decision is recorded: a `permission` event goes to `--json`, `--log-db` and `--otel` (with `tool_call_id`, `tool_name`, `decision`, `source` (`rule`, `default`, `user`, `session` or `non_interactive`), the rule index, and the channel for asks), `run.started` and trajectories record a `permissions` summary, `-v` prints one stderr line per non-default decision, and `--check` prints the rule count, default and resolved non-interactive behavior.
+#### AI permission judge
+
+An optional AI judge can answer some `ask` decisions without prompting you. It is **off by default**; turn it on under `permissions.judge`:
+
+```yaml
+permissions:
+  default: ask
+  judge:
+    enabled: true
+    min_confidence: 0.85   # optional; only auto-allow at or above this (0..1)
+    timeout_seconds: 10    # optional; caps one judge model call (1..60)
+```
+
+When a rule resolves to `ask` (or no rule matches and `default` is `ask`), tinyagent asks the [auxiliary](models.md#model-roles) model (task `permission`: `--route permission=`, then `models.auxiliary.tasks.permission`, then `--aux-model` / `models.auxiliary.model`, then the main model) to classify the call. The judge may **only auto-allow** when its verdict is `allow` and its confidence is at or above `min_confidence`. It never silently denies: `ask`, `risky`, low confidence, a parse failure, a timeout or a model error all fall back to the normal human prompt (or `non_interactive`). Explicit `deny` rules always win before the judge runs, and [lockdown](#untrusted-content-lockdown) is checked before permissions, so neither is bypassed. The judge does not fall back to the main model on error (unlike compaction/review helpers): a failed judge is a human prompt. Cost and tokens count toward `--cost-limit` and `--token-limit` under `auxiliary`/`permission`.
+
+The `permission` event records the judge's verdict under `judge` (`verdict`, `confidence`, `reason`, and `error` when the model failed). An auto-allow has `source: judge`; a fallback that the user (or `non_interactive`) then answers still includes the judge fields. `--check` appends `, judge on` to the permissions line when the judge is enabled.
+
+Every decision is recorded: a `permission` event goes to `--json`, `--log-db` and `--otel` (with `tool_call_id`, `tool_name`, `decision`, `source` (`rule`, `default`, `user`, `session`, `non_interactive` or `judge`), the rule index, and the channel for asks), `run.started` and trajectories record a `permissions` summary, `-v` prints one stderr line per non-default decision, and `--check` prints the rule count, default and resolved non-interactive behavior.
 
 **This is a guardrail, not a security boundary.** Command-text matching cannot stop a determined model from running something equivalent (for example `Bash(rm *)` doesn't stop `/bin/rm` or `bash -c 'rm ...'`). For real containment keep using [`--sandbox`](sandbox.md#sandboxing-commands), [`sandbox_allowed_domains`](sandbox.md#sandboxing-commands) and `--env container`. Older tinyagent versions reject a config containing `permissions`.
 

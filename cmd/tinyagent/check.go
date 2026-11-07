@@ -292,8 +292,12 @@ func resolveCheck(o *options, fs *flag.FlagSet, sum *checkSummary) ([][2]string,
 	}
 	if policy != nil {
 		ps := policy.Summary()
-		sum.Permissions = checkPermissions{Configured: true, Rules: policy.RuleCount(), Default: ps.Default, NonInteractive: ps.NonInteractive}
-		add("permissions", fmt.Sprintf("%d rules, default %s, non-interactive %s", policy.RuleCount(), policy.Summary().Default, policy.Summary().NonInteractive))
+		sum.Permissions = checkPermissions{Configured: true, Rules: policy.RuleCount(), Default: ps.Default, NonInteractive: ps.NonInteractive, Judge: ps.Judge}
+		line := fmt.Sprintf("%d rules, default %s, non-interactive %s", policy.RuleCount(), ps.Default, ps.NonInteractive)
+		if ps.Judge {
+			line += ", judge on"
+		}
+		add("permissions", line)
 	}
 	return lines, nil
 }
