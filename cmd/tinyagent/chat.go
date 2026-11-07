@@ -281,6 +281,10 @@ func (c *chat) turn(msg string, asFollowUp bool) {
 	cfg := s.turnConfig(prev)
 	var r turnResume
 	if prev != nil {
+		if prev.Model != s.modelName {
+			// /model switched mid-conversation: keep history under the new model.
+			prev.Model, prev.ActiveModel = s.modelName, ""
+		}
 		r = turnResume{prev: prev, source: c.source, cont: c.cont}
 		if asFollowUp {
 			r.followUp = msg

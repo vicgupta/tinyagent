@@ -230,7 +230,7 @@ func TestChatSlashCommands(t *testing.T) {
 	if r.code != 0 {
 		t.Fatalf("exit %d\n%s", r.code, r.stderr)
 	}
-	for _, want := range []string{"/exit, /quit", "/context", "no turns yet", "nothing to save yet", "unknown command /bogus", "did you mean /compact?", "turns   1", "compacted context", "compacts the conversation first", "saved " + filepath.Join(root, "s.json"), "new conversation"} {
+	for _, want := range []string{"/exit, /quit", "/context", "/model", "no turns yet", "nothing to save yet", "unknown command /bogus", "did you mean /compact?", "turns   1", "compacted context", "compacts the conversation first", "saved " + filepath.Join(root, "s.json"), "new conversation"} {
 		if !strings.Contains(r.stderr, want) {
 			t.Errorf("stderr lacks %q", want)
 		}
@@ -284,6 +284,42 @@ func rawEditor(input string, hist ...string) (*lineEditor, *strings.Builder) {
 	e := newLineEditor(nil, strings.NewReader(input), &out, &chatHistory{entries: hist})
 	e.raw = func() (func(), error) { return func() {}, nil }
 	return e, &out
+}
+
+func TestChatModelCommand(t *testing.T) {
+	root := acpWorkspace(t)
+	p := newACPProvider(t)
+	in := "/model\n/model nosuchprovider/x\n/model openai/gpt-4o-mini\n/model\nhi\n/model openai/gpt-4o\nagain\n/exit\n"
+	r := runChatTest(t, root, strings.NewReader(in), nil, "-m", "openai/gpt-4o", "--fallback-model", "openai/gpt-4.1")
+	if r.code != 0 {
+		t.Fatalf("exit %d\n%s", r.code, r.stderr)
+	}
+	for _, want := range []string{
+		"model", "openai/gpt-4o",
+		"fallback", "openai/gpt-4.1",
+		"nosuchprovider",
+		"model: openai/gpt-4o-mini",
+		"model: openai/gpt-4o",
+	} {
+		if !strings.Contains(r.stderr, want) {
+			t.Errorf("stderr lacks %q\n%s", want, r.stderr)
+		}
+	}
+	// Invalid switch keeps the previous model; a valid switch applies to the next turn.
+	reqs := p.requests()
+	if len(reqs) < 2 {
+		t.Fatalf("%d requests\n%s", len(reqs), r.stderr)
+	}
+	if m := reqs[0]["model"]; m != "gpt-4o-mini" {
+		t.Errorf("first turn model = %v, want gpt-4o-mini", m)
+	}
+	if m := reqs[1]["model"]; m != "gpt-4o" {
+		t.Errorf("second turn model = %v, want gpt-4o", m)
+	}
+	// History is kept across the switch.
+	if msgs := requestMessages(reqs[1]); len(msgs) < 4 || !strings.Contains(fmt.Sprint(msgs), "hi") {
+		t.Errorf("history after switch: %v", msgs)
+	}
 }
 
 func TestLineEditor(t *testing.T) {

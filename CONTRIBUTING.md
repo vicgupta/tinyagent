@@ -185,6 +185,10 @@ stays unchanged.
   mention it in the README feature list. `/context` (the breakdown in
   `internal/agent/context_usage.go`, rendered by `formatContext`) must keep
   using the compaction character estimate and label estimates as estimates.
+  `/model` (status via `modelStatusText`, switch via `session.switchModel`)
+  must keep validating the spec like `-m`, preserve history, and leave role
+  models that have their own config alone; cover show/switch/invalid in tests
+  with the fake provider only.
 
 ### Continuous integration
 

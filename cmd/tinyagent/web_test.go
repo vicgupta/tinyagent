@@ -374,12 +374,15 @@ func TestWebBusyAndCancel(t *testing.T) {
 
 func TestWebModelSwitch(t *testing.T) {
 	p := newACPProvider(t)
-	c := startWeb(t, acpWorkspace(t))
+	c := startWeb(t, acpWorkspace(t), "--fallback-model", "openai/gpt-4.1")
 	ev := c.events()
 	st := c.state()
 	models := st["models"].([]any)
 	if len(models) < 2 || models[0] != "openai/gpt-4o" {
 		t.Errorf("models = %v", models[:min(5, len(models))])
+	}
+	if r := c.post("/api/command", map[string]any{"line": "/model"}); !strings.Contains(r["text"].(string), "openai/gpt-4o") || !strings.Contains(r["text"].(string), "openai/gpt-4.1") {
+		t.Errorf("/model status = %v", r)
 	}
 	if r := c.post("/api/model", map[string]any{"model": "openai/gpt-4o-mini"}); r["model"] != "openai/gpt-4o-mini" {
 		t.Errorf("switch = %v", r)

@@ -885,7 +885,7 @@ func (w *webUI) apiCommand(body map[string]any) (any, error) {
 		return w.cancelTurn(), nil
 	case "/model":
 		if arg == "" {
-			return note("model: " + w.s.modelName)
+			return note(strings.TrimRight(modelStatusText(w.s, styler{}), "\n"))
 		}
 		if _, err := w.apiModel(map[string]any{"model": arg}); err != nil {
 			return nil, err
