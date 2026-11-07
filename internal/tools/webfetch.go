@@ -187,11 +187,11 @@ func (f *WebFetcher) Fetch(ctx context.Context, rawURL string) (string, error) {
 func (f *WebFetcher) fetch(ctx context.Context, rawURL string, rec *WebFetchRecord) (string, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
-		return "", errors.New("url is required")
+		return "", Actionable("url is required", "pass an http(s) URL to fetch")
 	}
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return "", fmt.Errorf("invalid url: %v", err)
+		return "", Actionablef("pass a valid http(s) URL", "invalid url: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, f.Timeout)
 	defer cancel()
@@ -203,11 +203,11 @@ func (f *WebFetcher) fetch(ctx context.Context, rawURL string, rec *WebFetchReco
 		if loc := resp.Header.Get("Location"); isRedirect(resp.StatusCode) && loc != "" {
 			resp.Body.Close()
 			if hop >= MaxWebFetchRedirects {
-				return "", &webFetchDenied{WebFetchDeniedRedirects, fmt.Sprintf("%s: more than %d redirects", WebFetchDeniedRedirects, MaxWebFetchRedirects)}
+				return "", &webFetchDenied{WebFetchDeniedRedirects, fmt.Sprintf("%s: more than %d redirects; fetch the final URL directly if you know it", WebFetchDeniedRedirects, MaxWebFetchRedirects)}
 			}
 			next, err := u.Parse(loc)
 			if err != nil {
-				return "", fmt.Errorf("invalid redirect location %q: %v", loc, err)
+				return "", Actionablef("fetch a concrete absolute URL instead", "invalid redirect location %q: %v", loc, err)
 			}
 			u = next
 			continue
@@ -228,7 +228,7 @@ func isRedirect(code int) bool {
 
 func (f *WebFetcher) ctxError(ctx context.Context, err error) error {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return fmt.Errorf("timed out after %s (web_fetch.timeout_seconds)", f.Timeout)
+		return Actionablef("retry later, raise web_fetch.timeout_seconds, or fetch a smaller/faster URL", "timed out after %s (web_fetch.timeout_seconds)", f.Timeout)
 	}
 	return err
 }
@@ -245,14 +245,14 @@ func (f *WebFetcher) get(ctx context.Context, u *url.URL) (*http.Response, error
 // checked address, with no cookies, no proxy and no redirects followed.
 func (f *WebFetcher) send(ctx context.Context, method string, u *url.URL, body []byte, hdr http.Header) (*http.Response, error) {
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return nil, &webFetchDenied{WebFetchDeniedScheme, fmt.Sprintf("%s, got %q", WebFetchDeniedScheme, u.Scheme+":")}
+		return nil, &webFetchDenied{WebFetchDeniedScheme, fmt.Sprintf("%s, got %q; use an http:// or https:// URL", WebFetchDeniedScheme, u.Scheme+":")}
 	}
 	if u.User != nil {
-		return nil, &webFetchDenied{WebFetchDeniedCredentials, WebFetchDeniedCredentials}
+		return nil, &webFetchDenied{WebFetchDeniedCredentials, WebFetchDeniedCredentials + "; omit userinfo from the URL"}
 	}
 	host := sandboxnet.NormalizeHost(u.Hostname())
 	if host == "" {
-		return nil, errors.New("url has no host")
+		return nil, Actionable("url has no host", "pass a full http(s) URL including the hostname")
 	}
 	port := 80
 	if u.Scheme == "https" {
@@ -261,12 +261,12 @@ func (f *WebFetcher) send(ctx context.Context, method string, u *url.URL, body [
 	if p := u.Port(); p != "" {
 		n, err := strconv.Atoi(p)
 		if err != nil || n < 1 || n > 65535 {
-			return nil, fmt.Errorf("invalid port %q", p)
+			return nil, Actionablef("use a port between 1 and 65535", "invalid port %q", p)
 		}
 		port = n
 	}
 	if len(f.rules) > 0 && !f.allowed(host, port) {
-		return nil, &webFetchDenied{WebFetchDeniedHost, fmt.Sprintf("host %s (port %d) is not in web_fetch.allowed_domains", host, port)}
+		return nil, &webFetchDenied{WebFetchDeniedHost, fmt.Sprintf("host %s (port %d) is not in web_fetch.allowed_domains; pick an allowed host or ask to update web_fetch.allowed_domains", host, port)}
 	}
 	if f.Gate != nil {
 		if err := f.Gate(host, port); err != nil {
@@ -317,7 +317,7 @@ func (f *WebFetcher) pick(ctx context.Context, host string, port int) (netip.Add
 	}
 	all, err := f.Resolve(ctx, host)
 	if err != nil {
-		return netip.Addr{}, fmt.Errorf("resolving %s: %v", host, err)
+		return netip.Addr{}, Actionablef("check the hostname spelling, or try web_search for the right URL", "resolving %s: %v", host, err)
 	}
 	for _, a := range all {
 		a = a.Unmap()
@@ -326,7 +326,7 @@ func (f *WebFetcher) pick(ctx context.Context, host string, port int) (netip.Add
 		}
 	}
 	if len(all) == 0 {
-		return netip.Addr{}, fmt.Errorf("no addresses for %s", host)
+		return netip.Addr{}, Actionablef("check the hostname spelling, or try web_search for the right URL", "no addresses for %s", host)
 	}
 	return netip.Addr{}, &webFetchDenied{WebFetchDeniedNonPublic, fmt.Sprintf("%s: %s resolves to %s; list that address in web_fetch.allowed_domains to allow it", WebFetchDeniedNonPublic, host, all[0].Unmap())}
 }
@@ -362,11 +362,11 @@ func (f *WebFetcher) read(ctx context.Context, requested string, u *url.URL, res
 		if len(text) > 200 {
 			text = text[:200] + "..."
 		}
-		return "", fmt.Errorf("%s returned HTTP %d %s: %s", u, resp.StatusCode, http.StatusText(resp.StatusCode), text)
+		return "", Actionablef("if the URL is wrong try web_search; for a transient error retry later", "%s returned HTTP %d %s: %s", u, resp.StatusCode, http.StatusText(resp.StatusCode), text)
 	}
 	if mt != "" && !textual(mt) {
 		rec.ContentType = mt
-		return "", fmt.Errorf("unsupported content type %q from %s; web_fetch returns only HTML, text, JSON and XML", mt, u)
+		return "", fmt.Errorf("unsupported content type %q from %s; web_fetch returns only HTML, text, JSON and XML — use bash (e.g. curl -I) to inspect other types", mt, u)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(f.MaxBytes)+1))
 	if err != nil {
@@ -380,7 +380,7 @@ func (f *WebFetcher) read(ctx context.Context, requested string, u *url.URL, res
 		mt, _, _ = mime.ParseMediaType(http.DetectContentType(body))
 		if !textual(mt) {
 			rec.ContentType = mt
-			return "", fmt.Errorf("unsupported content type %q from %s; web_fetch returns only HTML, text, JSON and XML", mt, u)
+			return "", fmt.Errorf("unsupported content type %q from %s; web_fetch returns only HTML, text, JSON and XML — use bash (e.g. curl -I) to inspect other types", mt, u)
 		}
 	}
 	rec.ContentType, rec.Bytes, rec.Truncated = mt, len(body), truncated

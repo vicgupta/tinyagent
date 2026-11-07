@@ -54,7 +54,7 @@ func TestPermissionDeny(t *testing.T) {
 		t.Error("denied command ran")
 	}
 	res := toolResults(tr.Messages)
-	if len(res) != 1 || res[0] != "error: denied by permission rule 0: no writes" {
+	if len(res) != 1 || res[0] != "error: denied by permission rule 0: no writes; choose a different tool, path or command that the policy allows, or ask to update permissions" {
 		t.Errorf("results = %q", res)
 	}
 	if len(*events) != 1 || (*events)[0]["decision"] != "deny" || (*events)[0]["source"] != "rule" || (*events)[0]["rule"] != 0 || (*events)[0]["tool_name"] != "bash" {
@@ -74,7 +74,7 @@ func TestPermissionPrecedenceDenyOverAllow(t *testing.T) {
 	}})
 	tr := a.Run(context.Background(), "task")
 	res := toolResults(tr.Messages)
-	if len(res) != 1 || res[0] != "error: denied by permission rule 1: no push" {
+	if len(res) != 1 || res[0] != "error: denied by permission rule 1: no push; choose a different tool, path or command that the policy allows, or ask to update permissions" {
 		t.Errorf("results = %q", res)
 	}
 }
@@ -239,7 +239,7 @@ func TestPermissionDefaultDeny(t *testing.T) {
 	withPolicy(t, a, config.Permissions{Default: "deny"})
 	tr := a.Run(context.Background(), "task")
 	res := toolResults(tr.Messages)
-	if len(res) != 1 || res[0] != "error: denied by permission policy" {
+	if len(res) != 1 || res[0] != "error: denied by permission policy; choose a different tool, path or command that the policy allows, or ask to update permissions" {
 		t.Errorf("results = %q", res)
 	}
 }
@@ -286,7 +286,7 @@ func TestPermissionPathDenyWriteFile(t *testing.T) {
 		t.Error("denied write_file wrote the file")
 	}
 	res := toolResults(tr.Messages)
-	if len(res) != 1 || res[0] != "error: denied by permission rule 0: no migrations" {
+	if len(res) != 1 || res[0] != "error: denied by permission rule 0: no migrations; choose a different tool, path or command that the policy allows, or ask to update permissions" {
 		t.Errorf("results = %q", res)
 	}
 }

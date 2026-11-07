@@ -158,7 +158,7 @@ func (e *Executor) bufferBytes() int {
 // its id with any output produced in the first moment.
 func (e *Executor) StartProcess(command string) (string, error) {
 	if strings.TrimSpace(command) == "" {
-		return "", errors.New("command is required")
+		return "", Actionable("command is required", "pass a non-empty bash command to run in the background")
 	}
 	e.procs.mu.Lock()
 	if e.procs.procs == nil {
@@ -185,7 +185,7 @@ func (e *Executor) StartProcess(command string) (string, error) {
 	if err := cmd.Start(); err != nil {
 		e.procs.mu.Unlock()
 		cancel()
-		return "", err
+		return "", Actionablef("check that the executable exists on PATH and the command is valid bash", "could not start process: %v", err)
 	}
 	p := &process{id: id, command: command, cmd: cmd, cancel: cancel, out: out, done: make(chan struct{})}
 	e.procs.procs[id] = p
@@ -227,7 +227,7 @@ func (e *Executor) lookup(id string) (*process, error) {
 	defer e.procs.mu.Unlock()
 	p, ok := e.procs.procs[id]
 	if !ok {
-		return nil, fmt.Errorf("no background process %q (see start_process)", id)
+		return nil, Actionablef("call start_process first and use the returned process id", "no background process %q", id)
 	}
 	return p, nil
 }
@@ -237,10 +237,13 @@ func (e *Executor) lookup(id string) (*process, error) {
 // last tail lines.
 func (e *Executor) ReadProcess(ctx context.Context, id string, waitMs, tail int) (string, error) {
 	if waitMs < 0 || waitMs > maxReadWaitMs {
-		return "", fmt.Errorf("timeout must be between 0 and %d milliseconds, got %d", maxReadWaitMs, waitMs)
+		return "", Actionable(
+			fmt.Sprintf("timeout must be between 0 and %d milliseconds, got %d", maxReadWaitMs, waitMs),
+			fmt.Sprintf("pass timeout from 0 to %d milliseconds, or omit it", maxReadWaitMs),
+		)
 	}
 	if tail < 0 {
-		return "", fmt.Errorf("tail must be positive, got %d", tail)
+		return "", Actionablef("pass a positive tail line count, or omit tail", "tail must be positive, got %d", tail)
 	}
 	p, err := e.lookup(id)
 	if err != nil {

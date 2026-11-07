@@ -473,12 +473,12 @@ func (e *Executor) run(ctx context.Context, name, raw string, edited *[]string) 
 	webSearch := name == WebSearchToolName && e.WebSearch != nil
 	lspTool := name == LSPToolName && e.LSP != nil
 	if e.ReadOnly && !skillTool && !webFetch && !webSearch && !lspTool && (name != "read_file" && name != "list_files" && name != "grep") {
-		return "", fmt.Errorf("tool %q is unavailable in read-only mode; only read_file, list_files, and grep are allowed", name)
+		return "", Actionablef("use read_file, list_files, or grep, or run without --read-only", "tool %q is unavailable in read-only mode; only read_file, list_files, and grep are allowed", name)
 	}
 	var a args
 	if strings.TrimSpace(raw) != "" {
 		if err := json.Unmarshal([]byte(raw), &a); err != nil {
-			return "", fmt.Errorf("invalid arguments JSON: %w", err)
+			return "", Actionablef("resend the call with a single JSON object matching the tool schema", "invalid arguments JSON: %v", err)
 		}
 	}
 	if webFetch {
@@ -533,7 +533,7 @@ func (e *Executor) run(ctx context.Context, name, raw string, edited *[]string) 
 		return fmt.Sprintf("ok (%d replacements)", n), nil
 	case ApplyPatchToolName:
 		if !e.ApplyPatch {
-			return "", fmt.Errorf("unknown tool %q", name)
+			return "", Actionablef("call one of the tools listed in the system prompt", "unknown tool %q", name)
 		}
 		out, written, err := applyPatchFiles(e.Root, a.Input, e.scope())
 		if err == nil && edited != nil {
@@ -554,7 +554,10 @@ func (e *Executor) run(ctx context.Context, name, raw string, edited *[]string) 
 			return "", err
 		}
 		if contextLines < 0 || contextLines > maxGrepContextLines {
-			return "", fmt.Errorf("context_lines must be between 0 and %d, got %d", maxGrepContextLines, contextLines)
+			return "", Actionable(
+				fmt.Sprintf("context_lines must be between 0 and %d, got %d", maxGrepContextLines, contextLines),
+				fmt.Sprintf("pass context_lines from 0 to %d", maxGrepContextLines),
+			)
 		}
 		ignoreCase, err := boolArg("ignore_case", a.IgnoreCase)
 		if err != nil {
@@ -571,7 +574,10 @@ func (e *Executor) run(ctx context.Context, name, raw string, edited *[]string) 
 			return "", err
 		}
 		if secs < 0 || secs > maxBashTimeoutSeconds {
-			return "", fmt.Errorf("timeout must be between 1 and %d seconds, got %d", maxBashTimeoutSeconds, secs)
+			return "", Actionable(
+				fmt.Sprintf("timeout must be between 1 and %d seconds, got %d", maxBashTimeoutSeconds, secs),
+				fmt.Sprintf("pass timeout from 1 to %d seconds, or omit it to use the default", maxBashTimeoutSeconds),
+			)
 		}
 		timeout := e.BashTimeout
 		if secs > 0 {
@@ -601,11 +607,11 @@ func (e *Executor) run(ctx context.Context, name, raw string, edited *[]string) 
 			return "", err
 		}
 		if tail < 0 {
-			return "", fmt.Errorf("tail must be positive, got %d", tail)
+			return "", Actionablef("pass a positive tail line count, or omit tail", "tail must be positive, got %d", tail)
 		}
 		return e.StopProcess(a.ID, tail)
 	default:
-		return "", fmt.Errorf("unknown tool %q", name)
+		return "", Actionablef("call one of the tools listed in the system prompt", "unknown tool %q", name)
 	}
 }
 
@@ -617,7 +623,7 @@ func intArg(name string, n json.Number) (int, error) {
 	}
 	v, err := strconv.Atoi(string(n))
 	if err != nil {
-		return 0, fmt.Errorf("%s must be a whole number, got %s", name, n)
+		return 0, Actionablef("pass a whole number (JSON number or digit string)", "%s must be a whole number, got %s", name, n)
 	}
 	return v, nil
 }
@@ -632,12 +638,18 @@ func contextLinesArg(raw json.RawMessage) (int, error) {
 		if json.Unmarshal(raw, &value) == nil {
 			n = json.Number(value)
 		} else {
-			return 0, fmt.Errorf("context_lines must be a whole number from 0 to %d", maxGrepContextLines)
+			return 0, Actionable(
+				fmt.Sprintf("context_lines must be a whole number from 0 to %d", maxGrepContextLines),
+				fmt.Sprintf("pass context_lines from 0 to %d as a whole number", maxGrepContextLines),
+			)
 		}
 	}
 	v, err := intArg("context_lines", n)
 	if err != nil {
-		return 0, fmt.Errorf("context_lines must be a whole number from 0 to %d", maxGrepContextLines)
+		return 0, Actionable(
+			fmt.Sprintf("context_lines must be a whole number from 0 to %d", maxGrepContextLines),
+			fmt.Sprintf("pass context_lines from 0 to %d as a whole number", maxGrepContextLines),
+		)
 	}
 	return v, nil
 }
@@ -651,7 +663,7 @@ func boolArg(name string, raw json.RawMessage) (bool, error) {
 	case "true":
 		return true, nil
 	}
-	return false, fmt.Errorf("%s must be true or false, got %s", name, raw)
+	return false, Actionablef("pass true or false", "%s must be true or false, got %s", name, raw)
 }
 
 // Resolve maps a path relative to root (or absolute inside root) to an
@@ -668,7 +680,7 @@ func Resolve(root, path string) (string, error) {
 	full = filepath.Clean(full)
 	rel, err := filepath.Rel(root, full)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("path %q is outside the working directory", path)
+		return "", Actionablef("use a path under the working directory", "path %q is outside the working directory", path)
 	}
 	return full, nil
 }

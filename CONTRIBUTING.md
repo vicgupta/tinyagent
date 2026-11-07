@@ -101,6 +101,11 @@ embed/prompts/        system prompt templates
 - Format with `gofmt`; keep packages small and idiomatic.
 - Follow existing naming and error-handling patterns. Errors should be actionable
   and name the file or key involved (see the config loader and provider code).
+  **Tool errors the model sees** must state the cause and a concrete next step
+  (joined by `; `, like `edit_file`'s unique-match message). Use
+  `tools.Actionable` / `tools.Actionablef` (or the MCP `actionable` helpers);
+  add a wording assertion for each new key error. See
+  [Tool error messages](docs/tools.md#tool-error-messages).
 - Prefer the standard library; add dependencies only with justification.
 - Terminal output must degrade cleanly without color: with `--color never`,
   `NO_COLOR` or a non-terminal, keep the structure (plain ASCII markers such

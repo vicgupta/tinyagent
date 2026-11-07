@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Tool errors are actionable.** Every built-in tool error the model sees (bash, LSP, MCP, `web_fetch`, `web_search`, file tools, permission/`file_access` denials, and related paths) states the cause and a concrete next step, joined by a semicolon — the same shape as `edit_file`'s unique-match error. Bare `failed` messages are avoided so the model can fix the call instead of retrying blindly. New tool errors should use `tools.Actionable` / `tools.Actionablef` (or the MCP helpers); see [Tool error messages](docs/tools.md#tool-error-messages) and CONTRIBUTING. (#378)
+
 ## [v0.21.0] - 2026-11-07
 
 ### Added

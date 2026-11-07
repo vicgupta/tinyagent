@@ -62,7 +62,7 @@ func parseResourceArgs(raw string) (resourceArgs, error) {
 		return a, nil
 	}
 	if err := json.Unmarshal([]byte(raw), &a); err != nil {
-		return a, errors.New("error: invalid arguments JSON object")
+		return a, errors.New(actionable("invalid arguments JSON object", "resend a single JSON object matching the tool schema"))
 	}
 	return a, nil
 }
@@ -75,7 +75,7 @@ func (r *Registry) resourceServer(alias string) (*server, string) {
 		}
 		names = append(names, sv.alias)
 	}
-	return nil, fmt.Sprintf("error: no MCP server %q with resources; servers with resources: %s", alias, strings.Join(names, ", "))
+	return nil, actionablef("pass one of those server aliases, or omit server to list all", "no MCP server %q with resources; servers with resources: %s", alias, strings.Join(names, ", "))
 }
 
 // requestError turns a failed resource request into a model-visible error.
@@ -85,20 +85,20 @@ func (r *Registry) resourceServer(alias string) (*server, string) {
 func requestError(ctx, cctx context.Context, sv *server, what string, err error) string {
 	if cctx.Err() != nil {
 		if ctx.Err() == nil {
-			return fmt.Sprintf("error: MCP %s on server %s timed out after %s", what, sv.alias, sv.timeout)
+			return actionablef("retry later or raise the server's call_timeout_seconds", "MCP %s on server %s timed out after %s", what, sv.alias, sv.timeout)
 		}
-		return fmt.Sprintf("error: MCP %s on server %s was interrupted: %s", what, sv.alias, ctx.Err())
+		return actionablef("retry the call if the run was not cancelled on purpose", "MCP %s on server %s was interrupted: %s", what, sv.alias, ctx.Err())
 	}
 	var rpcErr *jsonrpc.Error
 	if errors.As(err, &rpcErr) && !errors.Is(err, mcp.ErrConnectionClosed) {
-		return truncate(fmt.Sprintf("error: MCP %s on server %s failed: %s (code %d)", what, sv.alias, clean(rpcErr.Message), rpcErr.Code))
+		return truncate(actionablef("use an allowlisted URI from list_mcp_resources, or fix the URI", "MCP %s on server %s failed: %s (code %d)", what, sv.alias, clean(rpcErr.Message), rpcErr.Code))
 	}
 	sv.failed = true
-	return truncate("error: MCP server " + sv.alias + " call failed: " + err.Error())
+	return truncate(actionable("MCP server "+sv.alias+" call failed: "+err.Error(), "fix the server or its config, then start a new run"))
 }
 
 func unavailable(sv *server) string {
-	return "error: MCP server " + sv.alias + " connection is unavailable after an earlier failure"
+	return actionable("MCP server "+sv.alias+" connection is unavailable after an earlier failure", "restart the run or fix that server's command/config, then retry")
 }
 
 // listResources implements list_mcp_resources.
@@ -115,7 +115,7 @@ func (r *Registry) listResources(ctx context.Context, raw string) (string, bool)
 		}
 		servers = []*server{sv}
 	} else if a.Cursor != "" {
-		return "error: cursor requires server", true
+		return actionable("cursor requires server", "pass server together with cursor when continuing a listing"), true
 	}
 	var b strings.Builder
 	isErr := false
@@ -261,14 +261,14 @@ func (r *Registry) readResource(ctx context.Context, raw string, maxImageBytes i
 		return err.Error(), nil, true
 	}
 	if a.Server == "" || a.URI == "" {
-		return "error: server and uri are required", nil, true
+		return actionable("server and uri are required", "pass both server and uri from list_mcp_resources"), nil, true
 	}
 	sv, msg := r.resourceServer(a.Server)
 	if sv == nil {
 		return msg, nil, true
 	}
 	if !config.MatchResource(sv.resources, a.URI) {
-		return truncate("error: resource not allowed for server " + sv.alias + ": " + clean(a.URI)), nil, true
+		return truncate(actionable("resource not allowed for server "+sv.alias+": "+clean(a.URI), "pick a URI from list_mcp_resources or ask to update the server's resources allowlist")), nil, true
 	}
 	if sv.failed {
 		return unavailable(sv), nil, true
@@ -281,7 +281,7 @@ func (r *Registry) readResource(ctx context.Context, raw string, maxImageBytes i
 		return requestError(ctx, cctx, sv, "resource read", err), nil, true
 	}
 	if res.NeedsInput() {
-		return "error: MCP resource read requested unsupported interactive input", nil, true
+		return actionable("MCP resource read requested unsupported interactive input", "use a different URI or non-interactive resource; tinyagent cannot answer MCP prompts"), nil, true
 	}
 	var b strings.Builder
 	var images []model.Image

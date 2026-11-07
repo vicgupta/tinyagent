@@ -215,7 +215,7 @@ func TestReadResource(t *testing.T) {
 	if !strings.Contains(log.String(), "mcp: read docs docs://guides/a (") {
 		t.Errorf("verbose log = %q", log.String())
 	}
-	if got, isErr := read("secret://x"); !isErr || got != "error: resource not allowed for server docs: secret://x" {
+	if got, isErr := read("secret://x"); !isErr || got != "error: resource not allowed for server docs: secret://x; pick a URI from list_mcp_resources or ask to update the server's resources allowlist" {
 		t.Errorf("read secret = %q, isErr %v", got, isErr)
 	}
 	if _, err := os.Stat(trace); err == nil {
@@ -245,7 +245,7 @@ func TestReadResource(t *testing.T) {
 	if got, isErr := read("docs://guides/b"); isErr || !strings.HasSuffix(got, "guide B") {
 		t.Errorf("read after errors = %q, isErr %v; want the server still usable", got, isErr)
 	}
-	if got, isErr, _ := r.Call(context.Background(), ReadResourceTool, `{"server":"docs"}`); !isErr || got != "error: server and uri are required" {
+	if got, isErr, _ := r.Call(context.Background(), ReadResourceTool, `{"server":"docs"}`); !isErr || got != "error: server and uri are required; pass both server and uri from list_mcp_resources" {
 		t.Errorf("missing uri = %q", got)
 	}
 }

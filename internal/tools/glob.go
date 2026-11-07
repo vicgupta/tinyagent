@@ -50,7 +50,7 @@ func listFiles(root, path, pattern, skip string, sc *scope) (string, error) {
 		return withHiddenNote(strings.Join(lines, "\n"), hidden), nil
 	}
 	if _, err := filepath.Match(pattern, ""); err != nil {
-		return "", fmt.Errorf("bad pattern %q: %w", pattern, err)
+		return "", Actionablef("use a valid glob pattern (e.g. **/*.go)", "bad pattern %q: %v", pattern, err)
 	}
 
 	var matches []string

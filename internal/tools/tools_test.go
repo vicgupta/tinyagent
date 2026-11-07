@@ -246,7 +246,7 @@ func TestExecutorGrepIgnoreCaseValidation(t *testing.T) {
 	e := &Executor{Root: t.TempDir()}
 	for _, value := range []string{`"true"`, `"yes"`, `0`, `1`, `[]`, `{}`} {
 		args := `{"pattern":"error","ignore_case":` + value + `}`
-		want := "error: ignore_case must be true or false, got " + value
+		want := "error: ignore_case must be true or false, got " + value + "; pass true or false"
 		if got := e.RunResult(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: args}}).Text; got != want {
 			t.Errorf("grep %s = %q, want %q", args, got, want)
 		}
@@ -341,7 +341,7 @@ func TestExecutorGrepFixedStrings(t *testing.T) {
 		{"path include", `{"pattern":"func(","include":"pkg/*.go","fixed_strings":true}`, "pkg/util.go:1: func("},
 		{"no matches", `{"pattern":"missing(","fixed_strings":true}`, "no matches"},
 		{"include excludes matches", `{"pattern":"func(","include":"*.md","fixed_strings":true}`, "no matches"},
-		{"path confinement", `{"pattern":"func(","path":"..","fixed_strings":true}`, `error: path ".." is outside the working directory`},
+		{"path confinement", `{"pattern":"func(","path":"..","fixed_strings":true}`, `error: path ".." is outside the working directory; use a path under the working directory`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got := e.RunResult(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: tt.args}}).Text
@@ -373,7 +373,7 @@ func TestExecutorGrepFixedStringsValidation(t *testing.T) {
 	e := &Executor{Root: t.TempDir()}
 	for _, value := range []string{`"true"`, `"yes"`, `0`, `1`, `[]`, `{}`} {
 		args := `{"pattern":"func(","fixed_strings":` + value + `}`
-		want := "error: fixed_strings must be true or false, got " + value
+		want := "error: fixed_strings must be true or false, got " + value + "; pass true or false"
 		if got := e.RunResult(context.Background(), model.ToolCall{Function: model.FunctionCall{Name: "grep", Arguments: args}}).Text; got != want {
 			t.Errorf("grep %s = %q, want %q", args, got, want)
 		}
