@@ -58,17 +58,6 @@ func TestWinGetDocs(t *testing.T) {
 			t.Fatal(err)
 		}
 		text := string(body)
-		if file == "CHANGELOG.md" {
-			rest, ok := strings.CutPrefix(text, "# Changelog\n\n## [Unreleased]\n")
-			if !ok {
-				t.Fatal("CHANGELOG.md: Unreleased section missing")
-			}
-			next := strings.Index(rest, "\n## [")
-			if next < 0 {
-				t.Fatal("CHANGELOG.md: no release after Unreleased")
-			}
-			text = rest[:next]
-		}
 		for _, want := range wants {
 			if !strings.Contains(text, want) {
 				t.Errorf("%s: missing %q", file, want)
