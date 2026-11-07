@@ -113,6 +113,15 @@ embed/prompts/        system prompt templates
   every later request. Prefer `recordToolResult` / `recordResult` (or the same
   fields the tool loop emits) over appending a bare tool message. See
   [Tool results](docs/json-output.md#tool-results).
+- **History is append-only.** Never edit, reorder or drop a message that has
+  already been sent to the model, and never rebuild the system prompt or tool
+  definitions mid-run: add new context (notices, resume notes, results) as a new
+  message at the end. Per-request extras (like the pinned plan block) must be
+  added to a copy in `Agent.request`, never to the view or `t.Messages`. Only
+  compaction may replace part of the view. `internal/agent/append_only_test.go`
+  hashes the request prefix around every step and fails on any rewrite; extend
+  it when you add a new kind of message. See
+  [Append-only history and prompt caching](docs/long-runs.md#append-only-history-and-prompt-caching).
 - Prefer the standard library; add dependencies only with justification.
 - Terminal output must degrade cleanly without color: with `--color never`,
   `NO_COLOR` or a non-terminal, keep the structure (plain ASCII markers such
