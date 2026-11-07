@@ -218,6 +218,9 @@ type webUI struct {
 	perms    map[string]chan permissions.Answer
 	permReqs map[string]map[string]any
 	closed   bool
+	// verbose is -v/--verbose. Tool calls, tool results and other internal
+	// events stay off the event stream and out of /api/state without it.
+	verbose bool
 }
 
 func newWebUI(s *session, prev *trajectory.Trajectory, errw io.Writer) (*webUI, error) {
@@ -226,7 +229,8 @@ func newWebUI(s *session, prev *trajectory.Trajectory, errw io.Writer) (*webUI, 
 		return nil, err
 	}
 	w := &webUI{s: s, errw: errw, token: newWebToken(), files: http.FileServer(http.FS(sub)),
-		subs: map[chan webEvent]struct{}{}, perms: map[string]chan permissions.Answer{}, permReqs: map[string]map[string]any{}}
+		subs: map[chan webEvent]struct{}{}, perms: map[string]chan permissions.Answer{}, permReqs: map[string]map[string]any{},
+		verbose: s.o.verbose}
 	w.path = s.o.output
 	if w.path == "" {
 		if w.path, err = newChatPath(s.root); err != nil {
@@ -495,7 +499,7 @@ type webMessage struct {
 	Images    int              `json:"images,omitempty"`
 }
 
-func webMessages(t *trajectory.Trajectory) []webMessage {
+func webMessages(t *trajectory.Trajectory, verbose bool) []webMessage {
 	if t == nil {
 		return []webMessage{}
 	}
@@ -504,12 +508,23 @@ func webMessages(t *trajectory.Trajectory) []webMessage {
 		if m.Role == "system" {
 			continue
 		}
+		// Quiet mode shows the conversation, not the tool trace. A reload
+		// must not bring back calls or results the live stream omitted.
+		if !verbose && m.Role == "tool" {
+			continue
+		}
 		content := strings.ReplaceAll(m.Content, agent.SubmitMarker, "")
 		if m.Role == "user" {
 			// Show what was typed, not the follow-up preamble the agent adds.
 			content = strings.TrimPrefix(content, trajectory.FollowUpNotice+"\n\n")
 		}
-		out = append(out, webMessage{Role: m.Role, Content: content, ToolCalls: m.ToolCalls, ToolID: m.ToolCallID, Images: len(m.Images)})
+		msg := webMessage{Role: m.Role, Content: content, Images: len(m.Images)}
+		if verbose {
+			msg.ToolCalls, msg.ToolID = m.ToolCalls, m.ToolCallID
+		} else if m.Role == "assistant" && strings.TrimSpace(content) == "" {
+			continue
+		}
+		out = append(out, msg)
 	}
 	return out
 }
@@ -567,8 +582,9 @@ func (w *webUI) state() map[string]any {
 		"running":    w.running,
 		"turns":      w.turns,
 		"checkpoint": relTo(s.root, w.path),
-		"messages":   webMessages(t),
+		"messages":   webMessages(t, w.verbose),
 		"compact":    w.compact,
+		"verbose":    w.verbose,
 		"canRegen":   w.last != nil && !w.running,
 		"markdown":   cfg.ChatMarkdown == nil || *cfg.ChatMarkdown,
 		"settings": map[string]any{
@@ -978,6 +994,53 @@ func (ww webWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// webQuietKind is an internal progress event. The web UI forwards it only
+// with -v/--verbose (tool calls as cards, everything else as a detail
+// event). Assistant text, permission prompts, warnings and compaction are
+// not in this set: those stay visible in either mode.
+func webQuietKind(kind string) bool {
+	switch kind {
+	case "tool.call", "tool.output", "tool.result",
+		"reasoning", "thinking",
+		"debug", "status",
+		"model.request", "model.fallback", "model.route", "model.truncated", "assistant.message",
+		"hook", "provider.retry", "workspace.snapshot",
+		"lsp.server", "sandbox.network_denied",
+		"web_fetch", "web_search",
+		"memory.saved", "memory.loaded",
+		"subagent.started", "subagent.finished", "worker.applied", "workers.batch",
+		"verify.reprompt", "verify.unverified", "verify.check", "verify.review",
+		"plan.updated", "plan.required",
+		"instructions.loaded", "instructions.skipped",
+		"budget.warning",
+		"lockdown.denied", "lockdown.processes_stopped", "taint",
+		"resume.interrupted_call", "resume.process_lost",
+		"checkpoint.saved":
+		return true
+	}
+	return strings.HasPrefix(kind, "reasoning.") || strings.HasPrefix(kind, "thinking.") ||
+		strings.HasPrefix(kind, "debug.") || strings.HasPrefix(kind, "status.")
+}
+
+// webDetailLimit caps one verbose detail event. Larger payloads are cut
+// so a single event can't fill the stream.
+const webDetailLimit = 32 << 10
+
+func webDetailPayload(kind string, fields map[string]any) map[string]any {
+	if len(fields) == 0 {
+		return map[string]any{"kind": kind}
+	}
+	b, err := json.Marshal(fields)
+	if err != nil || len(b) > webDetailLimit {
+		s := ""
+		if err == nil {
+			s = string(b[:webDetailLimit]) + "…"
+		}
+		return map[string]any{"kind": kind, "fields_json": s}
+	}
+	return map[string]any{"kind": kind, "fields": fields}
+}
+
 // start begins a turn with msg in the background. from, when set, rewinds
 // the conversation to before the latest turn first (edit / regenerate).
 func (w *webUI) start(msg string, images []model.Image, from *webTurnSnap) (any, error) {
@@ -1047,10 +1110,41 @@ func (w *webUI) runTurn(ctx context.Context, cancel context.CancelFunc, a *agent
 		w.broadcast("delta", map[string]any{"text": t})
 	}}
 	var tmu sync.Mutex
+	var actMu sync.Mutex
+	acted := map[string]bool{}
+	// noteActivity tells the page that work is happening, without a tool
+	// name, arguments or output. One event per call id.
+	noteActivity := func(id any) {
+		key := fmt.Sprint(id)
+		if key == "" || key == "<nil>" {
+			key = "*"
+		}
+		actMu.Lock()
+		if acted[key] {
+			actMu.Unlock()
+			return
+		}
+		acted[key] = true
+		actMu.Unlock()
+		w.broadcast("activity", map[string]any{"phase": "working"})
+	}
 	logged := a.OnEvent
 	a.OnEvent = func(kind string, fields map[string]any) {
 		if logged != nil {
 			logged(kind, fields)
+		}
+		if !w.verbose && webQuietKind(kind) {
+			switch kind {
+			case "tool.call":
+				tmu.Lock()
+				text.flush()
+				tmu.Unlock()
+				noteActivity(fields["id"])
+			case "tool.output":
+				// A handoff CLI reports its own tools without a tool.call.
+				noteActivity(fields["id"])
+			}
+			return
 		}
 		switch kind {
 		case "tool.call":
@@ -1068,6 +1162,10 @@ func (w *webUI) runTurn(ctx context.Context, cancel context.CancelFunc, a *agent
 			w.broadcast("tool_result", map[string]any{"id": fields["id"], "name": fields["name"], "output": out, "is_error": fields["is_error"]})
 		case "compaction", "context.compacted":
 			w.broadcast("notice", map[string]any{"text": "conversation compacted"})
+		default:
+			if webQuietKind(kind) {
+				w.broadcast("detail", webDetailPayload(kind, fields))
+			}
 		}
 	}
 	w.broadcast("turn_start", map[string]any{"turn": turns, "message": msg, "images": nImages, "model": s.modelName, "rewind": rewind})

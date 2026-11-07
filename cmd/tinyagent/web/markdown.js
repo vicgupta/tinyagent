@@ -57,17 +57,35 @@
     }).join("\n");
   }
 
+  // safeURL allows only http(s) and mailto. Control characters and whitespace
+  // are stripped first so a scheme can't be hidden inside them, and every
+  // other scheme (javascript, data, vbscript) is dropped.
   function safeURL(u) {
-    return /^(https?:|mailto:)/i.test(u) ? u : null;
+    u = String(u).replace(/[\u0000-\u001F\u007F\s]/g, "");
+    var m = /^([a-z][a-z0-9+.-]*):/i.exec(u);
+    if (!m) return null;
+    var scheme = m[1].toLowerCase();
+    if (scheme !== "http" && scheme !== "https" && scheme !== "mailto") return null;
+    return u;
+  }
+
+  function link(text, url) {
+    var u = safeURL(String(url).replace(/&amp;/g, "&"));
+    if (!u) return null;
+    return '<a href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + text + "</a>";
   }
 
   function inline(s) {
     var codes = [];
     s = s.replace(/`([^`\n]+)`/g, function (_, c) { codes.push(c); return "\u0000" + (codes.length - 1) + "\u0000"; });
     s = esc(s);
+    // Images stay links (or their alt text). An <img> could point at a
+    // script URL; the page never inserts one from model text.
+    s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, function (all, text, url) {
+      return link(text || esc(url), url) || text;
+    });
     s = s.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, function (all, text, url) {
-      var u = safeURL(url.replace(/&amp;/g, "&"));
-      return u ? '<a href="' + esc(u) + '" target="_blank" rel="noopener noreferrer">' + text + "</a>" : all;
+      return link(text, url) || all;
     });
     s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
     s = s.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>").replace(/__([^_\n]+)__/g, "<strong>$1</strong>");
@@ -112,9 +130,9 @@
         flush();
         var row = function (r) { return r.trim().replace(/^\||\|$/g, "").split("|").map(function (c) { return c.trim(); }); };
         var head = row(l); i += 2;
-        var t = "<table><thead><tr>" + head.map(function (c) { return "<th>" + inline(c) + "</th>"; }).join("") + "</tr></thead><tbody>";
+        var t = '<div class="table-wrap"><table><thead><tr>' + head.map(function (c) { return "<th>" + inline(c) + "</th>"; }).join("") + "</tr></thead><tbody>";
         while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) t += "<tr>" + row(lines[i++]).map(function (c) { return "<td>" + inline(c) + "</td>"; }).join("") + "</tr>";
-        out.push(t + "</tbody></table>");
+        out.push(t + "</tbody></table></div>");
         continue;
       }
       if ((m = /^(\s*)([-*+]|\d+[.)])\s+/.exec(l))) {

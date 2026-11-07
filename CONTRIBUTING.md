@@ -149,8 +149,13 @@ stays unchanged.
   drive the real server through `httptest` with the fake provider
   (`newACPProvider`), so no network is used. The browser-side Markdown renderer is
   checked by `web/ui_test.js`, which `TestWebUIScripts` runs when `node` is installed.
-  Keep the page dependency-free and escape everything model-provided before it
-  reaches the DOM.
+  Keep the page dependency-free (the Markdown renderer is embedded; no CDN) and
+  escape everything model-provided before it reaches the DOM. Tool calls, tool
+  results, reasoning and other internal events are sent to the browser only when
+  the session was started with `-v`/`--verbose` (`webQuietKind`); otherwise the
+  stream carries an `activity` event whose only field is `phase: working`, and
+  `/api/state` omits tool messages. `TestWebHidesInternalDetailsUnlessVerbose`
+  covers that gate.
 - **Chat line editor** (`cmd/tinyagent/lineedit.go`): drive it through the fake
   terminal in `lineedit_redraw_test.go` (`termEditor`), which models CR/LF,
   cursor moves, clears, rune widths and autowrap. Assert on the screen and on

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Web UI Markdown and quiet tool trace.** `tinyagent web` renders assistant replies as Markdown while they stream: headings, lists, bold and italic, links, inline code, scrollable highlighted code blocks, tables and quotes. Model text is escaped first (no raw HTML), and links are only `http`, `https` or `mailto`. Tool calls, tool results, reasoning and other internal details are omitted from the event stream and from `/api/state` unless the server was started with `-v`/`--verbose`, matching the CLI. Without `-v` a tool run shows only a "Working…" indicator (`activity` with `{"phase":"working"}`). With `-v` the collapsible tool cards and detail events are shown as before. See [Web UI](docs/web.md).
+
 ## [v0.21.0] - 2026-11-07
 
 ### Added
