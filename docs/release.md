@@ -14,14 +14,14 @@ Tag only after the full suite is green on `main`. `install.sh` verifies checksum
 
 `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`, `windows/amd64`, `windows/arm64`.
 
-Windows is uploaded as two files per architecture:
+Windows is uploaded as one zip per architecture. The bare `.exe` is built only long enough to pack the zip, then deleted before `SHA256SUMS` is written and before the workflow uploads `dist/*`.
 
 | File | Role |
 |---|---|
-| `tinyagent-windows-amd64.exe`, `tinyagent-windows-arm64.exe` | Bare executable. `tinyagent --update` and the direct Windows download use these names. |
-| `tinyagent-windows-amd64.zip`, `tinyagent-windows-arm64.zip` | Zip whose only entry is `tinyagent.exe`. WinGet installs these. |
+| `tinyagent-windows-amd64.zip` | x64. The only entry is `tinyagent.exe`. WinGet and `tinyagent --update` both use this file. |
+| `tinyagent-windows-arm64.zip` | arm64. Same layout. |
 
-The zip exists because WinGet needs a zip or an installer at a stable URL, with a SHA-256. A Go `.exe` is not an Inno, NSIS, Burn, or MSI installer, so the bare executable stays for `--update` and the zip is the WinGet installer (`zip` + nested `portable`). `SHA256SUMS` includes both. URLs look like:
+WinGet needs a zip or an installer at a stable URL, with a SHA-256. A Go `.exe` is not an Inno, NSIS, Burn, or MSI installer, so the published Windows asset is the zip (`zip` + nested `portable`). `SHA256SUMS` lists the zip and not a bare Windows `.exe`. The release workflow fails if `dist/` still contains `tinyagent-windows-*.exe` or if `SHA256SUMS` names one. URLs look like:
 
 `https://github.com/vicgupta/tinyagent/releases/download/vX.Y.Z/tinyagent-windows-amd64.zip`
 
@@ -31,7 +31,7 @@ The zip exists because WinGet needs a zip or an installer at a stable URL, with 
 
 Package identifier: `VicGupta.TinyAgent`. The install command is `winget install VicGupta.TinyAgent`.
 
-The `winget` job runs only after the `release` job has published the GitHub release. It uses [vedantmgoyal9/winget-releaser](https://github.com/vedantmgoyal9/winget-releaser) at `v2`, which runs [komac](https://github.com/russellbanks/komac) `update` and opens a pull request from a fork of [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs). The job passes installer URLs that match `tinyagent-windows-.+\.zip$`, so the bare `.exe` files are not submitted.
+The `winget` job runs only after the `release` job has published the GitHub release. It uses [vedantmgoyal9/winget-releaser](https://github.com/vedantmgoyal9/winget-releaser) at `v2`, which runs [komac](https://github.com/russellbanks/komac) `update` and opens a pull request from a fork of [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs). The job passes installer URLs that match `tinyagent-windows-.+\.zip$`.
 
 The GitHub release succeeds in all of these cases. The WinGet job logs a notice and exits 0:
 

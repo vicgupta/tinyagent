@@ -39,10 +39,10 @@ fmt:
 
 dist:
 	@mkdir -p $(DISTDIR)
-	@rm -f $(DISTDIR)/SHA256SUMS $(DISTDIR)/$(BIN)-windows-*.zip
+	@rm -f $(DISTDIR)/SHA256SUMS $(DISTDIR)/$(BIN)-windows-*.zip $(DISTDIR)/$(BIN)-windows-*.exe
 	@for p in $(PLATFORMS); do \
 		os=$${p%/*}; arch=$${p#*/}; ext=; [ $$os = windows ] && ext=.exe; \
-		echo "$(DISTDIR)/$(BIN)-$$os-$$arch$$ext"; \
+		if [ $$os != windows ]; then echo "$(DISTDIR)/$(BIN)-$$os-$$arch$$ext"; fi; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags="$(LDFLAGS)" \
 			-o $(DISTDIR)/$(BIN)-$$os-$$arch$$ext ./cmd/$(BIN) || exit 1; \
 	done
@@ -52,8 +52,8 @@ dist:
 		|| shasum -a 256 $(BIN)-* > SHA256SUMS; }
 
 # windows-zips packs each Windows exe into a zip whose only entry is
-# tinyagent.exe. WinGet installs those zips. The bare .exe stays beside
-# them for tinyagent --update and direct download. Requires the zip command.
+# tinyagent.exe, then deletes the bare exe. The release ships the zip only.
+# Requires the zip command.
 windows-zips:
 	@set -eu; \
 	command -v zip >/dev/null 2>&1 || { echo "windows-zips: zip is required to pack tinyagent.exe for WinGet" >&2; exit 1; }; \
@@ -67,7 +67,7 @@ windows-zips:
 		mkdir -p "$$stage"; \
 		cp "$$exe" "$$stage/$(BIN).exe"; \
 		( cd "$$stage" && zip -q -X "../$(BIN)-windows-$$arch.zip" "$(BIN).exe" ); \
-		rm -rf "$$stage"; \
+		rm -rf "$$stage" "$$exe"; \
 		echo "$$zipf"; \
 	done
 

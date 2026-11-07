@@ -15,7 +15,7 @@ fail() { echo "install: $*" >&2; exit 1; }
 case $(uname -s) in
 	Darwin) os=darwin ;;
 	Linux) os=linux ;;
-	*) fail "unsupported OS $(uname -s); download a binary from https://github.com/$REPO/releases" ;;
+	*) fail "unsupported OS $(uname -s); on Windows use: winget install VicGupta.TinyAgent (or download tinyagent-windows-amd64.zip from https://github.com/$REPO/releases)" ;;
 esac
 case $(uname -m) in
 	x86_64 | amd64) arch=amd64 ;;

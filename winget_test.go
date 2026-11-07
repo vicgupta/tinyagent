@@ -114,8 +114,16 @@ func TestWinGetReleaseWorkflow(t *testing.T) {
 			published = true
 		}
 	}
-	if !built || !published {
-		t.Fatalf("release job must make dist and publish with softprops/action-gh-release, steps=%+v", release.Steps)
+	var zipOnly bool
+	for _, s := range release.Steps {
+		if strings.Contains(s.Run, "bare Windows exe must not be published") &&
+			strings.Contains(s.Run, "tinyagent-windows-amd64.zip") &&
+			strings.Contains(s.Run, "SHA256SUMS lists a bare Windows exe") {
+			zipOnly = true
+		}
+	}
+	if !built || !published || !zipOnly {
+		t.Fatalf("release job must make dist, reject bare Windows exes, and publish, steps=%+v", release.Steps)
 	}
 
 	winget, ok := wf.Jobs["winget"]
@@ -223,6 +231,10 @@ func TestWindowsZipLayout(t *testing.T) {
 	for _, arch := range []string{"amd64", "arm64"} {
 		if _, err := os.Stat(filepath.Join(dist, ".zip-"+arch)); !os.IsNotExist(err) {
 			t.Fatalf("staging dir .zip-%s left behind: %v", arch, err)
+		}
+		exe := filepath.Join(dist, "tinyagent-windows-"+arch+".exe")
+		if _, err := os.Stat(exe); !os.IsNotExist(err) {
+			t.Fatalf("bare exe left in dist: %s (%v)", exe, err)
 		}
 	}
 }

@@ -41,9 +41,9 @@ The package appears in WinGet after Microsoft merges the first submission to the
 
 ### Direct download
 
-Download `tinyagent-windows-amd64.exe` (or `tinyagent-windows-arm64.exe`) from the [latest release](https://github.com/vicgupta/tinyagent/releases/latest), rename it to `tinyagent.exe`, and put it in a folder on your `PATH`.
+Download `tinyagent-windows-amd64.zip` (or `tinyagent-windows-arm64.zip`) from the [latest release](https://github.com/vicgupta/tinyagent/releases/latest), extract `tinyagent.exe`, and put it in a folder on your `PATH`. The release does not include a bare Windows `.exe`.
 
-`tinyagent --update` downloads that same bare executable (`tinyagent-windows-<arch>.exe`), checks it against `SHA256SUMS`, and replaces the binary in place. It does not download the zip.
+`tinyagent --update` on Windows downloads that zip, checks the zip against `SHA256SUMS`, extracts `tinyagent.exe`, and replaces the running binary. The download bar counts the zip. When a release has no zip (older tags published `tinyagent-windows-<arch>.exe` only), `--update` installs that executable instead.
 
 The `bash` tool needs `bash` on your `PATH`, for example from Git for Windows.
 
@@ -55,13 +55,13 @@ go install github.com/vicgupta/tinyagent/cmd/tinyagent@latest
 
 ## Checksums
 
-Binaries for every platform, the Windows zips, and `SHA256SUMS` are on the [releases page](https://github.com/vicgupta/tinyagent/releases). Verify with:
+Unix and macOS binaries, the Windows zips, and `SHA256SUMS` are on the [releases page](https://github.com/vicgupta/tinyagent/releases). Verify with:
 
 ```bash
 shasum -a 256 -c SHA256SUMS --ignore-missing
 ```
 
-`SHA256SUMS` lists both the bare executables and the Windows zips. On macOS, a binary downloaded with a browser is quarantined; clear it once with `xattr -d com.apple.quarantine tinyagent`.
+`SHA256SUMS` lists `tinyagent-windows-amd64.zip` and `tinyagent-windows-arm64.zip`. It does not list a bare Windows `.exe`. On macOS, a binary downloaded with a browser is quarantined; clear it once with `xattr -d com.apple.quarantine tinyagent`.
 
 ## Updating
 
@@ -69,4 +69,4 @@ shasum -a 256 -c SHA256SUMS --ignore-missing
 tinyagent --update
 ```
 
-This replaces the binary in place with the latest release, after checking its checksum. When the install directory is not writable, run it with `sudo`. Each step is printed to stderr. See [`--update`](subcommands.md#updating).
+This replaces the binary in place with the latest release, after checking its checksum. On Windows the checked file is `tinyagent-windows-<arch>.zip`, and the installed bytes are the `tinyagent.exe` inside it. When the install directory is not writable, run it with `sudo`. Each step is printed to stderr. See [`--update`](subcommands.md#updating).

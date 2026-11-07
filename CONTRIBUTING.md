@@ -325,13 +325,14 @@ git tag v0.x.y && git push origin v0.x.y
 ```
 
 `make dist` reproduces the artifacts locally. It needs the `zip` command.
-Each Windows build is uploaded twice: the bare executable
-(`tinyagent-windows-amd64.exe` and `tinyagent-windows-arm64.exe`, which
-`tinyagent --update` and direct download use) and a zip of the same bytes
-(`tinyagent-windows-amd64.zip` and `tinyagent-windows-arm64.zip`). Each zip
-contains one file, `tinyagent.exe`, which is what WinGet installs.
-`install.sh` verifies checksums, so tag only after the full suite is green
-on `main`.
+Unix and macOS builds are bare binaries. Windows builds are
+`tinyagent-windows-amd64.zip` and `tinyagent-windows-arm64.zip` only. Each
+zip contains one file, `tinyagent.exe`. The bare `.exe` is removed before
+`SHA256SUMS` is written, and the release workflow rejects a `dist/` that
+still has one. `tinyagent --update` on Windows downloads the zip. An older
+release that only has `tinyagent-windows-<arch>.exe` still installs from
+that file. `install.sh` verifies checksums, so tag only after the full
+suite is green on `main`.
 
 ### WinGet
 

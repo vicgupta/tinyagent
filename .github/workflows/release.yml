@@ -18,6 +18,23 @@ jobs:
           cache: true
       - name: Build all platforms
         run: make dist
+      - name: Windows release is zip-only
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          exes=(dist/tinyagent-windows-*.exe)
+          if [ "${#exes[@]}" -ne 0 ]; then
+            printf 'bare Windows exe must not be published: %s\n' "${exes[@]}" >&2
+            exit 1
+          fi
+          test -f dist/tinyagent-windows-amd64.zip
+          test -f dist/tinyagent-windows-arm64.zip
+          grep -q 'tinyagent-windows-amd64.zip' dist/SHA256SUMS
+          grep -q 'tinyagent-windows-arm64.zip' dist/SHA256SUMS
+          if grep -E -q 'tinyagent-windows-.*\.exe' dist/SHA256SUMS; then
+            echo "SHA256SUMS lists a bare Windows exe" >&2
+            exit 1
+          fi
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:

@@ -34,7 +34,7 @@ winget install VicGupta.TinyAgent
 
 The package identifier is `VicGupta.TinyAgent` (WinGet matches it without regard to case). WinGet installs a zip whose only file is `tinyagent.exe` and adds the `tinyagent` command to your PATH. The release assets for that are `tinyagent-windows-amd64.zip` (x64) and `tinyagent-windows-arm64.zip` (arm64). See [Install](docs/install.md) for the zip layout and [Releasing](docs/release.md) for how the package is published. The package is listed after Microsoft merges the first submission to the Windows Package Manager community repository.
 
-To install from the release assets directly, download `tinyagent-windows-amd64.exe` (or `-arm64.exe`) from the [latest release](https://github.com/vicgupta/tinyagent/releases/latest), rename it to `tinyagent.exe`, and put it in a folder on your `PATH`. `tinyagent --update` replaces that same bare executable. The `bash` tool needs `bash` on your `PATH`, e.g. from Git for Windows.
+To install from the release assets directly, download `tinyagent-windows-amd64.zip` (or `-arm64.zip`) from the [latest release](https://github.com/vicgupta/tinyagent/releases/latest), extract `tinyagent.exe`, and put it in a folder on your `PATH`. Those zips are the only Windows files on the release. `tinyagent --update` downloads the zip, checks it against `SHA256SUMS`, and replaces this binary with the `tinyagent.exe` inside. An older release that has no zip is installed from its bare `tinyagent-windows-<arch>.exe` instead. The `bash` tool needs `bash` on your `PATH`, e.g. from Git for Windows.
 
 ### With Go
 
@@ -44,7 +44,7 @@ go install github.com/vicgupta/tinyagent/cmd/tinyagent@latest
 
 ### Manual download
 
-Binaries for every platform, the Windows zip archives, and `SHA256SUMS`, are on the [releases page](https://github.com/vicgupta/tinyagent/releases). Verify with `shasum -a 256 -c SHA256SUMS --ignore-missing`. On macOS, a binary downloaded with a browser is quarantined; clear it once with `xattr -d com.apple.quarantine tinyagent`.
+Unix and macOS binaries, the Windows zips, and `SHA256SUMS` are on the [releases page](https://github.com/vicgupta/tinyagent/releases). `SHA256SUMS` lists `tinyagent-windows-amd64.zip` and `tinyagent-windows-arm64.zip`, not a bare Windows `.exe`. Verify with `shasum -a 256 -c SHA256SUMS --ignore-missing`. On macOS, a binary downloaded with a browser is quarantined; clear it once with `xattr -d com.apple.quarantine tinyagent`.
 
 ### Updating
 
