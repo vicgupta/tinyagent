@@ -90,6 +90,7 @@ Line editing works on Linux and macOS. Elsewhere chat reads plain lines (no arro
 | `/save [path]` | Save the checkpoint now, or a copy to `path` |
 | `/compact` | Compact the conversation before the next request (refused with `--no-compact`) |
 | `/raw` | Toggle rendered Markdown off and on for this session |
+| `/model [provider/model]` | Show the current model, its fallback chain and any role routes, or switch the main model for the rest of the session (history is kept). An invalid spec is refused and the current model stays. See [Switching mid-session](models.md#switching-mid-session) |
 
 A message that really starts with `/` is sent with a doubled slash: `//etc/hosts is empty?` sends `/etc/hosts is empty?`.
 

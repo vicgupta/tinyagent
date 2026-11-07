@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"strings"
+
+	"github.com/vicgupta/tinyagent/internal/model"
 )
 
 // chatCommands are the slash commands, in /help order.
@@ -16,6 +18,7 @@ var chatCommands = []struct{ name, alias, desc string }{
 	{"/save", "", "save the checkpoint now, or to /save <path>"},
 	{"/compact", "", "compact the conversation before the next request"},
 	{"/raw", "", "toggle showing replies as raw Markdown"},
+	{"/model", "", "show or switch the model: /model <provider/model>"},
 }
 
 // command runs one slash command and reports whether the session ends.
@@ -51,6 +54,20 @@ func (c *chat) command(line string) bool {
 		fmt.Fprint(w, c.costText())
 	case "/context":
 		fmt.Fprint(w, formatContext(c.s.contextReport(), c.st))
+	case "/model":
+		if arg == "" {
+			fmt.Fprint(w, modelStatusText(c.s, c.st))
+			return false
+		}
+		if err := c.s.switchModel(arg, w); err != nil {
+			msg := err.Error()
+			if h := model.Hint(arg, msg); h != "" {
+				msg += " (" + h + ")"
+			}
+			fmt.Fprintln(w, c.st.Red("error: "+msg))
+			return false
+		}
+		fmt.Fprintln(w, c.st.Dim("model: "+arg))
 	case "/new", "/clear":
 		c.s.traj, c.source, c.cont, c.turns, c.compact = nil, "", false, 0, false
 		c.s.remember = nil

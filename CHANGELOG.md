@@ -4,6 +4,8 @@
 
 ### Added
 
+- **`/model` in chat (and richer status in the web UI).** `/model` shows the current main model, its fallback chain and any role routes; `/model <provider/model>` switches the main model mid-session after the same validation as `-m`, keeps conversation history, and refuses an invalid spec (the current model stays). The web UI already had a model picker and `/model <spec>`; bare `/model` now shows the same status. See [Switching mid-session](docs/models.md#switching-mid-session), [Interactive chat](docs/chat.md#slash-commands) and [Web UI](docs/web.md#slash-commands). (#381)
+
 - **Append-only history is pinned by tests.** Tests hash each request's message prefix before and after every step and check that the system prompt (including `AGENTS.md`) and tool definitions stay byte-identical, the model's replies are resent exactly as returned, and resume, follow-ups and compaction summaries append instead of rewriting earlier messages, so provider prompt caches keep hitting. Compaction is the documented exception (it replaces the compacted part of the view, never the stored history, the system prompt or the task), as is a `--plan` update, which re-renders the pinned plan block. No behavior change. See [Append-only history and prompt caching](docs/long-runs.md#append-only-history-and-prompt-caching) and CONTRIBUTING. (#380)
 
 ### Fixed
