@@ -25,6 +25,7 @@ const (
 
 	TaskCompaction = "compaction"
 	TaskReview     = "review"
+	TaskPermission = "permission"
 )
 
 // SourceMain is the Source of a task that falls back to the main model.
@@ -80,9 +81,9 @@ func Delegated(cfg config.AgentConfig, main, task string) Route {
 	return r
 }
 
-// Auxiliary resolves an auxiliary task (TaskCompaction or TaskReview):
-// --route <task>=, then models.auxiliary.tasks.<task>, then --aux-model,
-// then models.auxiliary.model, then the main model.
+// Auxiliary resolves an auxiliary task (TaskCompaction, TaskReview or
+// TaskPermission): --route <task>=, then models.auxiliary.tasks.<task>,
+// then --aux-model, then models.auxiliary.model, then the main model.
 func Auxiliary(cfg config.AgentConfig, main, task string) Route {
 	r := Route{Role: RoleAuxiliary, Task: task}
 	f, a := cfg.Models.Flags, cfg.Models.Auxiliary

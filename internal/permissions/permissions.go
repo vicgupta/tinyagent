@@ -37,6 +37,7 @@ const (
 	SourceUser           = "user"
 	SourceSession        = "session"
 	SourceNonInteractive = "non_interactive"
+	SourceJudge          = "judge"
 )
 
 // Call is one tool call to evaluate. The fields hold the call's primary
@@ -99,6 +100,8 @@ type Summary struct {
 	Default        string `json:"default"`
 	NonInteractive string `json:"non_interactive"`
 	Rules          int    `json:"rules"`
+	// Judge is true when the optional AI permission judge is enabled.
+	Judge bool `json:"judge,omitempty"`
 }
 
 type matcherKind int
@@ -255,7 +258,15 @@ func (p *Policy) Summary() Summary {
 	if p == nil {
 		return Summary{}
 	}
-	return Summary{Default: string(p.Default), NonInteractive: string(p.NonInteractive), Rules: len(p.rules)}
+	return Summary{Default: string(p.Default), NonInteractive: string(p.NonInteractive), Rules: len(p.rules), Judge: p.cfg.Judge.On()}
+}
+
+// Judge returns the optional AI judge settings compiled into this policy.
+func (p *Policy) Judge() config.PermissionJudge {
+	if p == nil {
+		return config.PermissionJudge{}
+	}
+	return p.cfg.Judge
 }
 
 // Check evaluates the call and returns the decision. A nil policy allows.

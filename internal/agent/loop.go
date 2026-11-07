@@ -197,7 +197,7 @@ type Agent struct {
 	// run uses, reported in run.started; informational only.
 	Routes []routing.Route
 	// Helpers maps an auxiliary task (routing.TaskCompaction,
-	// routing.TaskReview) to the model serving it; a task without an
+	// routing.TaskReview, routing.TaskPermission) to the model serving it; a task without an
 	// entry uses Model.
 	Helpers map[string]model.Model
 	// UsageRole and UsageTask label this agent's own requests in
@@ -1007,13 +1007,13 @@ func (a *Agent) permit(ctx context.Context, t *trajectory.Trajectory, call model
 	res := a.Policy.Check(pc)
 	switch res.Decision {
 	case permissions.DecisionAllow:
-		a.permissionEvent(call, res, permissions.DecisionAllow, res.Source, "")
+		a.permissionEvent(call, res, permissions.DecisionAllow, res.Source, "", nil)
 		return tools.Result{}, false
 	case permissions.DecisionDeny:
-		a.permissionEvent(call, res, permissions.DecisionDeny, res.Source, "")
+		a.permissionEvent(call, res, permissions.DecisionDeny, res.Source, "", nil)
 		return tools.Result{Text: tools.Truncate(deniedMessage(res), a.Tools.MaxOutputChars), IsError: true}, true
 	case permissions.DecisionAsk:
-		return a.askPermission(ctx, call, pc, res)
+		return a.askPermission(ctx, t, call, pc, res)
 	}
 	return tools.Result{}, false
 }
@@ -1031,12 +1031,25 @@ func deniedMessage(res permissions.Result) string {
 	return "error: denied by permission policy" + next
 }
 
-// askPermission answers a policy ask: through the approver when one is set,
-// or with the policy's non-interactive decision.
-func (a *Agent) askPermission(ctx context.Context, call model.ToolCall, pc permissions.Call, res permissions.Result) (tools.Result, bool) {
+// askPermission answers a policy ask: optionally through the AI judge,
+// then through the approver when one is set, or with the policy's
+// non-interactive decision. The judge may only auto-allow; it never
+// silently denies.
+func (a *Agent) askPermission(ctx context.Context, t *trajectory.Trajectory, call model.ToolCall, pc permissions.Call, res permissions.Result) (tools.Result, bool) {
 	if a.permissionApprovals[pc.Key()] {
-		a.permissionEvent(call, res, permissions.DecisionAllow, permissions.SourceSession, "")
+		a.permissionEvent(call, res, permissions.DecisionAllow, permissions.SourceSession, "", nil)
 		return tools.Result{}, false
+	}
+	var opinion *judgeOpinion
+	if a.judgeEnabled() {
+		op := a.consultJudge(ctx, t, call, pc, res)
+		opinion = &op
+		if op.AutoAllow {
+			a.permissionEvent(call, res, permissions.DecisionAllow, permissions.SourceJudge, "", opinion)
+			return tools.Result{}, false
+		}
+		// Low confidence, risky, ask, or model error: fall through to the
+		// human prompt (or non-interactive fallback). Never auto-deny.
 	}
 	req := permissions.Request{
 		Tool:       call.Function.Name,
@@ -1055,14 +1068,14 @@ func (a *Agent) askPermission(ctx context.Context, call model.ToolCall, pc permi
 				}
 				a.permissionApprovals[pc.Key()] = true
 			}
-			a.permissionEvent(call, res, permissions.DecisionAllow, permissions.SourceUser, ans.Channel)
+			a.permissionEvent(call, res, permissions.DecisionAllow, permissions.SourceUser, ans.Channel, opinion)
 			return tools.Result{}, false
 		case permissions.DecisionDeny:
 			msg := "error: denied by user"
 			if ans.Reason != "" {
 				msg += ": " + ans.Reason
 			}
-			a.permissionEvent(call, res, permissions.DecisionDeny, permissions.SourceUser, ans.Channel)
+			a.permissionEvent(call, res, permissions.DecisionDeny, permissions.SourceUser, ans.Channel, opinion)
 			return tools.Result{Text: tools.Truncate(msg, a.Tools.MaxOutputChars), IsError: true}, true
 		}
 	}
@@ -1072,7 +1085,7 @@ func (a *Agent) askPermission(ctx context.Context, call model.ToolCall, pc permi
 		dec = permissions.DecisionDeny
 	}
 	if dec == permissions.DecisionAllow {
-		a.permissionEvent(call, res, permissions.DecisionAllow, permissions.SourceNonInteractive, "none")
+		a.permissionEvent(call, res, permissions.DecisionAllow, permissions.SourceNonInteractive, "none", opinion)
 		return tools.Result{}, false
 	}
 	msg := "error: denied: approval required by permission rule "
@@ -1082,7 +1095,7 @@ func (a *Agent) askPermission(ctx context.Context, call model.ToolCall, pc permi
 		msg += "policy"
 	}
 	msg += " but no one can approve in this run"
-	a.permissionEvent(call, res, permissions.DecisionDeny, permissions.SourceNonInteractive, "none")
+	a.permissionEvent(call, res, permissions.DecisionDeny, permissions.SourceNonInteractive, "none", opinion)
 	return tools.Result{Text: tools.Truncate(msg, a.Tools.MaxOutputChars), IsError: true}, true
 }
 
@@ -1096,8 +1109,9 @@ func (a *Agent) redactArgument(s string) string {
 }
 
 // permissionEvent emits one permission decision as an event and a verbose
-// line.
-func (a *Agent) permissionEvent(call model.ToolCall, res permissions.Result, decision permissions.Decision, source, channel string) {
+// line. When the optional AI judge was consulted, opinion is recorded on
+// the event as "judge".
+func (a *Agent) permissionEvent(call model.ToolCall, res permissions.Result, decision permissions.Decision, source, channel string, opinion *judgeOpinion) {
 	fields := map[string]any{
 		"tool_call_id": call.ID,
 		"tool_name":    call.Function.Name,
@@ -1112,6 +1126,9 @@ func (a *Agent) permissionEvent(call model.ToolCall, res permissions.Result, dec
 	}
 	if a.subagentID != "" {
 		fields["subagent"] = a.subagentID
+	}
+	if opinion != nil {
+		fields["judge"] = opinion.fields()
 	}
 	a.event("permission", fields)
 	if a.Verbose {
@@ -1684,7 +1701,7 @@ func PermissionsInfo(p *permissions.Policy) *trajectory.PermissionsInfo {
 		return nil
 	}
 	s := p.Summary()
-	info := &trajectory.PermissionsInfo{Default: s.Default, NonInteractive: s.NonInteractive, RuleCount: s.Rules}
+	info := &trajectory.PermissionsInfo{Default: s.Default, NonInteractive: s.NonInteractive, RuleCount: s.Rules, Judge: s.Judge}
 	for _, r := range p.Rules() {
 		info.Rules = append(info.Rules, trajectory.PermissionsRuleInfo{
 			Tool: r.Tool, Command: r.Command, Path: r.Path, Host: r.Host, Decision: r.Decision, Message: r.Message,

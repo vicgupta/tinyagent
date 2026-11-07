@@ -92,7 +92,7 @@ func TestRunStartedModelsAuxiliary(t *testing.T) {
 func TestCheckListsAuxRoutes(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test")
 	code, out, _ := runCLI(t, "--check", "-c", writeCfg(t, ""), "--cwd", t.TempDir(), "--aux-model", "openai/gpt-5-mini")
-	for _, want := range []string{"compaction: openai/gpt-5-mini (auxiliary, from --aux-model)", "review:"} {
+	for _, want := range []string{"compaction: openai/gpt-5-mini (auxiliary, from --aux-model)", "review:", "permission:"} {
 		if code != 0 || !strings.Contains(out, want) {
 			t.Errorf("exit %d, --check lacks %q:\n%s", code, want, out)
 		}

@@ -173,7 +173,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 - Every tool call gets a tool result: denials, errors, timeouts, lockdown refusals, ask_user answers and resume-interrupted calls always emit `tool.result` and a matching history message; see [Tool results](docs/json-output.md#tool-results).
 - `tinyagent --update`: checksum-verified self-update with step-by-step progress and a `#` download bar.
 - Undo for file edits, workspace rewind, resume and follow-up runs.
-- Sandboxed commands (Linux: Bubblewrap with Landlock stacked inside, or Landlock alone, via `--sandbox-backend`; macOS: Seatbelt) with a network allowlist, permission rules, hooks, untrusted-content lockdown and file-access rules.
+- Sandboxed commands (Linux: Bubblewrap with Landlock stacked inside, or Landlock alone, via `--sandbox-backend`; macOS: Seatbelt) with a network allowlist, permission rules (optional [AI permission judge](docs/permissions.md#ai-permission-judge) for `ask` decisions), hooks, untrusted-content lockdown and file-access rules.
 - WebAssembly plugin modules run through Extism with permission checks, a version store, rollback and prune. Go source modules are built with TinyGo, an external dependency that tinyagent downloads on first use (pinned version, checksum-verified, cached in `./.tinyagent/cache/toolchains` inside `--cwd`, `tinyagent tinygo update` to update; see [Managing TinyGo](docs/wasm-plugins.md#managing-tinygo)); TinyGo is never embedded in tinyagent.
 - AGENTS.md, Agent Skills, plugins, skill workflows, ACP editor integration and a GitHub Action.
 

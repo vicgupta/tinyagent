@@ -67,6 +67,10 @@ file_access:               # omitted by default (no rules); see Restricting file
 permissions:               # omitted by default (no policy); see Permissions
   default: allow           # allow (default), ask or deny, when no rule matches
   non_interactive: deny    # what an ask becomes with nobody to answer: deny (default) or allow
+  judge:                   # optional AI tier for ask; off by default; see AI permission judge
+    enabled: false
+    min_confidence: 0.85   # only auto-allow at or above this (0..1)
+    timeout_seconds: 10    # caps one judge model call (1..60)
   rules:                   # a profile's rules replace the base list
     - {tool: bash, command: "go test *", decision: allow}
     - {tool: "bash|start_process", command: "git push *", decision: ask}
@@ -121,8 +125,8 @@ subagents:
   max_steps: 30           # step cap per delegated task; 0 means the default (30)
 models:                  # per-role model routing; see Model roles (all optional, off by default)
   auxiliary:              # models for helper calls outside the agent loop
-    model: ""             # default for compaction and review (same as --aux-model); empty uses the main model
-    tasks: {}             # per-task override: compaction, review (same as --route task=spec)
+    model: ""             # default for compaction, review and permission (same as --aux-model); empty uses the main model
+    tasks: {}             # per-task override: compaction, review, permission (same as --route task=spec)
     fallback_models: []   # the role's own fallback chain, at most 3; never inherits fallback_models
   delegated:              # models for delegated children
     model: ""             # default for delegate and worker children; empty uses the main model
@@ -335,7 +339,7 @@ The `models:` section picks a model per role (`main`, `auxiliary`, `delegated`) 
 | Key | Meaning |
 |---|---|
 | `models.auxiliary.model` | Default model for helper calls (same as `--aux-model`) |
-| `models.auxiliary.tasks.compaction`, `models.auxiliary.tasks.review` | Per-task helper models |
+| `models.auxiliary.tasks.compaction`, `models.auxiliary.tasks.review`, `models.auxiliary.tasks.permission` | Per-task helper models (compaction, verify review, permission judge) |
 | `models.delegated.model` | Default model for `delegate` and `worker` children (same as `--delegate-model`) |
 | `models.delegated.tasks.delegate`, `models.delegated.tasks.worker` | Per-task child models; aliases `subagents.model` and `subagents.workers.model` |
 | `models.<role>.fallback_models` | The role's own fallback chain, at most 3 entries |

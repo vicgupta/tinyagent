@@ -113,6 +113,14 @@ embed/prompts/        system prompt templates
   every later request. Prefer `recordToolResult` / `recordResult` (or the same
   fields the tool loop emits) over appending a bare tool message. See
   [Tool results](docs/json-output.md#tool-results).
+- **Permission judge is allow-only.** The optional AI judge
+  (`permissions.judge`, task `permission`) may auto-allow on high confidence
+  only; it must never silently deny. Low confidence, risky, parse/model error
+  and timeout fall back to the human prompt (or `non_interactive`). Explicit
+  deny rules and lockdown must still win before the judge runs. Record the
+  judge's verdict on the `permission` event. Tests use a fake judge model only
+  (see `internal/agent/permission_judge_test.go`). See
+  [AI permission judge](docs/permissions.md#ai-permission-judge).
 - **History is append-only.** Never edit, reorder or drop a message that has
   already been sent to the model, and never rebuild the system prompt or tool
   definitions mid-run: add new context (notices, resume notes, results) as a new
