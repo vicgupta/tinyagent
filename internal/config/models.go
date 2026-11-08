@@ -13,7 +13,8 @@ type Models struct {
 	// Auxiliary is the role of helper calls made outside the agent loop:
 	// context compaction (task "compaction"), the verify_on_stop review
 	// (task "review"), and the optional permission judge (task
-	// "permission").
+	// "permission"), and the opt-in tinyagent tune proposal (task
+	// "tuning").
 	Auxiliary RoleModels `yaml:"auxiliary,omitempty"`
 	// Delegated is the role of the child agents: the delegate tool's
 	// read-only subagents (task "delegate") and workers (task "worker").
@@ -60,6 +61,11 @@ type ModelRoute struct {
 // AuxiliaryTasks are the task names models.auxiliary.tasks accepts.
 var AuxiliaryTasks = []string{"compaction", "review", "permission"}
 
+// TuningTask is the auxiliary task of the opt-in self-tuning command
+// (tinyagent tune). It is accepted under models.auxiliary.tasks and
+// --route but, unlike AuxiliaryTasks, is never built for an agent run.
+const TuningTask = "tuning"
+
 // DelegatedTasks are the task names models.delegated.tasks accepts.
 var DelegatedTasks = []string{"delegate", "worker"}
 
@@ -68,7 +74,7 @@ var DelegatedTasks = []string{"delegate", "worker"}
 // subagents.workers.model is models.delegated.tasks.worker, and setting
 // both to different models is an error.
 func validateModels(cfg *AgentConfig) error {
-	if err := validateRole("auxiliary", cfg.Models.Auxiliary, AuxiliaryTasks); err != nil {
+	if err := validateRole("auxiliary", cfg.Models.Auxiliary, append(AuxiliaryTasks[:len(AuxiliaryTasks):len(AuxiliaryTasks)], TuningTask)); err != nil {
 		return err
 	}
 	if err := validateRole("delegated", cfg.Models.Delegated, DelegatedTasks); err != nil {

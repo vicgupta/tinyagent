@@ -239,6 +239,10 @@ func appendLine(path string, v any) error {
 	return err
 }
 
+// AppliedRule is the id of the ratchet rule applied from sig's proposal,
+// or "" when none was (used by internal/selftune for provenance).
+func AppliedRule(root, sig string) string { return appliedRule(root, sig) }
+
 // appliedRule finds the ratchet rule created from this signature's
 // proposal, by the observer tag in its incident.
 func appliedRule(root, sig string) string {

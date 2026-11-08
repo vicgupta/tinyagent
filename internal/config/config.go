@@ -229,6 +229,9 @@ type AgentConfig struct {
 	UntrustedContent UntrustedContent `yaml:"untrusted_content"`
 	// Attempts configures --attempts best-of-N runs.
 	Attempts Attempts `yaml:"attempts"`
+	// SelfTuning configures the opt-in tinyagent tune command (off by
+	// default); see self_tuning.go.
+	SelfTuning SelfTuning `yaml:"self_tuning,omitempty"`
 }
 
 // ACP configures the --acp editor mode.
@@ -1355,6 +1358,9 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.Permissions.Validate(); err != nil {
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+	}
+	if err := cfg.SelfTuning.Validate(); err != nil {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.RedactSecrets.Validate(); err != nil {

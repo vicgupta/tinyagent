@@ -126,6 +126,18 @@ embed/prompts/        system prompt templates
   judge's verdict on the `permission` event. Tests use a fake judge model only
   (see `internal/agent/permission_judge_test.go`). See
   [AI permission judge](docs/permissions.md#ai-permission-judge).
+- **Self-tuning never applies on its own.** `internal/selftune` (`tinyagent
+  tune`, off unless `self_tuning.enabled`) may only write a candidate under
+  `.tinyagent/observer/candidates/`; the skill file changes only through
+  `tune apply` with the reviewed digest, and only while the file is unchanged.
+  The target always comes from the project's workflow file, never from a run;
+  treat run content (and model replies) as untrusted, redact and bound it, and
+  keep `AGENTS.md`, `CLAUDE.md`, config, `.tinyagent/` state and safety
+  settings out of reach. Keep every path inside `--cwd` with `internal/cwdpath`.
+  Validation runs in throwaway copies outside the project, within the
+  `self_tuning` bounds. Tests use fake stage runners and models only (see
+  `internal/selftune/selftune_test.go` and `cmd/tinyagent/tune_cmd_test.go`).
+  See [Self-tuning](docs/self-tuning.md).
 - **History is append-only.** Never edit, reorder or drop a message that has
   already been sent to the model, and never rebuild the system prompt or tool
   definitions mid-run: add new context (notices, resume notes, results) as a new

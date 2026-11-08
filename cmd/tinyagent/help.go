@@ -105,6 +105,7 @@ var helpGroups = []flagGroup{
 	{"Sandbox and permissions", [][3]string{{"", "read-only", ""}, {"", "tools", "names"}, {"", "no-tool-scope", ""}, {"", "add-dir-read", "path"}, {"", "add-dir-write", "path"}, {"", "sandbox", ""}, {"", "sandbox-network", ""}, {"", "sandbox-backend", "name"}, {"", "sandbox-allow-domain", "host"}, {"", "env", "name"}, {"", "command-env", "mode"}, {"", "lockdown", ""}, {"", "web-fetch", ""}, {"", "no-web-fetch", ""}, {"", "web-search", ""}, {"", "no-web-search", ""}, {"", "web-fetch-allow-domain", "host"}}},
 	{"Context and tools", [][3]string{{"", "no-agents-md", ""}, {"", "scoped-agents-md", ""}, {"", "skills", ""}, {"", "no-skills", ""}, {"", "apply-patch", ""}, {"", "lsp", ""}, {"", "snapshots", ""}}},
 	ratchetGroup,
+	tuneGroup,
 	{"Memory and planner", [][3]string{{"", "memory", ""}, {"", "memory-approve", "id|all"}, {"", "memory-forget", "id|all"}, {"", "memory-help", ""}, {"", "memory-list", ""}, {"", "memory-path", ""}, {"", "memory-yes", ""}, {"", "handoff", ""}, {"", "plan", ""}, {"", "plan-file", "path"}, {"", "plan-first", ""}}},
 	{"Plugins and TinyGo", [][3]string{{"", "list-plugins", ""}, {"", "plugins-prune", ""}, {"", "plugins-keep", "n"}, {"", "plugins-rollback", "module@sha256"}, {"", "tinygo-install", ""}, {"", "tinygo-update", ""}, {"", "tinygo-status", ""}}},
 	{"Rewind", [][3]string{{"", "rewind", "path"}, {"", "to", "target"}, {"", "dry-run", ""}}},
