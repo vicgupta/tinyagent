@@ -98,7 +98,8 @@ type Agent struct {
 	// and enables live tool.output events for command-executing tools.
 	Streamed bool
 	// CompactFirst compacts the conversation before the run's first model
-	// request, whatever its size (chat's /compact). NoCompact wins.
+	// request, whatever its size. NoCompact wins. Chat and the web UI's
+	// /compact call CompactNow immediately instead of setting this.
 	CompactFirst bool
 	// SkipAgentsMD stops Run from appending the nearest AGENTS.md at or above
 	// <root> to the system prompt.
@@ -197,7 +198,7 @@ type Agent struct {
 	// run uses, reported in run.started; informational only.
 	Routes []routing.Route
 	// Helpers maps an auxiliary task (routing.TaskCompaction,
-	// routing.TaskReview) to the model serving it; a task without an
+	// routing.TaskReview, routing.TaskPermission) to the model serving it; a task without an
 	// entry uses Model.
 	Helpers map[string]model.Model
 	// UsageRole and UsageTask label this agent's own requests in
@@ -659,11 +660,13 @@ func (a *Agent) Run(ctx context.Context, task string) *trajectory.Trajectory {
 
 		if a.Snapshots != nil && mutating(msg.ToolCalls) {
 			if err := a.snapshot(t, "step"); err != nil {
-				// No tool runs without its snapshot; record why.
+				// No tool runs without its snapshot; record why, with a tool
+				// result for every call so the history stays a complete turn.
 				reason := fmt.Sprintf("workspace snapshot before step %d failed: %v", t.Steps, err)
+				out := "error: not run: " + reason
 				for _, call := range msg.ToolCalls {
-					t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: call.ID, Content: "error: not run: " + reason})
-					v.add(t, t.Messages[len(t.Messages)-1])
+					a.event("tool.call", map[string]any{"id": call.ID, "name": call.Function.Name, "arguments": eventArguments(call.Function.Arguments)})
+					a.recordToolResult(t, v, call, out, true)
 				}
 				return a.finish(t, StatusError, reason+"; the tool calls were not run")
 			}
@@ -1005,35 +1008,49 @@ func (a *Agent) permit(ctx context.Context, t *trajectory.Trajectory, call model
 	res := a.Policy.Check(pc)
 	switch res.Decision {
 	case permissions.DecisionAllow:
-		a.permissionEvent(call, res, permissions.DecisionAllow, res.Source, "")
+		a.permissionEvent(call, res, permissions.DecisionAllow, res.Source, "", nil)
 		return tools.Result{}, false
 	case permissions.DecisionDeny:
-		a.permissionEvent(call, res, permissions.DecisionDeny, res.Source, "")
+		a.permissionEvent(call, res, permissions.DecisionDeny, res.Source, "", nil)
 		return tools.Result{Text: tools.Truncate(deniedMessage(res), a.Tools.MaxOutputChars), IsError: true}, true
 	case permissions.DecisionAsk:
-		return a.askPermission(ctx, call, pc, res)
+		return a.askPermission(ctx, t, call, pc, res)
 	}
 	return tools.Result{}, false
 }
 
 // deniedMessage renders the tool result for a policy deny.
 func deniedMessage(res permissions.Result) string {
+	const next = "; choose a different tool, path or command that the policy allows, or ask to update permissions"
 	if res.Rule >= 0 {
 		msg := fmt.Sprintf("error: denied by permission rule %d", res.Rule)
 		if res.Message != "" {
 			msg += ": " + res.Message
 		}
-		return msg
+		return msg + next
 	}
-	return "error: denied by permission policy"
+	return "error: denied by permission policy" + next
 }
 
-// askPermission answers a policy ask: through the approver when one is set,
-// or with the policy's non-interactive decision.
-func (a *Agent) askPermission(ctx context.Context, call model.ToolCall, pc permissions.Call, res permissions.Result) (tools.Result, bool) {
+// askPermission answers a policy ask: optionally through the AI judge,
+// then through the approver when one is set, or with the policy's
+// non-interactive decision. The judge may only auto-allow; it never
+// silently denies.
+func (a *Agent) askPermission(ctx context.Context, t *trajectory.Trajectory, call model.ToolCall, pc permissions.Call, res permissions.Result) (tools.Result, bool) {
 	if a.permissionApprovals[pc.Key()] {
-		a.permissionEvent(call, res, permissions.DecisionAllow, permissions.SourceSession, "")
+		a.permissionEvent(call, res, permissions.DecisionAllow, permissions.SourceSession, "", nil)
 		return tools.Result{}, false
+	}
+	var opinion *judgeOpinion
+	if a.judgeEnabled() {
+		op := a.consultJudge(ctx, t, call, pc, res)
+		opinion = &op
+		if op.AutoAllow {
+			a.permissionEvent(call, res, permissions.DecisionAllow, permissions.SourceJudge, "", opinion)
+			return tools.Result{}, false
+		}
+		// Low confidence, risky, ask, or model error: fall through to the
+		// human prompt (or non-interactive fallback). Never auto-deny.
 	}
 	req := permissions.Request{
 		Tool:       call.Function.Name,
@@ -1052,14 +1069,14 @@ func (a *Agent) askPermission(ctx context.Context, call model.ToolCall, pc permi
 				}
 				a.permissionApprovals[pc.Key()] = true
 			}
-			a.permissionEvent(call, res, permissions.DecisionAllow, permissions.SourceUser, ans.Channel)
+			a.permissionEvent(call, res, permissions.DecisionAllow, permissions.SourceUser, ans.Channel, opinion)
 			return tools.Result{}, false
 		case permissions.DecisionDeny:
 			msg := "error: denied by user"
 			if ans.Reason != "" {
 				msg += ": " + ans.Reason
 			}
-			a.permissionEvent(call, res, permissions.DecisionDeny, permissions.SourceUser, ans.Channel)
+			a.permissionEvent(call, res, permissions.DecisionDeny, permissions.SourceUser, ans.Channel, opinion)
 			return tools.Result{Text: tools.Truncate(msg, a.Tools.MaxOutputChars), IsError: true}, true
 		}
 	}
@@ -1069,7 +1086,7 @@ func (a *Agent) askPermission(ctx context.Context, call model.ToolCall, pc permi
 		dec = permissions.DecisionDeny
 	}
 	if dec == permissions.DecisionAllow {
-		a.permissionEvent(call, res, permissions.DecisionAllow, permissions.SourceNonInteractive, "none")
+		a.permissionEvent(call, res, permissions.DecisionAllow, permissions.SourceNonInteractive, "none", opinion)
 		return tools.Result{}, false
 	}
 	msg := "error: denied: approval required by permission rule "
@@ -1079,7 +1096,7 @@ func (a *Agent) askPermission(ctx context.Context, call model.ToolCall, pc permi
 		msg += "policy"
 	}
 	msg += " but no one can approve in this run"
-	a.permissionEvent(call, res, permissions.DecisionDeny, permissions.SourceNonInteractive, "none")
+	a.permissionEvent(call, res, permissions.DecisionDeny, permissions.SourceNonInteractive, "none", opinion)
 	return tools.Result{Text: tools.Truncate(msg, a.Tools.MaxOutputChars), IsError: true}, true
 }
 
@@ -1093,8 +1110,9 @@ func (a *Agent) redactArgument(s string) string {
 }
 
 // permissionEvent emits one permission decision as an event and a verbose
-// line.
-func (a *Agent) permissionEvent(call model.ToolCall, res permissions.Result, decision permissions.Decision, source, channel string) {
+// line. When the optional AI judge was consulted, opinion is recorded on
+// the event as "judge".
+func (a *Agent) permissionEvent(call model.ToolCall, res permissions.Result, decision permissions.Decision, source, channel string, opinion *judgeOpinion) {
 	fields := map[string]any{
 		"tool_call_id": call.ID,
 		"tool_name":    call.Function.Name,
@@ -1109,6 +1127,9 @@ func (a *Agent) permissionEvent(call model.ToolCall, res permissions.Result, dec
 	}
 	if a.subagentID != "" {
 		fields["subagent"] = a.subagentID
+	}
+	if opinion != nil {
+		fields["judge"] = opinion.fields()
 	}
 	a.event("permission", fields)
 	if a.Verbose {
@@ -1563,11 +1584,15 @@ const interruptedResult = "[interrupted: tool did not complete before the agent 
 	"it may have partially run — verify state before retrying]"
 
 // closeInterrupted gives every pending call of a resumed checkpoint an error
-// result, so the history is a complete tool turn again.
+// result, so the history is a complete tool turn again. It emits both
+// resume.interrupted_call (resume-specific) and tool.result (every call must
+// have a matching result before the next model request).
 func (a *Agent) closeInterrupted(t *trajectory.Trajectory) {
 	for _, c := range t.PendingCalls {
-		t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: c.ID, Content: "error: " + interruptedResult})
+		out := "error: " + interruptedResult
+		t.Messages = append(t.Messages, model.Message{Role: "tool", ToolCallID: c.ID, Content: out})
 		a.event("resume.interrupted_call", map[string]any{"id": c.ID, "name": c.Name})
+		a.event("tool.result", map[string]any{"id": c.ID, "name": c.Name, "output": out, "is_error": true})
 		fmt.Fprintf(a.Err, "resume: tool call %s (%s) was interrupted; it was not re-run\n", c.ID, c.Name)
 	}
 	t.PendingCalls = nil
@@ -1677,7 +1702,7 @@ func PermissionsInfo(p *permissions.Policy) *trajectory.PermissionsInfo {
 		return nil
 	}
 	s := p.Summary()
-	info := &trajectory.PermissionsInfo{Default: s.Default, NonInteractive: s.NonInteractive, RuleCount: s.Rules}
+	info := &trajectory.PermissionsInfo{Default: s.Default, NonInteractive: s.NonInteractive, RuleCount: s.Rules, Judge: s.Judge}
 	for _, r := range p.Rules() {
 		info.Rules = append(info.Rules, trajectory.PermissionsRuleInfo{
 			Tool: r.Tool, Command: r.Command, Path: r.Path, Host: r.Host, Decision: r.Decision, Message: r.Message,

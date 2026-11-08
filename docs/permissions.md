@@ -42,9 +42,26 @@ An `ask` is answered through the channel the run has:
 - **ACP** (`--acp`): tinyagent sends `session/request_permission` with the call's `toolCallId` and the `allow_once`, `allow_always` and `reject_once` options; the editor's Approve/Reject buttons answer it. A `cancelled` outcome cancels the turn like `session/cancel`.
 - **Non-interactive** (no terminal, `--json`, piped CI/GitHub Action runs): an `ask` resolves to `permissions.non_interactive` (`deny` by default), so nobody can answer but the run continues.
 
-A denied call does not run and no `pre_tool` hook runs for it; the model gets `error: denied by permission rule <index>: <message>` (or `... by user: <reason>`), and the run continues. An allowed call then runs its [`pre_tool` hooks](#tool-hooks) as usual, which can still deny it — but a hook can never cause a policy-denied call to run. Rules come only from `-c`, a trusted `./tinyagent.yaml` (`--trust-config`) or a profile, never from the repository, with one exception: [project rules](ratchet.md) with a `deny` table in `.tinyagent/ratchet.toml` are appended as `deny` rules (they can only block calls, never allow them; `--no-ratchet` skips them). A profile's `rules` replace the base list. Validation errors (unknown keys, an empty `tool`, an invalid decision, two matchers in one rule, a matcher/tool mismatch) exit 2 before any model request, naming the file, profile and rule index.
+A denied call does not run and no `pre_tool` hook runs for it; the model gets `error: denied by permission rule <index>: <message>` (or `... by user: <reason>`), and the run continues. An allowed call then runs its [`pre_tool` hooks](#tool-hooks) as usual, which can still deny it — but a hook can never cause a policy-denied call to run. Rules come only from `-c`, a trusted `./.tinyagent/tinyagent.yaml` (`--trust-config`) or a profile, never from the repository, with one exception: [project rules](ratchet.md) with a `deny` table in `.tinyagent/ratchet.toml` are appended as `deny` rules (they can only block calls, never allow them; `--no-ratchet` skips them). A profile's `rules` replace the base list. Validation errors (unknown keys, an empty `tool`, an invalid decision, two matchers in one rule, a matcher/tool mismatch) exit 2 before any model request, naming the file, profile and rule index.
 
-Every decision is recorded: a `permission` event goes to `--json`, `--log-db` and `--otel` (with `tool_call_id`, `tool_name`, `decision`, `source` (`rule`, `default`, `user`, `session` or `non_interactive`), the rule index, and the channel for asks), `run.started` and trajectories record a `permissions` summary, `-v` prints one stderr line per non-default decision, and `--check` prints the rule count, default and resolved non-interactive behavior.
+#### AI permission judge
+
+An optional AI judge can answer some `ask` decisions without prompting you. It is **off by default**; turn it on under `permissions.judge`:
+
+```yaml
+permissions:
+  default: ask
+  judge:
+    enabled: true
+    min_confidence: 0.85   # optional; only auto-allow at or above this (0..1)
+    timeout_seconds: 10    # optional; caps one judge model call (1..60)
+```
+
+When a rule resolves to `ask` (or no rule matches and `default` is `ask`), tinyagent asks the [auxiliary](models.md#model-roles) model (task `permission`: `--route permission=`, then `models.auxiliary.tasks.permission`, then `--aux-model` / `models.auxiliary.model`, then the main model) to classify the call. The judge may **only auto-allow** when its verdict is `allow` and its confidence is at or above `min_confidence`. It never silently denies: `ask`, `risky`, low confidence, a parse failure, a timeout or a model error all fall back to the normal human prompt (or `non_interactive`). Explicit `deny` rules always win before the judge runs, and [lockdown](#untrusted-content-lockdown) is checked before permissions, so neither is bypassed. The judge does not fall back to the main model on error (unlike compaction/review helpers): a failed judge is a human prompt. Cost and tokens count toward `--cost-limit` and `--token-limit` under `auxiliary`/`permission`.
+
+The `permission` event records the judge's verdict under `judge` (`verdict`, `confidence`, `reason`, and `error` when the model failed). An auto-allow has `source: judge`; a fallback that the user (or `non_interactive`) then answers still includes the judge fields. `--check` appends `, judge on` to the permissions line when the judge is enabled.
+
+Every decision is recorded: a `permission` event goes to `--json`, `--log-db` and `--otel` (with `tool_call_id`, `tool_name`, `decision`, `source` (`rule`, `default`, `user`, `session`, `non_interactive` or `judge`), the rule index, and the channel for asks), `run.started` and trajectories record a `permissions` summary, `-v` prints one stderr line per non-default decision, and `--check` prints the rule count, default and resolved non-interactive behavior.
 
 **This is a guardrail, not a security boundary.** Command-text matching cannot stop a determined model from running something equivalent (for example `Bash(rm *)` doesn't stop `/bin/rm` or `bash -c 'rm ...'`). For real containment keep using [`--sandbox`](sandbox.md#sandboxing-commands), [`sandbox_allowed_domains`](sandbox.md#sandboxing-commands) and `--env container`. Older tinyagent versions reject a config containing `permissions`.
 
@@ -52,7 +69,7 @@ In [`tinyagent chat`](chat.md), `ask` rules prompt on the terminal before the to
 
 ### Tool hooks
 
-Hooks are disabled unless `hooks` is configured. A `pre_tool` hook runs before a matching tool call and can deny it with a reason the model sees; a `post_tool` hook runs after it and can append feedback, such as formatter or linter output, to the result the model sees. Like MCP servers, hooks are trusted local executables running with your privileges: they are read only from `-c` or a trusted `./tinyagent.yaml` (`--trust-config`), never from the repository, launched directly (no shell) with an absolute `command`, `--cwd` as the working directory, and the same minimal environment (`PATH`, the Windows process variables when present, and only the named `env` variables, which must be set at startup). Provider API keys are not passed unless named. Hooks are a guardrail and automation point, not a sandbox: they see a call's parsed arguments, not what a shell command actually does.
+Hooks are disabled unless `hooks` is configured. A `pre_tool` hook runs before a matching tool call and can deny it with a reason the model sees; a `post_tool` hook runs after it and can append feedback, such as formatter or linter output, to the result the model sees. Like MCP servers, hooks are trusted local executables running with your privileges: they are read only from `-c` or a trusted `./.tinyagent/tinyagent.yaml` (`--trust-config`), never from the repository, launched directly (no shell) with an absolute `command`, `--cwd` as the working directory, and the same minimal environment (`PATH`, the Windows process variables when present, and only the named `env` variables, which must be set at startup). Provider API keys are not passed unless named. Hooks are a guardrail and automation point, not a sandbox: they see a call's parsed arguments, not what a shell command actually does.
 
 Each hook gets one JSON object on stdin: `schema_version` (`1`), `event` (`pre_tool` or `post_tool`), `tool_name`, `tool_call_id`, `arguments` (decoded JSON, or the raw string if malformed), canonical `root`, `read_only`, and `step`; `post_tool` also gets `output` (the model-visible result after normal truncation) and `is_error`, plus `output_file` when [tool output files](long-runs.md#tool-output-files) saved the full result. The input can contain secrets from tool arguments and output.
 
@@ -83,7 +100,7 @@ Example: a stop hook script `/usr/local/bin/verify-tests` that runs `go test ./.
 
 ### Untrusted-content lockdown
 
-Lockdown (experimental, in progress; see [#171](https://github.com/vicgupta/tinyagent/issues/171)) limits what a prompt-injected run can send out. It is off by default; turn it on with `--lockdown` or `untrusted_content.enabled: true` (`--lockdown=false` overrides the config). Like `mcp_servers` and `memory`, `untrusted_content` is read only from `-c`, a trusted `./tinyagent.yaml` (`--trust-config`) or a profile, never from the repository.
+Lockdown (experimental, in progress; see [#171](https://github.com/vicgupta/tinyagent/issues/171)) limits what a prompt-injected run can send out. It is off by default; turn it on with `--lockdown` or `untrusted_content.enabled: true` (`--lockdown=false` overrides the config). Like `mcp_servers` and `memory`, `untrusted_content` is read only from `-c`, a trusted `./.tinyagent/tinyagent.yaml` (`--trust-config`) or a profile, never from the repository.
 
 ```yaml
 untrusted_content:
@@ -111,7 +128,7 @@ mcp_servers:
 
 ## Redacting secrets from tool output
 
-`redact_secrets` (config only, from `-c`, a trusted `./tinyagent.yaml` (`--trust-config`) or a profile; never from the repository) replaces the exact values of secrets tinyagent knows about with `[REDACTED]` in tool output, **before** the output enters the model's context. It is off by default; `--redact-secrets` / `--redact-secrets=false` overrides `enabled` for one run.
+`redact_secrets` (config only, from `-c`, a trusted `./.tinyagent/tinyagent.yaml` (`--trust-config`) or a profile; never from the repository) replaces the exact values of secrets tinyagent knows about with `[REDACTED]` in tool output, **before** the output enters the model's context. It is off by default; `--redact-secrets` / `--redact-secrets=false` overrides `enabled` for one run.
 
 ```yaml
 redact_secrets:
@@ -132,7 +149,7 @@ redact_secrets:
 
 ## Restricting file access
 
-`file_access` (config only, from `-c` or a trusted `./tinyagent.yaml` (`--trust-config`); no other file inside `--cwd` is read) denies the built-in file tools access to matching paths. It is off by default.
+`file_access` (config only, from `-c` or a trusted `./.tinyagent/tinyagent.yaml` (`--trust-config`); no other file inside `--cwd` is read) denies the built-in file tools access to matching paths. It is off by default.
 
 ```yaml
 file_access:

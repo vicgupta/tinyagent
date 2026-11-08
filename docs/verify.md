@@ -5,7 +5,10 @@ An opt-in guard that keeps a run from finishing on untested changes: when files 
 ```bash
 tinyagent --verify-on-stop -t "fix the failing test in pkg/foo"
 tinyagent --verify-on-stop --verify-command "go test ./..." --max-verify-reprompts 3 -t "..."
+tinyagent goal "fix the failing test in pkg/foo" --check "go test ./..."
 ```
+
+[`tinyagent goal`](tasks.md#goal-mode) turns on `--plan --plan-first --verify-on-stop`; its `--check <cmd>` is `--verify-check`.
 
 | Flag | Config | Default | |
 |---|---|---|---|

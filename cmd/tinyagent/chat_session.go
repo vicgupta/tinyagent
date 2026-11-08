@@ -140,7 +140,7 @@ func (s *session) switchModel(spec string, errw io.Writer) error {
 		return err
 	}
 	if env := model.MissingKeyEnv(spec); env != "" {
-		return fmt.Errorf("%s is not set; set it in the environment or ./.env and restart tinyagent web", env)
+		return fmt.Errorf("%s is not set; set it in the environment or ./.env and restart the session", env)
 	}
 	if err := checkFallbacks(spec, s.fallbacks, cfg.OpenAIAPI); err != nil {
 		return err

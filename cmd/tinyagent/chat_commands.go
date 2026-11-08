@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"strings"
+
+	"github.com/vicgupta/tinyagent/internal/model"
 )
 
 // chatCommands are the slash commands, in /help order.
@@ -14,8 +17,9 @@ var chatCommands = []struct{ name, alias, desc string }{
 	{"/tools", "", "list tools available for this session"},
 	{"/new", "/clear", "start a fresh conversation (new checkpoint)"},
 	{"/save", "", "save the checkpoint now, or to /save <path>"},
-	{"/compact", "", "compact the conversation before the next request"},
+	{"/compact", "", "compact the conversation now and show the size before and after"},
 	{"/raw", "", "toggle showing replies as raw Markdown"},
+	{"/model", "", "show or switch the model: /model <provider/model>"},
 }
 
 // command runs one slash command and reports whether the session ends.
@@ -51,8 +55,22 @@ func (c *chat) command(line string) bool {
 		fmt.Fprint(w, c.costText())
 	case "/context":
 		fmt.Fprint(w, formatContext(c.s.contextReport(), c.st))
+	case "/model":
+		if arg == "" {
+			fmt.Fprint(w, modelStatusText(c.s, c.st))
+			return false
+		}
+		if err := c.s.switchModel(arg, w); err != nil {
+			msg := err.Error()
+			if h := model.Hint(arg, msg); h != "" {
+				msg += " (" + h + ")"
+			}
+			fmt.Fprintln(w, c.st.Red("error: "+msg))
+			return false
+		}
+		fmt.Fprintln(w, c.st.Dim("model: "+arg))
 	case "/new", "/clear":
-		c.s.traj, c.source, c.cont, c.turns, c.compact = nil, "", false, 0, false
+		c.s.traj, c.source, c.cont, c.turns = nil, "", false, 0
 		c.s.remember = nil
 		if c.s.o.output != "" {
 			c.path = nextOutputPath(c.path)
@@ -79,16 +97,19 @@ func (c *chat) command(line string) bool {
 		}
 		fmt.Fprintln(w, "saved "+path)
 	case "/compact":
-		if c.s.traj == nil {
-			fmt.Fprintln(w, "nothing to compact yet")
-			return false
+		ctx, cancel := context.WithCancel(context.Background())
+		c.mu.Lock()
+		c.cancel = cancel
+		c.mu.Unlock()
+		err := c.s.compactNow(ctx, w, c.path)
+		cancel()
+		c.mu.Lock()
+		c.cancel = nil
+		c.mu.Unlock()
+		if err != nil {
+			fmt.Fprintln(w, c.st.Red("error: "+err.Error()))
+			fmt.Fprintln(w, c.st.Dim("history was left unchanged; try again, or /help"))
 		}
-		if c.s.o.noCompact {
-			fmt.Fprintln(w, "compaction is off (--no-compact)")
-			return false
-		}
-		c.compact = true
-		fmt.Fprintln(w, c.st.Dim("the next message compacts the conversation first"))
 	case "/raw":
 		c.md = !c.md
 		if c.md {

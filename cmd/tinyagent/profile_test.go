@@ -142,7 +142,8 @@ func TestProfileExplicitConfigOnly(t *testing.T) { // AC14
 	if code != 2 {
 		t.Errorf("user config profile: exit %d, want 2\n%s", code, stderr)
 	}
-	os.WriteFile(filepath.Join(dir, "tinyagent.yaml"), []byte("profiles:\n  mine: {}\n"), 0o644)
+	os.MkdirAll(filepath.Join(dir, ".tinyagent"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".tinyagent", "tinyagent.yaml"), []byte("profiles:\n  mine: {}\n"), 0o644)
 	code, stdout, stderr = runCLI(t, "--check", "--cwd", dir, "--profile", "mine")
 	if code != 0 || !strings.Contains(stdout, "profile:   mine") {
 		t.Errorf("project config profile: exit %d\n%s%s", code, stdout, stderr)

@@ -117,7 +117,8 @@ func TestSkillsInteractiveDefault(t *testing.T) { // #359 acceptance
 	dir := skillsRepo(t)
 	cwdCfg := func(t *testing.T, body string) string {
 		d := skillsRepo(t)
-		os.WriteFile(filepath.Join(d, "tinyagent.yaml"), []byte(body), 0o644)
+		os.MkdirAll(filepath.Join(d, ".tinyagent"), 0o755)
+		os.WriteFile(filepath.Join(d, ".tinyagent", "tinyagent.yaml"), []byte(body), 0o644)
 		return d
 	}
 	for _, c := range []struct {
@@ -193,7 +194,8 @@ func TestCheckReportsSkillsSource(t *testing.T) { // #359
 	cfgOff := filepath.Join(t.TempDir(), "c.yaml")
 	os.WriteFile(cfgOff, []byte("skills: false\n"), 0o644)
 	cwdOn := skillsRepo(t)
-	os.WriteFile(filepath.Join(cwdOn, "tinyagent.yaml"), []byte("skills: true\n"), 0o644)
+	os.MkdirAll(filepath.Join(cwdOn, ".tinyagent"), 0o755)
+	os.WriteFile(filepath.Join(cwdOn, ".tinyagent", "tinyagent.yaml"), []byte("skills: true\n"), 0o644)
 	for _, c := range []struct {
 		name        string
 		interactive bool
@@ -210,7 +212,7 @@ func TestCheckReportsSkillsSource(t *testing.T) { // #359
 		{"non-tty", false, "", dir, nil, "skills:    off (hardened default: not an interactive terminal)", false, skillsSourceHardened},
 		{"CI", true, "true", dir, nil, "skills:    off (hardened default: CI is set)", false, skillsSourceHardened},
 		{"read-only", true, "", dir, []string{"--read-only"}, "skills:    off (hardened default: --read-only)", false, skillsSourceHardened},
-		{"cwd config ignored", true, "true", cwdOn, nil, "skills:    off (hardened default: CI is set; skills: true in ./tinyagent.yaml ignored without --trust-config)", false, skillsSourceHardened},
+		{"cwd config ignored", true, "true", cwdOn, nil, "skills:    off (hardened default: CI is set; skills: true in ./.tinyagent/tinyagent.yaml ignored without --trust-config)", false, skillsSourceHardened},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Setenv("CI", c.env)

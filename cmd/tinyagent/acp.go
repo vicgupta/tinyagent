@@ -168,7 +168,7 @@ func (s *acpSession) mcpServers(cfg config.AgentConfig, client []acp.MCPServer) 
 	}
 	switch {
 	case !cfg.ACP.ClientMCPServers:
-		s.notes = append(s.notes, fmt.Sprintf("Note: tinyagent did not start the MCP servers the editor offered (%s). Client-supplied MCP servers are off by default; set acp.client_mcp_servers: true in the -c file (or ./tinyagent.yaml with --trust-config) to start them.", strings.Join(names, ", ")))
+		s.notes = append(s.notes, fmt.Sprintf("Note: tinyagent did not start the MCP servers the editor offered (%s). Client-supplied MCP servers are off by default; set acp.client_mcp_servers: true in the -c file (or ./.tinyagent/tinyagent.yaml with --trust-config) to start them.", strings.Join(names, ", ")))
 		fmt.Fprintf(os.Stderr, "acp: ignoring client MCP servers (%s); acp.client_mcp_servers is off\n", strings.Join(names, ", "))
 		return out, nil
 	case cfg.ReadOnly:

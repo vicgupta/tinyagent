@@ -52,11 +52,16 @@ If you add or remove a direct dependency, update this list too;
 
 ## Layout
 
+[ARCHITECTURE.md](ARCHITECTURE.md) has the full package map, the request
+flow and the invariants every change must keep (cwd-only state, AGENTS.md
+only, no user config, tool signature pinning, append-only history). Update it
+when you add a package or change one of those rules.
+
 ```
 cmd/tinyagent/        CLI entrypoint, flag parsing, main loop glue; help.go holds --help and help topics (help workflows)
 cmd/tinyagent/web/    tinyagent web's page (HTML/CSS/JS, hand-written, embedded with go:embed; no build step, never commit generated files); web.go serves it, chat_session.go is the session core shared with chat
 internal/agent/       the run loop, compaction, tool dispatch; build an Agent with agent.New (it validates the options)
-internal/config/      YAML config + built-in defaults; memory.toml is read only from --cwd
+internal/config/      YAML config (./.tinyagent/tinyagent.yaml, located in locate.go; the old ./tinyagent.yaml only gets a hint) + built-in defaults; memory.toml is read only from --cwd
 internal/dotenv/      loads ./.env from --cwd at startup (real env wins, values never logged); tests that write a .env should unset its keys with t.Setenv+os.Unsetenv so they're restored
 internal/cwdpath/     Resolve confines a config or env path to --cwd (refuses "..", absolute paths elsewhere and symlinks that leave it)
 internal/memory/      project memory stores (markdown and SQLite), always under ./.tinyagent/memory in --cwd; confine.go refuses paths that leave --cwd
@@ -101,6 +106,47 @@ embed/prompts/        system prompt templates
 - Format with `gofmt`; keep packages small and idiomatic.
 - Follow existing naming and error-handling patterns. Errors should be actionable
   and name the file or key involved (see the config loader and provider code).
+  **Tool errors the model sees** must state the cause and a concrete next step
+  (joined by `; `, like `edit_file`'s unique-match message). Use
+  `tools.Actionable` / `tools.Actionablef` (or the MCP `actionable` helpers);
+  add a wording assertion for each new key error. See
+  [Tool error messages](docs/tools.md#tool-error-messages).
+- **Every tool call path must emit a tool result.** A denial, error, timeout,
+  lockdown refusal, format error, ask_user answer/rejection, or resume close of
+  an interrupted call still needs a `tool.result` event and a matching tool
+  message in history before the next model request. A missing result breaks
+  every later request. Prefer `recordToolResult` / `recordResult` (or the same
+  fields the tool loop emits) over appending a bare tool message. See
+  [Tool results](docs/json-output.md#tool-results).
+- **Permission judge is allow-only.** The optional AI judge
+  (`permissions.judge`, task `permission`) may auto-allow on high confidence
+  only; it must never silently deny. Low confidence, risky, parse/model error
+  and timeout fall back to the human prompt (or `non_interactive`). Explicit
+  deny rules and lockdown must still win before the judge runs. Record the
+  judge's verdict on the `permission` event. Tests use a fake judge model only
+  (see `internal/agent/permission_judge_test.go`). See
+  [AI permission judge](docs/permissions.md#ai-permission-judge).
+- **Self-tuning never applies on its own.** `internal/selftune` (`tinyagent
+  tune`, off unless `self_tuning.enabled`) may only write a candidate under
+  `.tinyagent/observer/candidates/`; the skill file changes only through
+  `tune apply` with the reviewed digest, and only while the file is unchanged.
+  The target always comes from the project's workflow file, never from a run;
+  treat run content (and model replies) as untrusted, redact and bound it, and
+  keep `AGENTS.md`, `CLAUDE.md`, config, `.tinyagent/` state and safety
+  settings out of reach. Keep every path inside `--cwd` with `internal/cwdpath`.
+  Validation runs in throwaway copies outside the project, within the
+  `self_tuning` bounds. Tests use fake stage runners and models only (see
+  `internal/selftune/selftune_test.go` and `cmd/tinyagent/tune_cmd_test.go`).
+  See [Self-tuning](docs/self-tuning.md).
+- **History is append-only.** Never edit, reorder or drop a message that has
+  already been sent to the model, and never rebuild the system prompt or tool
+  definitions mid-run: add new context (notices, resume notes, results) as a new
+  message at the end. Per-request extras (like the pinned plan block) must be
+  added to a copy in `Agent.request`, never to the view or `t.Messages`. Only
+  compaction may replace part of the view. `internal/agent/append_only_test.go`
+  hashes the request prefix around every step and fails on any rewrite; extend
+  it when you add a new kind of message. See
+  [Append-only history and prompt caching](docs/long-runs.md#append-only-history-and-prompt-caching).
 - Prefer the standard library; add dependencies only with justification.
 - Terminal output must degrade cleanly without color: with `--color never`,
   `NO_COLOR` or a non-terminal, keep the structure (plain ASCII markers such
@@ -169,6 +215,23 @@ stays unchanged.
   mention it in the README feature list. `/context` (the breakdown in
   `internal/agent/context_usage.go`, rendered by `formatContext`) must keep
   using the compaction character estimate and label estimates as estimates.
+  `/model` (status via `modelStatusText`, switch via `session.switchModel`)
+  must keep validating the spec like `-m`, preserve history, and leave role
+  models that have their own config alone; cover show/switch/invalid in tests
+  with the fake provider only.
+  `/compact` (via `session.compactNow` and `agent.CompactNow`) must run
+  immediately in chat and the web UI, print progress and the token count
+  before → after (or that nothing could be compacted), emit the existing
+  `compaction` event, leave stored messages unchanged, and on error report
+  a next step without rewriting history. Do not defer compaction to the
+  next message.
+- **Goal mode is a flag wrapper.** `tinyagent goal` rewrites to
+  `--plan --plan-first --verify-on-stop` (and `--check` to `--verify-check`) in
+  `expandSubcommand`. Do not add a separate goal loop or engine. Tests for
+  composition and help live in `cmd/tinyagent/goal_test.go`. There is no
+  `/goal` chat command: those settings are start-of-run flags; start chat with
+  `tinyagent goal -i` or pass the flags to `tinyagent chat`. See
+  [Goal mode](docs/tasks.md#goal-mode).
 
 ### Continuous integration
 
@@ -210,7 +273,9 @@ for that hint, never read (and per-project data outside `--cwd`, like the old
 memory JSON files, isn't looked at at all). Paths from config must be relative,
 stay inside `--cwd` and not escape through `..` or symlinks (see
 `internal/memory/confine.go`, or `internal/cwdpath` for new code). This covers
-config files too: `memory.toml` (`./memory.toml` or `$TINYAGENT_MEMORY_CONFIG`
+config files too: the project config is `./.tinyagent/tinyagent.yaml`
+(`config.ProjectFile`; the old `./tinyagent.yaml` is only stat'ed for a hint;
+tests that write a project config create `.tinyagent/` first), `memory.toml` (`./memory.toml` or `$TINYAGENT_MEMORY_CONFIG`
 inside `--cwd`), plugin `PLUGIN_DATA` (`./.tinyagent/plugin-data/<name>`)
 and the TinyGo toolchain cache (`./.tinyagent/cache/toolchains`) are never
 read from the user config or cache directory. Tests for such a feature point `HOME`, `XDG_*`

@@ -103,7 +103,7 @@ func undoSnapshot(dir, full string) error {
 // through the same path and write checks as the other file tools.
 func (e *Executor) undoFile(path string) (string, error) {
 	if path == "" {
-		return "", errors.New("path is required")
+		return "", Actionable("path is required", "pass the path of a file this session changed with write_file, edit_file or apply_patch")
 	}
 	sc := e.scope()
 	sc.snapDir = "" // restoring must not take a new snapshot
@@ -123,7 +123,7 @@ func (e *Executor) undoFile(path string) (string, error) {
 	}
 	fi, err := os.Lstat(base)
 	if err != nil {
-		return "", fmt.Errorf("no undo snapshot for %s in this session (only write_file, edit_file and apply_patch changes are recorded)", path)
+		return "", Actionablef("undo only covers write_file, edit_file and apply_patch in this session; use git or --rewind for other changes", "no undo snapshot for %s in this session", path)
 	}
 	b, err := os.ReadFile(base)
 	if err != nil {

@@ -50,14 +50,14 @@ func runStream(ctx context.Context, timeout time.Duration, live io.Writer, newCm
 
 	err := cmd.Run()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return fmt.Sprintf("command timed out after %s and was killed\n<output>\n%s</output>", timeout, buf.String()), nil
+		return fmt.Sprintf("command timed out after %s and was killed; retry with a higher timeout (1-%d seconds) or split the work into smaller commands\n<output>\n%s</output>", timeout, maxBashTimeoutSeconds, buf.String()), nil
 	}
 	code := 0
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		code = exitErr.ExitCode()
 	} else if err != nil {
-		return "", err
+		return "", Actionablef("check that the executable exists on PATH and the command is valid bash", "could not start command: %v", err)
 	}
 	return fmt.Sprintf("<returncode>%d</returncode>\n<output>\n%s</output>", code, buf.String()), nil
 }

@@ -16,6 +16,31 @@ git diff | tinyagent --read-only -t - # review what is piped in, changing nothin
 - `--untrusted-task` marks task text taken from an issue or ticket as untrusted; see the [CLI reference](subcommands.md).
 - A finished run takes a follow-up task with `--resume run.json -t "..."`, and an unfinished one can be resumed; see [Follow-ups](runs.md#continue-a-finished-run-with-a-follow-up-task), [Resume](runs.md#resume-an-unfinished-task) and [Asking for input](runs.md#asking-for-input).
 
+## Goal mode
+
+`tinyagent goal "<goal>"` is a shortcut for a plan-first, verify-on-stop run: it asks for a plan before any change, does the work in the normal agent loop, and does not accept a final answer while file changes are unverified. It rewrites to existing flags; it does not add a second loop.
+
+```bash
+tinyagent goal "fix the failing test in pkg/foo"
+tinyagent goal "fix the failing test in pkg/foo" --check "go test ./..."
+tinyagent goal --check "go test ./..." -t "fix the failing test in pkg/foo"
+tinyagent goal --check "go vet ./..." --check "go test ./..." -- fix the failing test
+tinyagent goal -i   # chat with the same plan-first and verify-on-stop flags
+```
+
+Those are the same as:
+
+```bash
+tinyagent --plan --plan-first --verify-on-stop -t "fix the failing test in pkg/foo"
+tinyagent --plan --plan-first --verify-on-stop --verify-check "go test ./..." -t "..."
+```
+
+- The goal text can be the first argument (`tinyagent goal "…"`), `-t`/`--task`, or everything after `--`. Put the goal first, or use `-t`/`--` when `--check` comes before it.
+- `--check <cmd>` (repeatable) is `--verify-check`: a command tinyagent runs itself when the model tries to stop with unverified changes. Under `goal`, `--check` is this success condition, not the diagnostic [`tinyagent --check`](subcommands.md).
+- Any other flag may follow (`-m`, `--cwd`, `--handoff`, `--sandbox`, …). [Session handoff](long-runs.md#session-handoff) stays off unless you pass `--handoff` or enable it in config.
+- Bare `tinyagent goal` prints this subcommand's help.
+
+`tinyagent goal` does not start a [skill workflow](project-context.md#skill-workflows). For a multi-stage plan → implement → test pipeline, use `--workflow docs/workflows/workflow.yaml` (the `implement` workflow) or your own workflow file. See [Plan first](planner.md#plan-first), [Verify before stop](verify.md) and the [CLI reference](subcommands.md).
 
 ## Tool scoping
 
@@ -26,7 +51,7 @@ tinyagent -t "summarize README" --tools read_file,grep
 tinyagent -t "…" --tools read_file --tools grep   # same, repeatable
 ```
 
-`tools: [read_file, grep]` in `tinyagent.yaml` or a profile does the same. `--tools` overrides the config list; `--no-tool-scope` or `--tools=*` / `--tools=""` clears a profile/config list so the full catalog is offered again.
+`tools: [read_file, grep]` in `.tinyagent/tinyagent.yaml` or a profile does the same. `--tools` overrides the config list; `--no-tool-scope` or `--tools=*` / `--tools=""` clears a profile/config list so the full catalog is offered again.
 
 Every name must be non-empty, unique, and actually offered for this run (including command tools and MCP `<alias>__<tool>` names). Conflicts such as `--read-only --tools write_file` or `--tools nonexistent` exit 2 before any model call. Agent-handled tools (`update_plan`, `delegate`, `worker`, `apply_worker`, `ask_user`) respect the same filter: they are not offered and calls are rejected.
 

@@ -17,12 +17,14 @@ import (
 //	tinyagent sandbox --backend bwrap -t "x"  == tinyagent --sandbox --sandbox-backend bwrap -t "x"
 //	tinyagent memory list                     == tinyagent --memory-list
 //	tinyagent planner --first -- fix the bug  == tinyagent --plan --plan-first -t "fix the bug"
+//	tinyagent goal "ship it" --check "go test ./..."  == tinyagent --plan --plan-first --verify-on-stop --verify-check "go test ./..." -t "ship it"
 //
 // argv[1] is a subcommand only when it is exactly a subcommand name and is
-// alone or followed by an option (-x), "--", or one of that subcommand's
-// actions. Anything else (e.g. "tinyagent memory leaks in the parser") is
-// left to the normal parser; pass a task that starts with such a word with
-// -t "memory leaks ...", which never starts with a subcommand.
+// alone or followed by an option (-x), "--", one of that subcommand's
+// actions, or (when it has a positional) a non-option word. Anything else
+// (e.g. "tinyagent memory leaks in the parser") is left to the normal
+// parser; pass a task that starts with such a word with -t "memory leaks
+// ...", which never starts with a subcommand.
 type subcommand struct {
 	name    string
 	summary string
@@ -73,7 +75,7 @@ var subcommands = []subcommand{
 		options: map[string]string{"port": "web-port", "no-open": "web-no-open"},
 	},
 	{
-		name: "init", brief: "write ./tinyagent.yaml in --cwd (--force, --migrate)", summary: "write a commented starter ./tinyagent.yaml in --cwd, or with -c to that path (same as --init-config)",
+		name: "init", brief: "write ./.tinyagent/tinyagent.yaml in --cwd (--force, --migrate)", summary: "write a commented starter ./.tinyagent/tinyagent.yaml in --cwd, or with -c to that path (same as --init-config)",
 		base:    []string{"--init-config"},
 		runBare: true,
 		options: map[string]string{"force": "init-force", "migrate": "init-migrate"},
@@ -107,9 +109,28 @@ var subcommands = []subcommand{
 		options: map[string]string{"incident": "ratchet-incident", "expires": "ratchet-expires", "review": "ratchet-review", "deny-tool": "ratchet-deny-tool", "deny-command": "ratchet-deny-command", "deny-path": "ratchet-deny-path", "deny-host": "ratchet-deny-host"},
 	},
 	{
+		name: "tune", brief: "opt-in self-tuning from past workflow runs: propose|validate|apply|revert|list|show", summary: "propose, validate and, after explicit approval, apply one skill or success-check change learned from past --workflow runs; off unless self_tuning.enabled (same as --tune-*)",
+		actions: map[string]subAction{
+			"propose":  {flag: "tune-propose", desc: "propose one change from the --run records of a --workflow (--tune-propose)"},
+			"list":     {flag: "tune-list", desc: "print the candidates with status and validation result, then exit (--tune-list)"},
+			"show":     {flag: "tune-show", arg: true, desc: "print a candidate's evidence, diff, validation and approval digest (--tune-show)"},
+			"validate": {flag: "tune-validate", arg: true, desc: "rerun the tasks with and without the change in isolated copies (--tune-validate)"},
+			"apply":    {flag: "tune-apply", arg: true, desc: "apply a validated candidate; needs --digest (--tune-apply)"},
+			"revert":   {flag: "tune-revert", arg: true, desc: "restore the file an applied candidate changed (--tune-revert)"},
+		},
+		options: map[string]string{"run": "tune-run", "workflow": "tune-workflow", "infer": "tune-infer", "digest": "tune-digest"},
+	},
+	{
 		name: "planner", brief: "run a task with the update_plan planner (--first, --file)", summary: "run with the task planner (update_plan) on (same as --plan)",
 		base:    []string{"--plan"},
 		options: map[string]string{"first": "plan-first", "file": "plan-file"},
+	},
+	{
+		name: "goal", brief: "plan first, run, and verify the goal (--check)", summary: "run a goal with a plan first and verify-on-stop (same as --plan --plan-first --verify-on-stop); optional --check <cmd> is --verify-check",
+		base:          []string{"--plan", "--plan-first", "--verify-on-stop"},
+		options:       map[string]string{"check": "verify-check"},
+		positional:    "task",
+		positionalArg: "goal",
 	},
 	{
 		name: "plugins", brief: "manage plugins: list|prune|rollback", summary: "inspect and manage plugins and stored plugin modules (same as --list-plugins and --plugins-*)",
@@ -198,6 +219,7 @@ func expandSubcommand(args []string) ([]string, *subHelp, error) {
 	gfs := newFlagSet(&options{})
 	var out []string
 	action := false
+	tookPositional := false
 	for i := 0; i < len(rest); i++ {
 		a := rest[i]
 		if a == "help" && i == 0 {
@@ -231,8 +253,11 @@ func expandSubcommand(args []string) ([]string, *subHelp, error) {
 			}
 			continue
 		}
-		if s.positional != "" && i == 0 && (!strings.HasPrefix(a, "-") || a == "-") {
+		// A positional may appear after options (tinyagent goal --check "cmd" "the goal")
+		// as well as first (tinyagent goal "the goal" --check "cmd"); only one is taken.
+		if s.positional != "" && !tookPositional && (!strings.HasPrefix(a, "-") || a == "-") {
 			out = append(out, "--"+s.positional, a)
+			tookPositional = true
 			continue
 		}
 		if a == "--" {

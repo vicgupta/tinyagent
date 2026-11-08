@@ -4,12 +4,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
 func TestStripUntrusted(t *testing.T) {
 	dir := t.TempDir()
-	p := filepath.Join(dir, ProjectFile)
+	p := filepath.Join(dir, "c.yaml")
 	yaml := `mcp_servers:
   - {alias: fs, command: [mcp-fs]}
 hooks:
@@ -60,8 +61,44 @@ func TestLocate(t *testing.T) {
 		t.Errorf("user config only: %+v", s)
 	}
 	p := filepath.Join(dir, ProjectFile)
+	os.MkdirAll(filepath.Dir(p), 0o700)
 	os.WriteFile(p, []byte("{}\n"), 0o600)
 	if s := Locate("", dir); s.Kind != SourceCwd || s.Path != p || len(s.Notes) != 0 || s.Label() != p+" (cwd)" {
 		t.Errorf("cwd: %+v", s)
+	}
+}
+
+// The old ./tinyagent.yaml is never read; it only adds a hint to move it,
+// whether or not .tinyagent/tinyagent.yaml exists.
+func TestLocateLegacyProjectFile(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	legacy := filepath.Join(dir, LegacyProjectFile)
+	os.WriteFile(legacy, []byte("step_limit: 3\n"), 0o600)
+	s := Locate("", dir)
+	if s.Kind != SourceNone || s.Path != "" || len(s.Notes) != 1 || !strings.Contains(s.Notes[0], legacy+" is no longer read") || !strings.Contains(s.Notes[0], ".tinyagent/tinyagent.yaml") {
+		t.Errorf("legacy only: %+v", s)
+	}
+	// -c skips the cwd lookup and its hint.
+	if s := Locate("x.yaml", dir); len(s.Notes) != 0 {
+		t.Errorf("-c: %+v", s)
+	}
+	p := filepath.Join(dir, ProjectFile)
+	os.MkdirAll(filepath.Dir(p), 0o700)
+	os.WriteFile(p, []byte("{}\n"), 0o600)
+	if s := Locate("", dir); s.Kind != SourceCwd || s.Path != p || len(s.Notes) != 1 {
+		t.Errorf("both: %+v", s)
+	}
+}
+
+// A .tinyagent that is a plain file means no project config, not an error.
+func TestLocateTinyagentNotADir(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, ".tinyagent"), []byte("x"), 0o600)
+	if s := Locate("", dir); s.Kind != SourceNone || s.Path != "" {
+		t.Errorf("got %+v", s)
 	}
 }

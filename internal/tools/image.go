@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -44,7 +43,7 @@ func LoadImageFile(path string, maxBytes int) (model.Image, error) {
 		return model.Image{}, err
 	}
 	if fi.IsDir() {
-		return model.Image{}, fmt.Errorf("%s is a directory, not an image", path)
+		return model.Image{}, Actionablef("pass a file path, not a directory", "%s is a directory, not an image", path)
 	}
 	if fi.Size() > int64(maxBytes) {
 		return model.Image{}, fmt.Errorf("%s is %s bytes; max_image_bytes is %s", path, model.FormatBytes(int(fi.Size())), model.FormatBytes(maxBytes))
@@ -58,7 +57,7 @@ func LoadImageFile(path string, maxBytes int) (model.Image, error) {
 	}
 	mime := SniffImage(data)
 	if mime == "" {
-		return model.Image{}, fmt.Errorf("%s is not a PNG, JPEG, GIF, or WebP image", path)
+		return model.Image{}, Actionablef("pass a PNG, JPEG, GIF, or WebP file", "%s is not a PNG, JPEG, GIF, or WebP image", path)
 	}
 	return model.NewImage(mime, filepath.Base(path), data), nil
 }
@@ -75,7 +74,7 @@ func viewImage(root, path string, maxBytes int, sc *scope) (string, *model.Image
 		maxBytes = DefaultMaxImageBytes
 	}
 	if path == "" {
-		return "", nil, errors.New("path is required")
+		return "", nil, Actionable("path is required", "pass the path of a PNG, JPEG, GIF, or WebP image under the working directory")
 	}
 	full, err := sc.resolve(root, path)
 	if err != nil {
@@ -89,7 +88,7 @@ func viewImage(root, path string, maxBytes int, sc *scope) (string, *model.Image
 		return "", nil, err
 	}
 	if fi.IsDir() {
-		return "", nil, fmt.Errorf("%s is a directory, not an image", path)
+		return "", nil, Actionablef("pass a file path, not a directory", "%s is a directory, not an image", path)
 	}
 	if fi.Size() > int64(maxBytes) {
 		return "", nil, fmt.Errorf("%s is %s bytes; max_image_bytes is %s", path, model.FormatBytes(int(fi.Size())), model.FormatBytes(maxBytes))
@@ -103,7 +102,7 @@ func viewImage(root, path string, maxBytes int, sc *scope) (string, *model.Image
 	}
 	mime := SniffImage(data)
 	if mime == "" {
-		return "", nil, fmt.Errorf("%s is not a PNG, JPEG, GIF, or WebP image", path)
+		return "", nil, Actionablef("pass a PNG, JPEG, GIF, or WebP file", "%s is not a PNG, JPEG, GIF, or WebP image", path)
 	}
 	im := model.NewImage(mime, path, data)
 	text := fmt.Sprintf("image %s (%s, %s bytes)\n%s", path, mime, model.FormatBytes(len(data)), im.Placeholder())

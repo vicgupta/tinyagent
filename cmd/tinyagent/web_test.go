@@ -538,12 +538,15 @@ func TestWebBusyAndCancel(t *testing.T) {
 
 func TestWebModelSwitch(t *testing.T) {
 	p := newACPProvider(t)
-	c := startWeb(t, acpWorkspace(t))
+	c := startWeb(t, acpWorkspace(t), "--fallback-model", "openai/gpt-4.1")
 	ev := c.events()
 	st := c.state()
 	models := st["models"].([]any)
 	if len(models) < 2 || models[0] != "openai/gpt-4o" {
 		t.Errorf("models = %v", models[:min(5, len(models))])
+	}
+	if r := c.post("/api/command", map[string]any{"line": "/model"}); !strings.Contains(r["text"].(string), "openai/gpt-4o") || !strings.Contains(r["text"].(string), "openai/gpt-4.1") {
+		t.Errorf("/model status = %v", r)
 	}
 	if r := c.post("/api/model", map[string]any{"model": "openai/gpt-4o-mini"}); r["model"] != "openai/gpt-4o-mini" {
 		t.Errorf("switch = %v", r)
@@ -602,11 +605,11 @@ func TestWebSlashCommands(t *testing.T) {
 	if !strings.Contains(afterText, "last turn") || !strings.Contains(afterText, "100 in") {
 		t.Errorf("/context after a turn = %v", after)
 	}
-	if r := c.post("/api/command", map[string]any{"line": "/compact"}); !strings.Contains(r["text"].(string), "compacts") {
+	if r := c.post("/api/command", map[string]any{"line": "/compact"}); !strings.Contains(r["text"].(string), "nothing to compact") {
 		t.Errorf("/compact = %v", r)
 	}
-	if st := c.state(); st["compact"] != true {
-		t.Errorf("compact flag = %v", st["compact"])
+	if st := c.state(); st["compact"] == true {
+		t.Errorf("deferred compact flag still set: %v", st["compact"])
 	}
 	saved := filepath.Join(root, "out.json")
 	c.post("/api/command", map[string]any{"line": "/save out.json"})
@@ -947,5 +950,87 @@ func TestWebToolOutputSuppression(t *testing.T) {
 				t.Fatalf("events = %v", es)
 			}
 		})
+	}
+}
+
+func TestWebCompactRunsImmediately(t *testing.T) {
+	p := newACPProvider(t)
+	root := acpWorkspace(t)
+	c := startWeb(t, root)
+	ev := c.events()
+	for _, msg := range []string{"one", "two", "three"} {
+		c.post("/api/message", map[string]any{"text": msg})
+		until(t, ev, "turn_end")
+	}
+	before := filepath.Join(root, "before.json")
+	c.post("/api/command", map[string]any{"line": "/save before.json"})
+	n := len(p.requests())
+	r := c.post("/api/command", map[string]any{"line": "/compact"})
+	text, _ := r["text"].(string)
+	if strings.Contains(text, "next message") || strings.Contains(text, "compacts the conversation first") {
+		t.Errorf("deferred wording: %q", text)
+	}
+	if !strings.Contains(text, "compacting...") || !strings.Contains(text, "compacted context") || !strings.Contains(text, "→") {
+		t.Errorf("/compact = %v", r)
+	}
+	if len(p.requests()) <= n {
+		t.Errorf("expected /compact itself to call the model; requests %d → %d", n, len(p.requests()))
+	}
+	c.post("/api/command", map[string]any{"line": "/save after.json"})
+	bt, err := trajectory.Load(before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at, err := trajectory.Load(filepath.Join(root, "after.json"))
+	if err != nil || len(at.Compactions) != 1 || at.Compactions[0].Reason != "requested" {
+		t.Fatalf("after /compact: %v %+v", err, at)
+	}
+	if len(at.Messages) != len(bt.Messages) {
+		t.Errorf("stored history changed: %d → %d", len(bt.Messages), len(at.Messages))
+	}
+	c.post("/api/message", map[string]any{"text": "four"})
+	until(t, ev, "turn_end")
+	c.post("/api/command", map[string]any{"line": "/save after2.json"})
+	at2, err := trajectory.Load(filepath.Join(root, "after2.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requested := 0
+	for _, rec := range at2.Compactions {
+		if rec.Reason == "requested" {
+			requested++
+		}
+	}
+	if requested != 1 {
+		t.Errorf("requested compactions after next message: %+v", at2.Compactions)
+	}
+}
+
+func TestWebCompactErrorLeavesHistory(t *testing.T) {
+	p := newACPProvider(t)
+	p.failFrom = 4
+	root := acpWorkspace(t)
+	c := startWeb(t, root)
+	ev := c.events()
+	for _, msg := range []string{"one", "two", "three"} {
+		c.post("/api/message", map[string]any{"text": msg})
+		until(t, ev, "turn_end")
+	}
+	c.post("/api/command", map[string]any{"line": "/save before.json"})
+	code, b := c.do("POST", "/api/command", map[string]any{"line": "/compact"}, nil)
+	if code == 200 || !strings.Contains(string(b), "history was left unchanged") {
+		t.Fatalf("/compact error = %d %s", code, b)
+	}
+	c.post("/api/command", map[string]any{"line": "/save after.json"})
+	bt, _ := trajectory.Load(filepath.Join(root, "before.json"))
+	at, err := trajectory.Load(filepath.Join(root, "after.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(at.Compactions) != 0 {
+		t.Errorf("failed /compact wrote a compaction: %+v", at.Compactions)
+	}
+	if len(at.Messages) != len(bt.Messages) {
+		t.Errorf("stored history changed: %d → %d", len(bt.Messages), len(at.Messages))
 	}
 }

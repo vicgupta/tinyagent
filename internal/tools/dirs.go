@@ -144,7 +144,7 @@ func (s *scope) resolve(root, path string) (string, error) {
 	if s.dirOf(full) != nil {
 		return full, nil
 	}
-	return "", fmt.Errorf("path %q is outside the working directory and the additional directories", path)
+	return "", Actionablef("use a path under the working directory or an additional directory", "path %q is outside the working directory and the additional directories", path)
 }
 
 // dirOf returns the additional directory containing full (or equal to it),

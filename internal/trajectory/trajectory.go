@@ -106,10 +106,12 @@ type FileAccessInfo struct {
 // PermissionsInfo records the tool permission policy a run enforced. Rules
 // are config data, never secrets.
 type PermissionsInfo struct {
-	Default        string                `json:"default"`
-	NonInteractive string                `json:"non_interactive"`
-	RuleCount      int                   `json:"rule_count"`
-	Rules          []PermissionsRuleInfo `json:"rules,omitempty"`
+	Default        string `json:"default"`
+	NonInteractive string `json:"non_interactive"`
+	RuleCount      int    `json:"rule_count"`
+	// Judge is true when the optional AI permission judge was enabled.
+	Judge bool                  `json:"judge,omitempty"`
+	Rules []PermissionsRuleInfo `json:"rules,omitempty"`
 }
 
 // PermissionsRuleInfo is one permissions rule in a trajectory's summary.

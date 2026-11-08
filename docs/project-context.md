@@ -37,7 +37,7 @@ tinyagent discovers [Agent Skills](https://agentskills.io): folders containing a
 | `--lockdown` (or `untrusted_content.enabled`) | off |
 | `--read-only` | off |
 
-Precedence is flag > config > mode default: `--skills` turns discovery on in any mode and `--no-skills` turns it off; otherwise `skills: true` or `skills: false` in the config wins; otherwise the mode default above applies. `skills` is tri-state, so leaving it out means "use the mode default". In a hardened mode, `skills: true` from a repository `./tinyagent.yaml` is ignored unless you pass `--trust-config` (it must come from `-c`, a trusted config or `--skills`); `skills: false` is always honored. `tinyagent --check` prints the decision and where it came from (for example `skills:    off (hardened default: CI is set)`), `--check --json` has it as `skills` (`enabled`, `source`, `detail`), and `-v` prints it at the start of a run.
+Precedence is flag > config > mode default: `--skills` turns discovery on in any mode and `--no-skills` turns it off; otherwise `skills: true` or `skills: false` in the config wins; otherwise the mode default above applies. `skills` is tri-state, so leaving it out means "use the mode default". In a hardened mode, `skills: true` from a repository `./.tinyagent/tinyagent.yaml` is ignored unless you pass `--trust-config` (it must come from `-c`, a trusted config or `--skills`); `skills: false` is always honored. `tinyagent --check` prints the decision and where it came from (for example `skills:    off (hardened default: CI is set)`), `--check --json` has it as `skills` (`enabled`, `source`, `detail`), and `-v` prints it at the start of a run.
 
 - **Locations:** only `./skills/<name>/SKILL.md` under `--cwd`. Parent directories and your home directory are not scanned. Symlinked skill folders are followed. `.agents/skills` and `.claude/skills` are not scanned; when one exists in `--cwd`, a warning suggests moving or symlinking its skills into `./skills`.
 - **Locations (plugins):** each configured [plugin](plugins.md#plugins) contributes `<plugin>/skills/<name>/SKILL.md`.
@@ -140,7 +140,7 @@ tinyagent --workflow docs/workflows/feature.yaml -t "add CSV export" --workflow-
 - **Safety.** Passed and interrupted runs write nothing, and without the flag nothing is written. A corrupt ledger line is skipped with a warning, and a write error is a warning; neither changes the exit code. Each file write is one `O_APPEND` line, so concurrent runs in the same `--cwd` don't interleave.
 - **Events.** With `--json`, `observer.proposed` or `observer.recurrence` follows `workflow.finished`; see [JSON output](json-output.md#machine-readable-output).
 
-The observer makes no model call. Model-written skill edits, generated verify checks and eval-suite generation are not part of it.
+The observer makes no model call and never edits a skill. To turn repeated failures into a reviewed skill or success-check change, use the opt-in [Self-tuning](self-tuning.md) commands (`tinyagent tune`), which group failures by the same signature and apply nothing without your approval.
 
 #### Spec gate
 

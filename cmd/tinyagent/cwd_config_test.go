@@ -47,7 +47,7 @@ func userConfigPath(t *testing.T) string {
 
 func TestCwdConfigPrecedence(t *testing.T) {
 	dir := cwdEnv(t)
-	cfg := filepath.Join(dir, "tinyagent.yaml")
+	cfg := filepath.Join(dir, ".tinyagent", "tinyagent.yaml")
 	writeFile(t, cfg, "model: anthropic/claude-sonnet-4-5\nstep_limit: 40\nfallback_models: [openrouter/a/b, openrouter/c/d]\nask_user: {enabled: true, max_questions: 2}\n")
 
 	code, stdout, stderr := runCLI(t, "--check", "--cwd", dir)
@@ -99,7 +99,7 @@ func TestCwdConfigPrecedence(t *testing.T) {
 // exact directory: a subdirectory doesn't see its parent's file.
 func TestCwdConfigStrictLookup(t *testing.T) {
 	dir := cwdEnv(t)
-	writeFile(t, filepath.Join(dir, "tinyagent.yaml"), "model: anthropic/claude-sonnet-4-5\n")
+	writeFile(t, filepath.Join(dir, ".tinyagent", "tinyagent.yaml"), "model: anthropic/claude-sonnet-4-5\n")
 	sub := filepath.Join(dir, "sub")
 	if err := os.Mkdir(sub, 0o755); err != nil {
 		t.Fatal(err)
@@ -115,7 +115,7 @@ func TestCwdConfigStrictLookup(t *testing.T) {
 		t.Errorf("process directory used instead of --cwd: config %q", got)
 	}
 	_, stdout, _ = runCLI(t, "--check")
-	if got := reportLine(t, stdout, "config"); got != "tinyagent.yaml (cwd)" {
+	if got := reportLine(t, stdout, "config"); got != filepath.Join(".tinyagent", "tinyagent.yaml")+" (cwd)" {
 		t.Errorf("default --cwd .: config %q", got)
 	}
 }
@@ -123,7 +123,7 @@ func TestCwdConfigStrictLookup(t *testing.T) {
 func TestCwdConfigInvalidNoFallback(t *testing.T) {
 	dir := cwdEnv(t)
 	writeFile(t, userConfigPath(t), "model: anthropic/claude-sonnet-4-5\n")
-	writeFile(t, filepath.Join(dir, "tinyagent.yaml"), "no_such_key: 1\n")
+	writeFile(t, filepath.Join(dir, ".tinyagent", "tinyagent.yaml"), "no_such_key: 1\n")
 	code, _, stderr := runCLI(t, "--check", "--cwd", dir)
 	if code != 2 || !strings.Contains(stderr, "no_such_key") {
 		t.Errorf("invalid cwd file: exit %d, stderr %q", code, stderr)
@@ -150,7 +150,7 @@ func TestUserConfigNoLongerRead(t *testing.T) {
 		t.Errorf("exit %d, stderr %q, want %q", code, stderr, want)
 	}
 	// With a project file present there is no note.
-	writeFile(t, filepath.Join(dir, "tinyagent.yaml"), "step_limit: 3\n")
+	writeFile(t, filepath.Join(dir, ".tinyagent", "tinyagent.yaml"), "step_limit: 3\n")
 	if _, _, stderr = runCLI(t, "--list-profiles", "--cwd", dir); strings.Contains(stderr, "no longer read") {
 		t.Errorf("note with a project file: %q", stderr)
 	}
@@ -164,7 +164,7 @@ const untrustedYAML = `command_tools:
 
 func TestCwdConfigTrust(t *testing.T) {
 	dir := cwdEnv(t)
-	writeFile(t, filepath.Join(dir, "tinyagent.yaml"), untrustedYAML)
+	writeFile(t, filepath.Join(dir, ".tinyagent", "tinyagent.yaml"), untrustedYAML)
 
 	code, stdout, stderr := runCLI(t, "--check", "--cwd", dir)
 	if code != 0 {
@@ -183,7 +183,7 @@ func TestCwdConfigTrust(t *testing.T) {
 		t.Errorf("--trust-config: tools %q", got)
 	}
 	// A -c file is trusted as before, even when it is the same file.
-	_, stdout, _ = runCLI(t, "--check", "--cwd", dir, "-c", filepath.Join(dir, "tinyagent.yaml"))
+	_, stdout, _ = runCLI(t, "--check", "--cwd", dir, "-c", filepath.Join(dir, ".tinyagent", "tinyagent.yaml"))
 	if got := reportLine(t, stdout, "tools"); got != "1 command tools (lint)" {
 		t.Errorf("-c: tools %q", got)
 	}
@@ -192,7 +192,7 @@ func TestCwdConfigTrust(t *testing.T) {
 func TestInitSubcommand(t *testing.T) {
 	cwdEnv(t)
 	dir := t.TempDir()
-	path := filepath.Join(dir, "tinyagent.yaml")
+	path := filepath.Join(dir, ".tinyagent", "tinyagent.yaml")
 	defer func(f func() bool) { stdinIsTerminal = f }(stdinIsTerminal)
 	stdinIsTerminal = func() bool { return true }
 
@@ -223,7 +223,8 @@ func TestInitSubcommand(t *testing.T) {
 	ldir := t.TempDir()
 	target := filepath.Join(t.TempDir(), "target.yaml")
 	writeFile(t, target, "step_limit: 1\n")
-	link := filepath.Join(ldir, "tinyagent.yaml")
+	link := filepath.Join(ldir, ".tinyagent", "tinyagent.yaml")
+	os.MkdirAll(filepath.Dir(link), 0o755)
 	if err := os.Symlink(target, link); err != nil {
 		t.Skip(err)
 	}
@@ -248,7 +249,7 @@ func TestInitSubcommand(t *testing.T) {
 func TestInitMigrate(t *testing.T) {
 	cwdEnv(t)
 	dir := t.TempDir()
-	path := filepath.Join(dir, "tinyagent.yaml")
+	path := filepath.Join(dir, ".tinyagent", "tinyagent.yaml")
 	// No user config: an error.
 	if code, _, stderr := runCLI(t, "init", "--migrate", "--cwd", dir); code != 2 || !strings.Contains(stderr, "no user config") {
 		t.Errorf("migrate without a user config: exit %d, %q", code, stderr)

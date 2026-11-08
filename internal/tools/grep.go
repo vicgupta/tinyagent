@@ -47,11 +47,11 @@ func grepWithContext(root, pattern, path, include string, ignoreCase, fixedStrin
 	}
 	re, err := regexp.Compile(pattern)
 	if err != nil {
-		return "", fmt.Errorf("bad regexp: %w", err)
+		return "", Actionablef("fix the pattern, or set fixed_strings: true for a literal search", "bad regexp: %v", err)
 	}
 	if include != "" {
 		if _, err := filepath.Match(include, ""); err != nil {
-			return "", fmt.Errorf("bad include pattern %q: %w", include, err)
+			return "", Actionablef("use a valid glob (e.g. *.go)", "bad include pattern %q: %v", include, err)
 		}
 	}
 	matchPath := strings.Contains(include, "/")

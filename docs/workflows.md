@@ -166,7 +166,7 @@ The chosen route (`kind` `workflow` or `skill`, how it was picked (`named`, `int
 
 Every other flag you pass, such as `-m`, `--sandbox`, `--cost-limit` or `--profile`, is forwarded to every stage, and stage settings in the workflow file override it.
 
-**Config keys.** `tinyagent.yaml` has no workflow-specific keys. Workflow settings live in the workflow file ([table above](#workflow-file-yaml)). The stages use your normal [config](config.md), so `model`, `profiles`, `sandbox`, `verify_on_stop` and others apply to every stage. A stage's `profile:` selects one of your config profiles.
+**Config keys.** `.tinyagent/tinyagent.yaml` has no workflow-specific keys. Workflow settings live in the workflow file ([table above](#workflow-file-yaml)). The stages use your normal [config](config.md), so `model`, `profiles`, `sandbox`, `verify_on_stop` and others apply to every stage. A stage's `profile:` selects one of your config profiles.
 
 All workflow flags are also listed in [docs/subcommands.md](subcommands.md#flags).
 
@@ -184,7 +184,7 @@ tinyagent --workflow docs/workflows/workflow.yaml -t "add CSV export" --workflow
 - When the same failure happens again, it bumps a count in `.tinyagent/observer/ledger.jsonl` and warns `gate did not hold`.
 - It never applies a rule and makes no model call. Passed and interrupted runs write nothing.
 
-The signatures and files are described in full in [Learning from failures](project-context.md#learning-from-failures).
+The signatures and files are described in full in [Learning from failures](project-context.md#learning-from-failures). To go further and propose, validate and (after your approval) apply a skill or success-check change from repeated failures, see [Self-tuning](self-tuning.md).
 
 ## Output, JSON events and exit status
 

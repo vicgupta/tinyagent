@@ -127,6 +127,7 @@ type options struct {
 	memory                                           memoryCmd
 	handoff                                          bool
 	ratchet                                          ratchetFlags
+	tune                                             tuneFlags
 	lockdown                                         lockdownFlags
 	attempts                                         attemptFlags
 	verify                                           verifyFlags
@@ -144,7 +145,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.task, "t", "", "shorthand for --task")
 	fs.StringVar(&o.modelName, "model", defaultModel(), "provider/model; if unset, $AGENT_MODEL, then the config's model")
 	fs.StringVar(&o.modelName, "m", defaultModel(), "shorthand for --model")
-	fs.StringVar(&o.configPath, "config", "", "YAML config (default: ./tinyagent.yaml in --cwd, else built-in)")
+	fs.StringVar(&o.configPath, "config", "", "YAML config (default: ./.tinyagent/tinyagent.yaml in --cwd, else built-in)")
 	fs.StringVar(&o.configPath, "c", "", "shorthand for --config")
 	fs.StringVar(&o.profile, "profile", "", "apply this named profile from the config file's profiles: section over its base settings")
 	fs.StringVar(&o.cwd, "cwd", ".", "working directory")
@@ -186,7 +187,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.webSearch, "web-search", true, "offer the web_search tool: search the web with keyless providers (web_search.providers; default duckduckgo, then exa as backup), in tinyagent's own process. On by default (off under lockdown unless given); --web-search=false turns it off (config web_search.enabled)")
 	fs.BoolVar(&o.noWebSearch, "no-web-search", false, "turn the web_search tool off; same as --web-search=false")
 	fs.Var(&o.webFetchAllowDomains, "web-fetch-allow-domain", "narrow web_fetch to this host (name, *.domain or IP, optional :port); repeatable, replaces web_fetch.allowed_domains; unset, any public host")
-	fs.BoolVar(&o.lsp, "lsp", false, "start the configured language servers (lsp.servers in -c or a trusted ./tinyagent.yaml (--trust-config)): append compiler diagnostics to edit results and add the read-only lsp tool (default off; config lsp.enabled)")
+	fs.BoolVar(&o.lsp, "lsp", false, "start the configured language servers (lsp.servers in -c or a trusted ./.tinyagent/tinyagent.yaml (--trust-config)): append compiler diagnostics to edit results and add the read-only lsp tool (default off; config lsp.enabled)")
 	fs.BoolVar(&o.subagents, "subagents", false, "add the delegate tool: hand a task to a read-only subagent with a fresh context and get back only its report (default off; config subagents.enabled)")
 	fs.BoolVar(&o.workers, "workers", false, "add the worker and apply_worker tools: a worker subagent edits files and runs commands in its own Git worktree, its changes are committed to branch tinyagent/<run>-w<n>, and apply_worker applies them (default off; config subagents.workers.enabled)")
 	fs.BoolVar(&o.askUser, "ask-user", false, "add the ask_user tool: the model may end the run with one question (status NeedsInput, exit 4), answered with --resume <trajectory> -t \"<answer>\"; requires -o (default off; config ask_user.enabled)")
@@ -197,7 +198,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.StringVar(&o.planFile, "plan-file", "", "with the plan enabled, also export the current plan as Markdown to this file after each save")
 	fs.StringVar(&o.reasoningEffort, "reasoning-effort", "", "provider reasoning effort: none, minimal, low, medium, high, xhigh, or max")
 	fs.Var(&o.fallbackModels, "fallback-model", "provider/model to switch to when requests still fail with 429/5xx/network errors after retries (repeatable, tried in order; replaces fallback_models)")
-	fs.StringVar(&o.auxModel, "aux-model", "", "provider/model for auxiliary helper calls (context compaction, verify review); replaces models.auxiliary.model")
+	fs.StringVar(&o.auxModel, "aux-model", "", "provider/model for auxiliary helper calls (context compaction, verify review, permission judge); replaces models.auxiliary.model")
 	fs.StringVar(&o.delegateModel, "delegate-model", "", "provider/model for delegated children (delegate subagents, workers); replaces models.delegated.model")
 	fs.BoolVar(&o.noRouting, "no-routing", false, "ignore the models: section, --aux-model, --delegate-model and --route: every task uses the main model (subagents.model and subagents.workers.model still apply)")
 	fs.Var(&o.routes, "route", "route one task to its own model, task=provider/model (repeatable; tasks: compaction, review, delegate, worker); beats models.<role>.tasks")
@@ -226,12 +227,12 @@ func newFlagSet(o *options) *flag.FlagSet {
 	fs.BoolVar(&o.showVersion, "version", false, "print the version and exit")
 	fs.BoolVar(&o.showVersion, "V", false, "shorthand for --version")
 	fs.BoolVar(&o.doUpdate, "update", false, "update to the latest release and exit")
-	fs.BoolVar(&o.initConfig, "init-config", false, "write a commented starter config to ./tinyagent.yaml in --cwd (or -c), refusing to overwrite, and exit; same as tinyagent init")
+	fs.BoolVar(&o.initConfig, "init-config", false, "write a commented starter config to ./.tinyagent/tinyagent.yaml in --cwd (or -c), refusing to overwrite, and exit; same as tinyagent init")
 	fs.BoolVar(&o.initForce, "init-force", false, "tinyagent init --force: replace an existing config file atomically; symlinks are still refused")
 	fs.BoolVar(&o.initMigrate, "init-migrate", false, "tinyagent init --migrate: copy the old per-user config (no longer read) instead of the starter; never deletes the original")
-	fs.BoolVar(&o.trustConfig, "trust-config", false, "honor settings that launch executables or set security policy (mcp_servers, hooks, command_tools, lsp.servers, plugins, permissions, ...) in ./tinyagent.yaml in --cwd; they are ignored with a warning otherwise")
+	fs.BoolVar(&o.trustConfig, "trust-config", false, "honor settings that launch executables or set security policy (mcp_servers, hooks, command_tools, lsp.servers, plugins, permissions, ...) in ./.tinyagent/tinyagent.yaml in --cwd; they are ignored with a warning otherwise")
 	fs.BoolVar(&o.check, "check", false, "print the resolved config, model, provider key status, fallbacks, cwd and limits, then exit; makes no model request")
-	fs.BoolVar(&o.listProfiles, "list-profiles", false, "print the profile names in the selected config file (-c or ./tinyagent.yaml in --cwd), sorted one per line, then exit; makes no model request")
+	fs.BoolVar(&o.listProfiles, "list-profiles", false, "print the profile names in the selected config file (-c or ./.tinyagent/tinyagent.yaml in --cwd), sorted one per line, then exit; makes no model request")
 	fs.BoolVar(&o.pluginsPrune, "plugins-prune", false, "remove stored plugin module versions under --cwd's .tinyagent/modules except each module's current one and the --plugins-keep newest others, then exit")
 	fs.IntVar(&o.pluginsKeep, "plugins-keep", plugins.DefaultKeep, "versions besides current that --plugins-prune keeps per module")
 	fs.StringVar(&o.pluginsRollback, "plugins-rollback", "", "point a stored plugin module at an older version, given as <module>@<sha256>, then exit; refused when that version needs wider permissions than the first load")
@@ -254,6 +255,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	registerMemoryFlags(fs, &o.memory)
 	registerHandoffFlags(fs, &o.handoff)
 	registerRatchetFlags(fs, &o.ratchet)
+	registerTuneFlags(fs, &o.tune)
 	registerLockdownFlags(fs, &o.lockdown)
 	registerAttemptFlags(fs, &o.attempts)
 	return fs
@@ -345,6 +347,9 @@ func run() int {
 	}
 	if ratchetCommandSet(fs) {
 		return runRatchetCommand(&o, fs, os.Stdout, os.Stderr)
+	}
+	if tuneCommandSet(fs) {
+		return runTuneCommand(&o, fs, os.Stdout, os.Stderr)
 	}
 	if o.acp {
 		if f := acpConflict(fs); f != "" {

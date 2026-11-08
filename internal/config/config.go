@@ -135,7 +135,7 @@ type AgentConfig struct {
 	Plugins []Plugin `yaml:"plugins,omitempty"`
 
 	// Providers are named model providers selectable as "<id>/<model>".
-	// They come only from -c or a trusted ./tinyagent.yaml (--trust-config).
+	// They come only from -c or a trusted ./.tinyagent/tinyagent.yaml (--trust-config).
 	Providers []Provider `yaml:"providers,omitempty"`
 
 	// Hooks are trusted local executables run around matching tool calls.
@@ -148,7 +148,7 @@ type AgentConfig struct {
 
 	// CommandTools are user-defined tools that run a fixed argv filled in
 	// with schema-checked arguments, without a shell. They come only from
-	// -c or a trusted ./tinyagent.yaml (--trust-config).
+	// -c or a trusted ./.tinyagent/tinyagent.yaml (--trust-config).
 	CommandTools []CommandTool `yaml:"command_tools,omitempty"`
 
 	// Plan configures the opt-in update_plan tool (off by default).
@@ -195,20 +195,20 @@ type AgentConfig struct {
 	AskUser AskUser `yaml:"ask_user"`
 	// LSP configures opt-in language servers: diagnostics appended to edit
 	// results and the read-only lsp tool (off by default; --lsp overrides
-	// Enabled). It comes only from -c or a trusted ./tinyagent.yaml (--trust-config).
+	// Enabled). It comes only from -c or a trusted ./.tinyagent/tinyagent.yaml (--trust-config).
 	LSP LSP `yaml:"lsp"`
 	// Skills turns Agent Skills discovery from ./skills in the cwd on or
 	// off. It is tri-state: nil (unset) uses the run's mode default (on in
 	// interactive runs, off in non-interactive and hardened runs), and an
 	// explicit true or false overrides it. --skills / --no-skills override
 	// the config; hardened runs ignore skills: true from an untrusted
-	// ./tinyagent.yaml. Use SkillsOn for the resolved value.
+	// ./.tinyagent/tinyagent.yaml. Use SkillsOn for the resolved value.
 	Skills *bool `yaml:"skills"`
 	// Memory configures opt-in cross-run project memory (off by default;
-	// --memory overrides Enabled). It comes only from -c or a trusted ./tinyagent.yaml (--trust-config).
+	// --memory overrides Enabled). It comes only from -c or a trusted ./.tinyagent/tinyagent.yaml (--trust-config).
 	Memory Memory `yaml:"memory"`
 	// Handoff configures the opt-in session handoff file (off by default;
-	// --handoff overrides Enabled). It comes only from -c or a trusted ./tinyagent.yaml (--trust-config).
+	// --handoff overrides Enabled). It comes only from -c or a trusted ./.tinyagent/tinyagent.yaml (--trust-config).
 	Handoff Handoff `yaml:"handoff"`
 	// LogDB is the opt-in SQLite event log.
 	LogDB LogDB `yaml:"log_db"`
@@ -229,6 +229,9 @@ type AgentConfig struct {
 	UntrustedContent UntrustedContent `yaml:"untrusted_content"`
 	// Attempts configures --attempts best-of-N runs.
 	Attempts Attempts `yaml:"attempts"`
+	// SelfTuning configures the opt-in tinyagent tune command (off by
+	// default); see self_tuning.go.
+	SelfTuning SelfTuning `yaml:"self_tuning,omitempty"`
 }
 
 // ACP configures the --acp editor mode.
@@ -672,6 +675,9 @@ type Permissions struct {
 	// patterns match, and an allow matches only when every compound-command
 	// segment is covered. A profile's rules replace the base list.
 	Rules []PermissionRule `yaml:"rules,omitempty"`
+	// Judge is the optional AI tier consulted when a rule (or the default)
+	// would ask the user. Off by default; see PermissionJudge.
+	Judge PermissionJudge `yaml:"judge,omitempty"`
 }
 
 // PermissionRule is one permissions.rules entry.
@@ -697,7 +703,7 @@ type PermissionRule struct {
 
 // Configured reports whether any permission rule or setting is present.
 func (p Permissions) Configured() bool {
-	return p.Default != "" || p.NonInteractive != "" || len(p.Rules) > 0
+	return p.Default != "" || p.NonInteractive != "" || len(p.Rules) > 0 || p.Judge.On()
 }
 
 // Permissions decisions.
@@ -725,7 +731,7 @@ func (p Permissions) Validate() error {
 			return err
 		}
 	}
-	return nil
+	return p.Judge.Validate()
 }
 
 func (r PermissionRule) validate(i int) error {
@@ -1352,6 +1358,9 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.Permissions.Validate(); err != nil {
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+	}
+	if err := cfg.SelfTuning.Validate(); err != nil {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.RedactSecrets.Validate(); err != nil {
