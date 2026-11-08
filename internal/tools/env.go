@@ -44,6 +44,9 @@ type Local struct {
 }
 
 func (l Local) Command(ctx context.Context, root, command string) *exec.Cmd {
+	// bash and start_process both come through here. The prefix refuses a
+	// git commit that would record tinyagent.yaml without changing PATH.
+	command = guardGitCommand(command)
 	if l.Sandbox == nil {
 		return l.command(ctx, root, exec.CommandContext(ctx, "bash", "-c", command))
 	}

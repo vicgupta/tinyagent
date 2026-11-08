@@ -4,7 +4,13 @@
 
 ### Fixed
 
-- **Tinyagent does not commit `tinyagent.yaml`, including a copy that is already tracked or staged.** `.tinyagent/.gitignore` and a `tinyagent.yaml` pattern in `.git/info/exclude` keep an untracked `.tinyagent/tinyagent.yaml`, the old `./tinyagent.yaml`, and any other untracked file of that name out of `git add .` / `git add -A`. Those ignore rules do not apply to a tracked file. Worker snapshots and worker commits still exclude the path, so unstaged edits stay in the working tree and the blob already in `HEAD` is left as it is. If a `tinyagent.yaml` is already staged, the worker commit is refused and the index is not changed: nothing else is unstaged, the working copy is not deleted, and history is not rewritten. See [Keeping the config out of commits](docs/config.md#keeping-the-config-out-of-commits).
+- **Web UI collapse checkbox.** Tool calls, live output and results reach `tinyagent web` with or without `-v`. A **Collapse tool calls** checkbox in the header (checked by default, saved in the browser) folds them into expandable rows, or shows them expanded. `-v` still adds the internal detail cards. See [Web UI](docs/web.md). (#400)
+
+- **Ctrl-C in chat cancels and exits.** A single Ctrl-C at the prompt leaves chat with status 130 and restores the terminal. During a turn it cancels the model stream, tools and child processes, saves a resumable checkpoint, then exits 130. See [Interactive chat](docs/chat.md). (#402)
+
+- **Large pastes.** Terminal chat turns on bracketed paste so a multi-line clipboard arrives as one message, and keeps up to 8 MiB of it (a huge paste warns when it is large relative to the model's context window). The web UI accepts the same 8 MiB message; its JSON body limit stays 64 MiB. See [Interactive chat](docs/chat.md) and [Web UI](docs/web.md). (#403)
+
+- **Tinyagent does not commit `tinyagent.yaml`, including a copy that is already tracked or staged.** `.tinyagent/.gitignore` and a `tinyagent.yaml` pattern in `.git/info/exclude` keep an untracked `.tinyagent/tinyagent.yaml`, the old `./tinyagent.yaml`, and any other untracked file of that name out of `git add .` / `git add -A`. Those ignore rules do not apply to a tracked file, and a `!tinyagent.yaml` negation does not let TinyAgent commit the file. Worker snapshots and worker commits still exclude the path, so unstaged edits stay in the working tree and the blob already in `HEAD` is left as it is. If a `tinyagent.yaml` is already staged, the worker commit is refused and the index is not changed: nothing else is unstaged, the working copy is not deleted, and history is not rewritten. `bash` and `start_process` refuse a `git commit` (including `-a` and `--no-verify`) that would record one, and their `git add` does not change that index entry. Git run outside TinyAgent is not wrapped. See [Keeping the config out of commits](docs/config.md#keeping-the-config-out-of-commits).
 
 ### Changed
 
