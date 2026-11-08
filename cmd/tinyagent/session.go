@@ -80,7 +80,7 @@ type sessionMode struct {
 // from the same config and flags. Errors carry the message (and any hint)
 // a headless run prints.
 func (s *session) setup(ctx context.Context, m sessionMode) (err error) {
-	// The project config is the session's: tinyagent.yaml in its cwd.
+	// The project config is the session's: .tinyagent/tinyagent.yaml in its cwd.
 	o, fs, root := s.o, s.fs, s.root
 	cfgSrc, cfg, err := loadConfig(o, root, os.Stderr)
 	cfgPath := cfgSrc.Path

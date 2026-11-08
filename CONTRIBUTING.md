@@ -61,7 +61,7 @@ when you add a package or change one of those rules.
 cmd/tinyagent/        CLI entrypoint, flag parsing, main loop glue; help.go holds --help and help topics (help workflows)
 cmd/tinyagent/web/    tinyagent web's page (HTML/CSS/JS, hand-written, embedded with go:embed; no build step, never commit generated files); web.go serves it, chat_session.go is the session core shared with chat
 internal/agent/       the run loop, compaction, tool dispatch; build an Agent with agent.New (it validates the options)
-internal/config/      YAML config + built-in defaults; memory.toml is read only from --cwd
+internal/config/      YAML config (./.tinyagent/tinyagent.yaml, located in locate.go; the old ./tinyagent.yaml only gets a hint) + built-in defaults; memory.toml is read only from --cwd
 internal/dotenv/      loads ./.env from --cwd at startup (real env wins, values never logged); tests that write a .env should unset its keys with t.Setenv+os.Unsetenv so they're restored
 internal/cwdpath/     Resolve confines a config or env path to --cwd (refuses "..", absolute paths elsewhere and symlinks that leave it)
 internal/memory/      project memory stores (markdown and SQLite), always under ./.tinyagent/memory in --cwd; confine.go refuses paths that leave --cwd
@@ -262,7 +262,9 @@ for that hint, never read (and per-project data outside `--cwd`, like the old
 memory JSON files, isn't looked at at all). Paths from config must be relative,
 stay inside `--cwd` and not escape through `..` or symlinks (see
 `internal/memory/confine.go`, or `internal/cwdpath` for new code). This covers
-config files too: `memory.toml` (`./memory.toml` or `$TINYAGENT_MEMORY_CONFIG`
+config files too: the project config is `./.tinyagent/tinyagent.yaml`
+(`config.ProjectFile`; the old `./tinyagent.yaml` is only stat'ed for a hint;
+tests that write a project config create `.tinyagent/` first), `memory.toml` (`./memory.toml` or `$TINYAGENT_MEMORY_CONFIG`
 inside `--cwd`), plugin `PLUGIN_DATA` (`./.tinyagent/plugin-data/<name>`)
 and the TinyGo toolchain cache (`./.tinyagent/cache/toolchains`) are never
 read from the user config or cache directory. Tests for such a feature point `HOME`, `XDG_*`

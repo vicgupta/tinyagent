@@ -43,7 +43,7 @@ func Hint(spec, errMsg string) string {
 		case status == 404:
 			return fmt.Sprintf("%s has no model %q; check the name after %s/", provider, name, provider)
 		case provider == "openai" && status == 400 && needsResponsesAPI(errMsg):
-			return fmt.Sprintf("%s needs OpenAI's Responses API for this request; set openai_api: responses in tinyagent.yaml (or pass --openai-api responses)", name)
+			return fmt.Sprintf("%s needs OpenAI's Responses API for this request; set openai_api: responses in .tinyagent/tinyagent.yaml (or pass --openai-api responses)", name)
 		}
 	case "ollama":
 		switch {

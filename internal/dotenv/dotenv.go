@@ -18,7 +18,7 @@ const FileName = ".env"
 
 // Aliases maps a .env key that has no environment meaning of its own onto
 // the variable tinyagent reads, matched case-insensitively. These mirror
-// tinyagent.yaml keys that have an environment equivalent. A model=provider/name line sets
+// .tinyagent/tinyagent.yaml keys that have an environment equivalent. A model=provider/name line sets
 // AGENT_MODEL. An AGENT_MODEL line in the same file wins over the alias, and
 // a real AGENT_MODEL in the environment wins over both.
 var Aliases = map[string]string{"model": "AGENT_MODEL"}

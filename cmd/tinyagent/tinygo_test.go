@@ -160,7 +160,8 @@ func TestTinygoCLIOnlyCwd(t *testing.T) {
 	before := treeListing(t, home)
 
 	cwd := t.TempDir()
-	os.WriteFile(filepath.Join(cwd, "tinyagent.yaml"), []byte("model: x\n"), 0o644)
+	os.MkdirAll(filepath.Join(cwd, ".tinyagent"), 0o755)
+	os.WriteFile(filepath.Join(cwd, ".tinyagent", "tinyagent.yaml"), []byte("model: x\n"), 0o644)
 	var out, errw bytes.Buffer
 	code := runTinygo(&options{cwd: cwd, tinygoStatus: true}, &out, &errw)
 	if code != 0 {

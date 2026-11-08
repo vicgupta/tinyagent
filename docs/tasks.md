@@ -51,7 +51,7 @@ tinyagent -t "summarize README" --tools read_file,grep
 tinyagent -t "…" --tools read_file --tools grep   # same, repeatable
 ```
 
-`tools: [read_file, grep]` in `tinyagent.yaml` or a profile does the same. `--tools` overrides the config list; `--no-tool-scope` or `--tools=*` / `--tools=""` clears a profile/config list so the full catalog is offered again.
+`tools: [read_file, grep]` in `.tinyagent/tinyagent.yaml` or a profile does the same. `--tools` overrides the config list; `--no-tool-scope` or `--tools=*` / `--tools=""` clears a profile/config list so the full catalog is offered again.
 
 Every name must be non-empty, unique, and actually offered for this run (including command tools and MCP `<alias>__<tool>` names). Conflicts such as `--read-only --tools write_file` or `--tools nonexistent` exit 2 before any model call. Agent-handled tools (`update_plan`, `delegate`, `worker`, `apply_worker`, `ask_user`) respect the same filter: they are not offered and calls are rejected.
 
