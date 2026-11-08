@@ -86,18 +86,17 @@ func runChat(o *options, fs *flag.FlagSet) int {
 
 // chat is one interactive session: a session plus the terminal state.
 type chat struct {
-	s       *session
-	io      chatIO
-	ed      *lineEditor
-	st      styler // stderr's
-	outSt   styler // stdout's, for replies
-	md      bool   // render replies as Markdown (/raw turns it off)
-	path    string // checkpoint written after every step
-	source  string // ResumeSource for the next turn
-	cont    bool   // the next turn continues s.traj (Continue)
-	compact bool   // /compact: compact before the next request
-	turns   int
-	start   time.Time
+	s      *session
+	io     chatIO
+	ed     *lineEditor
+	st     styler // stderr's
+	outSt  styler // stdout's, for replies
+	md     bool   // render replies as Markdown (/raw turns it off)
+	path   string // checkpoint written after every step
+	source string // ResumeSource for the next turn
+	cont   bool   // the next turn continues s.traj (Continue)
+	turns  int
+	start  time.Time
 
 	mu         sync.Mutex
 	cancel     context.CancelFunc // the running turn's, or nil at the prompt
@@ -302,7 +301,6 @@ func (c *chat) turn(msg string, asFollowUp bool) {
 	act := newChatActivity(errw, c.st)
 	termErr, termOut := act.writer(errw), act.writer(c.io.out)
 	a.Out, a.Err = lineEndFilter{termErr, &c.md}, termErr
-	a.CompactFirst, c.compact = c.compact, false
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c.mu.Lock()

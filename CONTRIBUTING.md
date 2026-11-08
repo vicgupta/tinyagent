@@ -214,6 +214,12 @@ stays unchanged.
   must keep validating the spec like `-m`, preserve history, and leave role
   models that have their own config alone; cover show/switch/invalid in tests
   with the fake provider only.
+  `/compact` (via `session.compactNow` and `agent.CompactNow`) must run
+  immediately in chat and the web UI, print progress and the token count
+  before → after (or that nothing could be compacted), emit the existing
+  `compaction` event, leave stored messages unchanged, and on error report
+  a next step without rewriting history. Do not defer compaction to the
+  next message.
 - **Goal mode is a flag wrapper.** `tinyagent goal` rewrites to
   `--plan --plan-first --verify-on-stop` (and `--check` to `--verify-check`) in
   `expandSubcommand`. Do not add a separate goal loop or engine. Tests for

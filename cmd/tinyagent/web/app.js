@@ -223,7 +223,6 @@
     ["sandbox", "read_only", "lockdown", "permissions", "memory", "ask_user"].forEach(function (k) {
       if (set[k]) els.status.appendChild(el("span", "badge on", k.replace("_", "-")));
     });
-    if (st.compact) els.status.appendChild(el("span", "badge", "compact next"));
     if (S.raw) els.status.appendChild(el("span", "badge", "raw"));
     if (!S.connected) els.status.appendChild(el("span", "badge", "offline"));
   }

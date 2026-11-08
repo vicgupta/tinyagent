@@ -21,7 +21,7 @@ Every event has a `type`. Event names and fields in schema version 1 are:
 | `checkpoint.saved` | `step`, `path`, `pending` (tool calls without results yet) |
 | `resume.interrupted_call` | `id`, `name` of a call that was in flight when the previous process stopped |
 | `resume.process_lost` | `id`, `pid`, `cmd` of a background process from the previous invocation |
-| `compaction` | `step`, `reason`, `stage`, `tokens_before`, `tokens_after`, `elided_messages`, `summarized_messages` |
+| `compaction` | `step`, `reason` (`proactive`, `overflow`, or `requested` for chat/web `/compact`, which runs immediately), `stage`, `tokens_before`, `tokens_after`, `elided_messages`, `summarized_messages` |
 | `workspace.snapshot` | `id`, `step` (0 = baseline), `kind` (`baseline`, `step`, `final`, or `pre-rewind`), `time`, `files`, `bytes`, `skipped_ignored`, `skipped_large`, `large_paths` (up to 20, when any), `store`, `duration_ms`; only with [snapshots](undo.md#rewind-workspace-changes) on. Paths and counts only, never file contents |
 | `rewind.plan` / `rewind.result` | `--rewind --json` only: the target snapshot, each `{op, path}` change and counts; then `restored`, `not_restored`, `pre_rewind` and `error` (on a partial restore) |
 | `warning` / `error` | `message` |
