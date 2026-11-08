@@ -136,31 +136,82 @@ func TestLocalConfigKeptOutOfCommits(t *testing.T) {
 		return dir
 	}
 
-	// An existing config: any command that loads it adds the ignore rule.
+	// An existing config: any command that loads it adds the ignore rules.
+	// An untracked root tinyagent.yaml is covered by .git/info/exclude, not
+	// by .tinyagent/.gitignore.
 	dir := newRepo()
 	writeFile(t, filepath.Join(dir, ".tinyagent", "tinyagent.yaml"), "step_limit: 9\n")
+	writeFile(t, filepath.Join(dir, "tinyagent.yaml"), "step_limit: 1\n")
 	if code, _, stderr := runCLI(t, "--check", "--cwd", dir); code != 0 {
 		t.Fatalf("check: exit %d %s", code, stderr)
 	}
 	gitIn(dir, "add", ".")
-	if staged := gitIn(dir, "diff", "--cached", "--name-only"); strings.Contains(staged, "tinyagent.yaml") || !strings.Contains(staged, "main.go") {
+	if staged := gitIn(dir, "diff", "--cached", "--name-only"); hasConfigPath(staged) || !strings.Contains(staged, "main.go") {
 		t.Errorf("git add . staged:\n%s", staged)
 	}
 	if b, _ := os.ReadFile(filepath.Join(dir, ".gitignore")); string(b) != "build/\n" {
 		t.Errorf("repository .gitignore changed: %q", b)
 	}
+	if b, err := os.ReadFile(gitExclude(t, dir)); err != nil || !strings.Contains(string(b), "\ntinyagent.yaml\n") {
+		t.Errorf("info/exclude = %q, %v", b, err)
+	}
 
-	// init writes the starter and the ignore rule, and says so.
+	// A tracked copy is still staged by git add . The ignore rule does not
+	// cover it, and the working copy stays.
+	gitIn(dir, "add", "-f", ".tinyagent/tinyagent.yaml", "tinyagent.yaml")
+	gitIn(dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "track config")
+	writeFile(t, filepath.Join(dir, ".tinyagent", "tinyagent.yaml"), "step_limit: 10\n")
+	writeFile(t, filepath.Join(dir, "tinyagent.yaml"), "step_limit: 2\n")
+	gitIn(dir, "add", ".")
+	staged := gitIn(dir, "diff", "--cached", "--name-only")
+	if !hasConfigPath(staged) || !strings.Contains(staged, ".tinyagent/tinyagent.yaml") {
+		t.Errorf("tracked config was not staged:\n%s", staged)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "tinyagent.yaml")); string(b) != "step_limit: 2\n" {
+		t.Errorf("tracked working copy = %q", b)
+	}
+
+	// init writes the starter and the ignore rules, and says the tracked
+	// case is not covered.
 	dir = newRepo()
+	writeFile(t, filepath.Join(dir, "tinyagent.yaml"), "step_limit: 1\n")
 	code, _, stderr := runCLI(t, "init", "--cwd", dir)
-	if code != 0 || !strings.Contains(stderr, "never commit it") || !strings.Contains(stderr, ".tinyagent/.gitignore") {
+	if code != 0 || !strings.Contains(stderr, "never commit it") || !strings.Contains(stderr, ".tinyagent/.gitignore") || !strings.Contains(stderr, ".git/info/exclude") || !strings.Contains(stderr, "tracked") {
 		t.Fatalf("init: exit %d, %q", code, stderr)
 	}
 	gitIn(dir, "add", "-A")
-	if staged := gitIn(dir, "diff", "--cached", "--name-only"); strings.Contains(staged, "tinyagent.yaml") {
+	if staged := gitIn(dir, "diff", "--cached", "--name-only"); hasConfigPath(staged) {
 		t.Errorf("git add -A after init staged:\n%s", staged)
 	}
-	if strings.Contains(starterConfig, "may be committed") || !strings.Contains(starterConfig, "never commit it") {
+	if b, _ := os.ReadFile(filepath.Join(dir, "tinyagent.yaml")); string(b) != "step_limit: 1\n" {
+		t.Errorf("legacy file changed: %q", b)
+	}
+	if strings.Contains(starterConfig, "may be committed") || !strings.Contains(starterConfig, "never commit it") || !strings.Contains(starterConfig, "tracked file") {
 		t.Errorf("starter config text does not say to keep it out of commits")
 	}
+}
+
+func hasConfigPath(staged string) bool {
+	for _, l := range strings.Split(staged, "\n") {
+		l = strings.TrimSpace(l)
+		if l == "tinyagent.yaml" || strings.HasSuffix(l, "/tinyagent.yaml") {
+			return true
+		}
+	}
+	return false
+}
+
+func gitExclude(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "-C", dir, "rev-parse", "--git-common-dir")
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git common dir: %v", err)
+	}
+	p := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(dir, p)
+	}
+	return filepath.Join(p, "info", "exclude")
 }

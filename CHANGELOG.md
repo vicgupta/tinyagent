@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Tinyagent does not commit `tinyagent.yaml`, including a copy that is already tracked or staged.** `.tinyagent/.gitignore` and a `tinyagent.yaml` pattern in `.git/info/exclude` keep an untracked `.tinyagent/tinyagent.yaml`, the old `./tinyagent.yaml`, and any other untracked file of that name out of `git add .` / `git add -A`. Those ignore rules do not apply to a tracked file. Worker snapshots and worker commits still exclude the path, so unstaged edits stay in the working tree and the blob already in `HEAD` is left as it is. If a `tinyagent.yaml` is already staged, the worker commit is refused and the index is not changed: nothing else is unstaged, the working copy is not deleted, and history is not rewritten. See [Keeping the config out of commits](docs/config.md#keeping-the-config-out-of-commits).
+
+### Changed
+
+- **Dotenv files are not read.** The old changelog notes that described loading a dotenv file from `--cwd` at startup are removed. Exported environment variables and explicit flags are unchanged. A dotenv file in `--cwd` is left in place and does not set the model or API keys.
+
 ## [v0.22.0] - 2026-11-07
 
 ### Breaking
@@ -74,8 +82,6 @@
 
 - `web_fetch` with no allowlist now refuses a URL whose host is a literal loopback or private IP (such as `http://127.0.0.1:8080/`) before connecting. Before, only hostnames that resolved to such addresses were refused.
 
-- `.env`: a `model=provider/name` line (case-insensitive) now sets the model, as an alias of `AGENT_MODEL`. Before, it was loaded as a variable named `model` that nothing reads, so `tinyagent web` (and chat and `-t` runs) silently fell back to `openai/gpt-4o` and then failed with `OPENAI_API_KEY is not set`. An `AGENT_MODEL` line in the same file wins over `model=`, and a real `AGENT_MODEL` in the environment wins over both. `-v` reports it as `loaded AGENT_MODEL from .env`. See [.env file](docs/config.md#env-file).
-
 ### Changed
 
 - **Behavior change: `web_fetch` is on by default.** Every one-shot, chat, `tinyagent web`, ACP, review and eval run now offers the `web_fetch` tool for any public host, and prints `web_fetch: any public host` on stderr at start. Loopback, private, link-local and cloud metadata addresses are still always refused. `web_fetch.allowed_domains` / `--web-fetch-allow-domain` now narrow it (an empty list no longer exits 2; a bare `*` still does). Turn it off with `--no-web-fetch` (new), `--web-fetch=false` or `web_fetch.enabled: false`. It stays off by default under lockdown (unless enabled explicitly) and in the GitHub Action (new `web-fetch` input, default `false`); `--read-only` keeps it; subagents never get it; `--resume` keeps the checkpoint's recorded setting, so older checkpoints resume without it. **Security:** fetched page content is untrusted input to the model and may carry prompt injection; use an allowlist, `--no-web-fetch` or `--lockdown` for runs on sensitive code or with credentials. See [Web fetch](docs/long-runs.md#web-fetch).
@@ -86,9 +92,7 @@
 
 ### Added
 
-- `tinyagent web` (`--web`) runs chat in the browser. It's a local web UI on `127.0.0.1` for the same session backend as `tinyagent chat`, with the same tools, sandbox, permissions, lockdown, memory, AGENTS.md and checkpoints. It defaults to port 7777, and when `--port` isn't set and 7777 is busy it uses the next free port. `--no-open` prints the URL instead of opening the browser, and every chat flag applies. A random per-run token is required on every request, and `Host` and `Origin` are checked; no API keys or `.env` values reach the browser. Features: streaming Markdown with highlighted code and copy buttons, collapsible tool-call cards with arguments, results and diffs, inline approve and deny for permission prompts and `ask_user`, stop, edit-and-resend and regenerate, a model picker, a searchable sessions sidebar (open and continue saved chats), a project panel (AGENTS.md and memory), and a status bar with model, cwd, tokens and cost. It also has a `/` command menu, a Ctrl/⌘-K palette, `?` shortcuts, file and image drag-and-drop or paste, light or dark mode that follows the system, a responsive layout, a reconnect notice and keyboard-accessible markup. It's built with `net/http` and `go:embed`, with no Node build step and no dependencies. See [Web UI](docs/web.md).
-
-- `./.env` support: when `.env` exists in `--cwd`, tinyagent loads it once at startup, so `tinyagent chat`/`-i` (as well as `-t` runs, `--check`, `--acp` and subcommands) pick up `AGENT_MODEL`, API keys, base URLs and other variables from it. Previously no `.env` was read, so chat only saw variables exported in the shell. Precedence: flags > real environment variables (even empty ones) > `.env` > `--profile` > config file > defaults. Only `./.env` is read (no parent or home-directory file); a missing file is fine; a malformed line exits 2 naming the line, never the value; `-v` lists the loaded variable names. See [.env file](docs/config.md#env-file).
+- `tinyagent web` (`--web`) runs chat in the browser. It's a local web UI on `127.0.0.1` for the same session backend as `tinyagent chat`, with the same tools, sandbox, permissions, lockdown, memory, AGENTS.md and checkpoints. It defaults to port 7777, and when `--port` isn't set and 7777 is busy it uses the next free port. `--no-open` prints the URL instead of opening the browser, and every chat flag applies. A random per-run token is required on every request, and `Host` and `Origin` are checked; no API keys or environment values reach the browser. Features: streaming Markdown with highlighted code and copy buttons, collapsible tool-call cards with arguments, results and diffs, inline approve and deny for permission prompts and `ask_user`, stop, edit-and-resend and regenerate, a model picker, a searchable sessions sidebar (open and continue saved chats), a project panel (AGENTS.md and memory), and a status bar with model, cwd, tokens and cost. It also has a `/` command menu, a Ctrl/⌘-K palette, `?` shortcuts, file and image drag-and-drop or paste, light or dark mode that follows the system, a responsive layout, a reconnect notice and keyboard-accessible markup. It's built with `net/http` and `go:embed`, with no Node build step and no dependencies. See [Web UI](docs/web.md).
 
 ### Tests
 

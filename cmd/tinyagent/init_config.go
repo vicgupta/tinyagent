@@ -11,7 +11,7 @@ import (
 )
 
 const starterConfig = `# tinyagent project config (./.tinyagent/tinyagent.yaml). Flags override these values. Full reference: docs/config.md.
-## Local configuration: never commit it (tinyagent adds it to .tinyagent/.gitignore). Keep secrets in env vars (api_key_env names them).
+## Local configuration: never commit it. Tinyagent lists /tinyagent.yaml in .tinyagent/.gitignore and an untracked tinyagent.yaml pattern in .git/info/exclude so git add . skips an untracked copy. Those rules do not cover a tracked file. Keep secrets in env vars (api_key_env names them).
 ## mcp_servers, hooks, command_tools, lsp.servers, plugins (and other executables) need --trust-config here.
 # model: openai/gpt-4o        # same <provider>/<model> syntax as -m
 # step_limit: 50
@@ -65,8 +65,11 @@ const starterConfig = `# tinyagent project config (./.tinyagent/tinyagent.yaml).
 // to -c PATH or ./.tinyagent/tinyagent.yaml in --cwd (creating .tinyagent/
 // when missing). It refuses to overwrite unless --init-force, and always
 // refuses a symlink. An old ./tinyagent.yaml is left alone, with a hint.
-// For the default path it also makes sure .tinyagent/.gitignore ignores the
-// file (config.EnsureIgnored), so it stays out of commits.
+// For the default path it also makes sure .tinyagent/.gitignore ignores an
+// untracked copy (config.EnsureIgnored). In a Git work tree it appends an
+// untracked tinyagent.yaml pattern to .git/info/exclude
+// (config.EnsureGitExclude), including the old ./tinyagent.yaml. Neither
+// rule covers a file that is already tracked.
 func runInitConfig(o *options) int {
 	path := o.configPath
 	if path == "" {
@@ -104,11 +107,16 @@ func runInitConfig(o *options) int {
 			fmt.Fprintln(os.Stderr, config.LegacyProjectHint(legacy))
 		}
 		if changed, err := config.EnsureIgnored(o.cwd); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not add %s to %s: %v; keep it out of commits yourself\n", config.ProjectFile, config.IgnoreFile, err)
+			fmt.Fprintf(os.Stderr, "warning: could not add %s to %s: %v; keep an untracked copy out of commits yourself (a tracked file is not covered by an ignore rule)\n", config.ProjectFile, config.IgnoreFile, err)
 		} else if changed {
-			fmt.Fprintf(os.Stderr, "added %s to %s so git add . leaves it out\n", config.ProjectFile, config.IgnoreFile)
+			fmt.Fprintf(os.Stderr, "added %s to %s so git add . leaves an untracked copy out; a tracked file is not covered by that rule\n", config.ProjectFile, config.IgnoreFile)
 		}
 		fmt.Fprintf(os.Stderr, "hint: %s is local configuration: never commit it, and keep secrets in env vars (api_key_env, env: names), not in it\n", config.ProjectFile)
+	}
+	if changed, err := config.EnsureGitExclude(o.cwd); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not add an untracked tinyagent.yaml pattern to .git/info/exclude: %v; a tracked file is not covered by an ignore rule\n", err)
+	} else if changed {
+		fmt.Fprintf(os.Stderr, "added an untracked tinyagent.yaml pattern to .git/info/exclude so git add . leaves it out; a tracked copy is not covered by that rule\n")
 	}
 	return 0
 }

@@ -18,11 +18,22 @@ func locateConfig(o *options, cwd string, stderr io.Writer) config.Source {
 	return src
 }
 
-// ensureConfigIgnored keeps the local ./.tinyagent/tinyagent.yaml out of
-// commits (see config.EnsureIgnored); a failure is only a warning.
+// ensureConfigIgnored keeps an untracked ./.tinyagent/tinyagent.yaml out of
+// broad staging (see config.EnsureIgnored). A failure is only a warning.
+// The rule does not cover a tracked file.
 func ensureConfigIgnored(cwd string, stderr io.Writer) {
 	if _, err := config.EnsureIgnored(cwd); err != nil {
-		fmt.Fprintf(stderr, "warning: could not add %s to %s: %v; keep it out of commits yourself\n", config.ProjectFile, config.IgnoreFile, err)
+		fmt.Fprintf(stderr, "warning: could not add %s to %s: %v; keep an untracked copy out of commits yourself (a tracked file is not covered by an ignore rule)\n", config.ProjectFile, config.IgnoreFile, err)
+	}
+}
+
+// ensureGitExclude adds an untracked tinyagent.yaml pattern to
+// .git/info/exclude when cwd is a Git work tree (see config.EnsureGitExclude).
+// A failure is only a warning. It does not cover a tracked file, and it
+// does not edit the repository .gitignore.
+func ensureGitExclude(cwd string, stderr io.Writer) {
+	if _, err := config.EnsureGitExclude(cwd); err != nil {
+		fmt.Fprintf(stderr, "warning: could not add an untracked tinyagent.yaml pattern to .git/info/exclude: %v; keep an untracked copy out of commits yourself (a tracked file is not covered by an ignore rule)\n", err)
 	}
 }
 
@@ -34,6 +45,7 @@ func loadConfig(o *options, cwd string, stderr io.Writer) (config.Source, config
 	if src.Kind == config.SourceCwd {
 		ensureConfigIgnored(cwd, stderr)
 	}
+	ensureGitExclude(cwd, stderr)
 	cfg, err := config.LoadProfile(src.Path, o.profile)
 	if err != nil {
 		return src, cfg, err
