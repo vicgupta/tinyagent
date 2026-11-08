@@ -380,6 +380,7 @@ func (w *webUI) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body map[string]any
+	// 64 MiB leaves room for a maxChatInputBytes message, JSON wrapping and images.
 	if err := json.NewDecoder(http.MaxBytesReader(rw, r.Body, 64<<20)).Decode(&body); err != nil {
 		http.Error(rw, "bad JSON: "+err.Error(), http.StatusBadRequest)
 		return
@@ -1076,6 +1077,9 @@ func webDetailPayload(kind string, fields map[string]any) map[string]any {
 // start begins a turn with msg in the background. from, when set, rewinds
 // the conversation to before the latest turn first (edit / regenerate).
 func (w *webUI) start(msg string, images []model.Image, from *webTurnSnap) (any, error) {
+	if len(msg) > maxChatInputBytes {
+		return nil, fmt.Errorf("message is too large (%s bytes; max is %s)", formatInt(len(msg)), formatInt(maxChatInputBytes))
+	}
 	w.mu.Lock()
 	if w.running {
 		w.mu.Unlock()
@@ -1115,6 +1119,9 @@ func (w *webUI) start(msg string, images []model.Image, from *webTurnSnap) (any,
 	w.running, w.cancel, w.turnDone = true, cancel, make(chan struct{})
 	turns, path, done := w.turns, w.path, w.turnDone
 	w.mu.Unlock()
+	if note := largeMessageWarning(msg, sessionContextWindow(s)); note != "" {
+		w.broadcast("warning", map[string]any{"text": note})
+	}
 	go w.runTurn(ctx, cancel, a, cfg, msg, len(images), prev, path, turns, done, from != nil)
 	return map[string]any{"ok": true, "turn": turns}, nil
 }

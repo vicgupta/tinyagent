@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/vicgupta/tinyagent/internal/termmd"
 )
@@ -37,6 +38,8 @@ type lineEditor struct {
 	mu        sync.Mutex
 	restore   func()        // raw-mode restore while ReadLine is in raw mode
 	interrupt chan struct{} // SIGINT at the prompt unblocks ReadLine
+	maxInput  int           // 0 means maxChatInputBytes
+	truncated bool          // the last read hit the input cap
 }
 
 func newLineEditor(tty *os.File, r io.Reader, w io.Writer, hist *chatHistory) *lineEditor {
@@ -100,13 +103,39 @@ func (e *lineEditor) interrupted() <-chan struct{} {
 	return e.interrupt
 }
 
+const (
+	enableBracketedPaste  = "\x1b[?2004h"
+	disableBracketedPaste = "\x1b[?2004l"
+)
+
+func (e *lineEditor) inputMax() int {
+	if e != nil && e.maxInput > 0 {
+		return e.maxInput
+	}
+	return maxChatInputBytes
+}
+
+// takeTruncated reports whether a read hit the input cap and clears the flag.
+func (e *lineEditor) takeTruncated() bool {
+	if e == nil {
+		return false
+	}
+	t := e.truncated
+	e.truncated = false
+	return t
+}
+
 // ReadLine shows prompt and returns the line typed, without its newline.
 // Ctrl-D on an empty line returns io.EOF; Ctrl-C returns errInterrupt.
 func (e *lineEditor) ReadLine(prompt string) (string, error) {
 	if e.raw != nil {
 		if restore, err := e.raw(); err == nil {
-			e.setRestore(restore)
+			e.setRestore(func() {
+				io.WriteString(e.w, disableBracketedPaste)
+				restore()
+			})
 			defer e.restoreRaw()
+			io.WriteString(e.w, enableBracketedPaste)
 			return e.readRaw(prompt)
 		}
 	}
@@ -130,7 +159,7 @@ func (e *lineEditor) readCooked() (string, error) {
 			ch <- result{"", err}
 			return
 		}
-		ch <- result{strings.TrimRight(line, "\r\n"), nil}
+		ch <- result{e.limitInput(strings.TrimRight(line, "\r\n")), nil}
 	}()
 	select {
 	case <-e.interrupted():
@@ -230,7 +259,18 @@ func (e *lineEditor) readRaw(prompt string) (string, error) {
 		case 14: // Ctrl-N
 			st.down()
 		case 27:
-			e.escape(st)
+			if err := e.escape(st); err != nil {
+				e.toEnd(prompt, st)
+				if errors.Is(err, errInterrupt) {
+					io.WriteString(e.w, "^C\r\n")
+					return string(st.buf), errInterrupt
+				}
+				io.WriteString(e.w, "\r\n")
+				if len(st.buf) > 0 && err == io.EOF {
+					return string(st.buf), nil
+				}
+				return "", err
+			}
 		case '\t':
 			st.insert(' ')
 		default:
@@ -243,28 +283,28 @@ func (e *lineEditor) readRaw(prompt string) (string, error) {
 }
 
 // escape handles an escape sequence: CSI or SS3 cursor keys, Home, End,
-// Delete. Unknown sequences are dropped.
-func (e *lineEditor) escape(st *lineState) {
+// Delete, or a bracketed-paste start (CSI 200~). Unknown sequences are dropped.
+func (e *lineEditor) escape(st *lineState) error {
 	b, err := e.r.ReadByte()
 	if err != nil || (b != '[' && b != 'O') {
-		return
+		return nil
 	}
 	c, err := e.r.ReadByte()
 	if err != nil {
-		return
+		return nil
 	}
 	if c >= '0' && c <= '9' {
 		num := string(c)
 		for {
 			d, err := e.r.ReadByte()
 			if err != nil {
-				return
+				return nil
 			}
 			if d == '~' {
 				break
 			}
 			if (d < '0' || d > '9') && d != ';' {
-				return
+				return nil
 			}
 			num += string(d)
 		}
@@ -275,8 +315,10 @@ func (e *lineEditor) escape(st *lineState) {
 			st.pos = len(st.buf)
 		case "3":
 			st.del()
+		case "200":
+			return e.paste(st)
 		}
-		return
+		return nil
 	}
 	switch c {
 	case 'A':
@@ -292,6 +334,7 @@ func (e *lineEditor) escape(st *lineState) {
 	case 'F':
 		st.pos = len(st.buf)
 	}
+	return nil
 }
 
 // reEscape matches CSI (colours, cursor moves) and OSC (hyperlinks,
@@ -373,8 +416,133 @@ func (e *lineEditor) toEnd(prompt string, st *lineState) {
 }
 
 func (st *lineState) insert(r rune) {
+	if len(st.buf) >= maxChatInputBytes {
+		return
+	}
 	st.buf = append(st.buf[:st.pos], append([]rune{r}, st.buf[st.pos:]...)...)
 	st.pos++
+}
+
+func (st *lineState) insertString(s string) {
+	if s == "" {
+		return
+	}
+	runes := []rune(s)
+	st.buf = append(st.buf[:st.pos], append(runes, st.buf[st.pos:]...)...)
+	st.pos += len(runes)
+}
+
+func (e *lineEditor) limitInput(s string) string {
+	max := e.inputMax()
+	if len(s) <= max {
+		return s
+	}
+	e.truncated = true
+	s = s[:max]
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+// paste reads a bracketed-paste payload until CSI 201~ and inserts it as
+// one edit, so newlines stay in the message and the line is redrawn once.
+func (e *lineEditor) paste(st *lineState) error {
+	s, err := e.readPaste()
+	room := e.inputMax() - len(string(st.buf))
+	if room < 0 {
+		room = 0
+	}
+	if len(s) > room {
+		e.truncated = true
+		s = s[:room]
+		for len(s) > 0 && !utf8.ValidString(s) {
+			s = s[:len(s)-1]
+		}
+	}
+	st.insertString(s)
+	return err
+}
+
+func (e *lineEditor) readPaste() (string, error) {
+	type result struct {
+		s   string
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		s, err := e.collectPaste()
+		ch <- result{s, err}
+	}()
+	select {
+	case <-e.interrupted():
+		return "", errInterrupt
+	case r := <-ch:
+		return r.s, r.err
+	}
+}
+
+func (e *lineEditor) collectPaste() (string, error) {
+	var b strings.Builder
+	limit := e.inputMax()
+	for {
+		r, _, err := e.r.ReadRune()
+		if err != nil {
+			return b.String(), err
+		}
+		if r == 0x1b {
+			done, err := e.sawPasteEnd()
+			if err != nil {
+				return b.String(), err
+			}
+			if done {
+				return b.String(), nil
+			}
+			continue
+		}
+		if r == '\r' {
+			if p, err := e.r.Peek(1); err == nil && len(p) > 0 && p[0] == '\n' {
+				e.r.ReadByte()
+			}
+			r = '\n'
+		}
+		if r < 32 && r != '\n' && r != '\t' {
+			continue
+		}
+		n := utf8.RuneLen(r)
+		if n < 0 {
+			continue
+		}
+		if b.Len()+n > limit {
+			e.truncated = true
+			continue
+		}
+		b.WriteRune(r)
+	}
+}
+
+func (e *lineEditor) sawPasteEnd() (bool, error) {
+	r, _, err := e.r.ReadRune()
+	if err != nil {
+		return false, err
+	}
+	if r != '[' {
+		return false, nil
+	}
+	var num strings.Builder
+	for {
+		r, _, err = e.r.ReadRune()
+		if err != nil {
+			return false, err
+		}
+		if r >= '0' && r <= '9' {
+			if num.Len() < 16 {
+				num.WriteRune(r)
+			}
+			continue
+		}
+		return r == '~' && num.String() == "201", nil
+	}
 }
 
 func (st *lineState) backspace() {

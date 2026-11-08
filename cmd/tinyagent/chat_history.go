@@ -39,7 +39,7 @@ func loadChatHistory(path string) (*chatHistory, error) {
 	}
 	defer f.Close()
 	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64*1024), 16*1024*1024)
+	sc.Buffer(make([]byte, 64*1024), maxChatInputBytes*2+32)
 	for sc.Scan() {
 		if e, err := strconv.Unquote(sc.Text()); err == nil {
 			h.entries = append(h.entries, e)

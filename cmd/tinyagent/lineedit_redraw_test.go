@@ -44,7 +44,7 @@ func (t *fakeTerm) Write(p []byte) (int, error) {
 			t.line(t.row)
 		case r == 0x1b && i+1 < len(s) && s[i+1] == '[':
 			j := i + 2
-			for j < len(s) && (s[j] >= '0' && s[j] <= '9' || s[j] == ';') {
+			for j < len(s) && (s[j] >= '0' && s[j] <= '9' || s[j] == ';' || s[j] == '?') {
 				j++
 			}
 			n, err := strconv.Atoi(string(s[i+2 : j]))
@@ -165,6 +165,7 @@ func TestLineEditorRedrawScreen(t *testing.T) {
 		{"history", "draft\x1b[A", colorPrompt, 40, []string{"old"}, []string{"", "› old"}},
 		{"history down", "draft\x1b[A\x1b[B", colorPrompt, 40, []string{"a much longer old entry"}, []string{"", "› draft"}},
 		{"paste", "pasted words at once", "> ", 40, nil, []string{"> pasted words at once"}},
+		{"bracketed paste", "\x1b[200~hello\nworld\x1b[201~", "> ", 40, nil, []string{"> hello↵world"}},
 		{"wrap", "0123456789abcdef", "> ", 10, nil, []string{"> 01234567", "89abcdef"}},
 		{"wrap exact", "01234567", "> ", 10, nil, []string{"> 01234567", ""}},
 		{"wrap backspace", "0123456789\x7f\x7f\x7f", "> ", 10, nil, []string{"> 0123456"}},
