@@ -4,6 +4,8 @@
 
 ### Added
 
+- **`ARCHITECTURE.md`.** A short root-level map for contributors: the real packages under `cmd/` and `internal/`, the request flow from startup to output, and the key invariants (state only in `--cwd`, `AGENTS.md` only, no user config, tool signature pinning, append-only history, a result for every tool call), each linked to the docs page that covers it. Linked from the README Documentation table and CONTRIBUTING. Docs only, no behavior change. (#384)
+
 - **Goal mode (`tinyagent goal`).** A thin subcommand wrapper that plans first, runs the task, and verifies before stop: `tinyagent goal "ship the feature"` is the same as `--plan --plan-first --verify-on-stop -t "ship the feature"`. Optional `--check <cmd>` is `--verify-check` (a success-condition command tinyagent runs itself); repeatable. Bare `tinyagent goal` prints its help. Session handoff stays opt-in (`--handoff`). There is no `/goal` chat command and no extra workflow template: start chat with `tinyagent goal -i`, and the existing `docs/workflows/workflow.yaml` `implement` workflow already covers plan → implement → verify. See [Goal mode](docs/tasks.md#goal-mode). (#383)
 
 - **Optional AI permission judge for `ask` decisions.** Opt-in via `permissions.judge` (off by default). When a rule (or the default) would ask the user, the auxiliary model (task `permission`) classifies the call and may auto-allow only on high confidence; it never silently denies — low confidence, risky, or a model error falls back to the normal human prompt. Explicit deny rules and lockdown still win first. The `permission` event records `judge` (`verdict`, `confidence`, `reason`). See [AI permission judge](docs/permissions.md#ai-permission-judge). (#382)

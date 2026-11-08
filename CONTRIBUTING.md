@@ -52,6 +52,11 @@ If you add or remove a direct dependency, update this list too;
 
 ## Layout
 
+[ARCHITECTURE.md](ARCHITECTURE.md) has the full package map, the request
+flow and the invariants every change must keep (cwd-only state, AGENTS.md
+only, no user config, tool signature pinning, append-only history). Update it
+when you add a package or change one of those rules.
+
 ```
 cmd/tinyagent/        CLI entrypoint, flag parsing, main loop glue; help.go holds --help and help topics (help workflows)
 cmd/tinyagent/web/    tinyagent web's page (HTML/CSS/JS, hand-written, embedded with go:embed; no build step, never commit generated files); web.go serves it, chat_session.go is the session core shared with chat
