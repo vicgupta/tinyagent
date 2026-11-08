@@ -44,8 +44,22 @@
   function setMD(node, text) {
     node.classList.toggle("raw", S.raw || (S.state && !S.state.markdown));
     if (S.raw || (S.state && !S.state.markdown)) node.textContent = text;
-    else node.innerHTML = MD.render(text);
+    else {
+      // Re-render the whole reply as it streams, including an unclosed fence,
+      // and keep a code block's scroll position across that replacement.
+      var tops = [];
+      node.querySelectorAll("pre").forEach(function (p) { tops.push(p.scrollTop); });
+      node.innerHTML = MD.render(text);
+      node.querySelectorAll("pre").forEach(function (p, i) { if (tops[i]) p.scrollTop = tops[i]; });
+    }
     node.dataset.src = text;
+  }
+  // detailsOn is true when this session was started with -v/--verbose.
+  // Until /api/state arrives, trust the server: it only sends tool and
+  // detail events in verbose mode.
+  function detailsOn() {
+    if (!S.state || S.state.verbose == null) return true;
+    return !!S.state.verbose;
   }
   function nearBottom() { return els.log.scrollHeight - els.log.scrollTop - els.log.clientHeight < 80; }
   function scroll() { if (S.pinned) els.log.scrollTop = els.log.scrollHeight; updateJump(); }
@@ -172,6 +186,24 @@
     for (var i = all.length - 1; i >= 0; i--) if (all[i].dataset.tool === String(id) && !all[i].querySelector(".st.ok, .st.err")) return all[i];
     return null;
   }
+  function showWorking() {
+    if (!S.cur) S.cur = { msg: append(assistantMsg()), seg: null };
+    var n = S.cur.msg.querySelector(".activity");
+    if (!n) {
+      n = el("div", "activity");
+      n.setAttribute("role", "status");
+      n.appendChild(el("span", "dot"));
+      n.appendChild(document.createTextNode("Working…"));
+      S.cur.msg.appendChild(n);
+    }
+    n.hidden = false;
+    scroll();
+  }
+  function hideWorking() {
+    if (!S.cur) return;
+    var n = S.cur.msg.querySelector(".activity");
+    if (n) n.hidden = true;
+  }
 
   // ---------- full render from /api/state ----------
   function renderAll() {
@@ -186,12 +218,12 @@
       if (m.role === "assistant") {
         if (!a) { a = assistantMsg(); els.msgs.appendChild(a); }
         if (m.content && m.content.trim()) setMD(segment(a), m.content);
-        (m.tool_calls || []).forEach(function (tc) {
+        if (detailsOn()) (m.tool_calls || []).forEach(function (tc) {
           var fn = tc.function || tc; a.appendChild(toolCard(tc.id, fn.name || tc.name, fn.arguments != null ? fn.arguments : tc.arguments));
         });
         return;
       }
-      if (m.role === "tool") { toolResult(findCard(m.tool_call_id), m.content, /^(error|Error)/.test(m.content || "")); }
+      if (m.role === "tool" && detailsOn()) { toolResult(findCard(m.tool_call_id), m.content, /^(error|Error)/.test(m.content || "")); }
     });
     if (st.question) questionCard(st.question);
     Object.keys(S.perms).forEach(function (id) { if (!S.perms[id].done) permCard(S.perms[id].ev); });
@@ -224,6 +256,7 @@
       if (set[k]) els.status.appendChild(el("span", "badge on", k.replace("_", "-")));
     });
     if (S.raw) els.status.appendChild(el("span", "badge", "raw"));
+    if (st.verbose) els.status.appendChild(el("span", "badge", "verbose"));
     if (!S.connected) els.status.appendChild(el("span", "badge", "offline"));
   }
   function fmtInt(n) { return Number(n).toLocaleString(); }
@@ -328,19 +361,28 @@
     es.addEventListener("delta", function (e) {
       var d = JSON.parse(e.data);
       if (!S.cur) S.cur = { msg: append(assistantMsg()), seg: null };
+      hideWorking();
       if (!S.cur.seg) { S.cur.seg = segment(S.cur.msg); }
       var pinned = nearBottom();
       setMD(S.cur.seg, S.cur.seg.dataset.src + d.text);
       S.pinned = pinned; scroll();
     });
+    es.addEventListener("activity", function (e) {
+      var d = JSON.parse(e.data);
+      if (d.phase !== "working") return;
+      showWorking();
+    });
     es.addEventListener("tool_call", function (e) {
+      if (!detailsOn()) return;
       var d = JSON.parse(e.data);
       if (!S.cur) S.cur = { msg: append(assistantMsg()), seg: null };
       S.cur.seg = null;
+      hideWorking();
       S.cur.msg.appendChild(toolCard(d.id, d.name, d.arguments));
       scroll();
     });
     es.addEventListener("tool_output", function (e) {
+      if (!detailsOn()) return;
       var d = JSON.parse(e.data);
       var card = findCard(d.id);
       if (!card && S.cur) {
@@ -351,8 +393,25 @@
       toolOutput(card, d.output); scroll();
     });
     es.addEventListener("tool_result", function (e) {
+      if (!detailsOn()) return;
       var d = JSON.parse(e.data);
       toolResult(findCard(d.id), d.output, d.is_error); scroll();
+    });
+    es.addEventListener("detail", function (e) {
+      if (!detailsOn()) return;
+      var d = JSON.parse(e.data);
+      if (!S.cur) S.cur = { msg: append(assistantMsg()), seg: null };
+      S.cur.seg = null;
+      var card = el("details", "tool detail");
+      var s = el("summary");
+      s.appendChild(el("span", "name", String(d.kind || "detail")));
+      card.appendChild(s);
+      var body = d.fields_json != null ? String(d.fields_json) : JSON.stringify(d.fields == null ? {} : d.fields, null, 2);
+      var sec = el("div", "section");
+      sec.appendChild(pre(body));
+      card.appendChild(sec);
+      S.cur.msg.appendChild(card);
+      scroll();
     });
     es.addEventListener("log", function (e) { notice(JSON.parse(e.data).text, "log"); });
     es.addEventListener("notice", function (e) { notice(JSON.parse(e.data).text); });
@@ -369,6 +428,8 @@
       var cur = S.cur; S.cur = null;
       if (cur) {
         cur.msg.classList.remove("cursor");
+        var act = cur.msg.querySelector(".activity");
+        if (act) act.remove();
         if (!d.streamed && d.submission && d.status !== "Error") setMD(segment(cur.msg), d.submission);
         if (!cur.msg.querySelector(".md, details")) cur.msg.remove();
       }

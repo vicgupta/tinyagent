@@ -29,7 +29,8 @@ const source = fs.readFileSync(__dirname + "/app.js", "utf8");
 const context = {
   el: (tag, cls, text) => new Element(tag, cls, text),
   MD: { looksLikeDiff: () => false }, argSummary: () => "args",
-  diffOf: () => "", prettyArgs: () => "{}"
+  diffOf: () => "", prettyArgs: () => "{}",
+  detailsOn: () => true
 };
 vm.createContext(context);
 vm.runInContext(source.slice(source.indexOf("  function pre("), source.indexOf("  // ---------- full render")), context);
@@ -75,5 +76,9 @@ const previous = context.findCard;
 context.findCard = id => id === "cli-1" ? created : previous(id);
 handlers.tool_output({ data: JSON.stringify({ id: "cli-1", name: "Bash", output: "a.go\n" }) });
 assert.equal(host.children.length, 1, "a later chunk must reuse the card");
+assert.equal(created.querySelector(".live-output").querySelector("pre").textContent, "$ ls\na.go\n");
+context.detailsOn = () => false;
+handlers.tool_output({ data: JSON.stringify({ id: "hidden", name: "bash", output: "secret-output" }) });
+assert.equal(host.children.length, 1, "quiet mode ignores tool output");
 assert.equal(created.querySelector(".live-output").querySelector("pre").textContent, "$ ls\na.go\n");
 console.log("tool output ok");

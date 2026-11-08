@@ -268,7 +268,7 @@ func TestWebToolOutputWhileRunning(t *testing.T) {
 	in, release := io.Pipe()
 	defer in.Close()
 	defer release.Close()
-	c := startWeb(t, acpWorkspace(t))
+	c := startWeb(t, acpWorkspace(t), "-v")
 	c.w.s.env = toolStdinGate{in: in}
 	c.w.s.redactor = eventlog.NewValueRedactor([]string{"secret-sentinel"}, false)
 	ev := c.events()
