@@ -56,12 +56,17 @@ func modeConflict(fs *flag.FlagSet, conflicts []string) string {
 var chatTerminal = func() bool { return stdinIsTerminal() && isTerminal(os.Stdout) }
 
 // chatIO is where a chat session reads and writes: the terminal, or a
-// test's pipes. interrupts delivers Ctrl-C (SIGINT) while a turn runs.
+// test's pipes. interrupts delivers Ctrl-C (SIGINT) while a turn runs
+// and at the prompt (cooked mode and Windows, where Ctrl-C is a signal
+// rather than a key).
 type chatIO struct {
 	in         *os.File // raw mode is tried on it when it is a terminal
 	reader     io.Reader
 	out, errw  io.Writer
 	interrupts chan os.Signal
+	// raw, if set, is installed on the line editor so tests can drive
+	// raw-mode keys (such as Ctrl-C) without a real terminal.
+	raw func() (func(), error)
 }
 
 // runChat runs the interactive chat mode (tinyagent chat, -i).
@@ -98,9 +103,9 @@ type chat struct {
 	turns  int
 	start  time.Time
 
-	mu         sync.Mutex
-	cancel     context.CancelFunc // the running turn's, or nil at the prompt
-	lastPrompt time.Time          // last Ctrl-C at an empty prompt
+	mu     sync.Mutex
+	cancel context.CancelFunc // the running turn's, or nil at the prompt
+	quit   bool               // Ctrl-C: finish the current turn (if any) and exit
 }
 
 func runChatIO(o *options, fs *flag.FlagSet, cio chatIO) int {
@@ -140,6 +145,9 @@ func runChatIO(o *options, fs *flag.FlagSet, cio chatIO) int {
 		fmt.Fprintln(errw, "chat: history not loaded:", err)
 	}
 	c.ed = newLineEditor(cio.in, cio.reader, cio.out, hist)
+	if cio.raw != nil {
+		c.ed.raw = cio.raw
+	}
 	go c.watchInterrupts()
 
 	io.WriteString(errw, c.banner())
@@ -153,10 +161,16 @@ func runChatIO(o *options, fs *flag.FlagSet, cio chatIO) int {
 			fmt.Fprintf(errw, "checkpoint %s stopped with %s; continue that run first? [Y/n] ", o.resume, prev.ExitStatus)
 			ans, err := c.ed.ReadLine("")
 			if err != nil {
+				if errors.Is(err, errInterrupt) {
+					return c.exitInterrupted()
+				}
 				return c.exit()
 			}
 			if a := strings.ToLower(strings.TrimSpace(ans)); a == "" || a == "y" || a == "yes" {
 				c.turn(prev.Task, false)
+				if c.shouldQuit() {
+					return c.exitInterrupted()
+				}
 			} else {
 				// A follow-up continues the run whatever its status.
 				c.cont = true
@@ -166,22 +180,21 @@ func runChatIO(o *options, fs *flag.FlagSet, cio chatIO) int {
 	if o.task != "" {
 		c.ed.hist.add(o.task)
 		c.turn(o.task, true)
+		if c.shouldQuit() {
+			return c.exitInterrupted()
+		}
 	}
 	for {
+		if c.shouldQuit() {
+			return c.exitInterrupted()
+		}
 		msg, err := c.readMessage()
 		switch {
 		case errors.Is(err, errInterrupt):
-			if strings.TrimSpace(msg) != "" {
-				continue // Ctrl-C with text typed clears the line
-			}
-			if c.promptInterrupt() {
-				return c.exit()
-			}
-			continue
+			return c.exitInterrupted()
 		case err != nil:
 			return c.exit()
 		}
-		c.lastPrompt = time.Time{}
 		if strings.TrimSpace(msg) == "" {
 			continue
 		}
@@ -196,6 +209,9 @@ func runChatIO(o *options, fs *flag.FlagSet, cio chatIO) int {
 			msg = strings.Replace(msg, "//", "/", 1) // "//x" sends "/x"
 		}
 		c.turn(msg, true)
+		if c.shouldQuit() {
+			return c.exitInterrupted()
+		}
 	}
 }
 
@@ -205,34 +221,37 @@ func chatFinished(t *trajectory.Trajectory) bool {
 	return t.ExitStatus == agent.StatusSubmitted || t.ExitStatus == agent.StatusCompleted || t.ExitStatus == agent.StatusNeedsInput
 }
 
-// promptInterrupt handles Ctrl-C at an empty prompt: the second within two
-// seconds exits.
-func (c *chat) promptInterrupt() bool {
-	now := time.Now()
-	if !c.lastPrompt.IsZero() && now.Sub(c.lastPrompt) < 2*time.Second {
-		return true
-	}
-	c.lastPrompt = now
-	fmt.Fprintln(c.io.errw, c.st.Dim("(press Ctrl-C again, Ctrl-D or /exit to quit)"))
-	return false
+// exitInterrupt is the conventional shell status for SIGINT (128 + 2).
+const exitInterrupt = 130
+
+// shouldQuit reports whether Ctrl-C asked the session to end.
+func (c *chat) shouldQuit() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.quit
 }
 
-// watchInterrupts cancels the running turn on SIGINT. In raw mode the
-// prompt reads Ctrl-C itself, so a signal at the prompt only comes from the
-// cooked fallback, where it counts like a Ctrl-C typed at an empty prompt.
+// watchInterrupts handles SIGINT: during a turn it cancels the run and
+// records that chat should exit once the turn has saved; at the prompt it
+// unblocks the line editor so the main loop can exit 130.
 func (c *chat) watchInterrupts() {
 	for range c.io.interrupts {
-		c.mu.Lock()
-		cancel := c.cancel
-		c.mu.Unlock()
-		if cancel != nil {
-			fmt.Fprintln(c.io.errw, c.st.Yellow("\ninterrupting the turn…"))
-			cancel()
-			continue
-		}
-		if c.promptInterrupt() {
-			os.Exit(c.exit())
-		}
+		c.onInterrupt()
+	}
+}
+
+func (c *chat) onInterrupt() {
+	c.mu.Lock()
+	cancel := c.cancel
+	c.quit = true
+	c.mu.Unlock()
+	if cancel != nil {
+		fmt.Fprintln(c.io.errw, c.st.Yellow("\ninterrupting the turn…"))
+		cancel()
+		return
+	}
+	if c.ed != nil {
+		c.ed.cancelRead()
 	}
 }
 
@@ -305,7 +324,11 @@ func (c *chat) turn(msg string, asFollowUp bool) {
 	defer cancel()
 	c.mu.Lock()
 	c.cancel = cancel
+	already := c.quit
 	c.mu.Unlock()
+	if already {
+		cancel()
+	}
 	defer func() {
 		c.mu.Lock()
 		c.cancel = nil
@@ -412,7 +435,11 @@ func (c *chat) turn(msg string, asFollowUp bool) {
 		printHint(errw, s.modelName, t.Submission)
 		fmt.Fprintln(errw, c.st.Dim("the conversation is kept; send a message to retry or carry on, or /help"))
 	default:
-		fmt.Fprintln(errw, c.st.Yellow(t.ExitStatus)+c.st.Dim(" (your next message continues from here)"))
+		extra := ""
+		if !c.shouldQuit() {
+			extra = c.st.Dim(" (your next message continues from here)")
+		}
+		fmt.Fprintln(errw, c.st.Yellow(t.ExitStatus)+extra)
 	}
 	fmt.Fprintln(errw, "\n"+c.st.Dim(c.turnLine(before, t, elapsed)))
 	events.finish(t, elapsed)
@@ -449,14 +476,19 @@ func turnSummary(n int, prev, t *trajectory.Trajectory, elapsed time.Duration) s
 }
 
 // exit prints the session summary and how to resume it.
-func (c *chat) exit() int {
+func (c *chat) exit() int { return c.finish(0) }
+
+// exitInterrupted prints the same summary after Ctrl-C and returns 130.
+func (c *chat) exitInterrupted() int { return c.finish(exitInterrupt) }
+
+func (c *chat) finish(code int) int {
 	t := c.s.traj
 	if t == nil {
 		fmt.Fprintln(c.io.errw, c.st.Dim("no turns; nothing saved"))
-		return 0
+		return code
 	}
 	io.WriteString(c.io.errw, c.exitSummary(t))
-	return 0
+	return code
 }
 
 // lineEndFilter drops the bare newline the agent writes to end a streamed

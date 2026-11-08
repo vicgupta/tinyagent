@@ -173,11 +173,17 @@ func TestChatInterruptAndResume(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "c.json")
 	start := time.Now()
 	r := runChatTest(t, root, strings.NewReader("run it\n"), sig, "-m", "openai/gpt-4o", "-o", out)
-	if r.code != 0 || time.Since(start) > 4*time.Second {
+	if r.code != 130 || time.Since(start) > 4*time.Second {
 		t.Fatalf("exit %d after %s\n%s", r.code, time.Since(start), r.stderr)
 	}
 	if !strings.Contains(r.stderr, "interrupting the turn") || !strings.Contains(r.stderr, agent.StatusInterrupted) {
 		t.Errorf("stderr:\n%s", r.stderr)
+	}
+	if strings.Contains(r.stderr, "your next message continues from here") || strings.Contains(r.stderr, "press Ctrl-C again") {
+		t.Errorf("should exit rather than stay in chat:\n%s", r.stderr)
+	}
+	if !strings.Contains(r.stderr, "chat ended") || !strings.Contains(r.stderr, "resume") {
+		t.Errorf("want session summary and resume hint:\n%s", r.stderr)
 	}
 	tr, err := trajectory.Load(out)
 	if err != nil || tr.ExitStatus != agent.StatusInterrupted {
@@ -202,6 +208,77 @@ func TestChatInterruptAndResume(t *testing.T) {
 	// -o can't overwrite the checkpoint being resumed.
 	if r := runChatTest(t, root, strings.NewReader(""), nil, "--resume", out, "-o", out); r.code != 2 {
 		t.Errorf("same -o: exit %d", r.code)
+	}
+}
+
+func runChatRaw(t *testing.T, root string, input string, args ...string) chatRun {
+	t.Helper()
+	var o options
+	fs := newFlagSet(&o)
+	if err := fs.Parse(append([]string{"--interactive", "--cwd", root, "--color", "never"}, args...)); err != nil {
+		t.Fatal(err)
+	}
+	var out, errw strings.Builder
+	code := runChatIO(&o, fs, chatIO{
+		reader:     strings.NewReader(input),
+		out:        &out,
+		errw:       &errw,
+		interrupts: make(chan os.Signal, 1),
+		raw:        func() (func(), error) { return func() {}, nil },
+	})
+	return chatRun{code, out.String(), errw.String()}
+}
+
+func TestChatPromptCtrlCExits(t *testing.T) {
+	root := acpWorkspace(t)
+	newACPProvider(t)
+	r := runChatRaw(t, root, "\x03", "-m", "openai/gpt-4o")
+	if r.code != 130 {
+		t.Fatalf("empty prompt: exit %d, want 130\n%s", r.code, r.stderr)
+	}
+	if !strings.Contains(r.stderr, "no turns; nothing saved") {
+		t.Errorf("empty prompt stderr:\n%s", r.stderr)
+	}
+	if strings.Contains(r.stderr, "press Ctrl-C again") {
+		t.Error("double Ctrl-C hint still present")
+	}
+	// Ctrl-C with text on the line also exits, instead of clearing the line.
+	r = runChatRaw(t, root, "partial\x03more\n", "-m", "openai/gpt-4o")
+	if r.code != 130 {
+		t.Fatalf("with text: exit %d, want 130\n%s", r.code, r.stderr)
+	}
+	if strings.Contains(r.stderr, "press Ctrl-C again") {
+		t.Error("double Ctrl-C hint still present with text")
+	}
+}
+
+func TestChatPromptSIGINTExits(t *testing.T) {
+	root := acpWorkspace(t)
+	newACPProvider(t)
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pr.Close()
+	t.Cleanup(func() { pw.Close() })
+	sig := make(chan os.Signal, 1)
+	sig <- os.Interrupt
+	var o options
+	fs := newFlagSet(&o)
+	if err := fs.Parse([]string{"--interactive", "--cwd", root, "--color", "never", "-m", "openai/gpt-4o"}); err != nil {
+		t.Fatal(err)
+	}
+	var out, errw strings.Builder
+	code := runChatIO(&o, fs, chatIO{reader: pr, out: &out, errw: &errw, interrupts: sig})
+	pw.Close()
+	if code != 130 {
+		t.Fatalf("exit %d, want 130\n%s", code, errw.String())
+	}
+	if !strings.Contains(errw.String(), "no turns; nothing saved") {
+		t.Errorf("stderr:\n%s", errw.String())
+	}
+	if strings.Contains(errw.String(), "press Ctrl-C again") {
+		t.Error("double Ctrl-C hint still present")
 	}
 }
 
@@ -371,6 +448,30 @@ func TestLineEditor(t *testing.T) {
 	}
 	if _, err := c.ReadLine("> "); err != io.EOF {
 		t.Errorf("cooked eof: %v", err)
+	}
+}
+
+func TestLineEditorCancelRead(t *testing.T) {
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pr.Close()
+	defer pw.Close()
+	e := newLineEditor(nil, pr, io.Discard, nil)
+	done := make(chan error, 1)
+	go func() {
+		_, err := e.ReadLine("> ")
+		done <- err
+	}()
+	e.cancelRead()
+	select {
+	case err := <-done:
+		if !errors.Is(err, errInterrupt) {
+			t.Fatalf("got %v, want errInterrupt", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ReadLine was not cancelled")
 	}
 }
 

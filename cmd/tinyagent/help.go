@@ -32,7 +32,7 @@ var helpBrief = helpIntro + "\n" + helpEssentials + helpSubcommands() + "\n" + h
 var helpEssentials = `Examples:
   tinyagent -t "fix the failing test in ./pkg"
   git diff | tinyagent -t - -m anthropic/claude-sonnet-4-5 --read-only
-  tinyagent chat       # interactive session: type messages, Ctrl-D to quit
+  tinyagent chat       # interactive session: type messages, Ctrl-C or Ctrl-D to quit
   tinyagent --workflow wf.yaml -t "add CSV export"  # see tinyagent help workflows
 
 Common options:

@@ -49,7 +49,7 @@ Thirteen subcommands are shortcuts for existing flags. They rewrite the command 
 | `-h, --help` | | Print usage to stdout and exit |
 | `-t, --task` | — | Task prompt (required unless `--resume`; with `--resume` of a finished run, the follow-up task; of a `NeedsInput` run, the answer); `-` reads it from stdin |
 | `--resume` | — | Continue a validated unfinished trajectory; requires explicit matching `--cwd` and a new `-o` path |
-| `-i, --interactive` | off | Same as `tinyagent chat`: an interactive session on the terminal; `-t` sends the first message, and limits apply per turn. Needs a terminal (exit 2 otherwise); see [Interactive chat](chat.md) |
+| `-i, --interactive` | off | Same as `tinyagent chat`: an interactive session on the terminal; `-t` sends the first message, and limits apply per turn. Needs a terminal (exit 2 otherwise). Ctrl-C cancels a running turn (if any) and exits with status 130; the session is saved and can be resumed. See [Interactive chat](chat.md) |
 | `--web` | off | Same as `tinyagent web`: chat in the browser. Serves a local web UI on `127.0.0.1` with a per-run token and opens the default browser; chat flags apply and limits apply per turn. Can't be combined with `-i`/`chat` or `--acp`; see [Web UI](web.md) |
 | `--web-port` | `7777` | Port for `--web`. Unset, a busy port falls back to the next free one (or one the OS picks) and the URL shows which; set, a busy port exits 1 |
 | `--web-no-open` | off | With `--web`, print the URL instead of opening a browser |
