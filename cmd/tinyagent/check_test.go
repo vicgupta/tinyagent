@@ -131,14 +131,15 @@ func TestCheckProjectConfigAndFallbacks(t *testing.T) {
 	}
 	// The old user config is no longer read: a project file is.
 	cwd := t.TempDir()
-	if err := os.Rename(p, filepath.Join(cwd, "tinyagent.yaml")); err != nil {
+	os.MkdirAll(filepath.Join(cwd, ".tinyagent"), 0o755)
+	if err := os.Rename(p, filepath.Join(cwd, ".tinyagent", "tinyagent.yaml")); err != nil {
 		t.Fatal(err)
 	}
 	code, stdout, stderr := runCLI(t, "--check", "--cwd", cwd)
 	if code != 0 {
 		t.Fatalf("exit %d; stderr:\n%s", code, stderr)
 	}
-	if got, want := reportLine(t, stdout, "config"), filepath.Join(cwd, "tinyagent.yaml")+" (cwd)"; got != want {
+	if got, want := reportLine(t, stdout, "config"), filepath.Join(cwd, ".tinyagent", "tinyagent.yaml")+" (cwd)"; got != want {
 		t.Errorf("config line %q, want %q", got, want)
 	}
 	if got := reportLine(t, stdout, "fallback"); got != "openrouter/a/b (from config)" {

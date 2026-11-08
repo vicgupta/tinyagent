@@ -39,7 +39,7 @@ Common options:
   -t, --task string    the task/prompt; "-" reads it from stdin
   -m, --model string   provider/model: openai, anthropic, openrouter or ollama
                        (default $AGENT_MODEL, else config model, else ` + builtinModel + `)
-  -c, --config path    YAML config (default: ./tinyagent.yaml in --cwd)
+  -c, --config path    YAML config (default: ./.tinyagent/tinyagent.yaml in --cwd)
       --cwd dir        working directory (default .)
       --resume path    continue or follow up a run saved with -o <path>
   -i, --interactive    chat on the terminal (same as tinyagent chat)

@@ -22,7 +22,8 @@ func TestListProfilesExplicitConfigSorted(t *testing.T) {
 func TestListProfilesProjectConfig(t *testing.T) {
 	checkEnv(t)
 	cwd := t.TempDir()
-	p := filepath.Join(cwd, "tinyagent.yaml")
+	p := filepath.Join(cwd, ".tinyagent", "tinyagent.yaml")
+	os.MkdirAll(filepath.Dir(p), 0o755)
 	if err := os.WriteFile(p, []byte("profiles:\n  zebra: {}\n  apple: {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -114,7 +114,8 @@ var errUnavailableForTest = errors.New("sandbox: not here")
 func TestCheckJSONCwdConfigSource(t *testing.T) {
 	t.Setenv("AGENT_MODEL", "")
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "tinyagent.yaml"), []byte("model: ollama/llama3\n"), 0o644); err != nil {
+	os.MkdirAll(filepath.Join(dir, ".tinyagent"), 0o755)
+	if err := os.WriteFile(filepath.Join(dir, ".tinyagent", "tinyagent.yaml"), []byte("model: ollama/llama3\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	code, stdout, stderr := runCLI(t, "--check", "--json", "--cwd", dir)

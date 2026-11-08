@@ -7,11 +7,17 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"syscall"
 )
 
-// ProjectFile is the project config file name. It is looked up only in the
-// --cwd directory itself, never in a parent.
-const ProjectFile = "tinyagent.yaml"
+// ProjectFile is the project config file, relative to --cwd: it lives with
+// the rest of tinyagent's cwd state in .tinyagent/. It is looked up only in
+// the --cwd directory itself, never in a parent.
+const ProjectFile = ".tinyagent/tinyagent.yaml"
+
+// LegacyProjectFile is the old project config location (./tinyagent.yaml in
+// --cwd). It is never read; when it exists, Locate adds a note to move it.
+const LegacyProjectFile = "tinyagent.yaml"
 
 // SourceKind says where a config file came from.
 type SourceKind int
@@ -21,7 +27,7 @@ const (
 	SourceNone SourceKind = iota
 	// SourceFlag is a file named with -c/--config.
 	SourceFlag
-	// SourceCwd is ./tinyagent.yaml in the --cwd directory.
+	// SourceCwd is ./.tinyagent/tinyagent.yaml in the --cwd directory.
 	SourceCwd
 )
 
@@ -44,10 +50,12 @@ func (s Source) Label() string {
 }
 
 // Locate returns the config file to load: explicit (-c) if set; else
-// tinyagent.yaml in cwd (exactly that directory, no walking up); else none.
-// The old per-user config (DefaultPath) is never read; when it exists and
-// nothing else was found, a note points at tinyagent init --migrate. A cwd
-// file that exists but can't be read is still returned, so Load reports it.
+// .tinyagent/tinyagent.yaml in cwd (exactly that directory, no walking up);
+// else none. The old ./tinyagent.yaml is never read: when it exists (and no
+// -c was given) a note says to move it. The old per-user config
+// (DefaultPath) is never read either; when it exists and nothing else was
+// found, a note points at tinyagent init --migrate. A cwd file that exists
+// but can't be read is still returned, so Load reports it.
 func Locate(explicit, cwd string) Source {
 	if explicit != "" {
 		return Source{Path: explicit, Kind: SourceFlag}
@@ -55,14 +63,25 @@ func Locate(explicit, cwd string) Source {
 	if cwd == "" {
 		cwd = "."
 	}
+	var notes []string
+	legacy := filepath.Join(cwd, LegacyProjectFile)
+	if _, err := os.Lstat(legacy); err == nil {
+		notes = append(notes, LegacyProjectHint(legacy))
+	}
 	p := filepath.Join(cwd, ProjectFile)
-	if _, err := os.Stat(p); err == nil || !errors.Is(err, fs.ErrNotExist) {
-		return Source{Path: p, Kind: SourceCwd}
+	// A .tinyagent that is a plain file (ENOTDIR) means no project config.
+	if _, err := os.Stat(p); err == nil || !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTDIR) {
+		return Source{Path: p, Kind: SourceCwd, Notes: notes}
 	}
 	if user := legacyUserConfig(); user != "" {
-		return Source{Notes: []string{fmt.Sprintf("note: user config %s is no longer read; run tinyagent init --migrate to copy it to ./%s", user, ProjectFile)}}
+		notes = append(notes, fmt.Sprintf("note: user config %s is no longer read; run tinyagent init --migrate to copy it to ./%s", user, ProjectFile))
 	}
-	return Source{}
+	return Source{Notes: notes}
+}
+
+// LegacyProjectHint is the note for an old ./tinyagent.yaml at path.
+func LegacyProjectHint(path string) string {
+	return fmt.Sprintf("hint: project config now lives in ./%s; %s is no longer read (move it there to keep it: mkdir -p .tinyagent && mv tinyagent.yaml .tinyagent/)", ProjectFile, path)
 }
 
 // UntrustedKeys lists the settings a project (cwd) config may set only

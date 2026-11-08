@@ -10,7 +10,7 @@ import (
 	"github.com/vicgupta/tinyagent/internal/config"
 )
 
-const starterConfig = `# tinyagent project config (./tinyagent.yaml). Flags override these values. Full reference: docs/config.md.
+const starterConfig = `# tinyagent project config (./.tinyagent/tinyagent.yaml). Flags override these values. Full reference: docs/config.md.
 ## Keep secrets in env vars (api_key_env names them); this file may be committed.
 ## mcp_servers, hooks, command_tools, lsp.servers, plugins (and other executables) need --trust-config here.
 # model: openai/gpt-4o        # same <provider>/<model> syntax as -m
@@ -62,8 +62,9 @@ const starterConfig = `# tinyagent project config (./tinyagent.yaml). Flags over
 
 // runInitConfig handles tinyagent init (--init-config): it writes the
 // starter config, or with --init-migrate a copy of the old per-user config,
-// to -c PATH or ./tinyagent.yaml in --cwd. It refuses to overwrite unless
-// --init-force, and always refuses a symlink.
+// to -c PATH or ./.tinyagent/tinyagent.yaml in --cwd (creating .tinyagent/
+// when missing). It refuses to overwrite unless --init-force, and always
+// refuses a symlink. An old ./tinyagent.yaml is left alone, with a hint.
 func runInitConfig(o *options) int {
 	path := o.configPath
 	if path == "" {
@@ -87,7 +88,7 @@ func runInitConfig(o *options) int {
 			return 2
 		}
 	}
-	if err := writeConfigFile(path, content, o.configPath != "", o.initForce); err != nil {
+	if err := writeConfigFile(path, content, true, o.initForce); err != nil {
 		fmt.Fprintf(os.Stderr, "error: init config %s: %v\n", path, err)
 		if errors.Is(err, fs.ErrExist) && !o.initForce {
 			fmt.Fprintln(os.Stderr, "hint: pass --force (tinyagent init --force) to replace it")
@@ -96,13 +97,17 @@ func runInitConfig(o *options) int {
 	}
 	fmt.Println(path)
 	if o.configPath == "" {
+		legacy := filepath.Join(o.cwd, config.LegacyProjectFile)
+		if _, err := os.Lstat(legacy); err == nil {
+			fmt.Fprintln(os.Stderr, config.LegacyProjectHint(legacy))
+		}
 		fmt.Fprintf(os.Stderr, "hint: keep secrets in env vars (api_key_env, env: names), never in %s; it may be committed with the project\n", config.ProjectFile)
 	}
 	return 0
 }
 
 // writeConfigFile creates path with mode 0600. mkdir creates missing parent
-// directories (for -c). Without force it uses exclusive creation, which also
+// directories (.tinyagent/, or the -c path's). Without force it uses exclusive creation, which also
 // refuses symlinks and avoids an overwrite race; with force it refuses a
 // symlink and replaces the file atomically through a temp file and rename.
 func writeConfigFile(path, content string, mkdir, force bool) error {

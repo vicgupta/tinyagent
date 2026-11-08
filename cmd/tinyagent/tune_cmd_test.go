@@ -32,9 +32,9 @@ func tuneEnv(t *testing.T, enabled bool) string {
 	tuneNow = func() time.Time { return time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC) }
 	t.Cleanup(func() { tuneNow = old })
 	files := map[string]string{
-		"wf.yaml":        "version: 1\nskills_dir: skills\ndefaults:\n  retries: 0\nworkflows:\n  build:\n    stages:\n      - skill: impl\n",
-		"skills/impl.md": tuneSkill,
-		"tinyagent.yaml": "self_tuning:\n  enabled: " + map[bool]string{true: "true", false: "false"}[enabled] + "\n",
+		"wf.yaml":                   "version: 1\nskills_dir: skills\ndefaults:\n  retries: 0\nworkflows:\n  build:\n    stages:\n      - skill: impl\n",
+		"skills/impl.md":            tuneSkill,
+		".tinyagent/tinyagent.yaml": "self_tuning:\n  enabled: " + map[bool]string{true: "true", false: "false"}[enabled] + "\n",
 	}
 	for i, task := range []string{"add CSV export", "add TSV export"} {
 		res := harness.Result{SchemaVersion: 1, Kind: "workflow", Workflow: "build", Task: task, Status: harness.StatusFailed, FailedStage: "impl", Reason: "missing header row",
@@ -109,7 +109,7 @@ func TestTuneOffByDefault(t *testing.T) {
 	if calls != 0 || m.calls != 0 {
 		t.Fatalf("agent runs %d, model calls %d", calls, m.calls)
 	}
-	if _, err := os.Stat(filepath.Join(cwd, ".tinyagent")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(cwd, ".tinyagent", "observer")); !os.IsNotExist(err) {
 		t.Fatal("off wrote state")
 	}
 }

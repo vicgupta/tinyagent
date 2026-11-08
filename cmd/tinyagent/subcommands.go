@@ -75,7 +75,7 @@ var subcommands = []subcommand{
 		options: map[string]string{"port": "web-port", "no-open": "web-no-open"},
 	},
 	{
-		name: "init", brief: "write ./tinyagent.yaml in --cwd (--force, --migrate)", summary: "write a commented starter ./tinyagent.yaml in --cwd, or with -c to that path (same as --init-config)",
+		name: "init", brief: "write ./.tinyagent/tinyagent.yaml in --cwd (--force, --migrate)", summary: "write a commented starter ./.tinyagent/tinyagent.yaml in --cwd, or with -c to that path (same as --init-config)",
 		base:    []string{"--init-config"},
 		runBare: true,
 		options: map[string]string{"force": "init-force", "migrate": "init-migrate"},

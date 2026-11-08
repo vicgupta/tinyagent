@@ -34,7 +34,7 @@ type skillsInputs struct {
 	FlagSet, FlagOn bool   // --skills / --no-skills
 	FlagName        string // the flag that set it, for the source text
 	Config          *bool  // skills: in the config; nil when unset
-	ConfigFromCwd   bool   // the config is ./tinyagent.yaml found in --cwd
+	ConfigFromCwd   bool   // the config is ./.tinyagent/tinyagent.yaml found in --cwd
 	TrustConfig     bool   // --trust-config
 }
 
@@ -62,7 +62,7 @@ func (d skillsDecision) String() string {
 // (#359). Precedence, highest first: --skills/--no-skills, an explicit
 // skills: true|false in the config, then the mode default (on in
 // interactive runs, off in non-interactive or hardened ones). A hardened
-// run ignores skills: true from ./tinyagent.yaml in the cwd unless
+// run ignores skills: true from ./.tinyagent/tinyagent.yaml in the cwd unless
 // --trust-config is set: a cloned repository must not put its own skills
 // into the system prompt of a CI or review run.
 func resolveSkills(in skillsInputs, m skillsMode) skillsDecision {
@@ -76,7 +76,7 @@ func resolveSkills(in skillsInputs, m skillsMode) skillsDecision {
 	}
 	if in.Config != nil {
 		if *in.Config && hardened && in.ConfigFromCwd && !in.TrustConfig {
-			return skillsDecision{Source: skillsSourceHardened, Detail: reason + "; skills: true in ./tinyagent.yaml ignored without --trust-config"}
+			return skillsDecision{Source: skillsSourceHardened, Detail: reason + "; skills: true in ./.tinyagent/tinyagent.yaml ignored without --trust-config"}
 		}
 		return skillsDecision{Enabled: *in.Config, Source: skillsSourceConfig}
 	}
