@@ -363,8 +363,11 @@ func eventBlob(es []sseEvent) string {
 	return b.String()
 }
 
-func TestWebHidesInternalDetailsUnlessVerbose(t *testing.T) {
-	const secret = "super-secret-tool-output"
+// TestWebToolDataWithAndWithoutVerbose: tool calls and results reach the
+// page in both modes (the "Collapse tool calls" checkbox decides how they
+// are shown); other internal events are sent only with -v.
+func TestWebToolDataWithAndWithoutVerbose(t *testing.T) {
+	const secret = "tool-output-sentinel"
 	replies := func() []acpReply {
 		return []acpReply{
 			{tool: "bash", args: `{"command":"echo ` + secret + `"}`},
@@ -390,23 +393,52 @@ func TestWebHidesInternalDetailsUnlessVerbose(t *testing.T) {
 			if !strings.Contains(text, "All **done**.") || strings.Contains(text, agent.SubmitMarker) {
 				t.Errorf("streamed answer = %q", text)
 			}
+			// Tool data over SSE, in either mode.
+			calls := kinds(es, "tool_call")
+			if len(calls) != 1 || calls[0]["name"] != "bash" || !strings.Contains(fmtJSON(calls[0]["arguments"]), secret) {
+				t.Fatalf("tool_call = %v", calls)
+			}
+			results := kinds(es, "tool_result")
+			if len(results) != 1 || results[0]["name"] != "bash" || !strings.Contains(fmtJSON(results[0]["output"]), secret) {
+				t.Fatalf("tool_result = %v", results)
+			}
+			if len(kinds(es, "tool_output")) != 1 {
+				t.Fatalf("tool_output = %v", kinds(es, "tool_output"))
+			}
+			// Tool data in /api/state, in either mode.
 			st := c.state()
 			raw, _ := json.Marshal(st)
+			if st["verbose"] != verbose {
+				t.Errorf("state verbose = %v", st["verbose"])
+			}
+			var sawCall, sawResult bool
+			var answer string
+			for _, m := range st["messages"].([]any) {
+				mm := m.(map[string]any)
+				switch mm["role"] {
+				case "assistant":
+					answer += fmtJSON(mm["content"])
+					if tc, _ := mm["tool_calls"].([]any); len(tc) == 1 && strings.Contains(fmtJSON(tc[0]), "bash") && strings.Contains(fmtJSON(tc[0]), secret) {
+						sawCall = true
+					}
+				case "tool":
+					if strings.Contains(fmtJSON(mm["content"]), secret) && mm["tool_call_id"] != nil {
+						sawResult = true
+					}
+				}
+			}
+			if !sawCall || !sawResult {
+				t.Errorf("state lacks tool call (%v) or result (%v): %s", sawCall, sawResult, raw)
+			}
+			if !strings.Contains(answer, "All **done**.") {
+				t.Errorf("answer = %q", answer)
+			}
+			for _, d := range kinds(es, "detail") {
+				if d["kind"] == "tool.call" || d["kind"] == "tool.output" || d["kind"] == "tool.result" {
+					t.Errorf("tool event also sent as detail: %v", d["kind"])
+				}
+			}
 			if verbose {
-				if st["verbose"] != true {
-					t.Errorf("state verbose = %v", st["verbose"])
-				}
-				calls := kinds(es, "tool_call")
-				if len(calls) != 1 || calls[0]["name"] != "bash" || !strings.Contains(fmtJSON(calls[0]["arguments"]), secret) {
-					t.Fatalf("tool_call = %v", calls)
-				}
-				results := kinds(es, "tool_result")
-				if len(results) != 1 || !strings.Contains(fmtJSON(results[0]["output"]), secret) {
-					t.Fatalf("tool_result = %v", results)
-				}
-				if len(kinds(es, "tool_output")) != 1 {
-					t.Fatalf("tool_output = %v", kinds(es, "tool_output"))
-				}
 				if len(kinds(es, "activity")) != 0 {
 					t.Errorf("verbose sent a quiet activity event: %v", kinds(es, "activity"))
 				}
@@ -415,58 +447,22 @@ func TestWebHidesInternalDetailsUnlessVerbose(t *testing.T) {
 					if d["kind"] == "model.request" {
 						sawRequest = true
 					}
-					if d["kind"] == "tool.call" || d["kind"] == "tool.result" {
-						t.Errorf("tool event also sent as detail: %v", d["kind"])
-					}
 				}
 				if !sawRequest {
 					t.Errorf("verbose detail events = %v", kinds(es, "detail"))
 				}
-				var sawTool bool
-				for _, m := range st["messages"].([]any) {
-					mm := m.(map[string]any)
-					if mm["role"] == "tool" && strings.Contains(fmtJSON(mm["content"]), secret) {
-						sawTool = true
-					}
-				}
-				if !sawTool {
-					t.Errorf("verbose state dropped the tool result: %s", raw)
-				}
 				return
 			}
-			if st["verbose"] != false {
-				t.Errorf("state verbose = %v", st["verbose"])
+			// Quiet: no extra internal detail, plus the "Working…" signal.
+			if n := kinds(es, "detail"); len(n) != 0 {
+				t.Errorf("quiet mode sent detail: %v", n)
 			}
-			for _, k := range []string{"tool_call", "tool_output", "tool_result", "detail"} {
-				if n := kinds(es, k); len(n) != 0 {
-					t.Errorf("quiet mode sent %s: %v", k, n)
-				}
-			}
-			if strings.Contains(blob, secret) || strings.Contains(blob, `"bash"`) || strings.Contains(blob, "model.request") {
+			if strings.Contains(blob, "model.request") {
 				t.Fatalf("quiet stream leaks internal details:\n%s", blob)
 			}
 			acts := kinds(es, "activity")
 			if len(acts) != 1 || len(acts[0]) != 1 || acts[0]["phase"] != "working" {
 				t.Fatalf("activity = %v", acts)
-			}
-			if strings.Contains(string(raw), secret) || strings.Contains(string(raw), "bash") {
-				t.Fatalf("quiet state leaks tool details: %s", raw)
-			}
-			for _, m := range st["messages"].([]any) {
-				mm := m.(map[string]any)
-				if mm["role"] == "tool" || mm["tool_calls"] != nil || mm["tool_call_id"] != nil {
-					t.Errorf("quiet message = %v", mm)
-				}
-			}
-			var answer string
-			for _, m := range st["messages"].([]any) {
-				mm := m.(map[string]any)
-				if mm["role"] == "assistant" {
-					answer += fmtJSON(mm["content"])
-				}
-			}
-			if !strings.Contains(answer, "All **done**.") {
-				t.Errorf("quiet answer = %q", answer)
 			}
 		})
 	}
@@ -483,6 +479,16 @@ func TestWebQuietKindsAndMessages(t *testing.T) {
 			t.Errorf("%s should stay visible without -v", k)
 		}
 	}
+	for _, k := range []string{"tool.call", "tool.output", "tool.result"} {
+		if !webToolKind(k) {
+			t.Errorf("%s should reach the page without -v", k)
+		}
+	}
+	for _, k := range []string{"reasoning", "debug", "status", "model.request", "hook", "web_fetch", "compaction"} {
+		if webToolKind(k) {
+			t.Errorf("%s is not a tool event", k)
+		}
+	}
 	tr := &trajectory.Trajectory{Messages: []model.Message{
 		{Role: "system", Content: "secret-system"},
 		{Role: "user", Content: "hi"},
@@ -490,13 +496,9 @@ func TestWebQuietKindsAndMessages(t *testing.T) {
 		{Role: "tool", ToolCallID: "c1", Content: "secret-output"},
 		{Role: "assistant", Content: "Answer **here**."},
 	}}
-	quiet := webMessages(tr, false)
-	if len(quiet) != 2 || quiet[0].Role != "user" || quiet[0].Content != "hi" || quiet[1].Role != "assistant" || quiet[1].Content != "Answer **here**." || len(quiet[1].ToolCalls) != 0 {
-		t.Fatalf("quiet messages = %+v", quiet)
-	}
-	loud := webMessages(tr, true)
-	if len(loud) != 4 || loud[1].ToolCalls[0].Function.Name != "bash" || loud[2].Role != "tool" || loud[2].Content != "secret-output" || loud[2].ToolID != "c1" {
-		t.Fatalf("verbose messages = %+v", loud)
+	loud := webMessages(tr)
+	if len(loud) != 4 || loud[0].Role != "user" || loud[0].Content != "hi" || loud[3].Content != "Answer **here**." || loud[1].ToolCalls[0].Function.Name != "bash" || loud[2].Role != "tool" || loud[2].Content != "secret-output" || loud[2].ToolID != "c1" {
+		t.Fatalf("messages = %+v", loud)
 	}
 	big := map[string]any{"output": strings.Repeat("x", webDetailLimit+10)}
 	payload := webDetailPayload("debug", big)
@@ -867,7 +869,7 @@ func TestWebAssetsEmbedded(t *testing.T) {
 		t.Error("index.html has inline script or style")
 	}
 	app, _ := webAssets.ReadFile("web/app.js")
-	for _, want := range []string{"X-TinyAgent-Token", "EventSource", "/api/regenerate", "/api/permission", "showModal", "prefers-color-scheme", "Working…", "detailsOn"} {
+	for _, want := range []string{"X-TinyAgent-Token", "EventSource", "/api/regenerate", "/api/permission", "showModal", "prefers-color-scheme", "Working…", "detailsOn", "collapse-tools", "Collapse tool calls", "tinyagent-collapse-tools"} {
 		if !strings.Contains(string(app)+s+mustAsset(t, "web/style.css"), want) {
 			t.Errorf("UI lacks %q", want)
 		}

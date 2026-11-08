@@ -196,12 +196,18 @@ stays unchanged.
   (`newACPProvider`), so no network is used. The browser-side Markdown renderer is
   checked by `web/ui_test.js`, which `TestWebUIScripts` runs when `node` is installed.
   Keep the page dependency-free (the Markdown renderer is embedded; no CDN) and
-  escape everything model-provided before it reaches the DOM. Tool calls, tool
-  results, reasoning and other internal events are sent to the browser only when
-  the session was started with `-v`/`--verbose` (`webQuietKind`); otherwise the
-  stream carries an `activity` event whose only field is `phase: working`, and
-  `/api/state` omits tool messages. `TestWebHidesInternalDetailsUnlessVerbose`
-  covers that gate.
+  escape everything model-provided before it reaches the DOM. Tool calls, live
+  tool output and tool results (`webToolKind`) are sent to the browser and kept
+  in `/api/state` in either mode; the page's **Collapse tool calls** checkbox
+  (`toolsCollapsed`/`setCollapsed` in `web/app.js`, default on, saved in
+  `localStorage` as `tinyagent-collapse-tools`) only decides whether the
+  `<details>` cards start open. Reasoning and the other internal events in
+  `webQuietKind` are sent as `detail` events only with `-v`/`--verbose`;
+  without it the stream also carries one `activity` event (`phase: working`)
+  per call. `TestWebToolDataWithAndWithoutVerbose` covers both modes (SSE and
+  `/api/state`), and `web/tool_output_test.js` covers the collapsed and
+  expanded card states and the checkbox toggle. Keep new tool-card behaviour
+  working in both states.
 - **Chat line editor** (`cmd/tinyagent/lineedit.go`): drive it through the fake
   terminal in `lineedit_redraw_test.go` (`termEditor`), which models CR/LF,
   cursor moves, clears, rune widths and autowrap. Assert on the screen and on

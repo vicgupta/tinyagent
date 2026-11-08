@@ -30,10 +30,28 @@ const context = {
   el: (tag, cls, text) => new Element(tag, cls, text),
   MD: { looksLikeDiff: () => false }, argSummary: () => "args",
   diffOf: () => "", prettyArgs: () => "{}",
-  detailsOn: () => true
+  detailsOn: () => true,
+  localStorage: (() => { const m = {}; return { getItem: k => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); } }; })()
 };
 vm.createContext(context);
 vm.runInContext(source.slice(source.indexOf("  function pre("), source.indexOf("  // ---------- full render")), context);
+context.COLLAPSE_KEY = "tinyagent-collapse-tools";
+// "Collapse tool calls" is checked by default: cards start as closed rows and
+// stay closed for live output and errors, each still expandable on its own.
+assert.equal(context.toolsCollapsed(), true, "collapsed by default");
+const folded = context.toolCard("f1", "bash", {});
+assert(!folded.open, "collapsed card starts closed");
+context.toolOutput(folded, "chunk");
+assert(!folded.open, "collapsed card stays closed for live output");
+context.toolResult(folded, "boom", true);
+assert(!folded.open && folded.querySelector(".st.err"), "collapsed error row keeps its status, stays closed");
+folded.open = true; // a row expands on its own
+const other = context.toolCard("f2", "grep", {});
+assert(!other.open, "expanding one row leaves the others collapsed");
+// Unchecked: tool calls and raw output are shown expanded inline.
+context.localStorage.setItem(context.COLLAPSE_KEY, "0");
+assert.equal(context.toolsCollapsed(), false);
+assert(context.toolCard("e1", "bash", {}).open, "expanded mode opens cards");
 const card = context.toolCard("build", "bash", {});
 assert(!card.querySelector(".live-output"));
 context.toolOutput(card, "first\n");
@@ -77,8 +95,23 @@ context.findCard = id => id === "cli-1" ? created : previous(id);
 handlers.tool_output({ data: JSON.stringify({ id: "cli-1", name: "Bash", output: "a.go\n" }) });
 assert.equal(host.children.length, 1, "a later chunk must reuse the card");
 assert.equal(created.querySelector(".live-output").querySelector("pre").textContent, "$ ls\na.go\n");
+// Without -v the page still shows tool output (collapsed by default).
 context.detailsOn = () => false;
-handlers.tool_output({ data: JSON.stringify({ id: "hidden", name: "bash", output: "secret-output" }) });
-assert.equal(host.children.length, 1, "quiet mode ignores tool output");
-assert.equal(created.querySelector(".live-output").querySelector("pre").textContent, "$ ls\na.go\n");
+context.localStorage.setItem(context.COLLAPSE_KEY, "1");
+handlers.tool_output({ data: JSON.stringify({ id: "quiet", name: "bash", output: "quiet-output" }) });
+assert.equal(host.children.length, 2, "non-verbose mode shows tool output too");
+const quiet = host.children[1];
+assert(!quiet.open, "non-verbose tool output starts collapsed");
+assert.equal(quiet.querySelector(".live-output").querySelector("pre").textContent, "quiet-output");
+// The checkbox folds or unfolds every card already on the page, including
+// verbose detail cards, and remembers the choice.
+const cards = [new Element("details", "tool"), new Element("details", "tool detail")];
+cards[0].open = true;
+context.els = { msgs: { querySelectorAll: sel => { assert.equal(sel, "details.tool"); return cards; } }, collapse: { checked: false } };
+vm.runInContext(source.slice(source.indexOf("  // ---------- collapse tool calls"), source.indexOf("  // ---------- theme")), context);
+context.setCollapsed(false);
+assert(cards.every(c => c.open) && context.localStorage.getItem(context.COLLAPSE_KEY) === "0" && !context.els.collapse.checked);
+context.setCollapsed(true);
+assert(cards.every(c => !c.open) && context.localStorage.getItem(context.COLLAPSE_KEY) === "1" && context.els.collapse.checked);
+assert.equal(context.toolsCollapsed(), true);
 console.log("tool output ok");

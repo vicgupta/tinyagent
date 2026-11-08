@@ -153,3 +153,6 @@ kbd { font-family: ui-monospace, monospace; font-size: 12px; border: 1px solid v
 /* Live previews stay bounded while a tool is running. */
 .tool .live-output pre { max-height: 24rem; overflow: auto; white-space: pre-wrap; }
 .tool .live-output h4 { color: var(--fg2); }
+/* "Collapse tool calls" checkbox in the top bar. */
+.toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--fg2); cursor: pointer; white-space: nowrap; }
+.toggle input { margin: 0; accent-color: var(--accent); }
