@@ -12,7 +12,7 @@ tinyagent -m openrouter/qwen/qwen3-coder -t "..."
 tinyagent -m ollama/llama3.1 -t "..."
 ```
 
-Everything after the first `/` is the provider's model name, so `openrouter/qwen/qwen3-coder` sends `qwen/qwen3-coder`. Without `-m`, the model is `$AGENT_MODEL` (the environment wins over `AGENT_MODEL` in [`./.env`](config.md#env-file)), then `model:` in the [config file](config.md), then the built-in default `openai/gpt-4o`. `tinyagent --check` prints the resolved model and key status without calling the model. Keys and base URLs can also come from [`./.env`](config.md#env-file); this applies to chat too.
+Everything after the first `/` is the provider's model name, so `openrouter/qwen/qwen3-coder` sends `qwen/qwen3-coder`. Without `-m`, the model is `$AGENT_MODEL` (exported in the environment), then `model:` in the [config file](config.md), then the built-in default `openai/gpt-4o`. `tinyagent --check` prints the resolved model and key status without calling the model.
 
 ## Switching mid-session
 

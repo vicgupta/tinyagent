@@ -23,6 +23,13 @@ import (
 // shared with --worktree.
 const Dir = ".tinyagent/worktrees"
 
+// LocalConfigExclude is the pathspec that keeps tinyagent's local config
+// out of every commit tinyagent makes: any file named tinyagent.yaml, which
+// covers .tinyagent/tinyagent.yaml and the old ./tinyagent.yaml at any
+// directory level. A copy already tracked in HEAD stays as it is (history is
+// never rewritten); its working-tree changes are just not staged.
+const LocalConfigExclude = ":(exclude,glob)**/tinyagent.yaml"
+
 // BranchPrefix prefixes every worker branch.
 const BranchPrefix = "tinyagent/"
 
@@ -115,7 +122,8 @@ func identity(dir string) []string {
 }
 
 // Snapshot records the working tree of the repository at top (tracked
-// changes plus untracked, non-ignored files, excluding .tinyagent/worktrees)
+// changes plus untracked, non-ignored files, excluding .tinyagent/worktrees
+// and the local config, see LocalConfigExclude)
 // as a commit whose parent is HEAD. It uses a temporary index, so the
 // repository's index, HEAD and refs are untouched.
 func Snapshot(top string) (string, error) {
@@ -135,7 +143,7 @@ func Snapshot(top string) (string, error) {
 	if _, err := run(top, env, "read-tree", head); err != nil {
 		return "", fmt.Errorf("snapshot: %w", err)
 	}
-	if _, err := run(top, env, "add", "-A", "--", ".", ":(exclude)"+Dir); err != nil {
+	if _, err := run(top, env, "add", "-A", "--", ".", ":(exclude)"+Dir, LocalConfigExclude); err != nil {
 		return "", fmt.Errorf("snapshot: %w", err)
 	}
 	tree, err := run(top, env, "write-tree")
@@ -207,10 +215,11 @@ func Remove(top, path, branch string) {
 }
 
 // Commit stages every change in the worktree at path (respecting
-// .gitignore) and commits it with message, with repository hooks disabled.
+// .gitignore, and never the local config: LocalConfigExclude) and commits
+// it with message, with repository hooks disabled.
 // changed is false, and no commit is made, when there is nothing to commit.
 func Commit(path, message string) (commit string, changed bool, err error) {
-	if _, err := run(path, nil, "add", "-A", "--", "."); err != nil {
+	if _, err := run(path, nil, "add", "-A", "--", ".", LocalConfigExclude); err != nil {
 		return "", false, fmt.Errorf("staging the worker's changes: %w", err)
 	}
 	if _, err := run(path, nil, "diff", "--cached", "--quiet"); err == nil {

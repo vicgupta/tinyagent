@@ -10,7 +10,7 @@ tinyagent chat --resume .tinyagent/chats/20261031-115411.json --cwd .   # pick a
 tinyagent goal -i                      # chat with plan-first and verify-on-stop; see [Goal mode](tasks.md#goal-mode)
 ```
 
-Chat reads the model, API keys and other settings exactly as a normal run does, including from [`./.env`](config.md#env-file) in `--cwd`: an `AGENT_MODEL` there picks the chat model when neither `-m` nor a real `$AGENT_MODEL` is set.
+Chat reads the model, API keys and other settings exactly as a normal run does: `-m`, then an exported `$AGENT_MODEL`, then `model:` in [`.tinyagent/tinyagent.yaml`](config.md#config) in `--cwd`, the first config file it reads. API keys come from exported environment variables.
 
 To chat in a browser instead, run `tinyagent web`: the same session, tools and settings in a local web UI. See [Web UI](web.md).
 

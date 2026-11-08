@@ -18,11 +18,22 @@ func locateConfig(o *options, cwd string, stderr io.Writer) config.Source {
 	return src
 }
 
+// ensureConfigIgnored keeps the local ./.tinyagent/tinyagent.yaml out of
+// commits (see config.EnsureIgnored); a failure is only a warning.
+func ensureConfigIgnored(cwd string, stderr io.Writer) {
+	if _, err := config.EnsureIgnored(cwd); err != nil {
+		fmt.Fprintf(stderr, "warning: could not add %s to %s: %v; keep it out of commits yourself\n", config.ProjectFile, config.IgnoreFile, err)
+	}
+}
+
 // loadConfig locates and loads the config with o's --profile. A project
 // config found in the cwd (not given with -c) can't launch executables
 // unless --trust-config is set: those settings are dropped with a warning.
 func loadConfig(o *options, cwd string, stderr io.Writer) (config.Source, config.AgentConfig, error) {
 	src := locateConfig(o, cwd, stderr)
+	if src.Kind == config.SourceCwd {
+		ensureConfigIgnored(cwd, stderr)
+	}
 	cfg, err := config.LoadProfile(src.Path, o.profile)
 	if err != nil {
 		return src, cfg, err

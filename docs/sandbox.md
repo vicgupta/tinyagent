@@ -106,7 +106,7 @@ When a policy is set (or `--command-env` is passed), one line such as `command e
 
 For CI on untrusted input (issue bodies, PR diffs), use `inherit: core` with `exclude_secrets: true`; for reproducible runs, `inherit: none` with `set`. `core` and `none` can break toolchains that need other variables (`GOPATH`, `JAVA_HOME`, proxy settings): check the `-v` lists and add them to `pass`.
 
-This is not a sandbox. It does not protect credentials stored in files (`~/.aws/credentials`, `.env`, the Codex auth file), which commands can still read ([`file_access`](permissions.md#restricting-file-access) rules hide them from the file tools only). It does not redact secrets from tool output by itself: `pass` and `set` deliberately give commands the values you name, so turn on [`redact_secrets`](permissions.md#redacting-secrets-from-tool-output) to keep those values out of what the model sees, trajectories and `--json`.
+This is not a sandbox. It does not protect credentials stored in files (`~/.aws/credentials`, the Codex auth file), which commands can still read ([`file_access`](permissions.md#restricting-file-access) rules hide them from the file tools only). It does not redact secrets from tool output by itself: `pass` and `set` deliberately give commands the values you name, so turn on [`redact_secrets`](permissions.md#redacting-secrets-from-tool-output) to keep those values out of what the model sees, trajectories and `--json`.
 
 ## Execution environments
 

@@ -16,42 +16,33 @@ A `.tinyagent/tinyagent.yaml` that exists but can't be read or parsed is an erro
 
 **`./tinyagent.yaml` is no longer read (hard cut).** Earlier versions read the project config from `tinyagent.yaml` at the top of `--cwd`. It now lives with the rest of tinyagent's project state in `.tinyagent/`. An old `./tinyagent.yaml` is never loaded, not even as a fallback; when it exists (and no `-c` was given), commands that load the config print one stderr line: `hint: project config now lives in ./.tinyagent/tinyagent.yaml; <path> is no longer read (move it there to keep it: mkdir -p .tinyagent && mv tinyagent.yaml .tinyagent/)`. The hint keeps appearing while the old file is there, even once `.tinyagent/tinyagent.yaml` exists. `tinyagent init` creates `.tinyagent/` when it's missing, and it leaves an old `./tinyagent.yaml` alone (it prints the same hint). Nothing is moved for you.
 
-**Committing the config.** Many projects ignore `.tinyagent/` because tinyagent writes run state there (memory, tool output, the event log). To commit the config anyway, ignore the folder's contents instead of the folder: `/.tinyagent/*` followed by `!/.tinyagent/tinyagent.yaml` in `.gitignore`. Git can't re-include a file inside an ignored directory, so `/.tinyagent/` plus a `!` line doesn't work.
+### Keeping the config out of commits
 
-**Precedence**, highest first: explicit command-line flags, environment variables (such as `$AGENT_MODEL`, which still outranks the file's `model:`), variables from [`./.env`](#env-file), the selected `--profile`, the config file, the built-in defaults. A flag counts only when given, so `--read-only=false` overrides `read_only: true`, and a repeatable list flag (`--fallback-model`, `--verify-check`, ...) replaces the file's list rather than adding to it.
+`.tinyagent/tinyagent.yaml` is local configuration: tinyagent never stages or commits it, and neither should you.
 
-### .env file
+- **Ignore rule.** Whenever tinyagent loads `.tinyagent/tinyagent.yaml` from `--cwd` (one-shot, chat, web, ACP, `--check` and the other commands that read the config), and when `tinyagent init` writes it, tinyagent makes sure `.tinyagent/.gitignore` contains `/tinyagent.yaml`, so broad staging such as `git add .` or `git add -A` leaves the file out. It creates `.tinyagent/.gitignore` when missing and otherwise appends the line under a `# Added by tinyagent` comment. It never touches your repository's own `.gitignore`, `.git/info/exclude` or global ignore settings, never removes a line, and leaves `.tinyagent/.gitignore` alone when it already mentions `tinyagent.yaml` (including a `!tinyagent.yaml` you wrote on purpose) or ignores everything (`*`). A symlinked `.tinyagent/` or `.tinyagent/.gitignore` is refused with a warning, and a write failure is only a warning.
+- **tinyagent's own commits.** The worker snapshot and worker commits ([Workers](long-runs.md#workers)) exclude every file named `tinyagent.yaml` (the `.tinyagent/` one, the old `./tinyagent.yaml` and copies in subdirectories), even when no ignore rule covers them.
+- **Already committed?** Ignore rules don't apply to tracked files, and tinyagent never rewrites history or deletes your file. To stop tracking it while keeping your copy, run `git rm --cached .tinyagent/tinyagent.yaml` and commit that.
+- **The old `./tinyagent.yaml`** is not read and not covered by `.tinyagent/.gitignore`; move it into `.tinyagent/` (see above) to keep it out of commits.
+- **Sharing settings.** To share settings with a team, keep a file outside `.tinyagent/` (for example `team-tinyagent.yml`) and pass it with `-c`.
 
-When `.env` exists in `--cwd` (default `.`), tinyagent loads it at startup, before any mode runs, so one-shot runs (`-t`), `tinyagent chat`/`-i`, `--check`, `--acp` and subcommands all see the same settings: the model (`AGENT_MODEL`), API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, ...), base URLs (`OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`, `OLLAMA_HOST`) and any other variable tinyagent or a configured `api_key_env` reads.
-
-```sh
-# .env
-AGENT_MODEL=anthropic/claude-sonnet-4-5
-ANTHROPIC_API_KEY=sk-ant-...
-```
-
-- `model=provider/name` (any case: `model`, `Model`, `MODEL`) is accepted as an alias of `AGENT_MODEL`, mirroring the config file's `model:` key, the only config key with an environment equivalent, so `model=codex/gpt-5` works. If the file has both, the `AGENT_MODEL` line wins. A real `AGENT_MODEL` in the environment still wins over both. Other keys are case-sensitive and set as written.
-- Only `./.env` in `--cwd` is read: no parent directories, no home-directory file. A missing `.env` is fine.
-- A variable already set in the environment (even to an empty value) is left alone, so real environment variables win over `.env`, and explicit flags such as `-m` win over both.
-- Format: `KEY=value` lines, optional `export ` prefix, `#` comment lines and ` # trailing comments` on unquoted values, `'single'` (literal) or `"double"` (with `\n`, `\t`, `\"`, `\\` escapes) quotes. A malformed line is an error (exit 2) naming `.env` and the line number, never the value.
-- Values are never printed. With `-v`, tinyagent prints the names of the variables it loaded (`loaded AGENT_MODEL, ANTHROPIC_API_KEY from .env`).
-- Keep `.env` out of Git (add it to `.gitignore`); consider a [`file_access`](permissions.md#restricting-file-access) `deny_read: [".env"]` rule so the model's file tools can't read it.
+**Precedence**, highest first: explicit command-line flags, environment variables you export (such as `$AGENT_MODEL`, which still outranks the file's `model:`), the selected `--profile`, the config file, the built-in defaults. A flag counts only when given, so `--read-only=false` overrides `read_only: true`, and a repeatable list flag (`--fallback-model`, `--verify-check`, ...) replaces the file's list rather than adding to it.
 
 ### Trusting a project config
 
-A `.tinyagent/tinyagent.yaml` found in `--cwd` usually comes with the repository, so by default it can't make tinyagent run programs or loosen your security settings. These keys are **ignored with a warning** naming them, unless you pass `--trust-config`:
+A `.tinyagent/tinyagent.yaml` found in `--cwd` may have come with a repository you cloned (for example one committed before it was kept local), so by default it can't make tinyagent run programs or loosen your security settings. These keys are **ignored with a warning** naming them, unless you pass `--trust-config`:
 
 `mcp_servers`, `hooks`, `command_tools`, `lsp.servers`, `plugins`, `tinygo`, `claude_code.path`, `codex_exec.path`, `opencode.path`, `handoff.startup_command`, `verify_on_stop.checks`, `attempts.checks`, `acp.client_mcp_servers`, `container.run_args`, `permissions`, `file_access`, `command_env`, `redact_secrets`, `untrusted_content`, `memory`.
 
 There is no prompt, so `--trust-config` works the same in CI. Pass it only for a repository you trust, after reading its `.tinyagent/tinyagent.yaml`. A file given with `-c` is always trusted (you chose it), even if it is the same file. Command-line flags such as `--verify-check` and `--attempt-check` still work without `--trust-config`. Elsewhere in these docs, "read only from `-c`, never from the repository" means: from `-c`, or from `./.tinyagent/tinyagent.yaml` with `--trust-config`.
 
-**Secrets.** `.tinyagent/tinyagent.yaml` may be committed, so never put API keys or tokens in it: name environment variables instead (`api_key_env`, `env:` lists, `headers_env`). If the file holds personal settings, add `.tinyagent/tinyagent.yaml` to `.gitignore`.
+**Secrets.** Even though `.tinyagent/tinyagent.yaml` stays out of commits, never put API keys or tokens in it: name environment variables instead (`api_key_env`, `env:` lists, `headers_env`) and export them in your shell.
 
 Every key is optional, but an unrecognized key (a typo like `step_limt`) is an error naming the file and the key, rather than silently ignored. Command-line flags override the file.
 
 Set `read_only: true` to make repository analysis the default. Optional `tools: [read_file, grep, …]` restricts the run to those tool names (same as `--tools`; empty/omitted leaves every enabled tool available). `--tools` overrides; `--no-tool-scope` or `--tools=*` clears a profile/config list. See [Tool scoping](tasks.md#tool-scoping). `--read-only` overrides the config value, including `--read-only=false`. In this mode, executor dispatch allows only `read_file`, `list_files`, and `grep`; writes, edits, shell commands, and background process tools are denied even if task text or repository instructions request them. Denials are returned to the model as tool errors. The restriction is model tool authority, not an OS sandbox (for that, see `--sandbox` under Sandboxing commands): an explicit `-o` trajectory destination can be written by the CLI, provider requests still send their context to the selected service, the Codex provider may refresh its credential file, the [`claude-code`, `codex-exec` and `opencode`](models.md#cli-handoff-providers) providers map read-only onto their CLI's own restriction (see there), and the opt-in [`web_fetch`](long-runs.md#web-fetch) tool, which only reads allowlisted URLs, and the [`web_search`](long-runs.md#web-search) tool stay available when enabled, as does the read-only [`lsp`](long-runs.md#language-servers-lsp) tool (its servers are still started and write logs under `.tinyagent/lsp`). `--update` is an administrative action outside task-tool policy. Readable secrets (unless hidden with [`file_access`](permissions.md#restricting-file-access) rules), symlinks that point outside `--cwd`, existing lexical path behavior, and AGENTS.md discovery retain their existing limitations; read-only mode does not make an untrusted repository safe.
 
-`model` saves a default model, so `tinyagent -t "fix the failing test"` needs no `-m`. The model is chosen in this order: `-m`/`--model` if given (even `-m openai/gpt-4o`), then a nonempty `$AGENT_MODEL` (from the environment or [`./.env`](#env-file)), then a nonempty `model` in the config, then `openai/gpt-4o`.
+`model` saves a default model, so `tinyagent -t "fix the failing test"` needs no `-m`. The model is chosen in this order: `-m`/`--model` if given (even `-m openai/gpt-4o`), then a nonempty `$AGENT_MODEL` exported in the environment, then a nonempty `model` in the config, then `openai/gpt-4o`.
 
 ```yaml
 model: ollama/llama3.1    # same <provider>/<model> syntax as -m
@@ -66,7 +57,7 @@ command_env:               # omitted by default (inherit everything); see Comman
   inherit: core            # all, core or none
   exclude_secrets: true
 file_access:               # omitted by default (no rules); see Restricting file access
-  deny_read: [".env", "*.pem", "secrets/"]
+  deny_read: ["*.pem", "secrets/"]
   deny_write: [go.sum, "vendor/"]
 permissions:               # omitted by default (no policy); see Permissions
   default: allow           # allow (default), ask or deny, when no rule matches
