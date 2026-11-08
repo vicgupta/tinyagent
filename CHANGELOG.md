@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+## [v0.22.0] - 2026-11-07
+
+### Breaking
+
+- **Project config is read only from `./.tinyagent/tinyagent.yaml`.** The old `./tinyagent.yaml` at the top of `--cwd` is never loaded. When that file exists and no `-c` was given, commands that load config print one stderr hint to move it (`mkdir -p .tinyagent && mv tinyagent.yaml .tinyagent/`). `tinyagent init` writes the starter there and creates `.tinyagent/` when it is missing. See [Config](docs/config.md#config). (#391)
+
 ### Added
 
 - **Web UI Markdown and quiet tool trace.** `tinyagent web` renders assistant replies as Markdown while they stream: headings, lists, bold and italic, links, inline code, scrollable highlighted code blocks, tables and quotes. Model text is escaped first (no raw HTML), and links are only `http`, `https` or `mailto`. Tool calls, tool results, reasoning and other internal details are omitted from the event stream and from `/api/state` unless the server was started with `-v`/`--verbose`, matching the CLI. Without `-v` a tool run shows only a "Working…" indicator (`activity` with `{"phase":"working"}`). With `-v` the collapsible tool cards and detail events are shown as before. See [Web UI](docs/web.md).
@@ -23,6 +29,8 @@
 - **Every tool call gets a tool result.** Denied, errored, timed-out, ask_user (when answered or rejected), lockdown-refused, snapshot-skipped, and resume-interrupted calls always emit a `tool.result` event and a matching tool message in history — a denial is still an answer, and a missing result breaks every later model request. `resume.interrupted_call` still fires on resume; it now also emits `tool.result`. See [Tool results](docs/json-output.md#tool-results) and CONTRIBUTING. (#379)
 
 ### Changed
+
+- **`/compact` runs immediately in chat and the web UI.** It compacts the conversation as soon as it is issued, shows progress and the estimated size before and after (or that nothing could be compacted), and no longer waits for the next message. A model error is reported and leaves stored history unchanged. `--no-compact` still refuses it. See [Interactive chat](docs/chat.md#slash-commands) and [Web UI](docs/web.md#slash-commands). (#394)
 
 - **Tool errors are actionable.** Every built-in tool error the model sees (bash, LSP, MCP, `web_fetch`, `web_search`, file tools, permission/`file_access` denials, and related paths) states the cause and a concrete next step, joined by a semicolon — the same shape as `edit_file`'s unique-match error. Bare `failed` messages are avoided so the model can fix the call instead of retrying blindly. New tool errors should use `tools.Actionable` / `tools.Actionablef` (or the MCP helpers); see [Tool error messages](docs/tools.md#tool-error-messages) and CONTRIBUTING. (#378)
 
