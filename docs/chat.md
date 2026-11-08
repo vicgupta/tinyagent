@@ -67,6 +67,7 @@ A [CLI handoff](models.md#cli-handoff-providers) provider (`claude-code`, `codex
 | Key | Action |
 |---|---|
 | Enter | Send the message |
+| Paste | Multi-line clipboard text arrives as one message, where the terminal supports bracketed paste. Up to 8 MiB is kept intact; a larger paste is truncated with a warning |
 | `\` at the end of a line | Continue the message on the next line |
 | `"""` | Start or end a multi-line block |
 | Up / Down (Ctrl-P / Ctrl-N) | Previous / next message from history |
@@ -107,6 +108,7 @@ The history file holds your messages in plain text. To keep it out of Git, add `
 
 - Ctrl-C cancels a running turn (if any) and exits with status 130. The checkpoint is saved and can be resumed. Ctrl-D and `/exit` quit with status 0.
 - Each message is one turn. `--max-turns`, `--cost-limit`, `--token-limit` and `--timeout` apply to each turn, not the whole session. A turn that hits a limit stops; your next message carries on.
+- Pasting several megabytes of clipboard text (up to 8 MiB) is kept intact and sent as one message. If that message is huge relative to the model's context window (an estimate of about 4 characters per token, at least half the window), chat warns but still sends it.
 - Replies stream as they arrive. After each turn a dim line shows its steps, tokens and cost, and the session total.
 - `--ask-user` works: a question ends the turn, and your next message is the answer.
 - `ask` permission rules prompt on the terminal, as in a normal run; see [Permissions](permissions.md#permissions).

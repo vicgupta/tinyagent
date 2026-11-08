@@ -210,9 +210,19 @@ stays unchanged.
   working in both states.
 - **Chat line editor** (`cmd/tinyagent/lineedit.go`): drive it through the fake
   terminal in `lineedit_redraw_test.go` (`termEditor`), which models CR/LF,
-  cursor moves, clears, rune widths and autowrap. Assert on the screen and on
-  `lineFeeds`, not on raw bytes, and cover a colour prompt, a `NO_COLOR` prompt
-  and multibyte input.
+  cursor moves, clears, rune widths, autowrap and DEC private modes (bracketed
+  paste enable/disable). Assert on the screen and on `lineFeeds`, not on raw
+  bytes, and cover a colour prompt, a `NO_COLOR` prompt and multibyte input.
+  Enable bracketed paste in raw mode (`ESC [ ? 2004 h` / `l`) so a multi-line
+  clipboard paste arrives as one message (`ESC [ 200 ~` ... `ESC [ 201 ~`);
+  insert the payload in one edit and redraw once, rather than treating each
+  pasted newline as Enter. Cap a message at `maxChatInputBytes` (8 MiB) and
+  warn if a paste is truncated. Tests for this live in `lineedit_paste_test.go`
+  and must include a pasted input of 1 MiB or more. The web UI accepts the
+  same 8 MiB cap (`web.start`); its JSON body limit stays 64 MiB. Warn when a
+  pasted message is huge relative to the model's context window
+  (`largeMessageWarning` in `chat_input.go`, ~4 characters per token, at least
+  half the window) without blocking the send.
 - **Chat Ctrl-C** must exit with status 130, whether it arrives as SIGINT
   (cooked input, Windows, or `kill -INT`) or as the raw-mode key (byte 3 on
   Linux and macOS). At the prompt it restores the terminal and leaves

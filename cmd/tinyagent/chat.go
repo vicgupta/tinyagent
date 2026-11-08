@@ -270,6 +270,7 @@ func (c *chat) readMessage() (string, error) {
 				return "", err
 			}
 			if strings.TrimSpace(l) == `"""` {
+				c.warnTruncatedInput()
 				return strings.Join(parts, "\n"), nil
 			}
 			parts = append(parts, l)
@@ -282,6 +283,7 @@ func (c *chat) readMessage() (string, error) {
 		}
 		line = strings.TrimSuffix(line, `\`) + "\n" + l
 	}
+	c.warnTruncatedInput()
 	return line, nil
 }
 
@@ -292,6 +294,7 @@ func (c *chat) prompt() string {
 // turn runs one message as one Agent.Run continuing the conversation.
 // asFollowUp is false only for re-running an unfinished checkpoint.
 func (c *chat) turn(msg string, asFollowUp bool) {
+	c.warnLargeMessage(msg)
 	s, errw := c.s, c.io.errw
 	s.turn++
 	c.turns++
