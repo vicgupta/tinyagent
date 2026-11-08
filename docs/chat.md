@@ -89,7 +89,7 @@ Line editing works on Linux and macOS. Elsewhere chat reads plain lines (no arro
 | `/context` | How the context window is used: the model and its limit, and the tokens in the system prompt, AGENTS.md, tool definitions (including MCP and plugin tools), skills, messages and a compaction summary. Free space and the distance to the auto-compact threshold (80%) are included. Category sizes are estimates (~4 characters per token). When the last turn reported usage and the conversation still matches that request, the total is that usage (plus an estimate of anything appended since) and the line says so |
 | `/new`, `/clear` | Start a fresh conversation with a new checkpoint |
 | `/save [path]` | Save the checkpoint now, or a copy to `path` |
-| `/compact` | Compact the conversation before the next request (refused with `--no-compact`) |
+| `/compact` | Compact the conversation now and show the estimated size before and after (or that nothing could be compacted). Refused with `--no-compact`. A model error is reported and leaves history unchanged |
 | `/raw` | Toggle rendered Markdown off and on for this session |
 | `/model [provider/model]` | Show the current model, its fallback chain and any role routes, or switch the main model for the rest of the session (history is kept). An invalid spec is refused and the current model stays. See [Switching mid-session](models.md#switching-mid-session) |
 

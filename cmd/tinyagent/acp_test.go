@@ -42,6 +42,9 @@ type acpProvider struct {
 	loop    *acpReply
 	tokens  int
 	bodies  []map[string]any
+	// failFrom, when > 0, makes this and later requests return HTTP 500
+	// (1-based count of bodies). Tests use it to fail a /compact summary.
+	failFrom int
 }
 
 func newACPProvider(t *testing.T, replies ...acpReply) *acpProvider {
@@ -60,6 +63,11 @@ func (p *acpProvider) serve(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&body)
 	p.mu.Lock()
 	p.bodies = append(p.bodies, body)
+	if p.failFrom > 0 && len(p.bodies) >= p.failFrom {
+		p.mu.Unlock()
+		http.Error(w, "model down", http.StatusInternalServerError)
+		return
+	}
 	reply := acpReply{text: "done\n" + agent.SubmitMarker}
 	switch {
 	case len(p.replies) > 0:

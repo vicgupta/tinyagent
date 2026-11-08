@@ -30,7 +30,7 @@ Thirteen subcommands are shortcuts for existing flags. They rewrite the command 
 | `tinyagent triage <issues.json> [--out next-up.json] [--stale-days N]` | `--triage <issues.json> [--triage-out next-up.json] [--triage-stale-days N]`; see [Issue triage](triage.md) |
 | `tinyagent tinygo install` / `update` / `status` | `--tinygo-install` / `--tinygo-update` / `--tinygo-status` |
 
-- Chat and `tinyagent web` share slash commands (`/help`, `/cost`, `/context`, `/model`, ...). `/context` shows how the context window is used; `/model [spec]` shows or switches the main model mid-session. See [Interactive chat](chat.md#slash-commands) and [Web UI](web.md#slash-commands).
+- Chat and `tinyagent web` share slash commands (`/help`, `/cost`, `/context`, `/model`, `/compact`, ...). `/context` shows how the context window is used; `/model [spec]` shows or switches the main model mid-session; `/compact` runs immediately and reports the conversation size before and after (or that nothing could be compacted). See [Interactive chat](chat.md#slash-commands) and [Web UI](web.md#slash-commands).
 - Any other flag (`-t`, `-m`, `--cwd`, ...) can follow. `--` followed by words is the task: `tinyagent planner --first -- fix the bug`.
 - The first word counts as a subcommand only when it is exactly the name and is alone or followed by an option, `--`, a known action, `help`, or that subcommand's positional argument (`tinyagent goal "…"`, `tinyagent triage issues.json`). So `tinyagent memory leaks in parser` is not a subcommand; it fails as before with "pass the task with -t". To start a task with one of these words, use `-t "memory ..."`.
 - An unknown option exits 2 with `unknown <sub> option --x (see tinyagent <sub> --help)`.

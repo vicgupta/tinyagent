@@ -209,7 +209,6 @@ type webUI struct {
 	path     string
 	source   string
 	cont     bool
-	compact  bool
 	turns    int
 	last     *webTurnSnap
 	subMu    sync.Mutex // guards subs and subsDone; never held with mu
@@ -478,7 +477,7 @@ var webCommands = []map[string]string{
 	{"name": "/cost", "desc": "tokens and cost so far"},
 	{"name": "/context", "desc": "show how the context window is used"},
 	{"name": "/save", "desc": "save the checkpoint now, or to /save <path>"},
-	{"name": "/compact", "desc": "compact the conversation before the next request"},
+	{"name": "/compact", "desc": "compact the conversation now and show the size before and after"},
 	{"name": "/raw", "desc": "toggle showing replies as raw Markdown"},
 	{"name": "/model", "desc": "show or switch the model: /model <provider/model>"},
 	{"name": "/history", "desc": "open a saved conversation"},
@@ -568,7 +567,6 @@ func (w *webUI) state() map[string]any {
 		"turns":      w.turns,
 		"checkpoint": relTo(s.root, w.path),
 		"messages":   webMessages(t),
-		"compact":    w.compact,
 		"canRegen":   w.last != nil && !w.running,
 		"markdown":   cfg.ChatMarkdown == nil || *cfg.ChatMarkdown,
 		"settings": map[string]any{
@@ -694,7 +692,7 @@ func (w *webUI) apiOpen(body map[string]any) (any, error) {
 		w.mu.Unlock()
 		return nil, err
 	}
-	w.s.traj, w.source, w.cont, w.turns, w.compact, w.last = t, path, true, 0, false, nil
+	w.s.traj, w.source, w.cont, w.turns, w.last = t, path, true, 0, nil
 	w.s.remember = nil
 	w.path = newPath
 	w.mu.Unlock()
@@ -895,6 +893,8 @@ func (w *webUI) apiCommand(body map[string]any) (any, error) {
 		return map[string]any{"ok": true, "history": true}, nil
 	case "/raw":
 		return map[string]any{"ok": true, "raw": true}, nil
+	case "/compact":
+		return w.compactNowCommand()
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -918,7 +918,7 @@ func (w *webUI) apiCommand(body map[string]any) (any, error) {
 		}
 		return note(txt)
 	case "/new", "/clear":
-		s.traj, w.source, w.cont, w.turns, w.compact, w.last = nil, "", false, 0, false, nil
+		s.traj, w.source, w.cont, w.turns, w.last = nil, "", false, 0, nil
 		s.remember = nil
 		if s.o.output != "" {
 			w.path = nextOutputPath(w.path)
@@ -944,15 +944,6 @@ func (w *webUI) apiCommand(body map[string]any) (any, error) {
 			return nil, err
 		}
 		return note("saved " + relTo(s.root, path))
-	case "/compact":
-		if s.traj == nil {
-			return note("nothing to compact yet")
-		}
-		if s.o.noCompact {
-			return note("compaction is off (--no-compact)")
-		}
-		w.compact = true
-		return note("the next message compacts the conversation first")
 	}
 	var names []string
 	for _, c := range webCommands {
@@ -966,6 +957,47 @@ func (w *webUI) apiCommand(body map[string]any) (any, error) {
 		msg += "; did you mean /" + sg[0] + "?"
 	}
 	return nil, errors.New(msg + " (/help lists them; //text sends a message starting with /)")
+}
+
+// compactNowCommand runs /compact immediately and returns the progress
+// and result text. It marks the UI busy so a concurrent turn cannot
+// race the trajectory, and /stop can cancel a long summary call.
+func (w *webUI) compactNowCommand() (any, error) {
+	w.mu.Lock()
+	if w.running {
+		w.mu.Unlock()
+		return nil, errBusy
+	}
+	if w.s.traj == nil {
+		w.mu.Unlock()
+		w.broadcast("notice", map[string]any{"text": "nothing to compact yet"})
+		return map[string]any{"ok": true, "text": "nothing to compact yet"}, nil
+	}
+	if w.s.o.noCompact {
+		w.mu.Unlock()
+		msg := "compaction is off (--no-compact)"
+		w.broadcast("notice", map[string]any{"text": msg})
+		return map[string]any{"ok": true, "text": msg}, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	w.running, w.cancel = true, cancel
+	path := w.path
+	w.mu.Unlock()
+	defer func() {
+		cancel()
+		w.mu.Lock()
+		w.running, w.cancel = false, nil
+		w.mu.Unlock()
+		go w.broadcast("state", nil)
+	}()
+
+	var buf strings.Builder
+	if err := w.s.compactNow(ctx, &buf, path); err != nil {
+		return nil, fmt.Errorf("%v; history was left unchanged", err)
+	}
+	text := strings.TrimRight(buf.String(), "\n")
+	w.broadcast("notice", map[string]any{"text": text})
+	return map[string]any{"ok": true, "text": text}, nil
 }
 
 // webWriter sends the agent's progress output to the browser as log events.
@@ -1018,7 +1050,6 @@ func (w *webUI) start(msg string, images []model.Image, from *webTurnSnap) (any,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	w.running, w.cancel, w.turnDone = true, cancel, make(chan struct{})
-	a.CompactFirst, w.compact = w.compact, false
 	turns, path, done := w.turns, w.path, w.turnDone
 	w.mu.Unlock()
 	go w.runTurn(ctx, cancel, a, cfg, msg, len(images), prev, path, turns, done, from != nil)

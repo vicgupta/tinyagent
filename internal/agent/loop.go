@@ -98,7 +98,8 @@ type Agent struct {
 	// and enables live tool.output events for command-executing tools.
 	Streamed bool
 	// CompactFirst compacts the conversation before the run's first model
-	// request, whatever its size (chat's /compact). NoCompact wins.
+	// request, whatever its size. NoCompact wins. Chat and the web UI's
+	// /compact call CompactNow immediately instead of setting this.
 	CompactFirst bool
 	// SkipAgentsMD stops Run from appending the nearest AGENTS.md at or above
 	// <root> to the system prompt.
