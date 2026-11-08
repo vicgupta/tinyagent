@@ -127,6 +127,7 @@ type options struct {
 	memory                                           memoryCmd
 	handoff                                          bool
 	ratchet                                          ratchetFlags
+	tune                                             tuneFlags
 	lockdown                                         lockdownFlags
 	attempts                                         attemptFlags
 	verify                                           verifyFlags
@@ -254,6 +255,7 @@ func newFlagSet(o *options) *flag.FlagSet {
 	registerMemoryFlags(fs, &o.memory)
 	registerHandoffFlags(fs, &o.handoff)
 	registerRatchetFlags(fs, &o.ratchet)
+	registerTuneFlags(fs, &o.tune)
 	registerLockdownFlags(fs, &o.lockdown)
 	registerAttemptFlags(fs, &o.attempts)
 	return fs
@@ -345,6 +347,9 @@ func run() int {
 	}
 	if ratchetCommandSet(fs) {
 		return runRatchetCommand(&o, fs, os.Stdout, os.Stderr)
+	}
+	if tuneCommandSet(fs) {
+		return runTuneCommand(&o, fs, os.Stdout, os.Stderr)
 	}
 	if o.acp {
 		if f := acpConflict(fs); f != "" {

@@ -14,7 +14,7 @@ import (
 )
 
 // routeTasks are the task names --route accepts.
-var routeTasks = []string{routing.TaskCompaction, routing.TaskReview, routing.TaskPermission, routing.TaskDelegate, routing.TaskWorker}
+var routeTasks = []string{routing.TaskCompaction, routing.TaskReview, routing.TaskPermission, routing.TaskTuning, routing.TaskDelegate, routing.TaskWorker}
 
 // routeList is the repeatable --route task=spec flag.
 type routeList map[string]string

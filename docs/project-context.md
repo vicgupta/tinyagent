@@ -140,7 +140,7 @@ tinyagent --workflow docs/workflows/feature.yaml -t "add CSV export" --workflow-
 - **Safety.** Passed and interrupted runs write nothing, and without the flag nothing is written. A corrupt ledger line is skipped with a warning, and a write error is a warning; neither changes the exit code. Each file write is one `O_APPEND` line, so concurrent runs in the same `--cwd` don't interleave.
 - **Events.** With `--json`, `observer.proposed` or `observer.recurrence` follows `workflow.finished`; see [JSON output](json-output.md#machine-readable-output).
 
-The observer makes no model call. Model-written skill edits, generated verify checks and eval-suite generation are not part of it.
+The observer makes no model call and never edits a skill. To turn repeated failures into a reviewed skill or success-check change, use the opt-in [Self-tuning](self-tuning.md) commands (`tinyagent tune`), which group failures by the same signature and apply nothing without your approval.
 
 #### Spec gate
 

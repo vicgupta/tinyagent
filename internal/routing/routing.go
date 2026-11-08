@@ -26,6 +26,8 @@ const (
 	TaskCompaction = "compaction"
 	TaskReview     = "review"
 	TaskPermission = "permission"
+	// TaskTuning is the opt-in tinyagent tune proposal call.
+	TaskTuning = config.TuningTask
 )
 
 // SourceMain is the Source of a task that falls back to the main model.
@@ -81,8 +83,8 @@ func Delegated(cfg config.AgentConfig, main, task string) Route {
 	return r
 }
 
-// Auxiliary resolves an auxiliary task (TaskCompaction, TaskReview or
-// TaskPermission): --route <task>=, then models.auxiliary.tasks.<task>,
+// Auxiliary resolves an auxiliary task (TaskCompaction, TaskReview,
+// TaskPermission or TaskTuning): --route <task>=, then models.auxiliary.tasks.<task>,
 // then --aux-model, then models.auxiliary.model, then the main model.
 func Auxiliary(cfg config.AgentConfig, main, task string) Route {
 	r := Route{Role: RoleAuxiliary, Task: task}

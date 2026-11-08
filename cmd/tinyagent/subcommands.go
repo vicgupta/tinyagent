@@ -109,6 +109,18 @@ var subcommands = []subcommand{
 		options: map[string]string{"incident": "ratchet-incident", "expires": "ratchet-expires", "review": "ratchet-review", "deny-tool": "ratchet-deny-tool", "deny-command": "ratchet-deny-command", "deny-path": "ratchet-deny-path", "deny-host": "ratchet-deny-host"},
 	},
 	{
+		name: "tune", brief: "opt-in self-tuning from past workflow runs: propose|validate|apply|revert|list|show", summary: "propose, validate and, after explicit approval, apply one skill or success-check change learned from past --workflow runs; off unless self_tuning.enabled (same as --tune-*)",
+		actions: map[string]subAction{
+			"propose":  {flag: "tune-propose", desc: "propose one change from the --run records of a --workflow (--tune-propose)"},
+			"list":     {flag: "tune-list", desc: "print the candidates with status and validation result, then exit (--tune-list)"},
+			"show":     {flag: "tune-show", arg: true, desc: "print a candidate's evidence, diff, validation and approval digest (--tune-show)"},
+			"validate": {flag: "tune-validate", arg: true, desc: "rerun the tasks with and without the change in isolated copies (--tune-validate)"},
+			"apply":    {flag: "tune-apply", arg: true, desc: "apply a validated candidate; needs --digest (--tune-apply)"},
+			"revert":   {flag: "tune-revert", arg: true, desc: "restore the file an applied candidate changed (--tune-revert)"},
+		},
+		options: map[string]string{"run": "tune-run", "workflow": "tune-workflow", "infer": "tune-infer", "digest": "tune-digest"},
+	},
+	{
 		name: "planner", brief: "run a task with the update_plan planner (--first, --file)", summary: "run with the task planner (update_plan) on (same as --plan)",
 		base:    []string{"--plan"},
 		options: map[string]string{"first": "plan-first", "file": "plan-file"},

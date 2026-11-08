@@ -10,7 +10,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and checks.
 
 | Path | Role |
 |---|---|
-| `cmd/tinyagent/` | CLI entrypoint: flag parsing, subcommands (`chat`, `web`, `goal`, `init`, `eval`, `triage`, `ratchet`, ...), `--help` topics, chat and web sessions, workers and subagents, worktrees, `--update` glue. See [docs/subcommands.md](docs/subcommands.md). |
+| `cmd/tinyagent/` | CLI entrypoint: flag parsing, subcommands (`chat`, `web`, `goal`, `init`, `eval`, `triage`, `ratchet`, `tune`, ...), `--help` topics, chat and web sessions, workers and subagents, worktrees, `--update` glue. See [docs/subcommands.md](docs/subcommands.md). |
 | `cmd/tinyagent/web/` | The embedded `tinyagent web` page (hand-written HTML/CSS/JS, no build step). See [docs/web.md](docs/web.md). |
 | `embed/prompts/` | System and review prompt templates. |
 | `internal/agent/` | The step loop: query the model, check permissions, run tool calls, record results, compact, verify before stop. |
@@ -25,6 +25,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and checks.
 | `internal/mcptools/`, `internal/plugins/`, `internal/tinygo/`, `internal/lsp/` | Local MCP servers, Agent Plugins and WebAssembly plugins, the pinned TinyGo toolchain, language servers. See [docs/plugins.md](docs/plugins.md) and [docs/wasm-plugins.md](docs/wasm-plugins.md). |
 | `internal/trajectory/`, `internal/resume/`, `internal/snapshot/`, `internal/transcript/`, `internal/handoff/` | The `-o` run record and checkpoint, what `--resume` must match, file snapshots for undo and rewind, Markdown transcripts, the session handoff file. See [docs/runs.md](docs/runs.md), [docs/undo.md](docs/undo.md) and [docs/long-runs.md](docs/long-runs.md). |
 | `internal/eventlog/`, `internal/telemetry/` | `--json` events, the SQLite event log, OpenTelemetry export. See [docs/json-output.md](docs/json-output.md). |
+| `internal/selftune/` | Opt-in self-tuning (`tinyagent tune`): skill and check candidates from past workflow runs, validation in isolated copies, digest-approved apply and revert. See [docs/self-tuning.md](docs/self-tuning.md). |
 | `internal/memory/`, `internal/ratchet/` | Project memory and project rules from agent failures. See [docs/memory.md](docs/memory.md) and [docs/ratchet.md](docs/ratchet.md). |
 | `internal/attempts/`, `internal/gitwt/` | Best-of-N attempts and the Git plumbing for workers. |
 | `internal/acp/` | Agent Client Protocol (editor integration). See [docs/integrations.md](docs/integrations.md). |

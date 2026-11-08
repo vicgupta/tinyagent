@@ -258,6 +258,21 @@ profiles:                    # omitted by default; named overlays selected with 
 
 `tinyagent.yaml` has no workflow-specific keys. Stage settings (`model`, `profile`, `step_limit`, `cost_limit`, `token_limit`, `time_limit`, `retries`, `check_timeout`) live in the workflow file passed to `--workflow`, and each stage otherwise uses this config, including `profiles` and `verify_on_stop`. See [Workflows](workflows.md#flags-and-settings).
 
+### Self-tuning
+
+`self_tuning` configures the opt-in [Self-tuning](self-tuning.md) commands (`tinyagent tune`). It is off by default; with `enabled: false` every tune command exits 2 and reads, calls and writes nothing. Bounds outside their range are a config error, so a project config can lower them but never lift them past the caps.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `self_tuning.enabled` | `false` | Allow the `tinyagent tune` commands in this project |
+| `self_tuning.inference` | `false` | Phrase proposals with the auxiliary model (task `tuning`); same as `--tune-infer` |
+| `self_tuning.min_evidence` | `2` | Distinct failed runs with the same failure signature a proposal needs; 2..20 |
+| `self_tuning.max_tokens` | `2000` | Tokens (input + output) of one inference call; 1..20000 |
+| `self_tuning.max_cost_usd` | `0.25` | Total cost of the inference calls of one proposal; > 0, at most 5 |
+| `self_tuning.max_attempts` | `1` | Inference calls per proposal; 1..3 |
+| `self_tuning.validation_runs` | `6` | Workflow runs (baseline + candidate) per validation; 2..20 |
+| `self_tuning.validation_cost_usd` | `2` | Stop a validation once its runs cost this much; > 0, at most 50 |
+
 ### Verify before stop
 
 `verify_on_stop` (or `--verify-on-stop`, `--verify-command`, `--verify-check`, `--max-verify-reprompts`) keeps a run that changed files from finishing until a test or build command has passed, re-prompting the model up to `max_reprompts` times and otherwise marking the run unverified. `verify_on_stop.checks` lists computational checks (lint, type check, tests) that tinyagent runs itself, in order, when the model finishes with unverified changes; see [Computational checks](verify.md#computational-checks). `verify_on_stop.review` (or `--verify-review`) then asks the model once to review the changes, report only; see [Inferential review](verify.md#inferential-review). See [Verify before stop](verify.md#verify-before-stop) for the full rules.
@@ -339,7 +354,7 @@ The `models:` section picks a model per role (`main`, `auxiliary`, `delegated`) 
 | Key | Meaning |
 |---|---|
 | `models.auxiliary.model` | Default model for helper calls (same as `--aux-model`) |
-| `models.auxiliary.tasks.compaction`, `models.auxiliary.tasks.review`, `models.auxiliary.tasks.permission` | Per-task helper models (compaction, verify review, permission judge) |
+| `models.auxiliary.tasks.compaction`, `models.auxiliary.tasks.review`, `models.auxiliary.tasks.permission`, `models.auxiliary.tasks.tuning` | Per-task helper models (compaction, verify review, permission judge, [self-tuning](self-tuning.md#model-phrased-proposals) proposals) |
 | `models.delegated.model` | Default model for `delegate` and `worker` children (same as `--delegate-model`) |
 | `models.delegated.tasks.delegate`, `models.delegated.tasks.worker` | Per-task child models; aliases `subagents.model` and `subagents.workers.model` |
 | `models.<role>.fallback_models` | The role's own fallback chain, at most 3 entries |

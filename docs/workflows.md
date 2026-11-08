@@ -184,7 +184,7 @@ tinyagent --workflow docs/workflows/workflow.yaml -t "add CSV export" --workflow
 - When the same failure happens again, it bumps a count in `.tinyagent/observer/ledger.jsonl` and warns `gate did not hold`.
 - It never applies a rule and makes no model call. Passed and interrupted runs write nothing.
 
-The signatures and files are described in full in [Learning from failures](project-context.md#learning-from-failures).
+The signatures and files are described in full in [Learning from failures](project-context.md#learning-from-failures). To go further and propose, validate and (after your approval) apply a skill or success-check change from repeated failures, see [Self-tuning](self-tuning.md).
 
 ## Output, JSON events and exit status
 
