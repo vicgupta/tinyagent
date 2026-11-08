@@ -14,7 +14,7 @@ Chat reads the model, API keys and other settings exactly as a normal run does, 
 
 To chat in a browser instead, run `tinyagent web`: the same session, tools and settings in a local web UI. See [Web UI](web.md).
 
-Press Ctrl-D (or type `/exit`) to quit. tinyagent prints the session's turns and cost, and the command that resumes it.
+Press Ctrl-C to cancel a running turn (if any) and exit (status 130), or Ctrl-D or `/exit` to quit (status 0). tinyagent prints the session's turns and cost, and the command that resumes it. An interrupted session is saved and can be resumed.
 
 ## What it looks like
 
@@ -25,7 +25,7 @@ tinyagent v0.15.0 · interactive chat
   model  openai/gpt-4o
   cwd    ~/src/app
   saves  .tinyagent/chats/20261031-115411.json
-Type a message and press Enter. /help lists commands, Ctrl-C stops a turn, Ctrl-D quits.
+Type a message and press Enter. /help lists commands, Ctrl-C exits, Ctrl-D quits.
 
 › what does main.go do?
 Let me look.
@@ -72,10 +72,9 @@ A [CLI handoff](models.md#cli-handoff-providers) provider (`claude-code`, `codex
 | Up / Down (Ctrl-P / Ctrl-N) | Previous / next message from history |
 | Left / Right, Home / End, Ctrl-A / Ctrl-E | Move the cursor |
 | Ctrl-U / Ctrl-K / Ctrl-W | Delete to the start / to the end / the previous word |
-| Ctrl-C while the model works | Stop that turn; the conversation stays, and you can keep typing |
-| Ctrl-C with text on the line | Clear the line |
-| Ctrl-C twice at an empty prompt (within 2s) | Quit |
-| Ctrl-D at an empty prompt | Quit |
+| Ctrl-C while the model works | Cancel that turn (the model stream, tools and child processes) and exit (status 130); the session is saved and can be resumed |
+| Ctrl-C at the prompt | Exit (status 130) and restore the terminal |
+| Ctrl-D at an empty prompt | Quit (status 0) |
 
 Line editing works on Linux and macOS. Elsewhere chat reads plain lines (no arrow keys or history recall).
 
@@ -106,6 +105,7 @@ The history file holds your messages in plain text. To keep it out of Git, add `
 
 ## How it behaves
 
+- Ctrl-C cancels a running turn (if any) and exits with status 130. The checkpoint is saved and can be resumed. Ctrl-D and `/exit` quit with status 0.
 - Each message is one turn. `--max-turns`, `--cost-limit`, `--token-limit` and `--timeout` apply to each turn, not the whole session. A turn that hits a limit stops; your next message carries on.
 - Replies stream as they arrive. After each turn a dim line shows its steps, tokens and cost, and the session total.
 - `--ask-user` works: a question ends the turn, and your next message is the answer.

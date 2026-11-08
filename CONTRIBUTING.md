@@ -213,6 +213,14 @@ stays unchanged.
   cursor moves, clears, rune widths and autowrap. Assert on the screen and on
   `lineFeeds`, not on raw bytes, and cover a colour prompt, a `NO_COLOR` prompt
   and multibyte input.
+- **Chat Ctrl-C** must exit with status 130, whether it arrives as SIGINT
+  (cooked input, Windows, or `kill -INT`) or as the raw-mode key (byte 3 on
+  Linux and macOS). At the prompt it restores the terminal and leaves
+  immediately; during a turn it cancels the run so the model stream, tools and
+  child processes stop, saves a resumable checkpoint, then exits. Do not
+  require a second press, clear the line and stay, or return to the prompt
+  after cancelling a turn. Tests live in `TestChatInterruptAndResume`,
+  `TestChatPromptCtrlCExits` and `TestChatPromptSIGINTExits`.
 - **Slash commands** live in `chatCommands` (`cmd/tinyagent/chat_commands.go`)
   and are printed by `/help`. The web UI's list is `webCommands` in
   `cmd/tinyagent/web.go`, served at `/api/commands`, which fills the slash menu

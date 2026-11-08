@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/vicgupta/tinyagent/internal/termmd"
 )
@@ -32,10 +33,14 @@ type lineEditor struct {
 	// row is the cursor's row below the prompt line's first row, as left
 	// by the last redraw.
 	row int
+
+	mu        sync.Mutex
+	restore   func()        // raw-mode restore while ReadLine is in raw mode
+	interrupt chan struct{} // SIGINT at the prompt unblocks ReadLine
 }
 
 func newLineEditor(tty *os.File, r io.Reader, w io.Writer, hist *chatHistory) *lineEditor {
-	e := &lineEditor{tty: tty, r: bufio.NewReader(r), w: w, hist: hist}
+	e := &lineEditor{tty: tty, r: bufio.NewReader(r), w: w, hist: hist, interrupt: make(chan struct{}, 1)}
 	if e.hist == nil {
 		e.hist = &chatHistory{}
 	}
@@ -46,24 +51,113 @@ func newLineEditor(tty *os.File, r io.Reader, w io.Writer, hist *chatHistory) *l
 	return e
 }
 
+// setRestore records the function that puts the terminal back after raw mode.
+func (e *lineEditor) setRestore(fn func()) {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	e.restore = fn
+	e.mu.Unlock()
+}
+
+// restoreRaw puts the terminal back if ReadLine put it in raw mode.
+// It is safe to call more than once and from another goroutine (SIGINT).
+func (e *lineEditor) restoreRaw() {
+	if e == nil {
+		return
+	}
+	e.mu.Lock()
+	fn := e.restore
+	e.restore = nil
+	e.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
+// cancelRead restores the terminal and unblocks a pending ReadLine with
+// errInterrupt. Used when SIGINT arrives at the prompt (cooked mode,
+// Windows, or kill -INT during raw input).
+func (e *lineEditor) cancelRead() {
+	if e == nil {
+		return
+	}
+	e.restoreRaw()
+	if e.interrupt == nil {
+		return
+	}
+	select {
+	case e.interrupt <- struct{}{}:
+	default:
+	}
+}
+
+func (e *lineEditor) interrupted() <-chan struct{} {
+	if e == nil {
+		return nil
+	}
+	return e.interrupt
+}
+
 // ReadLine shows prompt and returns the line typed, without its newline.
 // Ctrl-D on an empty line returns io.EOF; Ctrl-C returns errInterrupt.
 func (e *lineEditor) ReadLine(prompt string) (string, error) {
 	if e.raw != nil {
 		if restore, err := e.raw(); err == nil {
-			defer restore()
+			e.setRestore(restore)
+			defer e.restoreRaw()
 			return e.readRaw(prompt)
 		}
 	}
 	io.WriteString(e.w, prompt)
-	line, err := e.r.ReadString('\n')
-	if err != nil && (line == "" || err != io.EOF) {
-		if err == io.EOF {
-			io.WriteString(e.w, "\n")
-		}
-		return "", err
+	return e.readCooked()
+}
+
+// readCooked reads one line, or returns errInterrupt if cancelRead runs.
+func (e *lineEditor) readCooked() (string, error) {
+	type result struct {
+		line string
+		err  error
 	}
-	return strings.TrimRight(line, "\r\n"), nil
+	ch := make(chan result, 1)
+	go func() {
+		line, err := e.r.ReadString('\n')
+		if err != nil && (line == "" || err != io.EOF) {
+			if err == io.EOF {
+				io.WriteString(e.w, "\n")
+			}
+			ch <- result{"", err}
+			return
+		}
+		ch <- result{strings.TrimRight(line, "\r\n"), nil}
+	}()
+	select {
+	case <-e.interrupted():
+		return "", errInterrupt
+	case r := <-ch:
+		return r.line, r.err
+	}
+}
+
+// readRune reads one rune, or returns errInterrupt if cancelRead runs.
+func (e *lineEditor) readRune() (rune, int, error) {
+	type result struct {
+		r   rune
+		n   int
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		r, n, err := e.r.ReadRune()
+		ch <- result{r, n, err}
+	}()
+	select {
+	case <-e.interrupted():
+		return 0, 0, errInterrupt
+	case r := <-ch:
+		return r.r, r.n, r.err
+	}
 }
 
 // lineState is the edit buffer of one raw line.
@@ -90,7 +184,7 @@ func (e *lineEditor) readRaw(prompt string) (string, error) {
 	io.WriteString(e.w, prompt)
 	e.row = 0
 	for {
-		r, _, err := e.r.ReadRune()
+		r, _, err := e.readRune()
 		if err != nil {
 			e.toEnd(prompt, st)
 			io.WriteString(e.w, "\r\n")

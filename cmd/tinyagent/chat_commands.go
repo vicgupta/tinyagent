@@ -11,7 +11,7 @@ import (
 // chatCommands are the slash commands, in /help order.
 var chatCommands = []struct{ name, alias, desc string }{
 	{"/help", "", "show this list"},
-	{"/exit", "/quit", "end the session (also Ctrl-D)"},
+	{"/exit", "/quit", "end the session (also Ctrl-C or Ctrl-D)"},
 	{"/cost", "", "tokens and cost so far"},
 	{"/context", "", "show how the context window is used"},
 	{"/tools", "", "list tools available for this session"},

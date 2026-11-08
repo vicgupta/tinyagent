@@ -271,7 +271,7 @@ func (c *chat) banner() string {
 	row("model", c.s.modelName)
 	row("cwd", tildePath(c.s.root))
 	row("saves", relTo(c.s.root, c.path))
-	b.WriteString(st.Dim("Type a message and press Enter. /help lists commands, Ctrl-C stops a turn, Ctrl-D quits.") + "\n")
+	b.WriteString(st.Dim("Type a message and press Enter. /help lists commands, Ctrl-C exits, Ctrl-D quits.") + "\n")
 	return b.String()
 }
 
@@ -313,7 +313,7 @@ func (c *chat) helpText() string {
 		{"Enter", "send"},
 		{`\ or """`, "continue on the next line / multi-line block"},
 		{"Up, Down", "previous / next message"},
-		{"Ctrl-C", "stop the running turn, or clear the line"},
+		{"Ctrl-C", "cancel a running turn and exit, or exit at the prompt"},
 		{"Ctrl-D", "quit"},
 	}
 	for _, k := range keys {
