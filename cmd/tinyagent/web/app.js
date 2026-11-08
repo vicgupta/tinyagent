@@ -11,6 +11,7 @@
     history.replaceState(null, "", "/"); // keep the token out of the address bar and history
   }
 
+  var COLLAPSE_KEY = "tinyagent-collapse-tools";
   var S = { state: null, commands: [], history: [], raw: false, running: false, cur: null, pinned: true, attachments: [], perms: {}, connected: false };
   var els = {
     app: $("app"), log: $("log"), msgs: $("messages"), empty: $("empty"), input: $("composer-input"), form: $("composer"),
@@ -18,6 +19,7 @@
     model: $("model-input"), modelList: $("model-list"), sessions: $("sessions"), search: $("session-search"),
     palette: $("palette"), paletteInput: $("palette-input"), paletteList: $("palette-list"), help: $("help"), helpBody: $("help-body"),
     project: $("project"), projectBody: $("project-body"), attachments: $("attachments"), file: $("file-input"), drop: $("drop"),
+    collapse: $("collapse-tools"),
   };
 
   // ---------- API ----------
@@ -55,8 +57,9 @@
     node.dataset.src = text;
   }
   // detailsOn is true when this session was started with -v/--verbose.
-  // Until /api/state arrives, trust the server: it only sends tool and
-  // detail events in verbose mode.
+  // Until /api/state arrives, trust the server: it only sends detail events
+  // (reasoning, debug, status, ...) in verbose mode. Tool calls and results
+  // arrive in either mode; the "Collapse tool calls" checkbox shapes them.
   function detailsOn() {
     if (!S.state || S.state.verbose == null) return true;
     return !!S.state.verbose;
@@ -145,9 +148,16 @@
     return p;
   }
 
+  // toolsCollapsed is the header's "Collapse tool calls" checkbox: checked
+  // (the default, remembered in localStorage) keeps tool calls, raw output
+  // and detail cards as one-line rows that expand individually.
+  function toolsCollapsed() {
+    try { return localStorage.getItem(COLLAPSE_KEY) !== "0"; } catch (e) { return true; }
+  }
   function toolCard(id, name, args) {
     var d = el("details", "tool");
     d.dataset.tool = id || "";
+    d.open = !toolsCollapsed();
     var s = el("summary");
     s.appendChild(el("span", "name", name || "tool"));
     s.appendChild(el("span", "arg", argSummary(args)));
@@ -167,7 +177,7 @@
       live.appendChild(el("h4", null, "Live output"));
       live.appendChild(el("pre"));
       card.appendChild(live);
-      card.open = true;
+      if (!toolsCollapsed()) card.open = true;
     }
     live.querySelector("pre").textContent += output || "";
   }
@@ -179,7 +189,7 @@
     st.className = "st " + (isErr ? "err" : "ok");
     st.textContent = isErr ? "error" : "done";
     var rs = el("div", "section"); rs.appendChild(el("h4", null, "Result")); rs.appendChild(pre(output || "(no output)")); card.appendChild(rs);
-    if (isErr) card.open = true;
+    if (isErr && !toolsCollapsed()) card.open = true;
   }
   function findCard(id) {
     var all = els.msgs.querySelectorAll("details.tool");
@@ -218,12 +228,12 @@
       if (m.role === "assistant") {
         if (!a) { a = assistantMsg(); els.msgs.appendChild(a); }
         if (m.content && m.content.trim()) setMD(segment(a), m.content);
-        if (detailsOn()) (m.tool_calls || []).forEach(function (tc) {
+        (m.tool_calls || []).forEach(function (tc) {
           var fn = tc.function || tc; a.appendChild(toolCard(tc.id, fn.name || tc.name, fn.arguments != null ? fn.arguments : tc.arguments));
         });
         return;
       }
-      if (m.role === "tool" && detailsOn()) { toolResult(findCard(m.tool_call_id), m.content, /^(error|Error)/.test(m.content || "")); }
+      if (m.role === "tool") { toolResult(findCard(m.tool_call_id), m.content, /^(error|Error)/.test(m.content || "")); }
     });
     if (st.question) questionCard(st.question);
     Object.keys(S.perms).forEach(function (id) { if (!S.perms[id].done) permCard(S.perms[id].ev); });
@@ -373,7 +383,6 @@
       showWorking();
     });
     es.addEventListener("tool_call", function (e) {
-      if (!detailsOn()) return;
       var d = JSON.parse(e.data);
       if (!S.cur) S.cur = { msg: append(assistantMsg()), seg: null };
       S.cur.seg = null;
@@ -382,7 +391,6 @@
       scroll();
     });
     es.addEventListener("tool_output", function (e) {
-      if (!detailsOn()) return;
       var d = JSON.parse(e.data);
       var card = findCard(d.id);
       if (!card && S.cur) {
@@ -393,7 +401,6 @@
       toolOutput(card, d.output); scroll();
     });
     es.addEventListener("tool_result", function (e) {
-      if (!detailsOn()) return;
       var d = JSON.parse(e.data);
       toolResult(findCard(d.id), d.output, d.is_error); scroll();
     });
@@ -403,6 +410,7 @@
       if (!S.cur) S.cur = { msg: append(assistantMsg()), seg: null };
       S.cur.seg = null;
       var card = el("details", "tool detail");
+      card.open = !toolsCollapsed();
       var s = el("summary");
       s.appendChild(el("span", "name", String(d.kind || "detail")));
       card.appendChild(s);
@@ -566,6 +574,7 @@
       { k: "Regenerate", d: "Re-run the latest message", run: regenerate },
       { k: "Edit last message", d: "Edit and resend the latest message", run: editLast, key: "↑ in empty box" },
       { k: "Toggle theme", d: "System / light / dark", run: cycleTheme },
+      { k: "Collapse tool calls", d: "Fold or unfold tool calls and raw output", run: function () { setCollapsed(!toolsCollapsed()); } },
       { k: "Toggle sidebar", d: "Show or hide conversations", run: toggleSidebar, key: "Ctrl+Shift+S" },
       { k: "Project: AGENTS.md & memory", d: "Show this project's AGENTS.md and memory entries", run: openProject },
       { k: "Keyboard shortcuts", d: "Show commands and shortcuts", run: openHelp, key: "?" },
@@ -703,6 +712,14 @@
     return true;
   }
 
+  // ---------- collapse tool calls ----------
+  // Applies to the cards already on the page and to the ones still to come.
+  function setCollapsed(on) {
+    try { localStorage.setItem(COLLAPSE_KEY, on ? "1" : "0"); } catch (e) { /* ignore */ }
+    if (els.collapse) els.collapse.checked = on;
+    els.msgs.querySelectorAll("details.tool").forEach(function (d) { d.open = !on; });
+  }
+
   // ---------- theme ----------
   var THEMES = ["system", "light", "dark"];
   function applyTheme(t) {
@@ -765,6 +782,7 @@
   $("palette-btn").addEventListener("click", openPalette);
   $("help-btn").addEventListener("click", openHelp);
   $("theme-btn").addEventListener("click", cycleTheme);
+  if (els.collapse) els.collapse.addEventListener("change", function () { setCollapsed(els.collapse.checked); });
   $("project-btn").addEventListener("click", openProject);
   $("toggle-sidebar").addEventListener("click", toggleSidebar);
   els.jump.addEventListener("click", function () { S.pinned = true; scroll(); els.input.focus(); });
@@ -816,6 +834,7 @@
 
   // ---------- boot ----------
   applyTheme(localStorage.getItem("tinyagent-theme") || "system");
+  if (els.collapse) els.collapse.checked = toolsCollapsed();
   if (matchMedia("(max-width: 760px)").matches) $("toggle-sidebar").setAttribute("aria-expanded", "false");
   if (!token) { banner("Missing token: open the full URL that tinyagent web printed (it ends in ?token=…).", "error"); return; }
   api("/api/commands").then(function (c) { S.commands = c; }).catch(function (e) {

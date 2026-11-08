@@ -217,8 +217,9 @@ type webUI struct {
 	perms    map[string]chan permissions.Answer
 	permReqs map[string]map[string]any
 	closed   bool
-	// verbose is -v/--verbose. Tool calls, tool results and other internal
-	// events stay off the event stream and out of /api/state without it.
+	// verbose is -v/--verbose. Tool calls and results always reach the page
+	// (its "Collapse tool calls" checkbox decides how they're shown); other
+	// internal events (reasoning, debug, status, ...) are sent only with it.
 	verbose bool
 }
 
@@ -498,7 +499,9 @@ type webMessage struct {
 	Images    int              `json:"images,omitempty"`
 }
 
-func webMessages(t *trajectory.Trajectory, verbose bool) []webMessage {
+// webMessages includes tool calls and tool results in either mode: the
+// page collapses or expands them with its "Collapse tool calls" checkbox.
+func webMessages(t *trajectory.Trajectory) []webMessage {
 	if t == nil {
 		return []webMessage{}
 	}
@@ -507,23 +510,12 @@ func webMessages(t *trajectory.Trajectory, verbose bool) []webMessage {
 		if m.Role == "system" {
 			continue
 		}
-		// Quiet mode shows the conversation, not the tool trace. A reload
-		// must not bring back calls or results the live stream omitted.
-		if !verbose && m.Role == "tool" {
-			continue
-		}
 		content := strings.ReplaceAll(m.Content, agent.SubmitMarker, "")
 		if m.Role == "user" {
 			// Show what was typed, not the follow-up preamble the agent adds.
 			content = strings.TrimPrefix(content, trajectory.FollowUpNotice+"\n\n")
 		}
-		msg := webMessage{Role: m.Role, Content: content, Images: len(m.Images)}
-		if verbose {
-			msg.ToolCalls, msg.ToolID = m.ToolCalls, m.ToolCallID
-		} else if m.Role == "assistant" && strings.TrimSpace(content) == "" {
-			continue
-		}
-		out = append(out, msg)
+		out = append(out, webMessage{Role: m.Role, Content: content, ToolCalls: m.ToolCalls, ToolID: m.ToolCallID, Images: len(m.Images)})
 	}
 	return out
 }
@@ -581,7 +573,7 @@ func (w *webUI) state() map[string]any {
 		"running":    w.running,
 		"turns":      w.turns,
 		"checkpoint": relTo(s.root, w.path),
-		"messages":   webMessages(t, w.verbose),
+		"messages":   webMessages(t),
 		"verbose":    w.verbose,
 		"canRegen":   w.last != nil && !w.running,
 		"markdown":   cfg.ChatMarkdown == nil || *cfg.ChatMarkdown,
@@ -1026,10 +1018,11 @@ func (ww webWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// webQuietKind is an internal progress event. The web UI forwards it only
-// with -v/--verbose (tool calls as cards, everything else as a detail
-// event). Assistant text, permission prompts, warnings and compaction are
-// not in this set: those stay visible in either mode.
+// webQuietKind is an internal progress event. Tool calls, live output and
+// results (webToolKind) are forwarded in either mode; everything else in
+// this set is sent as a detail event only with -v/--verbose. Assistant
+// text, permission prompts, warnings and compaction are not in this set:
+// those stay visible in either mode.
 func webQuietKind(kind string) bool {
 	switch kind {
 	case "tool.call", "tool.output", "tool.result",
@@ -1052,6 +1045,13 @@ func webQuietKind(kind string) bool {
 	}
 	return strings.HasPrefix(kind, "reasoning.") || strings.HasPrefix(kind, "thinking.") ||
 		strings.HasPrefix(kind, "debug.") || strings.HasPrefix(kind, "status.")
+}
+
+// webToolKind is a tool call, live tool output or tool result. The page
+// always receives these (as tool_call, tool_output and tool_result) and its
+// "Collapse tool calls" checkbox controls how they are shown.
+func webToolKind(kind string) bool {
+	return kind == "tool.call" || kind == "tool.output" || kind == "tool.result"
 }
 
 // webDetailLimit caps one verbose detail event. Larger payloads are cut
@@ -1166,16 +1166,14 @@ func (w *webUI) runTurn(ctx context.Context, cancel context.CancelFunc, a *agent
 		}
 		if !w.verbose && webQuietKind(kind) {
 			switch kind {
-			case "tool.call":
-				tmu.Lock()
-				text.flush()
-				tmu.Unlock()
-				noteActivity(fields["id"])
-			case "tool.output":
-				// A handoff CLI reports its own tools without a tool.call.
+			case "tool.call", "tool.output":
+				// Keep the quiet "Working…" signal (a handoff CLI reports its
+				// own tools without a tool.call); the tool events below follow.
 				noteActivity(fields["id"])
 			}
-			return
+			if !webToolKind(kind) {
+				return
+			}
 		}
 		switch kind {
 		case "tool.call":
