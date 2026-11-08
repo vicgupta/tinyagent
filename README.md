@@ -189,6 +189,7 @@ Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: us
 | Releasing, including WinGet (maintainers) | [docs/release.md](docs/release.md) |
 | Every flag, subcommands and exit status | [docs/subcommands.md](docs/subcommands.md) |
 | Config file, profiles, MCP and command tools | [docs/config.md](docs/config.md) |
+| Architecture: packages, request flow, key invariants (contributors) | [ARCHITECTURE.md](ARCHITECTURE.md) |
 
 ### Running tasks
 
