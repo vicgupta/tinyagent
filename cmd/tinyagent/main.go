@@ -20,7 +20,6 @@ import (
 
 	"github.com/vicgupta/tinyagent/internal/agent"
 	"github.com/vicgupta/tinyagent/internal/config"
-	"github.com/vicgupta/tinyagent/internal/dotenv"
 	"github.com/vicgupta/tinyagent/internal/eventlog"
 	"github.com/vicgupta/tinyagent/internal/hooks"
 	"github.com/vicgupta/tinyagent/internal/lsp"
@@ -312,13 +311,6 @@ func run() int {
 		return 2
 	}
 	setColor(o.color)
-	// ./.env in --cwd fills in environment variables (AGENT_MODEL, API keys,
-	// base URLs, ...) for every mode, chat included. Real environment
-	// variables win; flags still win over both.
-	if err := loadDotenv(o.cwd, o.verbose); err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		return 2
-	}
 	if o.showHelp {
 		printHelp(helpOutput, fs, o.verbose)
 		return 0
@@ -2314,19 +2306,6 @@ func defaultModel() string {
 		return v
 	}
 	return builtinModel
-}
-
-// loadDotenv loads <cwd>/.env without overriding variables already set.
-// With verbose it names the variables it set, never their values.
-func loadDotenv(cwd string, verbose bool) error {
-	names, err := dotenv.Load(cwd)
-	if err != nil {
-		return err
-	}
-	if verbose && len(names) > 0 {
-		fmt.Fprintf(os.Stderr, "loaded %s from %s\n", strings.Join(names, ", "), dotenv.FileName)
-	}
-	return nil
 }
 
 func fail(err error) int {

@@ -11,7 +11,7 @@ import (
 )
 
 const starterConfig = `# tinyagent project config (./.tinyagent/tinyagent.yaml). Flags override these values. Full reference: docs/config.md.
-## Keep secrets in env vars (api_key_env names them); this file may be committed.
+## Local configuration: never commit it (tinyagent adds it to .tinyagent/.gitignore). Keep secrets in env vars (api_key_env names them).
 ## mcp_servers, hooks, command_tools, lsp.servers, plugins (and other executables) need --trust-config here.
 # model: openai/gpt-4o        # same <provider>/<model> syntax as -m
 # step_limit: 50
@@ -65,6 +65,8 @@ const starterConfig = `# tinyagent project config (./.tinyagent/tinyagent.yaml).
 // to -c PATH or ./.tinyagent/tinyagent.yaml in --cwd (creating .tinyagent/
 // when missing). It refuses to overwrite unless --init-force, and always
 // refuses a symlink. An old ./tinyagent.yaml is left alone, with a hint.
+// For the default path it also makes sure .tinyagent/.gitignore ignores the
+// file (config.EnsureIgnored), so it stays out of commits.
 func runInitConfig(o *options) int {
 	path := o.configPath
 	if path == "" {
@@ -101,7 +103,12 @@ func runInitConfig(o *options) int {
 		if _, err := os.Lstat(legacy); err == nil {
 			fmt.Fprintln(os.Stderr, config.LegacyProjectHint(legacy))
 		}
-		fmt.Fprintf(os.Stderr, "hint: keep secrets in env vars (api_key_env, env: names), never in %s; it may be committed with the project\n", config.ProjectFile)
+		if changed, err := config.EnsureIgnored(o.cwd); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not add %s to %s: %v; keep it out of commits yourself\n", config.ProjectFile, config.IgnoreFile, err)
+		} else if changed {
+			fmt.Fprintf(os.Stderr, "added %s to %s so git add . leaves it out\n", config.ProjectFile, config.IgnoreFile)
+		}
+		fmt.Fprintf(os.Stderr, "hint: %s is local configuration: never commit it, and keep secrets in env vars (api_key_env, env: names), not in it\n", config.ProjectFile)
 	}
 	return 0
 }

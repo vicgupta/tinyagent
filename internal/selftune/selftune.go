@@ -358,7 +358,7 @@ func writeAtomic(p string, data []byte, mode os.FileMode) error {
 // protectedNames are files a candidate may never change, whatever the
 // workflow says.
 var protectedNames = map[string]bool{
-	"agents.md": true, "claude.md": true, "tinyagent.yaml": true, "memory.toml": true, ".env": true,
+	"agents.md": true, "claude.md": true, "tinyagent.yaml": true, "memory.toml": true,
 }
 
 // checkTarget refuses a target that is not a Markdown skill file or is a
@@ -377,7 +377,7 @@ func checkTarget(rel string) error {
 	}
 	base := strings.ToLower(filepath.Base(rel))
 	if protectedNames[base] {
-		return fmt.Errorf("target %q is a protected file; self-tuning never edits AGENTS.md, CLAUDE.md, config, memory or .env", rel)
+		return fmt.Errorf("target %q is a protected file; self-tuning never edits AGENTS.md, CLAUDE.md, config or memory", rel)
 	}
 	if !strings.HasSuffix(base, ".md") {
 		return fmt.Errorf("target %q is not a Markdown skill file", rel)

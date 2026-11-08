@@ -39,7 +39,7 @@ func startWeb(t *testing.T, root string, args ...string) *webTest {
 }
 
 // startWebArgs is startWeb without the default -m, so the model comes from
-// the environment, ./.env or the config.
+// the environment or the config.
 func startWebArgs(t *testing.T, root string, args ...string) *webTest {
 	t.Helper()
 	var o options
