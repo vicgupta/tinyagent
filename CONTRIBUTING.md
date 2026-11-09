@@ -61,7 +61,7 @@ when you add a package or change one of those rules.
 cmd/tinyagent/        CLI entrypoint, flag parsing, main loop glue; help.go holds --help and help topics (help workflows)
 cmd/tinyagent/web/    tinyagent web's page (HTML/CSS/JS, hand-written, embedded with go:embed; no build step, never commit generated files); web.go serves it, chat_session.go is the session core shared with chat
 internal/agent/       the run loop, compaction, tool dispatch; build an Agent with agent.New (it validates the options)
-internal/config/      YAML config (./.tinyagent/tinyagent.yaml, located in locate.go; the old ./tinyagent.yaml only gets a hint; ignore.go keeps it in .tinyagent/.gitignore) + built-in defaults; memory.toml is read only from --cwd
+internal/config/      YAML config (./.tinyagent/tinyagent.yaml, located in locate.go; the old ./tinyagent.yaml only gets a hint; ignore.go keeps an untracked copy out of broad staging via .tinyagent/.gitignore and .git/info/exclude, which do not cover a tracked file) + built-in defaults; memory.toml is read only from --cwd
 internal/cwdpath/     Resolve confines a config or env path to --cwd (refuses "..", absolute paths elsewhere and symlinks that leave it)
 internal/memory/      project memory stores (markdown and SQLite), always under ./.tinyagent/memory in --cwd; confine.go refuses paths that leave --cwd
 internal/model/       providers, price table, context windows; CLI handoff providers (claudecode.go, codexexec.go, opencode.go) share handoff.go
@@ -298,7 +298,7 @@ stay inside `--cwd` and not escape through `..` or symlinks (see
 `internal/memory/confine.go`, or `internal/cwdpath` for new code). This covers
 config files too: the project config is `./.tinyagent/tinyagent.yaml`
 (`config.ProjectFile`; the old `./tinyagent.yaml` is only stat'ed for a hint;
-tests that write a project config create `.tinyagent/` first; the file is local and never committed: loading it keeps `/tinyagent.yaml` in `.tinyagent/.gitignore` via `config.EnsureIgnored`, and any code that stages or commits for the user must exclude it the way `internal/gitwt` does with `gitwt.LocalConfigExclude`; don't add a dotenv or other implicit env-file loader), `memory.toml` (`./memory.toml` or `$TINYAGENT_MEMORY_CONFIG`
+tests that write a project config create `.tinyagent/` first; the file is local and must never be committed. `config.EnsureIgnored` keeps an untracked `.tinyagent/tinyagent.yaml` out of `git add .` via `.tinyagent/.gitignore`, and `config.EnsureGitExclude` appends an untracked `tinyagent.yaml` pattern to `.git/info/exclude` (the old `./tinyagent.yaml` and any other untracked copy). Neither rule affects a tracked file. Code that stages or commits for the user in tinyagent's own commit flow must exclude `tinyagent.yaml` the way `internal/gitwt` does (`gitwt.LocalConfigExclude`), and must refuse the commit when a copy is already staged instead of unstaging other files or deleting the working copy. `bash`, `start_process`, command tools, and the container environment stay unrestricted: do not wrap `git` in them or undo their commits. Don't add a dotenv or other implicit env-file loader), `memory.toml` (`./memory.toml` or `$TINYAGENT_MEMORY_CONFIG`
 inside `--cwd`), plugin `PLUGIN_DATA` (`./.tinyagent/plugin-data/<name>`)
 and the TinyGo toolchain cache (`./.tinyagent/cache/toolchains`) are never
 read from the user config or cache directory. Tests for such a feature point `HOME`, `XDG_*`

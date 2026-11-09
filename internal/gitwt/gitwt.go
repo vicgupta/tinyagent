@@ -23,12 +23,17 @@ import (
 // shared with --worktree.
 const Dir = ".tinyagent/worktrees"
 
-// LocalConfigExclude is the pathspec that keeps tinyagent's local config
-// out of every commit tinyagent makes: any file named tinyagent.yaml, which
-// covers .tinyagent/tinyagent.yaml and the old ./tinyagent.yaml at any
-// directory level. A copy already tracked in HEAD stays as it is (history is
-// never rewritten); its working-tree changes are just not staged.
+// LocalConfigExclude is the pathspec that keeps every file named
+// tinyagent.yaml out of `git add`: .tinyagent/tinyagent.yaml, the old
+// ./tinyagent.yaml, and a copy in a subdirectory. It does not unstage a
+// copy that is already in the index. Commit refuses in that case rather
+// than changing staged files. A blob already recorded in HEAD stays as it
+// is: history is not rewritten and the working copy is not deleted.
 const LocalConfigExclude = ":(exclude,glob)**/tinyagent.yaml"
+
+// errStagedLocalConfig is returned by Commit when a tinyagent.yaml is
+// already staged. The index and the working copy are left unchanged.
+var errStagedLocalConfig = errors.New("tinyagent.yaml is already staged")
 
 // BranchPrefix prefixes every worker branch.
 const BranchPrefix = "tinyagent/"
@@ -123,9 +128,11 @@ func identity(dir string) []string {
 
 // Snapshot records the working tree of the repository at top (tracked
 // changes plus untracked, non-ignored files, excluding .tinyagent/worktrees
-// and the local config, see LocalConfigExclude)
+// and every tinyagent.yaml, see LocalConfigExclude)
 // as a commit whose parent is HEAD. It uses a temporary index, so the
-// repository's index, HEAD and refs are untouched.
+// repository's index, HEAD and refs are untouched. A tinyagent.yaml already
+// in HEAD stays at that blob: unstaged edits are not recorded, and a copy
+// staged in the real index is not read.
 func Snapshot(top string) (string, error) {
 	head, err := Head(top)
 	if err != nil {
@@ -215,12 +222,45 @@ func Remove(top, path, branch string) {
 }
 
 // Commit stages every change in the worktree at path (respecting
-// .gitignore, and never the local config: LocalConfigExclude) and commits
+// .gitignore, and never a tinyagent.yaml: LocalConfigExclude) and commits
 // it with message, with repository hooks disabled.
-// changed is false, and no commit is made, when there is nothing to commit.
+// changed is false, and no commit is made, when there is nothing to commit
+// besides a tinyagent.yaml. Unstaged edits to a tracked tinyagent.yaml stay
+// in the working tree and are not part of the commit; the blob already in
+// HEAD is left as it is.
+//
+// When a tinyagent.yaml is already staged, Commit returns
+// errStagedLocalConfig and does not change the index or the working copy:
+// dropping it from the commit would mean unstaging it, and tinyagent will
+// not change staged files to leave the config out. There is no safe commit
+// in that case, so the commit is refused.
 func Commit(path, message string) (commit string, changed bool, err error) {
+	staged, err := stagedLocalConfig(path)
+	if err != nil {
+		return "", false, err
+	}
+	if len(staged) > 0 {
+		return "", false, stagedConfigError(staged)
+	}
+	restore, err := snapshotIndex(path)
+	if err != nil {
+		return "", false, err
+	}
 	if _, err := run(path, nil, "add", "-A", "--", ".", LocalConfigExclude); err != nil {
+		if rerr := restore(); rerr != nil {
+			return "", false, fmt.Errorf("staging the worker's changes: %w (and the index could not be restored: %v)", err, rerr)
+		}
 		return "", false, fmt.Errorf("staging the worker's changes: %w", err)
+	}
+	staged, err = stagedLocalConfig(path)
+	if err != nil || len(staged) > 0 {
+		if rerr := restore(); rerr != nil {
+			return "", false, fmt.Errorf("tinyagent.yaml could not be kept out of the commit and the index could not be restored: %v", rerr)
+		}
+		if err != nil {
+			return "", false, err
+		}
+		return "", false, fmt.Errorf("refusing to commit: %s would be included and cannot be left out without changing the index; nothing was committed and the index is unchanged", strings.Join(staged, ", "))
 	}
 	if _, err := run(path, nil, "diff", "--cached", "--quiet"); err == nil {
 		return "", false, nil
@@ -236,6 +276,76 @@ func Commit(path, message string) (commit string, changed bool, err error) {
 	}
 	c, err := run(path, nil, "rev-parse", "HEAD")
 	return c, err == nil, err
+}
+
+func stagedConfigError(paths []string) error {
+	return fmt.Errorf("%w (%s); tinyagent will not commit it or change other staged files, and the working copy is unchanged", errStagedLocalConfig, strings.Join(paths, ", "))
+}
+
+// stagedLocalConfig lists index paths whose base name is tinyagent.yaml.
+// A rename is reported as the old path and the new path.
+func stagedLocalConfig(dir string) ([]string, error) {
+	out, err := runRaw(dir, nil, "diff", "--cached", "--name-only", "-z", "--no-renames")
+	if err != nil {
+		return nil, fmt.Errorf("checking the index for tinyagent.yaml: %w", err)
+	}
+	var paths []string
+	for _, p := range strings.Split(out, "\x00") {
+		if isLocalConfigPath(p) {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
+}
+
+func isLocalConfigPath(p string) bool {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return false
+	}
+	base := p
+	if i := strings.LastIndexAny(p, `/\`); i >= 0 {
+		base = p[i+1:]
+	}
+	return base == "tinyagent.yaml"
+}
+
+// snapshotIndex returns a function that puts the index at dir back the way
+// it was, including the case where there was no index file.
+func snapshotIndex(dir string) (restore func() error, err error) {
+	idx, err := indexFile(dir)
+	if err != nil {
+		return nil, err
+	}
+	original, err := os.ReadFile(idx)
+	had := true
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, err
+		}
+		had = false
+		original = nil
+	}
+	return func() error {
+		if !had {
+			if err := os.Remove(idx); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			return nil
+		}
+		return os.WriteFile(idx, original, 0o644)
+	}, nil
+}
+
+func indexFile(dir string) (string, error) {
+	p, err := run(dir, nil, "rev-parse", "--git-path", "index")
+	if err != nil || p == "" {
+		return "", fmt.Errorf("finding the index: %w", err)
+	}
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(dir, filepath.FromSlash(p))
+	}
+	return filepath.Clean(p), nil
 }
 
 // DiffStat returns `git diff --stat base commit` and its one-line summary.
