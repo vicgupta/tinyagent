@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [v0.23.0] - 2026-11-09
+
 ### Fixed
 
 - **Web UI collapse checkbox.** Tool calls, live output and results reach `tinyagent web` with or without `-v`. A **Collapse tool calls** checkbox in the header (checked by default, saved in the browser) folds them into expandable rows, or shows them expanded. `-v` still adds the internal detail cards. See [Web UI](docs/web.md). (#400)
