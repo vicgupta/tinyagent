@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/vicgupta/tinyagent/internal/config"
+	"github.com/vicgupta/tinyagent/internal/gitwt"
 	"github.com/vicgupta/tinyagent/internal/model"
 	"github.com/vicgupta/tinyagent/internal/outschema"
 	"github.com/vicgupta/tinyagent/internal/skills"
@@ -260,13 +261,14 @@ func (e *Executor) runCommandTool(ctx context.Context, c *CommandTool, raw strin
 		quoted, _ := json.Marshal(argv)
 		fmt.Fprintf(e.CommandLog, "command tool %s: %s\n", c.Name, quoted)
 	}
+	repo := gitwt.Capture(c.Dir)
 	out, err := runStream(ctx, c.Timeout, outputWriter(ctx), func(ctx context.Context) *exec.Cmd {
 		return environment(e.Env).Exec(ctx, c.Dir, argv)
 	})
 	if err != nil {
 		return "", fmt.Errorf("running %q in the %s environment: %v", argv[0], envName(e.Env), err)
 	}
-	return out, nil
+	return finishRepoGuard(repo, out, nil)
 }
 
 // envName names env for error messages.

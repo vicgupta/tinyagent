@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/vicgupta/tinyagent/internal/eventlog"
+	"github.com/vicgupta/tinyagent/internal/gitwt"
 )
 
 const (
@@ -177,6 +178,7 @@ func (e *Executor) StartProcess(command string) (string, error) {
 	e.procs.nextID++
 	id := "p" + strconv.Itoa(e.procs.nextID)
 	ctx, cancel := context.WithCancel(context.Background())
+	repo := gitwt.Capture(e.Root)
 	cmd := environment(e.Env).Command(ctx, e.Root, command)
 	out := newOutBuffer(e.bufferBytes())
 	cmd.Stdout = out
@@ -193,6 +195,16 @@ func (e *Executor) StartProcess(command string) (string, error) {
 
 	go func() {
 		err := cmd.Wait()
+		if note, gerr := repo.Enforce(); gerr != nil || note != "" {
+			msg := note
+			if gerr != nil {
+				if msg != "" {
+					msg += "\n"
+				}
+				msg += "tinyagent: could not undo a commit of tinyagent.yaml: " + gerr.Error()
+			}
+			p.out.Write([]byte("\n" + msg + "\n"))
+		}
 		var exitErr *exec.ExitError
 		switch {
 		case errors.As(err, &exitErr):

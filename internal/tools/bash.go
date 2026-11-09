@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"time"
+
+	"github.com/vicgupta/tinyagent/internal/gitwt"
 )
 
 // Bash runs command in a fresh `bash -c` process in root. On timeout the
@@ -27,9 +30,40 @@ func bashStream(ctx context.Context, env Environment, root, command string, time
 	if timeout <= 0 {
 		timeout = 120 * time.Second
 	}
-	return runStream(ctx, timeout, live, func(ctx context.Context) *exec.Cmd {
+	repo := gitwt.Capture(root)
+	out, err := runStream(ctx, timeout, live, func(ctx context.Context) *exec.Cmd {
 		return environment(env).Command(ctx, root, command)
 	})
+	return finishRepoGuard(repo, out, err)
+}
+
+// finishRepoGuard undoes a tool command's commits of tinyagent.yaml. A
+// failure to start the command is returned unchanged. The check does not
+// parse the command: nested shells, command git, absolute paths and
+// container exec are covered because it looks at the repository afterward.
+func finishRepoGuard(repo *gitwt.RepoState, out string, err error) (string, error) {
+	if err != nil {
+		return out, err
+	}
+	note, gerr := repo.Enforce()
+	if gerr != nil {
+		note = strings.TrimSpace(note + "\ntinyagent: could not undo a commit of tinyagent.yaml: " + gerr.Error())
+	}
+	if note == "" {
+		return out, nil
+	}
+	out = strings.Replace(out, "<returncode>0</returncode>", "<returncode>1</returncode>", 1)
+	if strings.HasSuffix(out, "</output>") {
+		out = strings.TrimSuffix(out, "</output>")
+		if !strings.HasSuffix(out, "\n") {
+			out += "\n"
+		}
+		return out + note + "\n</output>", nil
+	}
+	if !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	return out + note + "\n", nil
 }
 
 // runStream runs the command newCmd returns for a context that times out

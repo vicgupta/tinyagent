@@ -17,11 +17,9 @@ import (
 	"github.com/vicgupta/tinyagent/internal/hooks/hookstest"
 	"github.com/vicgupta/tinyagent/internal/lsp/lsptest"
 	"github.com/vicgupta/tinyagent/internal/model"
-	"github.com/vicgupta/tinyagent/internal/tools"
 )
 
 func TestMain(m *testing.M) {
-	tools.MaybeRunGitGuard()
 	hookstest.Run()
 	lsptest.Run()
 	os.Exit(m.Run())

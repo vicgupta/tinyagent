@@ -13,7 +13,6 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	MaybeRunGitGuard()
 	lsptest.Run()
 	if len(os.Args) > 1 && os.Args[1] == SandboxHelperArg {
 		os.Exit(RunSandboxHelper(os.Args[2:]))

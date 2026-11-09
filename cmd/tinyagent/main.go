@@ -264,7 +264,6 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == tools.SandboxHelperArg {
 		os.Exit(tools.RunSandboxHelper(os.Args[2:]))
 	}
-	tools.MaybeRunGitGuard()
 	os.Exit(run())
 }
 
