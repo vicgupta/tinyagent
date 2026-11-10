@@ -57,7 +57,7 @@ ok
 
 | Symptom | Fix |
 |---|---|
-| `HTTP 401` or `403` from openai, openrouter or anthropic | Set the key: `export OPENAI_API_KEY=...` (or `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`). If it's already set, check that it's current. |
+| `HTTP 401` or `403` from openai, openrouter or anthropic | Set the key: `export OPENAI_API_KEY=...` (or `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`), or put it under [`env:`](config.md#environment-variables) in `./.tinyagent/tinyagent.yaml`. If it's already set, check that it's current. |
 | `HTTP 404` from openai, openrouter or anthropic | Check the model name after the `/`. |
 | `connection refused` with `ollama/...` | Start Ollama with `ollama serve`, or set `OLLAMA_HOST` to where it runs. |
 | `HTTP 404` with `ollama/...` | Pull the model: `ollama pull <model>`. |

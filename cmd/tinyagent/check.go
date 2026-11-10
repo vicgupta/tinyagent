@@ -170,6 +170,9 @@ func resolveCheck(o *options, fs *flag.FlagSet, sum *checkSummary) ([][2]string,
 	if o.profile != "" {
 		add("profile", o.profile)
 	}
+	if env := describeConfigEnv(cfg.Env); env != "" {
+		add("env", env) // names only, never values (#410)
+	}
 	add("model", spec+" ("+specSource+")")
 	add("provider", providerStatus(spec, m))
 	switch {

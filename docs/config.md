@@ -27,17 +27,38 @@ A `.tinyagent/tinyagent.yaml` that exists but can't be read or parsed is an erro
 - **Shell, command tools, and the container are outside this guarantee.** `bash`, `start_process`, configured command tools, and the container environment run the command you (or the model) gave them. Tinyagent does not wrap `git`, inspect the command, or undo commits those commands make, including a nested shell, `command git`, or an absolute path such as `/usr/bin/git`. A `git commit` from those commands is your responsibility. The protection above is only tinyagent's own snapshot and worker commit.
 - **Sharing settings.** To share settings with a team, keep a file that is not named `tinyagent.yaml` (for example `team-tinyagent.yml`) and pass it with `-c`.
 
-**Precedence**, highest first: explicit command-line flags, environment variables you export (such as `$AGENT_MODEL`, which still outranks the file's `model:`), the selected `--profile`, the config file, the built-in defaults. A flag counts only when given, so `--read-only=false` overrides `read_only: true`, and a repeatable list flag (`--fallback-model`, `--verify-check`, ...) replaces the file's list rather than adding to it.
+**Precedence**, highest first: explicit command-line flags, environment variables you export (such as `$AGENT_MODEL`, which still outranks the file's `model:`, and any variable the file also sets under [`env:`](#environment-variables)), the selected `--profile`, the config file (including its `env:`), the built-in defaults. A flag counts only when given, so `--read-only=false` overrides `read_only: true`, and a repeatable list flag (`--fallback-model`, `--verify-check`, ...) replaces the file's list rather than adding to it.
 
 ### Trusting a project config
 
 A `.tinyagent/tinyagent.yaml` found in `--cwd` may have come with a repository you cloned (for example one committed before it was kept local), so by default it can't make tinyagent run programs or loosen your security settings. These keys are **ignored with a warning** naming them, unless you pass `--trust-config`:
 
-`mcp_servers`, `hooks`, `command_tools`, `lsp.servers`, `plugins`, `tinygo`, `claude_code.path`, `codex_exec.path`, `opencode.path`, `handoff.startup_command`, `verify_on_stop.checks`, `attempts.checks`, `acp.client_mcp_servers`, `container.run_args`, `permissions`, `file_access`, `command_env`, `redact_secrets`, `untrusted_content`, `memory`.
+`mcp_servers`, `hooks`, `command_tools`, `lsp.servers`, `plugins`, `tinygo`, `claude_code.path`, `codex_exec.path`, `opencode.path`, `handoff.startup_command`, `verify_on_stop.checks`, `attempts.checks`, `acp.client_mcp_servers`, `container.run_args`, `permissions`, `file_access`, `command_env`, `redact_secrets`, `untrusted_content`, `memory`, and, under [`env:`](#environment-variables), the variables that change which program runs (`PATH`, `LD_*`, `GIT_*`, ...; the warning names them as `env.NAME`). The rest of `env:`, such as API keys, is honored without `--trust-config`.
 
 There is no prompt, so `--trust-config` works the same in CI. Pass it only for a repository you trust, after reading its `.tinyagent/tinyagent.yaml`. A file given with `-c` is always trusted (you chose it), even if it is the same file. Command-line flags such as `--verify-check` and `--attempt-check` still work without `--trust-config`. Elsewhere in these docs, "read only from `-c`, never from the repository" means: from `-c`, or from `./.tinyagent/tinyagent.yaml` with `--trust-config`.
 
-**Secrets.** Even though `.tinyagent/tinyagent.yaml` stays out of commits, never put API keys or tokens in it: name environment variables instead (`api_key_env`, `env:` lists, `headers_env`) and export them in your shell.
+**Secrets.** `.tinyagent/tinyagent.yaml` stays out of commits (see above), so local API keys may go under its top-level [`env:`](#environment-variables) map instead of being exported in your shell. Other keys still only *name* variables (`providers[].api_key_env`, `env_headers`, `mcp_servers[].env`, `redact_secrets.env`); their values come from the environment, which `env:` can now fill. Don't put keys in a file you share with `-c` or commit under another name.
+
+### Environment variables
+
+A top-level `env:` map sets variables in tinyagent's own process environment, as `NAME: value` pairs. It replaces the old `.env` role for API keys and similar settings; `.env` files are still never read.
+
+```yaml
+model: openai/gpt-4o-mini
+env:
+  OPENAI_API_KEY: "sk-..."      # quote every value
+  ANTHROPIC_API_KEY: "sk-ant-..."
+  GATEWAY_API_KEY: "..."         # for a providers[] entry with api_key_env: GATEWAY_API_KEY
+```
+
+- **When.** The shared config loader applies `env:` right after it reads and trust-checks the file, before providers are registered, before the missing-key check (`OPENAI_API_KEY is not set`), and before MCP servers, hooks, command tools, LSP servers and commands start. It runs for every entry point that loads the config: one-shot, `--resume`, `tinyagent chat`, `tinyagent web`, ACP sessions, `--check`, workflow stages and `--attempts`/eval runs (each child loads the same file, and also inherits what its parent set). There is no second loader. Utility commands that don't load a config (`init`, `--update`, `--version`, ...) don't apply it.
+- **Precedence.** A variable already set to a nonempty value in the real environment wins: `env:` fills only what you haven't exported (the same idea as `$AGENT_MODEL` outranking `model:`). An exported empty value counts as unset. Flags beat both (`-m` beats `$AGENT_MODEL` whether it came from your shell or from `env:`). A `--profile`'s `env:` is merged over the base `env:` name by name.
+- **Children.** Because the values are in tinyagent's environment, `bash`, `start_process`, MCP servers (only the names they forward), hooks and CLI handoff providers see them the way they see exported variables. [`command_env`](sandbox.md#command-environment) filters them for commands as usual (`exclude_secrets: true` drops secret-named ones).
+- **ACP and several projects.** The environment is per process. When an ACP session loads another project's config, values set from the previous config are replaced, and names the new config doesn't set are removed again; variables you exported are never changed.
+- **Never printed.** Values never appear in stderr, warnings, hints, `-v`, `--check`, `--check --json`, `--json` events or trajectories. `-v` prints the names (`env: set from config: OPENAI_API_KEY; already set in the environment (kept): ...`) and `--check` prints an `env:` line such as `OPENAI_API_KEY (from config)` or `(from environment)`. With [`redact_secrets`](permissions.md#redacting-secrets-from-tool-output) on, each `env:` variable's value is masked in tool output like other config secrets.
+- **Validation.** Names must be plain names (no `=`, globs or NUL). Values must be YAML strings, so quote numbers and booleans (`PORT: "8080"`); an error names the variable, never its value.
+- **Trust.** `env:` is honored from an untrusted `./.tinyagent/tinyagent.yaml` without `--trust-config`, so local API keys work in a bare `tinyagent web` or `chat`. The variables that change which program runs or what it loads are dropped with the usual warning unless you pass `--trust-config` (a `-c` file is always trusted): `PATH`, `PATHEXT`, `LD_*`, `DYLD_*`, `BASH_ENV`, `ENV`, `ZDOTDIR`, `SHELL`, `COMSPEC`, `NODE_OPTIONS`, `NODE_PATH`, `PYTHONPATH`, `PYTHONSTARTUP`, `PYTHONHOME`, `PERL5OPT`, `PERL5LIB`, `PERLLIB`, `RUBYOPT`, `RUBYLIB`, `GIT_*`, `SSH_ASKPASS`, `EDITOR`, `VISUAL`, `PAGER`, `BROWSER` (compared case-insensitively). A repository's file can still set other variables, such as `OPENAI_BASE_URL`; read a cloned repository's `.tinyagent/tinyagent.yaml` before running in it, as you would for `model:` and `providers`.
+- **Starter.** `tinyagent init` writes a commented `# model:` line and a commented `# env:` example with `OPENAI_API_KEY`. Uncomment `model:` to pick another provider (for example `model: anthropic/claude-sonnet-4-5`, which then needs `ANTHROPIC_API_KEY`, not `OPENAI_API_KEY`), and uncomment `env:` to keep the key in the file.
 
 Every key is optional, but an unrecognized key (a typo like `step_limt`) is an error naming the file and the key, rather than silently ignored. Command-line flags override the file.
 

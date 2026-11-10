@@ -55,6 +55,11 @@ type AgentConfig struct {
 	// CommandEnv is the environment policy for local bash and start_process
 	// commands. The zero value inherits tinyagent's whole environment.
 	CommandEnv CommandEnv `yaml:"command_env"`
+	// Env sets variables (NAME: value) in tinyagent's own environment when
+	// the config is loaded, before providers, key checks, MCP servers and
+	// commands are set up. A variable already set (nonempty) in the real
+	// environment wins. Values are never printed; see docs/config.md.
+	Env map[string]string `yaml:"env,omitempty"`
 	// FileAccess denies the built-in file tools access to matching paths.
 	// The zero value denies nothing.
 	FileAccess FileAccess `yaml:"file_access"`
@@ -1223,6 +1228,7 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		MaxOutputTokens yaml.Node `yaml:"max_output_tokens"`
 		MaxTruncations  yaml.Node `yaml:"max_truncations"`
 		CommandEnv      yaml.Node `yaml:"command_env"`
+		Env             yaml.Node `yaml:"env"`
 		LSP             yaml.Node `yaml:"lsp"`
 		RedactSecrets   yaml.Node `yaml:"redact_secrets"`
 		OTel            yaml.Node `yaml:"otel"`
@@ -1250,6 +1256,11 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		}
 		if probe.CommandEnv.Kind != 0 {
 			if err := checkCommandEnv(&probe.CommandEnv); err != nil {
+				return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+			}
+		}
+		if probe.Env.Kind != 0 {
+			if err := checkEnvNode(&probe.Env); err != nil {
 				return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 			}
 		}
@@ -1352,6 +1363,9 @@ func loadFile(path, profile string) (AgentConfig, error) {
 		return cfg, fmt.Errorf("config %s: environment %q must be local or container", src, cfg.Environment)
 	}
 	if err := cfg.CommandEnv.Validate(); err != nil {
+		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
+	}
+	if err := validateEnv(cfg.Env); err != nil {
 		return cfg, &InvalidError{fmt.Errorf("config %s: %w", src, err)}
 	}
 	if err := cfg.FileAccess.Validate(); err != nil {
