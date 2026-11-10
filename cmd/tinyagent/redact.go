@@ -66,6 +66,13 @@ func configSecrets(cfg config.AgentConfig) []namedSecret {
 	for k, v := range cfg.CommandEnv.Set {
 		out = append(out, namedSecret{k, v})
 	}
+	// env: values (#410) are mostly API keys: mask what each name holds now
+	// (the config's value, or the exported one that won).
+	for k := range cfg.Env {
+		if v := os.Getenv(k); v != "" {
+			out = append(out, namedSecret{k, v})
+		}
+	}
 	return out
 }
 

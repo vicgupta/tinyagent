@@ -193,7 +193,7 @@ func (s *session) setup(ctx context.Context, m sessionMode) (err error) {
 		return withHint(s.modelName, err.Error(), err.Error())
 	}
 	if env := model.MissingKeyEnv(s.modelName); env != "" {
-		return withHint(s.modelName, fmt.Sprintf("%s is not set; set it in the agent's env in the editor's agent settings", env), "HTTP 401: ")
+		return withHint(s.modelName, fmt.Sprintf("%s is not set; export it, or set it under env: in ./%s (for ACP, the agent's env in the editor's agent settings also works)", env, config.ProjectFile), "HTTP 401: ")
 	}
 	if s.fallbacks, err = fallbackModels(fs, o.fallbackModels, o.noFallback, cfg); err == nil {
 		err = checkFallbacks(s.modelName, s.fallbacks, cfg.OpenAIAPI)

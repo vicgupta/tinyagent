@@ -11,9 +11,12 @@ import (
 )
 
 const starterConfig = `# tinyagent project config (./.tinyagent/tinyagent.yaml). Flags override these values. Full reference: docs/config.md.
-## Local configuration: never commit it. Tinyagent lists /tinyagent.yaml in .tinyagent/.gitignore and an untracked tinyagent.yaml pattern in .git/info/exclude so git add . skips an untracked copy. Those rules do not cover a tracked file. Keep secrets in env vars (api_key_env names them).
+## Local configuration: never commit it. Tinyagent lists /tinyagent.yaml in .tinyagent/.gitignore and an untracked tinyagent.yaml pattern in .git/info/exclude so git add . skips an untracked copy. Those rules do not cover a tracked file. Local API keys can go under env: below.
 ## mcp_servers, hooks, command_tools, lsp.servers, plugins (and other executables) need --trust-config here.
-# model: openai/gpt-4o        # same <provider>/<model> syntax as -m
+# model: openai/gpt-4o        # uncomment to pick the model for one-shot, chat, web and ACP (same <provider>/<model> syntax as -m)
+# env:                        # NAME: value set in tinyagent's environment (one-shot, chat, web, ACP); values are never printed
+#   OPENAI_API_KEY: "sk-..."  # a variable you already exported wins; quote every value
+#   # PATH, LD_*, GIT_* and other launch variables need --trust-config here (docs/config.md "Environment variables")
 # step_limit: 50
 # cost_limit: 2.0
 # token_limit: 0              # max input+output tokens, delegates and workers included (0 = unlimited)

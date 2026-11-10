@@ -7,8 +7,8 @@ Thirteen subcommands are shortcuts for existing flags. They rewrite the command 
 | Subcommand | Same as |
 |---|---|
 | `tinyagent chat [-t "..."] [-- message]` | `--interactive` (`-i`); see [Interactive chat](chat.md) |
-| `tinyagent web [--port n] [--no-open]` | `--web [--web-port n] [--web-no-open]`; see [Web UI](web.md). Reads `.tinyagent/tinyagent.yaml` in `--cwd` like chat |
-| `tinyagent init [--force] [--migrate]` | `--init-config [--init-force] [--init-migrate]` |
+| `tinyagent web [--port n] [--no-open]` | `--web [--web-port n] [--web-no-open]`; see [Web UI](web.md). Reads `.tinyagent/tinyagent.yaml` in `--cwd` like chat, including its [`env:`](config.md#environment-variables) API keys |
+| `tinyagent init [--force] [--migrate]` | `--init-config [--init-force] [--init-migrate]`. The starter has a commented `# model:` line and `# env:` example ([Environment variables](config.md#environment-variables)) |
 | `tinyagent sandbox -t "..."` | `--sandbox` |
 | `tinyagent sandbox network [--allow-domain host]... -t "..."` | `--sandbox --sandbox-network [--sandbox-allow-domain host]` (`--allowed-domains` is an alias) |
 | `tinyagent sandbox --backend auto\|landlock\|bwrap -t "..."` | `--sandbox --sandbox-backend auto\|landlock\|bwrap` |
@@ -30,6 +30,7 @@ Thirteen subcommands are shortcuts for existing flags. They rewrite the command 
 | `tinyagent triage <issues.json> [--out next-up.json] [--stale-days N]` | `--triage <issues.json> [--triage-out next-up.json] [--triage-stale-days N]`; see [Issue triage](triage.md) |
 | `tinyagent tinygo install` / `update` / `status` | `--tinygo-install` / `--tinygo-update` / `--tinygo-status` |
 
+- Chat and `tinyagent web` load the same project config as a one-shot run (`.tinyagent/tinyagent.yaml` in `--cwd`, through the same loader), including its `model:` and its [`env:`](config.md#environment-variables) map, which is set in the process environment before the API-key check. So bare `tinyagent chat` or `tinyagent web` starts without an exported `OPENAI_API_KEY` when the file sets it; a variable you exported wins.
 - Chat and `tinyagent web` share slash commands (`/help`, `/cost`, `/context`, `/model`, `/compact`, ...). `/context` shows how the context window is used; `/model [spec]` shows or switches the main model mid-session; `/compact` runs immediately and reports the conversation size before and after (or that nothing could be compacted). See [Interactive chat](chat.md#slash-commands) and [Web UI](web.md#slash-commands).
 - Any other flag (`-t`, `-m`, `--cwd`, ...) can follow. `--` followed by words is the task: `tinyagent planner --first -- fix the bug`.
 - The first word counts as a subcommand only when it is exactly the name and is alone or followed by an option, `--`, a known action, `help`, or that subcommand's positional argument (`tinyagent goal "…"`, `tinyagent triage issues.json`). So `tinyagent memory leaks in parser` is not a subcommand; it fails as before with "pass the task with -t". To start a task with one of these words, use `-t "memory ..."`.

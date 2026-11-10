@@ -40,6 +40,8 @@ func ensureGitExclude(cwd string, stderr io.Writer) {
 // loadConfig locates and loads the config with o's --profile. A project
 // config found in the cwd (not given with -c) can't launch executables
 // unless --trust-config is set: those settings are dropped with a warning.
+// The config's env: entries are then set in the process environment (see
+// applyConfigEnv).
 func loadConfig(o *options, cwd string, stderr io.Writer) (config.Source, config.AgentConfig, error) {
 	src := locateConfig(o, cwd, stderr)
 	if src.Kind == config.SourceCwd {
@@ -54,6 +56,11 @@ func loadConfig(o *options, cwd string, stderr io.Writer) (config.Source, config
 		if keys := config.StripUntrusted(&cfg); len(keys) > 0 {
 			fmt.Fprintf(stderr, "warning: ignoring %s from %s: a project config can't launch executables or loosen security settings; pass --trust-config to allow them\n", strings.Join(keys, ", "), src.Path)
 		}
+	}
+	// env: goes into the process environment before anything reads it
+	// (#410): providers, key checks, MCP servers, commands, child runs.
+	if r := applyConfigEnv(cfg.Env); o.verbose {
+		printConfigEnv(stderr, r)
 	}
 	return src, cfg, nil
 }

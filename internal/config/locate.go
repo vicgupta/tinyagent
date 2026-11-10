@@ -88,7 +88,8 @@ func LegacyProjectHint(path string) string {
 // with --trust-config: the ones that make tinyagent launch an executable or
 // shell command of its own, and the security policy a repository must not
 // loosen (permission rules, file_access, command_env, redact_secrets,
-// untrusted_content, memory, container run_args).
+// untrusted_content, memory, container run_args). env: itself is allowed;
+// only its LaunchEnv names (PATH, LD_*, GIT_*, ...) need --trust-config.
 var UntrustedKeys = []string{
 	"mcp_servers", "hooks", "command_tools", "lsp.servers", "plugins", "tinygo",
 	"claude_code.path", "codex_exec.path", "opencode.path", "handoff.startup_command",
@@ -128,6 +129,9 @@ func StripUntrusted(cfg *AgentConfig) []string {
 	reset("redact_secrets", &cfg.RedactSecrets, d.RedactSecrets)
 	reset("untrusted_content", &cfg.UntrustedContent, d.UntrustedContent)
 	reset("memory", &cfg.Memory, d.Memory)
+	// env: is allowed (local API keys); only the variables that change
+	// which program runs or what it loads are dropped.
+	out = append(out, stripLaunchEnv(cfg)...)
 	return out
 }
 
