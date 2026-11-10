@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **README quick start.** The README opens with a quick start — install options, `OPENAI_API_KEY` for the default `openai/gpt-4o`, `tinyagent --check` as the setup check, and a first read-only task — followed by a "What is sent where" section: what goes to the selected model provider (task, system-prompt context, tool results including file contents and command output), that every tool runs locally as your user unsandboxed by default, and the `--sandbox`/`--read-only` boundaries. The base-tool catalog paragraph moved to the top of Features, below the quick start. Docs only, no behavior change. (#413)
+
 ## [v0.24.0] - 2026-11-09
 
 ### Added

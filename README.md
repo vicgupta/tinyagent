@@ -1,10 +1,36 @@
 # tinyagent
 
+A minimal coding agent in a single static Go binary.
+
+## Quick start
+
+Four commands from install to a first, read-only task. All tools run on your machine; read [What is sent where](#what-is-sent-where) before you point tinyagent at real work.
+
 ```bash
+# 1. Install (macOS and Linux)
 curl -fsSL https://raw.githubusercontent.com/vicgupta/tinyagent/main/install.sh | sh
+
+# 2. Give the default model (openai/gpt-4o) its API key
+export OPENAI_API_KEY=...
+
+# 3. Check the setup: no model request, writes nothing
+tinyagent --check
+
+# 4. Run a first task, read-only, in a scratch copy of a repository
+tinyagent --read-only --cwd ~/src/project -t "Review error handling in pkg/api"
 ```
 
-A minimal coding agent in a single static Go binary. It gives an LLM ten base tools (`read_file`, `write_file`, `edit_file`, `undo_file`, `list_files`, `grep`, `bash`, and `start_process`, `read_process`, `stop_process` for background commands), plus `web_fetch` (on by default for public hosts; `--no-web-fetch` turns it off), the keyless `web_search` (on by default; DuckDuckGo with Exa as backup, with retries for transient failures and rate limits; `--no-web-search` turns it off) and the opt-in `update_plan`, `skill`, `view_image`, `apply_patch`, `delegate`, `lsp`, and MCP resource (`list_mcp_resources`, `read_mcp_resource`) tools, and keeps a linear message history until the model submits.
+`tinyagent --check` prints the model, provider, API-key status, sandbox, permissions and config source a run would use, and exits 2 with a `hint:` line naming the fix when a run would fail (a missing key, an invalid setting).
+
+- **Install options:** Windows `winget install VicGupta.TinyAgent`; with Go, `go install github.com/vicgupta/tinyagent/cmd/tinyagent@latest`; also a direct download. See [Install](#install) for all of them, and updating.
+- **Models:** any other provider is `-m <provider>/<model>`, e.g. `anthropic/claude-sonnet-4-5` (`ANTHROPIC_API_KEY`), `openrouter/qwen/qwen3-coder` (`OPENROUTER_API_KEY`), a local `ollama/llama3.1` (no key), a ChatGPT subscription (`codex/gpt-5.6-luna`). Per-project settings go in `.tinyagent/tinyagent.yaml`, which `tinyagent init` writes with comments, and its `env:` map can hold the key. See [docs/models.md](docs/models.md), [docs/providers.md](docs/providers.md) and [docs/config.md](docs/config.md).
+- **First real task:** drop `--read-only` to let it edit files, and pass `--sandbox` to confine the commands it runs. From there, [Usage](#usage) and [Features](#features).
+
+### What is sent where
+
+- **Sent to the model provider you pick:** your task, the system prompt with the context tinyagent attaches to it (for example `AGENTS.md` and project memory), and each tool result the model asks for as the run goes — file contents read from your repository, command output, fetched pages and search results. That conversation follows the provider's data terms. Optional `redact_secrets` (off by default) masks known secret values in command and web-tool output before it reaches the model; file reads are not covered. With `ollama`, the model runs locally and the conversation never leaves your machine.
+- **Run locally:** every tool runs on your machine, in `--cwd`, as your user. Commands are not sandboxed by default: a `bash` call runs with your environment and can read anything you can, including your API keys. The on-by-default web tools make their own requests (`web_fetch` to public hosts, `web_search` queries to DuckDuckGo with Exa as backup; `--no-web-fetch` and `--no-web-search` turn them off).
+- **Boundaries you can draw:** `--sandbox` confines every command at the OS level (Linux: Bubblewrap with Landlock stacked inside, or Landlock alone; macOS: Seatbelt; not supported on Windows) to writing only inside `--cwd` and a per-run temp dir, denies outbound network unless you allow it, and fails closed rather than running unsandboxed. `--read-only` permits only `read_file`, `list_files` and `grep`, so nothing is changed and no commands run. The sandbox does not cover the provider requests, the web tools or the in-process file tools; permissions, a network allowlist, file-access rules and secret redaction add finer control. See [docs/sandbox.md](docs/sandbox.md) and [docs/permissions.md](docs/permissions.md).
 
 ## Install
 
@@ -139,6 +165,8 @@ tinyagent goal "fix the failing test in pkg/foo" --check "go test ./..."
 Run `tinyagent --help` (or plain `tinyagent` at a terminal) for the overview: usage, two examples, the common options (`-t/--task`, including `-t -` for stdin; `-m/--model` with its providers and default; `-c`, `--cwd`, `--resume`, `--read-only`; optional `--tools` to scope a task to named tools ([docs](docs/tasks.md#tool-scoping)), `-o`, `--json`, `--check`, `--update`, `-V`) and the subcommands, and `tinyagent --help --verbose` for every flag. Subcommands are shortcuts for common flags: `tinyagent sandbox`, `tinyagent memory list`, `tinyagent ratchet list`, `tinyagent planner --first`, `tinyagent goal "..."`, `tinyagent plugins list`, `tinyagent triage issues.json`, `tinyagent tinygo status` (see [CLI reference](docs/subcommands.md)); each one alone, such as `tinyagent sandbox`, prints its help.
 
 ## Features
+
+tinyagent gives an LLM ten base tools (`read_file`, `write_file`, `edit_file`, `undo_file`, `list_files`, `grep`, `bash`, and `start_process`, `read_process`, `stop_process` for background commands), plus `web_fetch` (on by default for public hosts; `--no-web-fetch` turns it off), the keyless `web_search` (on by default; DuckDuckGo with Exa as backup, with retries for transient failures and rate limits; `--no-web-search` turns it off) and the opt-in `update_plan`, `skill`, `view_image`, `apply_patch`, `delegate`, `lsp`, and MCP resource (`list_mcp_resources`, `read_mcp_resource`) tools, and keeps a linear message history until the model submits.
 
 - Small set of file, search, shell and background-process tools, plus web fetch of public pages (on by default, optional host allowlist, private addresses always refused; `--no-web-fetch` turns it off), free keyless web search (DuckDuckGo, falling back to Exa's public MCP endpoint, or your own SearXNG; `--no-web-search` turns it off) and opt-in planning, skills, images, patches, subagents (read-only researchers), workers (read-write builders in their own Git worktree), LSP and MCP tools.
 - Per-role model routing (`models:` in config, `--aux-model`, `--delegate-model`, `--route`, keyword or `task_type` routes, `--no-routing`) for compaction, the verify review and delegated children, each role with its own fallback chain and a `usage_by_role` cost split in the summary, JSON, trajectory, `--log-db` and eval reports; off by default.
