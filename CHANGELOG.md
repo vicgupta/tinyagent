@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [v0.24.0] - 2026-11-09
+
+### Added
+
+- **`env:` in the project config.** A top-level `env:` map (`NAME: value`) in `.tinyagent/tinyagent.yaml`, and in a profile, sets variables in tinyagent's own environment. The shared config loader applies it before providers are registered, before the missing-key check, and before MCP servers, hooks, command tools and commands start. That covers every mode that loads the config: one-shot, `--resume`, `tinyagent chat`, `tinyagent web`, ACP sessions, `--check`, workflow stages and `--attempts`/eval runs. So bare `tinyagent chat` or `tinyagent web` works with `OPENAI_API_KEY` kept in the local file instead of exported.
+  - **Precedence.** Flags win over an exported variable, which wins over `env:`. An exported empty value counts as unset.
+  - **Profiles.** A `--profile`'s `env:` is merged over the base `env:` name by name.
+  - **Values are never printed.** `-v` and `--check` show only names and where each value came from (`from config` or `from environment`). With `redact_secrets` on, `env:` values are masked in tool output.
+  - **Validation.** Values must be quoted YAML strings. An error names the variable, never its value.
+  - **Trust.** `env:` is honored from an untrusted project config without `--trust-config`, except variables that change which program runs or what it loads, which are dropped with a warning unless `--trust-config` is passed (a `-c` file is always trusted). These include `PATH`, `LD_*`, `DYLD_*`, `GIT_*`, `SHELL`, `NODE_OPTIONS`, `PYTHONPATH`, `EDITOR` and `PAGER`; the full list is in the docs.
+  - **ACP.** When an ACP session loads another project's config, the previous config's values are replaced or removed. Variables you exported are never changed.
+  - **Starter and hints.** `tinyagent init` writes a commented `env:` example. When chat, web or an ACP session starts without a provider key, the error suggests setting it under `env:`.
+  - `.env` files are still not read. See [Environment variables](docs/config.md#environment-variables). (#410)
+
 ## [v0.23.0] - 2026-11-09
 
 ### Fixed
@@ -16,7 +30,7 @@
 
 ### Changed
 
-- **Dotenv files are not read.** The old changelog notes that described loading a dotenv file from `--cwd` at startup are removed. Exported environment variables and explicit flags are unchanged. A dotenv file in `--cwd` is left in place and does not set the model or API keys.
+- **Dotenv files are not read.** The old changelog notes that described loading a dotenv file from `--cwd` at startup are removed. Exported environment variables and explicit flags are unchanged. A dotenv file in `--cwd` is left in place and does not set the model or API keys. (Since v0.24.0, the top-level `env:` map in `.tinyagent/tinyagent.yaml` fills that role.)
 
 ## [v0.22.0] - 2026-11-07
 
