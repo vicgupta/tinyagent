@@ -77,12 +77,56 @@ type checkHint struct {
 
 func (h checkHint) Error() string { return h.err.Error() }
 
+// checkReport accumulates a --check run's state between its phases
+// (issue #416): the resolved config, model, workspace, the report lines
+// and the summary fields filled as it goes, so a failed check still
+// reports what it resolved before the error. The phases run in the order
+// resolveCheck has always used.
+type checkReport struct {
+	o       *options
+	fs      *flag.FlagSet
+	cfg     config.AgentConfig
+	cfgSrc  config.Source
+	cfgPath string
+	sum     *checkSummary
+	policy  *permissions.Policy
+
+	spec       string
+	specSource string
+	fallbacks  []string
+	m          model.Model
+	root       string
+	cmdTools   []*tools.CommandTool
+	lines      [][2]string
+}
+
+func (rp *checkReport) add(k, v string) { rp.lines = append(rp.lines, [2]string{k, v}) }
+
 // resolveCheck returns the --check report lines, or the first error a run
-// would stop on before its first request.
-//
-// It fills sum as it goes, so a failed check still reports what it
-// resolved before the error.
+// would stop on before its first request. It fills sum as it goes, so a
+// failed check still reports what it resolved before the error. The
+// phases live in checkReport's methods.
 func resolveCheck(o *options, fs *flag.FlagSet, sum *checkSummary) ([][2]string, error) {
+	rp, err := newCheckReport(o, fs, sum)
+	if err != nil {
+		return nil, err
+	}
+	if err := rp.resolveModel(); err != nil {
+		return nil, err
+	}
+	if err := rp.resolveWorkspace(); err != nil {
+		return nil, err
+	}
+	if err := rp.reportLines(); err != nil {
+		return nil, err
+	}
+	return rp.lines, nil
+}
+
+// newCheckReport loads the config the way a run would, builds the hooks
+// runner and the permission policy, and applies the limit, tool-scope and
+// output-budget overrides --check reports on.
+func newCheckReport(o *options, fs *flag.FlagSet, sum *checkSummary) (*checkReport, error) {
 	cfgSrc, cfg, err := loadConfig(o, o.cwd, io.Discard)
 	cfgPath := cfgSrc.Path
 	if err == nil {
@@ -106,6 +150,15 @@ func resolveCheck(o *options, fs *flag.FlagSet, sum *checkSummary) ([][2]string,
 	if flagWasSet(fs, "max-output-tokens") {
 		cfg.MaxOutputTokens = o.maxOutputTokens
 	}
+	return &checkReport{o: o, fs: fs, cfg: cfg, cfgSrc: cfgSrc, cfgPath: cfgPath, sum: sum, policy: policy}, nil
+}
+
+// resolveModel resolves the model spec and where it came from, checks the
+// reasoning effort, output budget, OpenAI transport, provider environment
+// and fallbacks, and builds the client (which makes no request) to report
+// the provider's credentials.
+func (rp *checkReport) resolveModel() error {
+	o, fs, cfg := rp.o, rp.fs, &rp.cfg
 	spec := resolveModel(fs, o.modelName, cfg.Model)
 	specSource := modelSource(fs, cfg.Model)
 	if attemptsActive(fs) && len(o.attempts.models) > 0 {
@@ -117,98 +170,133 @@ func resolveCheck(o *options, fs *flag.FlagSet, sum *checkSummary) ([][2]string,
 		cfg.ReasoningEffort = o.reasoningEffort
 	}
 	if err := checkReasoningEffort(spec, cfg.ReasoningEffort); err != nil {
-		return nil, err
+		return err
 	}
 	if err := checkMaxOutputTokens(spec, cfg.MaxOutputTokens); err != nil {
-		return nil, err
+		return err
 	}
 	if flagWasSet(fs, "openai-api") {
 		cfg.OpenAIAPI = o.openaiAPI
 	}
 	if err := checkOpenAIAPI(cfg.OpenAIAPI); err != nil {
-		return nil, err
+		return err
 	}
-	sum.Profile = o.profile
-	sum.Model = checkModel{Spec: spec, Source: strings.TrimPrefix(specSource, "from ")}
-	sum.setProvider(spec)
-	sum.Limits = checkLimits{Steps: cfg.StepLimit, CostUSD: cfg.CostLimit, Tokens: cfg.TokenLimit, TimeSec: cfg.WallTimeSec}
+	rp.spec, rp.specSource = spec, specSource
+	rp.sum.Profile = o.profile
+	rp.sum.Model = checkModel{Spec: spec, Source: strings.TrimPrefix(specSource, "from ")}
+	rp.sum.setProvider(spec)
+	rp.sum.Limits = checkLimits{Steps: cfg.StepLimit, CostUSD: cfg.CostLimit, Tokens: cfg.TokenLimit, TimeSec: cfg.WallTimeSec}
 	if err := model.CheckProviderEnv(spec); err != nil {
-		return nil, err
+		return err
 	}
-	fallbacks, err := fallbackModels(fs, o.fallbackModels, o.noFallback, cfg)
+	fallbacks, err := fallbackModels(fs, o.fallbackModels, o.noFallback, *cfg)
 	if err == nil {
 		err = checkFallbacks(spec, fallbacks, cfg.OpenAIAPI)
 	}
 	if err != nil {
-		return nil, err
+		return err
 	}
+	rp.fallbacks = fallbacks
 	// Building the client makes no request; it reports an unknown provider,
 	// a missing model name or a missing Codex login, as a run would.
 	m, err := model.NewWith(spec, nil, model.Options{OpenAIAPI: model.OpenAITransport(spec, cfg.OpenAIAPI)})
 	if err != nil {
-		return nil, checkHint{spec: spec, msg: err.Error(), err: err}
+		return checkHint{spec: spec, msg: err.Error(), err: err}
 	}
 	if env := model.MissingKeyEnv(spec); env != "" {
-		return nil, checkHint{spec: spec, msg: "HTTP 401: ", err: fmt.Errorf("%s is not set", env)}
+		return checkHint{spec: spec, msg: "HTTP 401: ", err: fmt.Errorf("%s is not set", env)}
 	}
+	rp.m = m
+	return nil
+}
+
+// resolveWorkspace resolves the working directory and loads the command
+// tools the way a run would.
+func (rp *checkReport) resolveWorkspace() error {
+	o, cfg := rp.o, &rp.cfg
 	root, err := canonicalRoot(o.cwd)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
-		return nil, fmt.Errorf("--cwd %s is not a directory", o.cwd)
+		return fmt.Errorf("--cwd %s is not a directory", o.cwd)
 	}
 	cmdTools, err := tools.NewCommandTools(cfg.CommandTools, root, cfg.BashTimeoutSec)
 	if err != nil {
-		if cfgPath == "" {
-			return nil, fmt.Errorf("config: %w", err)
+		if rp.cfgPath == "" {
+			return fmt.Errorf("config: %w", err)
 		}
-		return nil, inConfig(cfgPath, err)
+		return inConfig(rp.cfgPath, err)
 	}
+	rp.root, rp.cmdTools = root, cmdTools
+	return nil
+}
 
-	var lines [][2]string
-	add := func(k, v string) { lines = append(lines, [2]string{k, v}) }
-	add("config", cfgSrc.Label())
-	sum.setConfigLine(cfgSrc.Label())
+// reportLines builds the report lines section by section, filling the
+// summary as it goes.
+func (rp *checkReport) reportLines() error {
+	rp.headerLines()
+	if err := rp.routeLines(); err != nil {
+		return err
+	}
+	if err := rp.settingLines(); err != nil {
+		return err
+	}
+	return rp.postureLines()
+}
+
+// headerLines reports the config, profile, env, model, provider and
+// fallback lines.
+func (rp *checkReport) headerLines() {
+	o, fs := rp.o, rp.fs
+	rp.add("config", rp.cfgSrc.Label())
+	rp.sum.setConfigLine(rp.cfgSrc.Label())
 	if o.profile != "" {
-		add("profile", o.profile)
+		rp.add("profile", o.profile)
 	}
-	if env := describeConfigEnv(cfg.Env); env != "" {
-		add("env", env) // names only, never values (#410)
+	if env := describeConfigEnv(rp.cfg.Env); env != "" {
+		rp.add("env", env) // names only, never values (#410)
 	}
-	add("model", spec+" ("+specSource+")")
-	add("provider", providerStatus(spec, m))
+	rp.add("model", rp.spec+" ("+rp.specSource+")")
+	rp.add("provider", providerStatus(rp.spec, rp.m))
 	switch {
-	case len(fallbacks) == 0 && o.noFallback:
-		add("fallback", "none (--no-fallback)")
-	case len(fallbacks) == 0:
-		add("fallback", "none")
+	case len(rp.fallbacks) == 0 && o.noFallback:
+		rp.add("fallback", "none (--no-fallback)")
+	case len(rp.fallbacks) == 0:
+		rp.add("fallback", "none")
 	case flagWasSet(fs, "fallback-model"):
-		add("fallback", strings.Join(fallbacks, ", ")+" (from --fallback-model)")
+		rp.add("fallback", strings.Join(rp.fallbacks, ", ")+" (from --fallback-model)")
 	default:
-		add("fallback", strings.Join(fallbacks, ", ")+" (from config)")
+		rp.add("fallback", strings.Join(rp.fallbacks, ", ")+" (from config)")
 	}
+}
+
+// routeLines reports the model routing (auxiliary tasks routed away from
+// the main model, and the delegate and worker routes) plus the cwd,
+// limits and MCP lines.
+func (rp *checkReport) routeLines() error {
+	o, fs, cfg := rp.o, rp.fs, &rp.cfg
 	if flagWasSet(fs, "subagents") {
 		cfg.Subagents.Enabled = o.subagents
 	}
 	if flagWasSet(fs, "workers") {
-		setWorkers(&cfg, o.workers)
+		setWorkers(cfg, o.workers)
 	}
-	for _, r := range checkRoutes(cfg, spec) {
-		if r.Model != spec || len(r.Fallbacks) > 0 {
-			if _, err := routedModel(cfg, r, spec, cfg.ReasoningEffort); err != nil {
-				return nil, err
+	for _, r := range checkRoutes(*cfg, rp.spec) {
+		if r.Model != rp.spec || len(r.Fallbacks) > 0 {
+			if _, err := routedModel(*cfg, r, rp.spec, cfg.ReasoningEffort); err != nil {
+				return err
 			}
 		}
 		line := r.Model + " (" + r.Role + ", from " + r.Source + ")"
 		if len(r.Fallbacks) > 0 {
 			line += ", fallback " + strings.Join(r.Fallbacks, " -> ")
 		}
-		add(r.Task, line)
+		rp.add(r.Task, line)
 	}
-	if cfg.Subagents.Enabled || workersEnabled(cfg) {
-		if _, err := childRoutes(cfg, spec, routing.TaskDelegate, cfg.ReasoningEffort); err != nil {
-			return nil, err
+	if cfg.Subagents.Enabled || workersEnabled(*cfg) {
+		if _, err := childRoutes(*cfg, rp.spec, routing.TaskDelegate, cfg.ReasoningEffort); err != nil {
+			return err
 		}
 		for i, mr := range cfg.Models.Delegated.Routes {
 			var when []string
@@ -218,101 +306,115 @@ func resolveCheck(o *options, fs *flag.FlagSet, sum *checkSummary) ([][2]string,
 			if mr.Type != "" {
 				when = append(when, "type "+mr.Type)
 			}
-			add("route", fmt.Sprintf("%d: %s -> %s", i+1, strings.Join(when, " or "), mr.Model))
+			rp.add("route", fmt.Sprintf("%d: %s -> %s", i+1, strings.Join(when, " or "), mr.Model))
 		}
 	} else if cfg.Models.Flags.NoRouting {
-		add("route", "off (--no-routing)")
+		rp.add("route", "off (--no-routing)")
 	}
 	cwdSource := "default"
 	if flagWasSet(fs, "cwd") {
 		cwdSource = "from --cwd"
 	}
-	add("cwd", root+" ("+cwdSource+")")
-	sum.Cwd = root
-	add("limits", strings.Join([]string{
+	rp.add("cwd", rp.root+" ("+cwdSource+")")
+	rp.sum.Cwd = rp.root
+	rp.add("limits", strings.Join([]string{
 		"steps " + limitText(fs, "step-limit", cfg.StepLimit > 0, fmt.Sprint(cfg.StepLimit)),
 		"cost " + limitText(fs, "cost-limit", cfg.CostLimit > 0, formatCost(cfg.CostLimit)),
 		"tokens " + limitText(fs, "token-limit", cfg.TokenLimit > 0, fmt.Sprint(cfg.TokenLimit)),
 		"time " + limitText(fs, "time-limit", cfg.WallTimeSec > 0, fmt.Sprintf("%ds", cfg.WallTimeSec)),
 	}, ", "))
 	for _, s := range cfg.MCPServers {
-		add("mcp", fmt.Sprintf("%s: %d tools, %d resource patterns", s.Alias, len(s.Tools), len(s.Resources)))
+		rp.add("mcp", fmt.Sprintf("%s: %d tools, %d resource patterns", s.Alias, len(s.Tools), len(s.Resources)))
 	}
-	pl, err := checkPluginsLine(cfg, o.cwd, os.Stderr)
+	return nil
+}
+
+// settingLines reports the plugins, ask_user, command tools, tool scope
+// and sandbox lines.
+func (rp *checkReport) settingLines() error {
+	o, fs, cfg := rp.o, rp.fs, &rp.cfg
+	pl, err := checkPluginsLine(*cfg, o.cwd, os.Stderr)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if pl != "" {
-		add("plugins", pl)
+		rp.add("plugins", pl)
 	}
 	if flagWasSet(fs, "ask-user") {
 		cfg.AskUser.Enabled = o.askUser
 	}
 	switch {
 	case cfg.AskUser.Enabled && flagWasSet(fs, "ask-user"):
-		add("ask_user", fmt.Sprintf("on, at most %d questions per run (from --ask-user)", cfg.AskUser.MaxQuestions))
+		rp.add("ask_user", fmt.Sprintf("on, at most %d questions per run (from --ask-user)", cfg.AskUser.MaxQuestions))
 	case cfg.AskUser.Enabled:
-		add("ask_user", fmt.Sprintf("on, at most %d questions per run (from config)", cfg.AskUser.MaxQuestions))
+		rp.add("ask_user", fmt.Sprintf("on, at most %d questions per run (from config)", cfg.AskUser.MaxQuestions))
 	case flagWasSet(fs, "ask-user"):
-		add("ask_user", "off (from --ask-user)")
+		rp.add("ask_user", "off (from --ask-user)")
 	}
-	if n := len(cmdTools); n > 0 {
+	if n := len(rp.cmdTools); n > 0 {
 		names := make([]string, n)
-		for i, c := range cmdTools {
+		for i, c := range rp.cmdTools {
 			names[i] = c.Name
 		}
-		add("tools", fmt.Sprintf("%d command tools (%s)", n, strings.Join(names, ", ")))
+		rp.add("tools", fmt.Sprintf("%d command tools (%s)", n, strings.Join(names, ", ")))
 	}
 	if len(cfg.Tools) > 0 {
-		add("tool_scope", strings.Join(cfg.Tools, ", "))
+		rp.add("tool_scope", strings.Join(cfg.Tools, ", "))
 	}
-	if sb, err := checkSandbox(fs, *o, cfg); err != nil {
-		return nil, err
+	if sb, err := checkSandbox(fs, *o, *cfg); err != nil {
+		return err
 	} else if sb != "" {
-		add("sandbox", sb)
-		sum.Sandbox = checkSandboxInfo{Enabled: true, Backend: sandboxBackendName(cfg, fs, *o), Available: !strings.HasPrefix(sb, "unavailable"), Detail: sb}
+		rp.add("sandbox", sb)
+		rp.sum.Sandbox = checkSandboxInfo{Enabled: true, Backend: sandboxBackendName(*cfg, fs, *o), Available: !strings.HasPrefix(sb, "unavailable"), Detail: sb}
 	}
-	cmdPosture, webPosture, err := checkPosture(fs, *o, cfg)
+	return nil
+}
+
+// postureLines reports the command and web posture, memory, lockdown,
+// skills, attempts and permissions lines.
+func (rp *checkReport) postureLines() error {
+	o, fs, cfg := rp.o, rp.fs, &rp.cfg
+	cmdPosture, webPosture, err := checkPosture(fs, *o, *cfg)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	add("commands", commandsLine(cmdPosture))
-	add("web", webLine(webPosture))
-	sum.Commands, sum.WebTools = cmdPosture, webPosture
-	if mem := checkMemory(fs, o, cfg.Memory, root); mem != "" {
-		add("memory", mem)
+	rp.add("commands", commandsLine(cmdPosture))
+	rp.add("web", webLine(webPosture))
+	rp.sum.Commands, rp.sum.WebTools = cmdPosture, webPosture
+	if mem := checkMemory(fs, o, cfg.Memory, rp.root); mem != "" {
+		rp.add("memory", mem)
 	}
-	lock, err := checkLockdown(fs, o.lockdown, cfg)
+	lock, err := checkLockdown(fs, o.lockdown, *cfg)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if lock != "" {
-		add("lockdown", lock)
-		sum.Lockdown = checkLockdownSum{Enabled: !strings.HasPrefix(lock, "off"), Detail: lock}
+		rp.add("lockdown", lock)
+		rp.sum.Lockdown = checkLockdownSum{Enabled: !strings.HasPrefix(lock, "off"), Detail: lock}
 	}
 	if _, _, err := skillsFlag(fs, *o); err != nil {
-		return nil, err
+		return err
 	}
-	sk := checkSkills(fs, o, cfg, cfgSrc)
-	add("skills", sk.String())
-	sum.Skills = sk
-	att, err := checkAttempts(fs, o, cfg)
+	sk := checkSkills(fs, o, *cfg, rp.cfgSrc)
+	rp.add("skills", sk.String())
+	rp.sum.Skills = sk
+	att, err := checkAttempts(fs, o, *cfg)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if att != "" {
-		add("attempts", att)
+		rp.add("attempts", att)
 	}
-	if policy != nil {
-		ps := policy.Summary()
-		sum.Permissions = checkPermissions{Configured: true, Rules: policy.RuleCount(), Default: ps.Default, NonInteractive: ps.NonInteractive, Judge: ps.Judge}
-		line := fmt.Sprintf("%d rules, default %s, non-interactive %s", policy.RuleCount(), ps.Default, ps.NonInteractive)
+	if rp.policy != nil {
+		ps := rp.policy.Summary()
+		rp.sum.Permissions = checkPermissions{Configured: true, Rules: rp.policy.RuleCount(), Default: ps.Default, NonInteractive: ps.NonInteractive, Judge: ps.Judge}
+		line := fmt.Sprintf("%d rules, default %s, non-interactive %s", rp.policy.RuleCount(), ps.Default, ps.NonInteractive)
 		if ps.Judge {
 			line += ", judge on"
 		}
-		add("permissions", line)
+		rp.add("permissions", line)
 	}
-	return lines, nil
+	return nil
 }
 
 // modelSource names where resolveModel took the model from.

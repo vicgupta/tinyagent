@@ -65,8 +65,36 @@ var ratchetAllowedFlags = map[string]bool{"cwd": true, "json": true}
 var ratchetNow = time.Now
 
 // runRatchetCommand implements the ratchet management flags. Usage errors
-// exit 2; a rules file that can't be read or written exits 1.
+// exit 2; a rules file that can't be read or written exits 1. Each
+// command runs in its own helper (issue #416).
 func runRatchetCommand(o *options, fs *flag.FlagSet, stdout, stderr io.Writer) int {
+	cmd, code, done := ratchetCheck(o, fs, stderr)
+	if done {
+		return code
+	}
+	root, err := canonicalRoot(o.cwd)
+	if err != nil {
+		fmt.Fprintln(stderr, "error: ratchet:", err)
+		return 1
+	}
+	path := ratchet.Path(root)
+	switch cmd {
+	case "ratchet-path":
+		fmt.Fprintln(stdout, path)
+		return 0
+	case "ratchet-add":
+		return ratchetAddRule(o, path, stdout, stderr)
+	case "ratchet-remove":
+		return ratchetRemoveRule(o, path, stdout, stderr)
+	}
+	return ratchetListRules(path, o.jsonOutput, stdout, stderr)
+}
+
+// ratchetCheck validates the ratchet flags: exactly one ratchet command,
+// no flag it can't be combined with, no positional argument, --json only
+// with --ratchet-list, and --cwd a directory. It returns the command to
+// run ("" is --ratchet-list), an exit code and whether to stop.
+func ratchetCheck(o *options, fs *flag.FlagSet, stderr io.Writer) (string, int, bool) {
 	var set []string
 	for _, name := range ratchetCommandFlags {
 		if flagWasSet(fs, name) {
@@ -75,11 +103,11 @@ func runRatchetCommand(o *options, fs *flag.FlagSet, stdout, stderr io.Writer) i
 	}
 	if len(set) == 0 {
 		fmt.Fprintln(stderr, "error: the --ratchet-incident, --ratchet-expires, --ratchet-review and --ratchet-deny-* flags apply only to --ratchet-add")
-		return 2
+		return "", 2, true
 	}
 	if len(set) > 1 {
 		fmt.Fprintf(stderr, "error: %s can't be combined; run one ratchet command at a time\n", strings.Join(set, " and "))
-		return 2
+		return "", 2, true
 	}
 	r := o.ratchet
 	var conflict string
@@ -105,85 +133,88 @@ func runRatchetCommand(o *options, fs *flag.FlagSet, stdout, stderr io.Writer) i
 			dash = "-"
 		}
 		fmt.Fprintf(stderr, "error: %s only manages the project rules file; it can't be combined with %s%s\n", set[0], dash, conflict)
-		return 2
+		return "", 2, true
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintf(stderr, "error: unexpected positional argument %q\n", fs.Arg(0))
-		return 2
+		return "", 2, true
 	}
 	if o.jsonOutput && !r.list {
 		fmt.Fprintln(stderr, "error: --json applies only to --ratchet-list among the ratchet commands")
-		return 2
+		return "", 2, true
 	}
 	if fi, err := os.Stat(o.cwd); err != nil || !fi.IsDir() {
 		fmt.Fprintf(stderr, "error: --cwd %q is not a directory\n", o.cwd)
+		return "", 2, true
+	}
+	return strings.TrimPrefix(set[0], "--"), 0, false
+}
+
+// ratchetAddRule runs --ratchet-add: it validates the rule, enforces it
+// as a deny rule when asked, and records it.
+func ratchetAddRule(o *options, path string, stdout, stderr io.Writer) int {
+	r := o.ratchet
+	rule := ratchet.Rule{Rule: strings.TrimSpace(r.add), Incident: strings.TrimSpace(r.incident), Expires: r.expires, Review: strings.TrimSpace(r.review)}
+	if rule.Rule == "" {
+		fmt.Fprintln(stderr, "error: --ratchet-add needs the rule text")
 		return 2
 	}
-	root, err := canonicalRoot(o.cwd)
+	if rule.Incident == "" {
+		fmt.Fprintln(stderr, "error: --ratchet-add needs --ratchet-incident: what went wrong that this rule prevents")
+		return 2
+	}
+	if r.denyTool != "" || r.denyCommand != "" || r.denyPath != "" || r.denyHost != "" {
+		rule.Deny = &ratchet.Deny{Tool: r.denyTool, Command: r.denyCommand, Path: r.denyPath, Host: r.denyHost}
+	}
+	probe := rule
+	probe.Created, probe.Expires = ratchetNow().Format(ratchet.DateLayout), "2000-01-01"
+	if rule.Expires != "" {
+		probe.Expires = rule.Expires
+	}
+	if err := probe.Validate(); err != nil {
+		fmt.Fprintln(stderr, "error: --ratchet-add:", err)
+		return 2
+	}
+	if rule.Deny != nil {
+		if err := checkRatchetDeny(rule); err != nil {
+			fmt.Fprintln(stderr, "error: --ratchet-add:", err)
+			return 2
+		}
+	}
+	added, err := ratchet.Add(path, rule, ratchetNow())
 	if err != nil {
 		fmt.Fprintln(stderr, "error: ratchet:", err)
 		return 1
 	}
-	path := ratchet.Path(root)
-	switch {
-	case r.path:
-		fmt.Fprintln(stdout, path)
-		return 0
-	case flagWasSet(fs, "ratchet-add"):
-		rule := ratchet.Rule{Rule: strings.TrimSpace(r.add), Incident: strings.TrimSpace(r.incident), Expires: r.expires, Review: strings.TrimSpace(r.review)}
-		if rule.Rule == "" {
-			fmt.Fprintln(stderr, "error: --ratchet-add needs the rule text")
-			return 2
-		}
-		if rule.Incident == "" {
-			fmt.Fprintln(stderr, "error: --ratchet-add needs --ratchet-incident: what went wrong that this rule prevents")
-			return 2
-		}
-		if r.denyTool != "" || r.denyCommand != "" || r.denyPath != "" || r.denyHost != "" {
-			rule.Deny = &ratchet.Deny{Tool: r.denyTool, Command: r.denyCommand, Path: r.denyPath, Host: r.denyHost}
-		}
-		probe := rule
-		probe.Created, probe.Expires = ratchetNow().Format(ratchet.DateLayout), "2000-01-01"
-		if rule.Expires != "" {
-			probe.Expires = rule.Expires
-		}
-		if err := probe.Validate(); err != nil {
-			fmt.Fprintln(stderr, "error: --ratchet-add:", err)
-			return 2
-		}
-		if rule.Deny != nil {
-			if err := checkRatchetDeny(rule); err != nil {
-				fmt.Fprintln(stderr, "error: --ratchet-add:", err)
-				return 2
-			}
-		}
-		added, err := ratchet.Add(path, rule, ratchetNow())
-		if err != nil {
-			fmt.Fprintln(stderr, "error: ratchet:", err)
-			return 1
-		}
-		fmt.Fprintf(stdout, "added rule %s to %s (%s)\n", added.ID, path, ratchetLimit(added))
-		return 0
-	case flagWasSet(fs, "ratchet-remove"):
-		id := strings.TrimSpace(r.remove)
-		if id == "" {
-			fmt.Fprintln(stderr, "error: --ratchet-remove needs a rule id (see --ratchet-list)")
-			return 2
-		}
-		if err := ratchet.Remove(path, id); err != nil {
-			fmt.Fprintln(stderr, "error: ratchet:", err)
-			return 1
-		}
-		fmt.Fprintf(stdout, "removed rule %s from %s\n", id, path)
-		return 0
+	fmt.Fprintf(stdout, "added rule %s to %s (%s)\n", added.ID, path, ratchetLimit(added))
+	return 0
+}
+
+// ratchetRemoveRule runs --ratchet-remove: it deletes a rule by id.
+func ratchetRemoveRule(o *options, path string, stdout, stderr io.Writer) int {
+	id := strings.TrimSpace(o.ratchet.remove)
+	if id == "" {
+		fmt.Fprintln(stderr, "error: --ratchet-remove needs a rule id (see --ratchet-list)")
+		return 2
 	}
+	if err := ratchet.Remove(path, id); err != nil {
+		fmt.Fprintln(stderr, "error: ratchet:", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "removed rule %s from %s\n", id, path)
+	return 0
+}
+
+// ratchetListRules runs --ratchet-list: it prints the project rules with
+// their status, incident and expiry or review condition, as text or JSON.
+func ratchetListRules(path string, asJSON bool, stdout, stderr io.Writer) int {
 	rules, err := ratchet.Load(path)
 	if err != nil {
 		fmt.Fprintln(stderr, "error: ratchet:", err)
 		return 1
 	}
 	now := ratchetNow()
-	if o.jsonOutput {
+	if asJSON {
 		out := []map[string]any{}
 		for _, x := range rules {
 			m := map[string]any{"id": x.ID, "rule": x.Rule, "incident": x.Incident, "created": x.Created, "status": ratchetStatus(x, now), "enforced": x.Deny != nil}

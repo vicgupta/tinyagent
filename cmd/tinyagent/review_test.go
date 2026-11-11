@@ -337,6 +337,45 @@ func TestReviewFileAccessAndCap(t *testing.T) {
 	}
 }
 
+// The extracted helpers behind collectReview: hidden files are counted
+// but not shown, the diff cap leaves out whole files only, and the
+// message renders the summary, hidden count, left-out list and focus.
+func TestReviewHelpers(t *testing.T) {
+	root := t.TempDir()
+	fa, err := tools.NewFileAccess(root, []string{"secret.txt"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := &trajectory.ReviewInfo{Target: reviewUncommitted}
+	files := []reviewFile{
+		{path: "secret.txt", status: "M", add: 1, diff: "+leak\n"},
+		{path: "a.txt", status: "M", add: 2, del: 1, diff: "+two\n-one\n"},
+		{path: "big.txt", status: "A", add: 9, diff: strings.Repeat("+x\n", 9)},
+	}
+	shown := reviewShownFiles(fa, root, files, info)
+	if len(shown) != 2 || info.FilesChanged != 2 || info.HiddenPaths != 1 || info.DiffBytes != len("+two\n-one\n")+len(strings.Repeat("+x\n", 9)) {
+		t.Fatalf("shown = %v, info = %+v", shown, info)
+	}
+	defer func(n int) { reviewMaxDiffBytes = n }(reviewMaxDiffBytes)
+	reviewMaxDiffBytes = 12
+	body, omitted := reviewDiffBody(shown)
+	if body != "+two\n-one\n" || len(omitted) != 1 || omitted[0] != "big.txt" {
+		t.Fatalf("body = %q, omitted = %v", body, omitted)
+	}
+	info.DiffBytesSent, info.Truncated = len(body), len(omitted) > 0
+	msg := reviewMessage(info, "HEADER", shown, body, omitted, "FOCUS")
+	if !strings.Contains(msg, "Changed files (2):\nM a.txt (+2 -1)\nA big.txt (+9 -0)\n") ||
+		!strings.Contains(msg, "1 changed path is hidden by file_access.deny_read") ||
+		!strings.Contains(msg, "read them with read_file:\n- big.txt\n") ||
+		!strings.Contains(msg, "--- BEGIN DIFF ---\n+two\n-one\n--- END DIFF ---\n") ||
+		!strings.HasSuffix(msg, "Additional review instructions:\nFOCUS\n") {
+		t.Errorf("message:\n%s", msg)
+	}
+	if reviewMessage(info, "HEADER", shown, body, nil, "") == "" || !strings.Contains(reviewMessage(info, "HEADER", shown, "", nil, ""), "HEADER") {
+		t.Error("message empty without truncation or focus")
+	}
+}
+
 func TestReviewNothingAndSubdir(t *testing.T) {
 	repo := worktreeRepo(t)
 	f := newEnvOpenAI(t, "sk-x")

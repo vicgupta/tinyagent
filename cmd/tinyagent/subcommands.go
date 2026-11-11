@@ -183,7 +183,8 @@ type subHelp struct{ sub *subcommand }
 // expandSubcommand rewrites args (without the program name). It returns args
 // unchanged when they don't start with a subcommand, help for
 // "tinyagent <sub> --help" / "tinyagent help <sub>", or an error for an
-// unknown subcommand option.
+// unknown subcommand option. The per-argument rewrite lives in
+// expandSubArgs.
 func expandSubcommand(args []string) ([]string, *subHelp, error) {
 	if len(args) == 0 {
 		return args, nil, nil
@@ -216,41 +217,43 @@ func expandSubcommand(args []string) ([]string, *subHelp, error) {
 			return args, nil, nil // a prompt-like word: not a subcommand
 		}
 	}
+	out, action, help, err := expandSubArgs(s, rest)
+	if err != nil {
+		return nil, nil, err
+	}
+	if help != nil {
+		return nil, help, nil
+	}
+	if !action {
+		out = append(append([]string(nil), s.base...), out...)
+		if len(s.base) == 0 && len(out) == 0 {
+			return nil, &subHelp{s}, nil
+		}
+	}
+	return out, nil, nil
+}
+
+// expandSubArgs rewrites a subcommand's arguments into their equivalent
+// flags: the leading action, a positional, "--" task text, subcommand
+// options (mapped to their global flags) and any other global flag,
+// passed through unchanged. It returns the rewritten tokens, whether an
+// action ran (which drops the subcommand's base flags), and the
+// subcommand's help when it asked for it.
+func expandSubArgs(s *subcommand, rest []string) (out []string, action bool, help *subHelp, err error) {
 	gfs := newFlagSet(&options{})
-	var out []string
-	action := false
 	tookPositional := false
 	for i := 0; i < len(rest); i++ {
 		a := rest[i]
 		if a == "help" && i == 0 {
-			return nil, &subHelp{s}, nil
+			return nil, false, &subHelp{s}, nil
 		}
 		if act, ok := s.actions[a]; ok && i == 0 {
 			action = !act.withBase
-			if act.args {
-				j := i + 1
-				for ; j < len(rest) && !strings.HasPrefix(rest[j], "-"); j++ {
-					out = append(out, "--"+act.flag, rest[j])
-				}
-				if j == i+1 {
-					return nil, nil, fmt.Errorf("%s %s needs at least one value", s.name, a)
-				}
-				i = j - 1
-			} else if act.arg2 {
-				if i+2 >= len(rest) {
-					return nil, nil, fmt.Errorf("%s %s needs two values", s.name, a)
-				}
-				out = append(out, "--"+act.flag, rest[i+1]+"@"+rest[i+2])
-				i += 2
-			} else if act.arg {
-				if i+1 >= len(rest) {
-					return nil, nil, fmt.Errorf("%s %s needs a value", s.name, a)
-				}
-				out = append(out, "--"+act.flag, rest[i+1])
-				i++
-			} else {
-				out = append(out, "--"+act.flag)
+			next, err := expandSubAction(s, act, a, rest, i, out)
+			if err != nil {
+				return nil, false, nil, err
 			}
+			out, i = next.out, next.i
 			continue
 		}
 		// A positional may appear after options (tinyagent goal --check "cmd" "the goal")
@@ -263,22 +266,22 @@ func expandSubcommand(args []string) ([]string, *subHelp, error) {
 		if a == "--" {
 			task := strings.TrimSpace(strings.Join(rest[i+1:], " "))
 			if task == "" {
-				return nil, nil, fmt.Errorf("%s: nothing after --; pass the task after it", s.name)
+				return nil, false, nil, fmt.Errorf("%s: nothing after --; pass the task after it", s.name)
 			}
 			out = append(out, "-t", task)
 			break
 		}
 		if !strings.HasPrefix(a, "-") || a == "-" {
-			return nil, nil, fmt.Errorf("unexpected argument %q after %q; pass the task with -t or after --", a, s.name)
+			return nil, false, nil, fmt.Errorf("unexpected argument %q after %q; pass the task with -t or after --", a, s.name)
 		}
 		name, val, hasVal := strings.Cut(strings.TrimLeft(a, "-"), "=")
 		if name == "h" || name == "help" {
-			return nil, &subHelp{s}, nil
+			return nil, false, &subHelp{s}, nil
 		}
 		target, isOpt := s.options[name]
 		if !isOpt {
 			if gfs.Lookup(name) == nil {
-				return nil, nil, fmt.Errorf("unknown %s option %s (see tinyagent %s --help)", s.name, a, s.name)
+				return nil, false, nil, fmt.Errorf("unknown %s option %s (see tinyagent %s --help)", s.name, a, s.name)
 			}
 			target = name
 		}
@@ -289,19 +292,51 @@ func expandSubcommand(args []string) ([]string, *subHelp, error) {
 		out = append(out, tok)
 		if !hasVal && !isBoolFlag(gfs.Lookup(target)) {
 			if i+1 >= len(rest) {
-				return nil, nil, fmt.Errorf("%s option %s needs a value", s.name, a)
+				return nil, false, nil, fmt.Errorf("%s option %s needs a value", s.name, a)
 			}
 			out = append(out, rest[i+1])
 			i++
 		}
 	}
-	if !action {
-		out = append(append([]string(nil), s.base...), out...)
-		if len(s.base) == 0 && len(out) == 0 {
-			return nil, &subHelp{s}, nil
+	return out, action, nil, nil
+}
+
+// expandSubArgsResult is expandSubAction's output: the tokens so far and
+// the index of the last consumed argument.
+type expandSubArgsResult struct {
+	out []string
+	i   int
+}
+
+// expandSubAction rewrites the leading action word a (act) with the
+// values it takes in rest from index i.
+func expandSubAction(s *subcommand, act subAction, a string, rest []string, i int, out []string) (expandSubArgsResult, error) {
+	if act.args {
+		j := i + 1
+		for ; j < len(rest) && !strings.HasPrefix(rest[j], "-"); j++ {
+			out = append(out, "--"+act.flag, rest[j])
 		}
+		if j == i+1 {
+			return expandSubArgsResult{}, fmt.Errorf("%s %s needs at least one value", s.name, a)
+		}
+		return expandSubArgsResult{out: out, i: j - 1}, nil
 	}
-	return out, nil, nil
+	if act.arg2 {
+		if i+2 >= len(rest) {
+			return expandSubArgsResult{}, fmt.Errorf("%s %s needs two values", s.name, a)
+		}
+		out = append(out, "--"+act.flag, rest[i+1]+"@"+rest[i+2])
+		return expandSubArgsResult{out: out, i: i + 2}, nil
+	}
+	if act.arg {
+		if i+1 >= len(rest) {
+			return expandSubArgsResult{}, fmt.Errorf("%s %s needs a value", s.name, a)
+		}
+		out = append(out, "--"+act.flag, rest[i+1])
+		return expandSubArgsResult{out: out, i: i + 1}, nil
+	}
+	out = append(out, "--"+act.flag)
+	return expandSubArgsResult{out: out, i: i}, nil
 }
 
 func isBoolFlag(f *flag.Flag) bool {
