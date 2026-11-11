@@ -53,6 +53,9 @@ func runCheck(o *options, fs *flag.FlagSet, w io.Writer) int {
 		return 2
 	}
 	sum.OK = true
+	if sum.Commands.Warning != "" {
+		fmt.Fprintln(os.Stderr, stderrStyle.Yellow("warning:"), sum.Commands.Warning)
+	}
 	if o.jsonOutput {
 		sum.writeJSON(w)
 		return 0
@@ -269,6 +272,13 @@ func resolveCheck(o *options, fs *flag.FlagSet, sum *checkSummary) ([][2]string,
 		add("sandbox", sb)
 		sum.Sandbox = checkSandboxInfo{Enabled: true, Backend: sandboxBackendName(cfg, fs, *o), Available: !strings.HasPrefix(sb, "unavailable"), Detail: sb}
 	}
+	cmdPosture, webPosture, err := checkPosture(fs, *o, cfg)
+	if err != nil {
+		return nil, err
+	}
+	add("commands", commandsLine(cmdPosture))
+	add("web", webLine(webPosture))
+	sum.Commands, sum.WebTools = cmdPosture, webPosture
 	if mem := checkMemory(fs, o, cfg.Memory, root); mem != "" {
 		add("memory", mem)
 	}

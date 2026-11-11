@@ -179,7 +179,7 @@ func TestOTelCLITrace(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
-	if !strings.Contains(stderr, "otel: exporting traces to "+strings.TrimPrefix(r.url, "http://")+" (http/json)") || strings.Contains(stderr, "warning") {
+	if !strings.Contains(stderr, "otel: exporting traces to "+strings.TrimPrefix(r.url, "http://")+" (http/json)") || strings.Contains(withoutPostureWarning(stderr), "warning") {
 		t.Errorf("stderr:\n%s", stderr)
 	}
 	if len(r.auth) == 0 || r.auth[0] != "Bearer abc123" {

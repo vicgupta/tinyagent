@@ -33,7 +33,7 @@ Colors and styling (such as the `error:` and `hint:` labels) appear only at a te
 
 A mistyped flag exits 2 with one line naming up to three close flags, such as `error: unknown flag --sandbxo; did you mean --sandbox? (see tinyagent --help)`, instead of the full usage.
 
-To check your setup before a run, use `tinyagent --check` with the same `-m`, `-c`, `--cwd`, fallback and limit flags you'd pass to a run. It sends no model request and writes nothing. It prints which config file, model, provider, fallbacks, working directory and limits a run would use, and where each came from, then `ok` (exit 0). A problem a run would hit, such as an unknown provider, a bad config key or a missing API key, is printed the same way a run prints it, with its `hint:`, and exits 2. Key values are never printed, only whether the variable is set.
+To check your setup before a run, use `tinyagent --check` with the same `-m`, `-c`, `--cwd`, fallback and limit flags you'd pass to a run. It sends no model request and writes nothing. It prints which config file, model, provider, fallbacks, working directory and limits a run would use, and where each came from, then `ok` (exit 0). It also reports whether commands would run unsandboxed and which web tools are on (`commands:` and `web:`); an unsandboxed setup prints a `warning:` on stderr but still exits 0 (see [Execution posture](sandbox.md#execution-posture)). A problem a run would hit, such as an unknown provider, a bad config key or a missing API key, is printed the same way a run prints it, with its `hint:`, and exits 2. Key values are never printed, only whether the variable is set.
 
 ```
 $ tinyagent --check -m anthropic/claude-sonnet-4
@@ -42,6 +42,8 @@ summary
   provider     anthropic
   api key      ANTHROPIC_API_KEY set
   sandbox      off
+  commands     unsandboxed
+  web tools    web_fetch, web_search
   permissions  none configured
   lockdown     off
   config       none (built-in defaults)
@@ -52,6 +54,8 @@ provider:  anthropic, ANTHROPIC_API_KEY is set
 fallback:  none
 cwd:       /home/me/project (default)
 limits:    steps unlimited, cost unlimited, time unlimited
+commands:  UNSANDBOXED, as your user, full environment (pass --sandbox to confine them)
+web:       web_fetch on (any public host), web_search on; --no-web-fetch and --no-web-search turn them off
 ok
 ```
 

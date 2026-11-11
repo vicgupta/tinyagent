@@ -707,9 +707,9 @@ func TestUnpricedCostLimitWarning(t *testing.T) {
 			t.Setenv("OPENAI_API_KEY", "fake")
 			var code int
 			var out string
-			got := captureStderr(t, func() {
+			got := withoutPostureWarning(captureStderr(t, func() {
 				code, out, _ = runWith(t, append([]string{"-t", "x", "--no-stream", "--cwd", dir}, c.args...)...)
-			})
+			}))
 			if code != 0 || requests.Load() != 1 {
 				t.Fatalf("exit = %d, requests = %d; want 0, 1; stderr:\n%s", code, requests.Load(), got)
 			}

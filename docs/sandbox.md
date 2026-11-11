@@ -2,7 +2,7 @@
 
 ## Sandboxing commands
 
-`--sandbox` (or `sandbox: true`) confines every `bash`, `start_process` and [command tool](config.md#command-tools) command, and all processes they spawn, at the OS level. Commands can write only inside `--cwd`, a per-run temporary directory (exported as `TMPDIR`, removed when the run ends), the directories in `sandbox_writable_paths` and any `write` [additional directories](permissions.md#additional-directories). Reads stay unrestricted so toolchains work. Outbound network is denied unless you pass `--sandbox-network` (`sandbox_network: true`). Flags override the config, including `--sandbox=false`. It is off by default.
+`--sandbox` (or `sandbox: true`) confines every `bash`, `start_process` and [command tool](config.md#command-tools) command, and all processes they spawn, at the OS level. Commands can write only inside `--cwd`, a per-run temporary directory (exported as `TMPDIR`, removed when the run ends), the directories in `sandbox_writable_paths` and any `write` [additional directories](permissions.md#additional-directories). Reads stay unrestricted so toolchains work. Outbound network is denied unless you pass `--sandbox-network` (`sandbox_network: true`). Flags override the config, including `--sandbox=false`. It is off by default, and a run without it warns on stderr; see [Execution posture](#execution-posture).
 
 ```yaml
 sandbox: true
@@ -76,6 +76,23 @@ sandbox_writable_paths:    # their caches, see above
 - **Exfiltration:** an allowlist limits where data can go, not what is sent. Commands can upload anything they can read to an allowed host, and broad entries (`github.com`, `*.amazonaws.com`, CDN wildcards) allow uploads to other users' content and domain fronting, since TLS isn't inspected. List only the hosts a task needs.
 - The startup line shows e.g. `network: allowlist (2 domains: proxy.golang.org, sum.golang.org)`, and the trajectory's `sandbox` record includes `allowed_domains`. The proxy stops when the run ends, however it ends; background processes from `start_process` use it until then.
 
+
+## Execution posture
+
+The sandbox stays opt-in: turning it on by default would change what existing commands can do and would stop runs on hosts without a working engine (no Bubblewrap or Landlock, Windows). Instead, tinyagent discloses the posture a run has (#415):
+
+- **Unsandboxed runs warn, every time.** A run whose `bash`, `start_process` and [command tools](config.md#command-tools) execute locally without `--sandbox` prints, before the first model request:
+
+  ```text
+  warning: commands run unsandboxed, as your user, with your full environment (API keys and other secrets included) and can read anything you can; --sandbox confines them; --read-only runs none
+  ```
+
+  With a [command environment](#command-environment) policy it says `with the environment command_env allows` instead; on Windows the fix names `--env container`. It applies to one-shot runs, `--resume`, `tinyagent chat`, `tinyagent web` and ACP sessions. There is no setting or flag that hides it; the only ways to not get it are `--sandbox`, `--read-only` or `--env container`. It goes to stderr only, never to stdout, `--json` events or `--check --json`, so machine-readable output stays valid. It is printed even when `--tools` leaves no command tool in scope.
+- **`--read-only` does not turn the web tools off.** `--read-only` keeps its meaning (only `read_file`, `list_files` and `grep` touch the workspace; no commands run), but [`web_fetch`](long-runs.md#web-fetch) and [`web_search`](long-runs.md#web-search) are still offered and still make network requests. A read-only run with either on prints `read-only mode: web_fetch and web_search still make network requests; --no-web-fetch and --no-web-search turn them off`. For a run with no network side effects from tinyagent's tools, pass `--read-only --no-web-fetch --no-web-search` (or set `web_fetch.enabled: false` and `web_search.enabled: false`). [Lockdown](permissions.md#untrusted-content-lockdown) also keeps both off unless you enable them.
+- **`--check` reports it.** The summary table has `commands` (`unsandboxed`, `sandboxed`, `container` or `none`) and `web tools` rows, and the detail lines are e.g. `commands:  UNSANDBOXED, as your user, full environment (pass --sandbox to confine them)` and `web:       web_fetch on (any public host), web_search on; --no-web-fetch and --no-web-search turn them off` (with `--read-only` it adds `--read-only does not turn them off`). An unsandboxed setup also prints the warning above on stderr. `--check --json` has `commands` and `web_tools` objects (see [`--check --json`](json-output.md#check---json)).
+- **`--check` still exits 0 for an unsandboxed setup.** Its exit code means "a run would start" (2 is a setup error a run would stop on), and scripts and CI rely on that; unsandboxed execution is the documented default, not a setup error. Scripts that want to refuse it can test `commands.mode` in `--check --json`, e.g. `tinyagent --check --json | jq -e '.commands.mode != "unsandboxed"'`.
+
+`--sandbox`, `--no-web-fetch`, `--no-web-search` and `--read-only` behave exactly as before.
 
 ## Command environment
 

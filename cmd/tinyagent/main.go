@@ -1883,6 +1883,7 @@ func (d *domainList) Set(v string) error {
 // any sandbox, container or command_env policy on stderr. Read-only runs
 // have no command tools, so they get a plain local environment.
 func startEnvironment(ctx context.Context, cfg config.AgentConfig, root string, extra []tools.ExtraDir, verbose bool) (tools.Environment, func(), error) {
+	warnExecPosture(os.Stderr, cfg) // #415: not dismissible, stderr only
 	if cfg.ReadOnly {
 		return tools.Local{}, func() {}, nil
 	}

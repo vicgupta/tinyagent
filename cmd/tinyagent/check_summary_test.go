@@ -22,6 +22,8 @@ func TestCheckSummaryTable(t *testing.T) {
 		"  provider     anthropic\n" +
 		"  api key      ANTHROPIC_API_KEY set\n" +
 		"  sandbox      off\n" +
+		"  commands     unsandboxed\n" +
+		"  web tools    web_fetch, web_search\n" +
 		"  permissions  1 rules, default allow, non-interactive deny\n" +
 		"  lockdown     off\n" +
 		"  config       CFG (-c)\n\n"
