@@ -87,44 +87,12 @@ var tuneModel = func(cfg config.AgentConfig, fs *flag.FlagSet, o *options) (mode
 }
 
 // runTuneCommand implements the tune flags. Usage errors and self-tuning
-// being off exit 2; a failed proposal, validation or apply exits 1.
+// being off exit 2; a failed proposal, validation or apply exits 1. The
+// command runs in its own helper (issue #416).
 func runTuneCommand(o *options, fs *flag.FlagSet, stdout, stderr io.Writer) int {
-	var set []string
-	for _, n := range tuneCommandFlags {
-		if flagWasSet(fs, n) {
-			set = append(set, n)
-		}
-	}
-	if len(set) != 1 {
-		if len(set) == 0 {
-			fmt.Fprintln(stderr, "error: --tune-run, --tune-workflow and --tune-infer apply only to --tune-propose, --tune-digest only to --tune-apply")
-		} else {
-			fmt.Fprintf(stderr, "error: --%s can't be combined; run one tune command at a time\n", strings.Join(set, " and --"))
-		}
-		return 2
-	}
-	cmd := set[0]
-	var bad string
-	fs.Visit(func(f *flag.Flag) {
-		if bad != "" || f.Name == cmd || tuneAllowedFlags[f.Name] {
-			return
-		}
-		if owner, ok := tuneOptionFlags[f.Name]; ok && owner == cmd {
-			return
-		}
-		bad = f.Name
-	})
-	if bad != "" {
-		fmt.Fprintf(stderr, "error: --%s only manages self-tuning candidates; it can't be combined with -%s\n", cmd, dashName(bad))
-		return 2
-	}
-	if fs.NArg() > 0 {
-		fmt.Fprintf(stderr, "error: unexpected positional argument %q\n", fs.Arg(0))
-		return 2
-	}
-	if fi, err := os.Stat(o.cwd); err != nil || !fi.IsDir() {
-		fmt.Fprintf(stderr, "error: --cwd %q is not a directory\n", o.cwd)
-		return 2
+	cmd, code, done := tuneCheck(o, fs, stderr)
+	if done {
+		return code
 	}
 	root, err := canonicalRoot(o.cwd)
 	if err != nil {
@@ -159,82 +127,151 @@ func runTuneCommand(o *options, fs *flag.FlagSet, stdout, stderr io.Writer) int 
 	case "tune-show":
 		return tuneShow(root, strings.TrimSpace(t.show), o.jsonOutput, stdout, stderr)
 	case "tune-propose":
-		po := selftune.ProposeOptions{Root: root, Workflow: t.workflow, Runs: t.runs, Settings: st, Redact: eventlog.EnvRedactor().Redact, Now: tuneNow()}
-		if t.infer || st.Inference {
-			m, name, err := tuneModel(cfg, fs, o)
-			if err != nil {
-				fmt.Fprintln(stderr, "error: tune: auxiliary model (task tuning):", err)
-				return 1
-			}
-			po.Model, po.ModelName = m, name
-		}
-		p, err := selftune.Propose(ctx, po)
-		if err != nil {
-			fmt.Fprintln(stderr, "error: tune:", err)
-			return 1
-		}
-		for _, w := range p.Warnings {
-			fmt.Fprintln(stderr, "warning:", w)
-		}
-		if r := p.Recurrence; r != nil {
-			fmt.Fprintf(stderr, "warning: tune: gate did not hold: the failure of stage %s recurred after candidate %s was applied to %s; no new candidate (revert it with tinyagent tune revert %s, or edit the skill by hand)\n", r.Stage, r.ID, r.Target, r.ID)
-			emit("tune.recurrence", map[string]any{"id": r.ID, "signature": r.Signature, "stage": r.Stage, "target": r.Target})
-			return 0
-		}
-		c := p.Candidate
-		verb := "proposed"
-		if p.Existing {
-			verb = "already proposed"
-		}
-		if !o.jsonOutput {
-			fmt.Fprintf(stdout, "%s %s: %s change to %s for stage %s from %d failed runs\nreview: tinyagent tune show %s\nvalidate: tinyagent tune validate %s\n", verb, c.ID, c.Kind, c.Target, c.Stage, len(c.Evidence), c.ID, c.ID)
-		}
-		f := map[string]any{"id": c.ID, "kind": c.Kind, "stage": c.Stage, "target": c.Target, "signature": c.Signature, "digest": c.Digest, "evidence": len(c.Evidence), "controls": len(c.Controls), "existing": p.Existing}
-		if c.Inference != nil {
-			f["inference"] = c.Inference
-		}
-		emit("tune.proposed", f)
-		return 0
+		return tunePropose(ctx, o, fs, cfg, st, root, emit, stdout, stderr)
 	case "tune-validate":
-		agent, err := runWorkflowAgent()
-		if err != nil {
-			return fail(err)
-		}
-		c, err := selftune.Validate(ctx, selftune.ValidateOptions{Root: root, ID: strings.TrimSpace(t.validate), Settings: st, RunAgent: agent, Progress: stderr, Now: tuneNow()})
-		if err != nil {
-			fmt.Fprintln(stderr, "error: tune:", err)
-			return 1
-		}
-		v := c.Validation
-		if !o.jsonOutput {
-			fmt.Fprintf(stdout, "%s %s: %s\n", c.ID, v.Verdict, v.Reason)
-			if c.Status == selftune.StatusValidated {
-				fmt.Fprintf(stdout, "review, then approve this exact change with:\n  tinyagent tune apply %s --digest %s\n", c.ID, c.Digest)
-			}
-		}
-		emit("tune.validated", map[string]any{"id": c.ID, "status": c.Status, "verdict": v.Verdict, "reason": v.Reason, "runs": v.Runs, "cost_usd": v.CostUSD, "improvements": v.Improvements, "regressions": v.Regressions, "outcomes": v.Outcomes})
-		if c.Status != selftune.StatusValidated {
-			return 1
-		}
-		return 0
+		return tuneValidate(ctx, st, root, strings.TrimSpace(t.validate), o.jsonOutput, emit, stdout, stderr)
 	case "tune-apply":
-		c, err := selftune.Apply(st, root, strings.TrimSpace(t.apply), t.digest, tuneNow())
+		return tuneApply(st, root, strings.TrimSpace(t.apply), t.digest, o.jsonOutput, emit, stdout, stderr)
+	}
+	return tuneRevert(st, root, strings.TrimSpace(t.revert), o.jsonOutput, emit, stdout, stderr)
+}
+
+// tuneCheck validates the tune flags: exactly one tune command, no flag
+// it can't be combined with, no positional argument, and --cwd a
+// directory. It returns the command to run, an exit code and whether to
+// stop.
+func tuneCheck(o *options, fs *flag.FlagSet, stderr io.Writer) (string, int, bool) {
+	var set []string
+	for _, n := range tuneCommandFlags {
+		if flagWasSet(fs, n) {
+			set = append(set, n)
+		}
+	}
+	if len(set) != 1 {
+		if len(set) == 0 {
+			fmt.Fprintln(stderr, "error: --tune-run, --tune-workflow and --tune-infer apply only to --tune-propose, --tune-digest only to --tune-apply")
+		} else {
+			fmt.Fprintf(stderr, "error: --%s can't be combined; run one tune command at a time\n", strings.Join(set, " and --"))
+		}
+		return "", 2, true
+	}
+	cmd := set[0]
+	var bad string
+	fs.Visit(func(f *flag.Flag) {
+		if bad != "" || f.Name == cmd || tuneAllowedFlags[f.Name] {
+			return
+		}
+		if owner, ok := tuneOptionFlags[f.Name]; ok && owner == cmd {
+			return
+		}
+		bad = f.Name
+	})
+	if bad != "" {
+		fmt.Fprintf(stderr, "error: --%s only manages self-tuning candidates; it can't be combined with -%s\n", cmd, dashName(bad))
+		return "", 2, true
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(stderr, "error: unexpected positional argument %q\n", fs.Arg(0))
+		return "", 2, true
+	}
+	if fi, err := os.Stat(o.cwd); err != nil || !fi.IsDir() {
+		fmt.Fprintf(stderr, "error: --cwd %q is not a directory\n", o.cwd)
+		return "", 2, true
+	}
+	return cmd, 0, false
+}
+
+// tunePropose runs --tune-propose: it proposes a self-tuning candidate
+// from recent failed runs, inferring its rationale with an auxiliary
+// model when asked, and prints or emits it.
+func tunePropose(ctx context.Context, o *options, fs *flag.FlagSet, cfg config.AgentConfig, st config.SelfTuning, root string, emit func(string, map[string]any), stdout, stderr io.Writer) int {
+	po := selftune.ProposeOptions{Root: root, Workflow: o.tune.workflow, Runs: o.tune.runs, Settings: st, Redact: eventlog.EnvRedactor().Redact, Now: tuneNow()}
+	if o.tune.infer || st.Inference {
+		m, name, err := tuneModel(cfg, fs, o)
 		if err != nil {
-			fmt.Fprintln(stderr, "error: tune:", err)
+			fmt.Fprintln(stderr, "error: tune: auxiliary model (task tuning):", err)
 			return 1
 		}
-		if !o.jsonOutput {
-			fmt.Fprintf(stdout, "applied %s to %s (future fresh runs only); undo with: tinyagent tune revert %s\n", c.ID, c.Target, c.ID)
-		}
-		emit("tune.applied", map[string]any{"id": c.ID, "target": c.Target, "digest": c.Digest})
-		return 0
+		po.Model, po.ModelName = m, name
 	}
-	c, err := selftune.Revert(st, root, strings.TrimSpace(t.revert), tuneNow())
+	p, err := selftune.Propose(ctx, po)
 	if err != nil {
 		fmt.Fprintln(stderr, "error: tune:", err)
 		return 1
 	}
+	for _, w := range p.Warnings {
+		fmt.Fprintln(stderr, "warning:", w)
+	}
+	if r := p.Recurrence; r != nil {
+		fmt.Fprintf(stderr, "warning: tune: gate did not hold: the failure of stage %s recurred after candidate %s was applied to %s; no new candidate (revert it with tinyagent tune revert %s, or edit the skill by hand)\n", r.Stage, r.ID, r.Target, r.ID)
+		emit("tune.recurrence", map[string]any{"id": r.ID, "signature": r.Signature, "stage": r.Stage, "target": r.Target})
+		return 0
+	}
+	c := p.Candidate
+	verb := "proposed"
+	if p.Existing {
+		verb = "already proposed"
+	}
 	if !o.jsonOutput {
+		fmt.Fprintf(stdout, "%s %s: %s change to %s for stage %s from %d failed runs\nreview: tinyagent tune show %s\nvalidate: tinyagent tune validate %s\n", verb, c.ID, c.Kind, c.Target, c.Stage, len(c.Evidence), c.ID, c.ID)
+	}
+	f := map[string]any{"id": c.ID, "kind": c.Kind, "stage": c.Stage, "target": c.Target, "signature": c.Signature, "digest": c.Digest, "evidence": len(c.Evidence), "controls": len(c.Controls), "existing": p.Existing}
+	if c.Inference != nil {
+		f["inference"] = c.Inference
+	}
+	emit("tune.proposed", f)
+	return 0
+}
+
+// tuneValidate runs --tune-validate: it validates a candidate on a fresh
+// workflow run and reports the verdict; a candidate that is not
+// validated exits 1.
+func tuneValidate(ctx context.Context, st config.SelfTuning, root, id string, asJSON bool, emit func(string, map[string]any), stdout, stderr io.Writer) int {
+	agent, err := runWorkflowAgent()
+	if err != nil {
+		return fail(err)
+	}
+	c, err := selftune.Validate(ctx, selftune.ValidateOptions{Root: root, ID: id, Settings: st, RunAgent: agent, Progress: stderr, Now: tuneNow()})
+	if err != nil {
+		fmt.Fprintln(stderr, "error: tune:", err)
+		return 1
+	}
+	v := c.Validation
+	if !asJSON {
+		fmt.Fprintf(stdout, "%s %s: %s\n", c.ID, v.Verdict, v.Reason)
+		if c.Status == selftune.StatusValidated {
+			fmt.Fprintf(stdout, "review, then approve this exact change with:\n  tinyagent tune apply %s --digest %s\n", c.ID, c.Digest)
+		}
+	}
+	emit("tune.validated", map[string]any{"id": c.ID, "status": c.Status, "verdict": v.Verdict, "reason": v.Reason, "runs": v.Runs, "cost_usd": v.CostUSD, "improvements": v.Improvements, "regressions": v.Regressions, "outcomes": v.Outcomes})
+	if c.Status != selftune.StatusValidated {
+		return 1
+	}
+	return 0
+}
+
+// tuneApply runs --tune-apply: it applies a validated candidate.
+func tuneApply(st config.SelfTuning, root, id, digest string, asJSON bool, emit func(string, map[string]any), stdout, stderr io.Writer) int {
+	c, err := selftune.Apply(st, root, id, digest, tuneNow())
+	if err != nil {
+		fmt.Fprintln(stderr, "error: tune:", err)
+		return 1
+	}
+	if !asJSON {
+		fmt.Fprintf(stdout, "applied %s to %s (future fresh runs only); undo with: tinyagent tune revert %s\n", c.ID, c.Target, c.ID)
+	}
+	emit("tune.applied", map[string]any{"id": c.ID, "target": c.Target, "digest": c.Digest})
+	return 0
+}
+
+// tuneRevert runs --tune-revert: it undoes an applied candidate.
+func tuneRevert(st config.SelfTuning, root, id string, asJSON bool, emit func(string, map[string]any), stdout, stderr io.Writer) int {
+	c, err := selftune.Revert(st, root, id, tuneNow())
+	if err != nil {
+		fmt.Fprintln(stderr, "error: tune:", err)
+		return 1
+	}
+	if !asJSON {
 		fmt.Fprintf(stdout, "reverted %s: restored %s\n", c.ID, c.Target)
 	}
 	emit("tune.reverted", map[string]any{"id": c.ID, "target": c.Target})

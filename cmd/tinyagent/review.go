@@ -155,6 +155,22 @@ func reviewOverrides(dir string) ([]string, error) {
 	return ov, nil
 }
 
+// reviewRepo runs the read-only git commands a review needs in root.
+type reviewRepo struct {
+	root string
+	ov   []string
+}
+
+func (g reviewRepo) run(ok1 bool, args ...string) (string, error) {
+	return reviewGit(g.root, g.ov, ok1, args...)
+}
+
+// resolve returns the commit id rev names, or "" with git's error.
+func (g reviewRepo) resolve(rev string) (string, error) {
+	out, err := g.run(false, "rev-parse", "--verify", "--quiet", rev+"^{commit}")
+	return strings.TrimSpace(out), err
+}
+
 // collectReview resolves the review target in the repository containing
 // root, collects its diff with read-only git commands, and returns the
 // first user message (review instructions, target, change summary, diff,
@@ -162,7 +178,7 @@ func reviewOverrides(dir string) ([]string, error) {
 // only are reviewed, with paths relative to root; files that
 // file_access.deny_read hides are left out and only counted. An empty
 // change set returns errNothingToReview; every other error is a setup
-// problem (exit 2).
+// problem (exit 2). The phases live in the review* helpers.
 func collectReview(t *reviewTarget, root, focus string, fa *tools.FileAccess, stderr io.Writer, verbose bool) (string, *trajectory.ReviewInfo, error) {
 	flagName := t.flagName()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -176,108 +192,146 @@ func collectReview(t *reviewTarget, root, focus string, fa *tools.FileAccess, st
 	if err != nil {
 		return "", nil, fmt.Errorf("%s: %w", flagName, err)
 	}
-	g := func(ok1 bool, args ...string) (string, error) { return reviewGit(root, ov, ok1, args...) }
-	resolve := func(rev string) (string, error) {
-		out, err := g(false, "rev-parse", "--verify", "--quiet", rev+"^{commit}")
-		return strings.TrimSpace(out), err
+	g := reviewRepo{root: root, ov: ov}
+	info, from, to, header, err := reviewRevisions(g, t, top)
+	if err != nil {
+		return "", nil, err
 	}
-	// Diff options shared by every target: Git's built-in diff only, no
-	// rename detection (one entry per path), paths relative to root.
-	diffArgs := []string{"diff", "--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", "--relative"}
+	files, err := reviewDiffFiles(g, t, from, to)
+	if err != nil {
+		return "", nil, err
+	}
+	if t.kind == reviewUncommitted {
+		if files, err = reviewUntracked(g, fa, root, files); err != nil {
+			return "", nil, err
+		}
+	}
+	shown := reviewShownFiles(fa, root, files, info)
+	if len(files) == 0 {
+		return "", nil, errNothingToReview
+	}
+	body, omitted := reviewDiffBody(shown)
+	info.DiffBytesSent, info.Truncated = len(body), len(omitted) > 0
+	msg := reviewMessage(info, header, shown, body, omitted, focus)
+	reviewNotes(stderr, g, t, info, omitted, verbose)
+	return msg, info, nil
+}
 
+// reviewRevisions resolves the review target's revision range in the
+// repository rooted at top: the uncommitted changes against HEAD, the
+// commits on HEAD since a merge base, or one commit against its first
+// parent. It returns the target's record, the range's ends and the header
+// describing it.
+func reviewRevisions(g reviewRepo, t *reviewTarget, top string) (*trajectory.ReviewInfo, string, string, string, error) {
 	info := &trajectory.ReviewInfo{Target: t.kind, Ref: t.ref}
 	var from, to, header string
 	switch t.kind {
 	case reviewUncommitted:
-		head, err := resolve("HEAD")
+		head, err := g.resolve("HEAD")
 		if err != nil || head == "" {
-			return "", nil, fmt.Errorf("--review: the repository at %s has no commits", top)
+			return nil, "", "", "", fmt.Errorf("--review: the repository at %s has no commits", top)
 		}
 		info.HeadCommit, from = head, head
 		header = fmt.Sprintf("Review target: uncommitted changes (staged, unstaged and untracked) against HEAD %s.", shortCommit(head))
 	case reviewBase:
-		base, err := resolve(t.ref)
+		base, err := g.resolve(t.ref)
 		if err != nil || base == "" {
-			return "", nil, fmt.Errorf("--review-base %q: not a commit in the repository at %s", t.ref, top)
+			return nil, "", "", "", fmt.Errorf("--review-base %q: not a commit in the repository at %s", t.ref, top)
 		}
-		head, err := resolve("HEAD")
+		head, err := g.resolve("HEAD")
 		if err != nil || head == "" {
-			return "", nil, fmt.Errorf("--review-base %q: the repository at %s has no commits", t.ref, top)
+			return nil, "", "", "", fmt.Errorf("--review-base %q: the repository at %s has no commits", t.ref, top)
 		}
-		mb, err := g(false, "merge-base", base, head)
+		mb, err := g.run(false, "merge-base", base, head)
 		if mb = strings.TrimSpace(mb); err != nil || mb == "" {
-			return "", nil, fmt.Errorf("--review-base %q: no merge base with HEAD in the repository at %s", t.ref, top)
+			return nil, "", "", "", fmt.Errorf("--review-base %q: no merge base with HEAD in the repository at %s", t.ref, top)
 		}
 		info.BaseCommit, info.HeadCommit, from, to = mb, head, mb, head
 		header = fmt.Sprintf("Review target: the commits on HEAD %s since its merge base %s with %s (uncommitted changes are not included).", shortCommit(head), shortCommit(mb), t.ref)
 	case reviewCommit:
-		c, err := resolve(t.ref)
+		c, err := g.resolve(t.ref)
 		if err != nil || c == "" {
-			return "", nil, fmt.Errorf("--review-commit %q: not a commit in the repository at %s", t.ref, top)
+			return nil, "", "", "", fmt.Errorf("--review-commit %q: not a commit in the repository at %s", t.ref, top)
 		}
-		parent, err := resolve(c + "^1")
+		parent, err := g.resolve(c + "^1")
 		if err != nil || parent == "" {
 			// A root commit is compared with the empty tree.
-			out, err := g(false, "hash-object", "-t", "tree", "--stdin")
+			out, err := g.run(false, "hash-object", "-t", "tree", "--stdin")
 			if parent = strings.TrimSpace(out); err != nil || parent == "" {
-				return "", nil, fmt.Errorf("--review-commit %q: %v", t.ref, err)
+				return nil, "", "", "", fmt.Errorf("--review-commit %q: %v", t.ref, err)
 			}
 		} else {
 			info.BaseCommit = parent
 		}
-		meta, err := g(false, "show", "-s", "--no-color", "--format=%s%n%an <%ae>", c)
+		meta, err := g.run(false, "show", "-s", "--no-color", "--format=%s%n%an <%ae>", c)
 		if err != nil {
-			return "", nil, fmt.Errorf("--review-commit %q: %w", t.ref, err)
+			return nil, "", "", "", fmt.Errorf("--review-commit %q: %w", t.ref, err)
 		}
 		subject, author, _ := strings.Cut(strings.TrimSpace(meta), "\n")
 		info.Commit, from, to = c, parent, c
 		header = fmt.Sprintf("Review target: the changes introduced by commit %s (against its first parent).\nCommit subject: %s\nAuthor: %s", c, subject, author)
 	}
-	if rel, err := filepath.Rel(top, root); err == nil && rel != "." {
+	if rel, err := filepath.Rel(top, g.root); err == nil && rel != "." {
 		header += fmt.Sprintf("\nOnly changes under %s are included.", filepath.ToSlash(rel))
 	}
 	header += "\nPaths are relative to the working directory."
+	return info, from, to, header, nil
+}
 
+// reviewDiffFiles collects the tracked files of the range with the diff
+// options shared by every target: Git's built-in diff only, no rename
+// detection (one entry per path), paths relative to root.
+func reviewDiffFiles(g reviewRepo, t *reviewTarget, from, to string) ([]reviewFile, error) {
 	revs := []string{from}
 	if to != "" {
 		revs = append(revs, to)
 	}
-	numstat, err := g(false, append(append(append([]string(nil), diffArgs...), "--numstat", "-z"), revs...)...)
+	diffArgs := []string{"diff", "--no-ext-diff", "--no-textconv", "--no-color", "--no-renames", "--relative"}
+	numstat, err := g.run(false, append(append(append([]string(nil), diffArgs...), "--numstat", "-z"), revs...)...)
 	if err != nil {
-		return "", nil, fmt.Errorf("%s: git diff: %w", flagName, err)
+		return nil, fmt.Errorf("%s: git diff: %w", t.flagName(), err)
 	}
-	patch, err := g(false, append(append([]string(nil), diffArgs...), revs...)...)
+	patch, err := g.run(false, append(append([]string(nil), diffArgs...), revs...)...)
 	if err != nil {
-		return "", nil, fmt.Errorf("%s: git diff: %w", flagName, err)
+		return nil, fmt.Errorf("%s: git diff: %w", t.flagName(), err)
 	}
 	files, err := parseReviewDiff(numstat, patch)
 	if err != nil {
-		return "", nil, fmt.Errorf("%s: %w", flagName, err)
+		return nil, fmt.Errorf("%s: %w", t.flagName(), err)
 	}
-	if t.kind == reviewUncommitted {
-		out, err := g(false, "ls-files", "--others", "--exclude-standard", "-z")
-		if err != nil {
-			return "", nil, fmt.Errorf("--review: git ls-files: %w", err)
-		}
-		for _, p := range strings.Split(out, "\x00") {
-			if p == "" {
-				continue
-			}
-			f := reviewFile{path: p, status: "A"}
-			// A nested repository is listed as a directory; it gets a
-			// summary line only.
-			if !strings.HasSuffix(p, "/") && !fa.Hidden(filepath.Join(root, p)) {
-				d, err := g(true, "diff", "--no-index", "--no-ext-diff", "--no-textconv", "--no-color", "--", os.DevNull, p)
-				if err != nil {
-					return "", nil, fmt.Errorf("--review: git diff %s: %w", p, err)
-				}
-				f.diff = d
-				f.add, f.binary = countAdded(d)
-			}
-			files = append(files, f)
-		}
-	}
+	return files, nil
+}
 
+// reviewUntracked appends the untracked files of an uncommitted-changes
+// review to files, with their whole new-file diffs.
+func reviewUntracked(g reviewRepo, fa *tools.FileAccess, root string, files []reviewFile) ([]reviewFile, error) {
+	out, err := g.run(false, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return nil, fmt.Errorf("--review: git ls-files: %w", err)
+	}
+	for _, p := range strings.Split(out, "\x00") {
+		if p == "" {
+			continue
+		}
+		f := reviewFile{path: p, status: "A"}
+		// A nested repository is listed as a directory; it gets a
+		// summary line only.
+		if !strings.HasSuffix(p, "/") && !fa.Hidden(filepath.Join(root, p)) {
+			d, err := g.run(true, "diff", "--no-index", "--no-ext-diff", "--no-textconv", "--no-color", "--", os.DevNull, p)
+			if err != nil {
+				return nil, fmt.Errorf("--review: git diff %s: %w", p, err)
+			}
+			f.diff = d
+			f.add, f.binary = countAdded(d)
+		}
+		files = append(files, f)
+	}
+	return files, nil
+}
+
+// reviewShownFiles filters out the files file_access.deny_read hides
+// (counted, not shown) and totals the diff bytes of the shown ones.
+func reviewShownFiles(fa *tools.FileAccess, root string, files []reviewFile, info *trajectory.ReviewInfo) []reviewFile {
 	var shown []reviewFile
 	for _, f := range files {
 		if fa.Hidden(filepath.Join(root, filepath.FromSlash(strings.TrimSuffix(f.path, "/")))) {
@@ -288,11 +342,13 @@ func collectReview(t *reviewTarget, root, focus string, fa *tools.FileAccess, st
 		info.DiffBytes += len(f.diff)
 	}
 	info.FilesChanged = len(shown)
-	if len(files) == 0 {
-		return "", nil, errNothingToReview
-	}
+	return shown
+}
 
-	var sb, body strings.Builder
+// reviewDiffBody joins the shown files' diffs up to reviewMaxDiffBytes,
+// returning the body and the paths left out.
+func reviewDiffBody(shown []reviewFile) (string, []string) {
+	var body strings.Builder
 	var omitted []string
 	for _, f := range shown {
 		if f.diff == "" {
@@ -304,8 +360,14 @@ func collectReview(t *reviewTarget, root, focus string, fa *tools.FileAccess, st
 		}
 		body.WriteString(f.diff)
 	}
-	info.DiffBytesSent, info.Truncated = body.Len(), len(omitted) > 0
+	return body.String(), omitted
+}
 
+// reviewMessage renders the review's first user message: the review
+// instructions, the target header, the change summary, the diff and the
+// focus as additional instructions.
+func reviewMessage(info *trajectory.ReviewInfo, header string, shown []reviewFile, body string, omitted []string, focus string) string {
+	var sb strings.Builder
 	sb.WriteString(strings.TrimSpace(embed.ReviewPrompt()))
 	sb.WriteString("\n\n" + header + "\n\n")
 	fmt.Fprintf(&sb, "Changed files (%d):\n", len(shown))
@@ -329,15 +391,21 @@ func collectReview(t *reviewTarget, root, focus string, fa *tools.FileAccess, st
 		}
 	}
 	sb.WriteString("\n--- BEGIN DIFF ---\n")
-	sb.WriteString(body.String())
-	if body.Len() > 0 && !strings.HasSuffix(body.String(), "\n") {
+	sb.WriteString(body)
+	if len(body) > 0 && !strings.HasSuffix(body, "\n") {
 		sb.WriteString("\n")
 	}
 	sb.WriteString("--- END DIFF ---\n")
 	if focus != "" {
 		sb.WriteString("\nAdditional review instructions:\n" + focus + "\n")
 	}
+	return sb.String()
+}
 
+// reviewNotes warns on stderr about hidden paths and a truncated diff,
+// notes uncommitted changes a --review-base leaves out, and prints the
+// verbose summary line.
+func reviewNotes(stderr io.Writer, g reviewRepo, t *reviewTarget, info *trajectory.ReviewInfo, omitted []string, verbose bool) {
 	if info.HiddenPaths > 0 {
 		fmt.Fprintf(stderr, "review: %d changed %s hidden by file_access.deny_read\n", info.HiddenPaths, plural(info.HiddenPaths, "path", "paths"))
 	}
@@ -345,14 +413,13 @@ func collectReview(t *reviewTarget, root, focus string, fa *tools.FileAccess, st
 		fmt.Fprintf(stderr, "review: diff truncated to %d of %d bytes; %d %s left out\n", info.DiffBytesSent, info.DiffBytes, len(omitted), plural(len(omitted), "file", "files"))
 	}
 	if t.kind == reviewBase {
-		if st, err := g(false, "status", "--porcelain", "--untracked-files=normal", "--", "."); err == nil && strings.TrimSpace(st) != "" {
+		if st, err := g.run(false, "status", "--porcelain", "--untracked-files=normal", "--", "."); err == nil && strings.TrimSpace(st) != "" {
 			fmt.Fprintln(stderr, "note: uncommitted changes are not part of --review-base; use --review to review them")
 		}
 	}
 	if verbose {
 		fmt.Fprintln(stderr, reviewLine(info))
 	}
-	return sb.String(), info, nil
 }
 
 // reviewLine is the -v summary of a review's change set.
