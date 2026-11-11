@@ -78,13 +78,13 @@ func runRatchetCommand(o *options, fs *flag.FlagSet, stdout, stderr io.Writer) i
 		return 1
 	}
 	path := ratchet.Path(root)
-	switch cmd {
-	case "ratchet-path":
+	switch {
+	case o.ratchet.path:
 		fmt.Fprintln(stdout, path)
 		return 0
-	case "ratchet-add":
+	case cmd == "ratchet-add":
 		return ratchetAddRule(o, path, stdout, stderr)
-	case "ratchet-remove":
+	case cmd == "ratchet-remove":
 		return ratchetRemoveRule(o, path, stdout, stderr)
 	}
 	return ratchetListRules(path, o.jsonOutput, stdout, stderr)
@@ -92,8 +92,8 @@ func runRatchetCommand(o *options, fs *flag.FlagSet, stdout, stderr io.Writer) i
 
 // ratchetCheck validates the ratchet flags: exactly one ratchet command,
 // no flag it can't be combined with, no positional argument, --json only
-// with --ratchet-list, and --cwd a directory. It returns the command to
-// run ("" is --ratchet-list), an exit code and whether to stop.
+// with --ratchet-list, and --cwd a directory. It returns the one ratchet
+// flag given, without its dashes, an exit code and whether to stop.
 func ratchetCheck(o *options, fs *flag.FlagSet, stderr io.Writer) (string, int, bool) {
 	var set []string
 	for _, name := range ratchetCommandFlags {

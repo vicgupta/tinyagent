@@ -129,7 +129,7 @@ func runTuneCommand(o *options, fs *flag.FlagSet, stdout, stderr io.Writer) int 
 	case "tune-propose":
 		return tunePropose(ctx, o, fs, cfg, st, root, emit, stdout, stderr)
 	case "tune-validate":
-		return tuneValidate(ctx, o, fs, cfg, st, root, strings.TrimSpace(t.validate), emit, stdout, stderr)
+		return tuneValidate(ctx, st, root, strings.TrimSpace(t.validate), o.jsonOutput, emit, stdout, stderr)
 	case "tune-apply":
 		return tuneApply(st, root, strings.TrimSpace(t.apply), t.digest, o.jsonOutput, emit, stdout, stderr)
 	}
@@ -226,7 +226,7 @@ func tunePropose(ctx context.Context, o *options, fs *flag.FlagSet, cfg config.A
 // tuneValidate runs --tune-validate: it validates a candidate on a fresh
 // workflow run and reports the verdict; a candidate that is not
 // validated exits 1.
-func tuneValidate(ctx context.Context, o *options, fs *flag.FlagSet, cfg config.AgentConfig, st config.SelfTuning, root, id string, emit func(string, map[string]any), stdout, stderr io.Writer) int {
+func tuneValidate(ctx context.Context, st config.SelfTuning, root, id string, asJSON bool, emit func(string, map[string]any), stdout, stderr io.Writer) int {
 	agent, err := runWorkflowAgent()
 	if err != nil {
 		return fail(err)
@@ -237,7 +237,7 @@ func tuneValidate(ctx context.Context, o *options, fs *flag.FlagSet, cfg config.
 		return 1
 	}
 	v := c.Validation
-	if !o.jsonOutput {
+	if !asJSON {
 		fmt.Fprintf(stdout, "%s %s: %s\n", c.ID, v.Verdict, v.Reason)
 		if c.Status == selftune.StatusValidated {
 			fmt.Fprintf(stdout, "review, then approve this exact change with:\n  tinyagent tune apply %s --digest %s\n", c.ID, c.Digest)

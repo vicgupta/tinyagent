@@ -112,7 +112,7 @@ func (s *session) loadSessionConfig(m sessionMode) error {
 	if err != nil {
 		return err
 	}
-	s.cfg, s.cfgSrc, s.cfgPath = cfg, cfgSrc, cfgPath
+	s.cfgSrc, s.cfgPath = cfgSrc, cfgPath
 	registerProviders(cfg)
 	if s.lockdown, err = m.setupLockdown(&cfg); err != nil {
 		return err
@@ -126,6 +126,9 @@ func (s *session) loadSessionConfig(m sessionMode) error {
 	if s.otel, err = otelSettings(fs, *o, cfg); err != nil {
 		return err
 	}
+	// Stored only now, so the session config carries what setupLockdown
+	// changed.
+	s.cfg = cfg
 	return nil
 }
 
