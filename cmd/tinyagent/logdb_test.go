@@ -122,7 +122,7 @@ func TestLogDBFlagCreatesDefaultDatabase(t *testing.T) {
 			t.Errorf("exit %d", code)
 		}
 	})
-	if strings.Contains(stderr, "warning") {
+	if strings.Contains(withoutPostureWarning(stderr), "warning") {
 		t.Errorf("stderr: %s", stderr)
 	}
 	path := filepath.Join(dir, ".tinyagent", "tinyagent.db")
@@ -174,7 +174,7 @@ func TestUnwritableLogDBWarnsOnceAndRunSucceeds(t *testing.T) {
 	if code != 0 || requests.Load() != 1 {
 		t.Fatalf("exit %d, requests %d; stderr %s", code, requests.Load(), stderr)
 	}
-	if n := strings.Count(stderr, "warning:"); n != 1 {
+	if n := strings.Count(withoutPostureWarning(stderr), "warning:"); n != 1 {
 		t.Errorf("got %d warnings:\n%s", n, stderr)
 	}
 }

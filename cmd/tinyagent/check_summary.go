@@ -16,20 +16,22 @@ import (
 // incompatible change. It never holds a secret value: an API key is only
 // "set", "missing" or "n/a".
 type checkSummary struct {
-	SchemaVersion int              `json:"schema_version"`
-	OK            bool             `json:"ok"`
-	Config        checkConfig      `json:"config"`
-	Profile       string           `json:"profile"`
-	Model         checkModel       `json:"model"`
-	Provider      checkProvider    `json:"provider"`
-	Fallbacks     []string         `json:"fallbacks"`
-	Sandbox       checkSandboxInfo `json:"sandbox"`
-	Permissions   checkPermissions `json:"permissions"`
-	Lockdown      checkLockdownSum `json:"lockdown"`
-	Skills        skillsDecision   `json:"skills"`
-	Cwd           string           `json:"cwd"`
-	Limits        checkLimits      `json:"limits"`
-	Error         *checkError      `json:"error"`
+	SchemaVersion int               `json:"schema_version"`
+	OK            bool              `json:"ok"`
+	Config        checkConfig       `json:"config"`
+	Profile       string            `json:"profile"`
+	Model         checkModel        `json:"model"`
+	Provider      checkProvider     `json:"provider"`
+	Fallbacks     []string          `json:"fallbacks"`
+	Sandbox       checkSandboxInfo  `json:"sandbox"`
+	Commands      checkCommandsInfo `json:"commands"`
+	WebTools      checkWebToolsInfo `json:"web_tools"`
+	Permissions   checkPermissions  `json:"permissions"`
+	Lockdown      checkLockdownSum  `json:"lockdown"`
+	Skills        skillsDecision    `json:"skills"`
+	Cwd           string            `json:"cwd"`
+	Limits        checkLimits       `json:"limits"`
+	Error         *checkError       `json:"error"`
 }
 
 const checkSchemaVersion = 1
@@ -83,7 +85,7 @@ type checkError struct {
 }
 
 func newCheckSummary() *checkSummary {
-	return &checkSummary{SchemaVersion: checkSchemaVersion, Fallbacks: []string{}}
+	return &checkSummary{SchemaVersion: checkSchemaVersion, Fallbacks: []string{}, WebTools: checkWebToolsInfo{WebFetchDomains: []string{}}}
 }
 
 // setConfigLine fills Config from the --check config line, "<path>
@@ -153,6 +155,8 @@ func (s *checkSummary) writeTable(w io.Writer) {
 		{"provider", s.Provider.Name},
 		{"api key", key},
 		{"sandbox", sandbox},
+		{"commands", s.Commands.Mode},
+		{"web tools", webToolsSummary(s.WebTools)},
 		{"permissions", perms},
 		{"lockdown", lock},
 		{"config", cfg},

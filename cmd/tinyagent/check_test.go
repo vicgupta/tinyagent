@@ -215,6 +215,7 @@ func TestCheckErrorsMatchRun(t *testing.T) {
 		first := func(s string) string {
 			s = strings.TrimPrefix(s, "web_fetch: any public host\n")
 			s = strings.TrimPrefix(s, "web_search: duckduckgo → exa\n")
+			s = withoutPostureWarning(s)
 			l, _, _ := strings.Cut(s, "\n")
 			return l
 		}
