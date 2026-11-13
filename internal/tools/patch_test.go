@@ -245,6 +245,7 @@ func TestApplyPatchPartialWriteFailure(t *testing.T) {
 	}
 	root := t.TempDir()
 	writeFiles(t, root, map[string]string{"locked/f.txt": "a\n"})
+	before := snapshot(t, root)
 	locked := filepath.Join(root, "locked")
 	if err := os.Chmod(locked, 0o555); err != nil {
 		t.Fatal(err)
@@ -253,8 +254,11 @@ func TestApplyPatchPartialWriteFailure(t *testing.T) {
 	patch := "*** Begin Patch\n*** Add File: first.txt\n+1\n*** Delete File: locked/f.txt\n*** Add File: third.txt\n+3\n*** End Patch"
 	_, err := ApplyPatch(root, patch)
 	if err == nil || !strings.Contains(err.Error(), "operation 2 (delete locked/f.txt) failed") ||
-		!strings.Contains(err.Error(), "applied (not rolled back): A first.txt") || !strings.Contains(err.Error(), "not applied: D locked/f.txt, A third.txt") {
+		!strings.Contains(err.Error(), "rolled back: A first.txt;") || !strings.Contains(err.Error(), "not applied: D locked/f.txt, A third.txt") {
 		t.Fatalf("err = %v", err)
+	}
+	if got := snapshot(t, root); !sameFiles(got, before) {
+		t.Errorf("files after rollback = %v, want %v", got, before)
 	}
 }
 

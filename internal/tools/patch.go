@@ -19,7 +19,8 @@ const MaxPatchBytes = 1 << 20
 // ApplyPatchSpec returns the apply_patch definition.
 func ApplyPatchSpec() model.ToolSpec {
 	return spec(ApplyPatchToolName, "Apply one patch that can add, update (several hunks), rename, and delete several files. "+
-		"The whole patch is checked before anything is written; if any part does not apply, nothing changes. Format:\n"+
+		"The whole patch is checked before anything is written; if any part does not apply, nothing changes. "+
+		"If a write fails part-way, the changes already made are rolled back. Format:\n"+
 		"*** Begin Patch\n"+
 		"*** Add File: <path>   (then every line prefixed with +)\n"+
 		"*** Delete File: <path>\n"+
@@ -380,7 +381,7 @@ func plural(n int) string {
 	return "s"
 }
 
-func (c fileChange) write(sc *scope) error {
+func (c fileChange) write(sc *scope, fsys patchFS) error {
 	if err := sc.snapshot(c.full); err != nil {
 		return err
 	}
@@ -391,35 +392,35 @@ func (c fileChange) write(sc *scope) error {
 	}
 	switch c.op.kind {
 	case "delete":
-		return os.Remove(c.full)
+		return fsys.Remove(c.full)
 	case "add":
-		if err := os.MkdirAll(filepath.Dir(c.full), 0o755); err != nil {
+		if err := fsys.MkdirAll(filepath.Dir(c.full), 0o755); err != nil {
 			return err
 		}
-		return os.WriteFile(c.full, c.content, c.mode)
+		return fsys.WriteFile(c.full, c.content, c.mode)
 	}
 	target := c.full
 	if c.dest != "" {
 		target = c.dest
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		if err := fsys.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
 	}
-	if err := os.WriteFile(target, c.content, c.mode); err != nil {
+	if err := fsys.WriteFile(target, c.content, c.mode); err != nil {
 		return err
 	}
-	if err := os.Chmod(target, c.mode); err != nil {
+	if err := fsys.Chmod(target, c.mode); err != nil {
 		return err
 	}
 	if c.dest != "" {
-		return os.Remove(c.full)
+		return fsys.Remove(c.full)
 	}
 	return nil
 }
 
 // ApplyPatch parses input, checks every operation before writing anything,
 // then applies the operations in order. A write failure after the check stops
-// the run and reports which operations were applied; those are not rolled back.
+// the run and rolls back every change this call made (see patch_rollback.go).
 func ApplyPatch(root, input string) (string, error) {
 	return applyPatch(root, input, nil)
 }
@@ -434,6 +435,11 @@ func applyPatch(root, input string, sc *scope) (string, error) {
 // applyPatchFiles is applyPatch that also returns the files it wrote
 // (added, updated or renamed-to; not deleted), in patch order.
 func applyPatchFiles(root, input string, sc *scope) (string, []string, error) {
+	return applyPatchFilesFS(root, input, sc, osPatchFS{})
+}
+
+// applyPatchFilesFS is applyPatchFiles writing through fsys.
+func applyPatchFilesFS(root, input string, sc *scope, fsys patchFS) (string, []string, error) {
 	ops, err := parsePatch(input)
 	if err != nil {
 		return "", nil, fmt.Errorf("invalid patch: %w; nothing was written", err)
@@ -445,17 +451,15 @@ func applyPatchFiles(root, input string, sc *scope) (string, []string, error) {
 	var written []string
 	var sb strings.Builder
 	sb.WriteString("ok")
+	var backups []pathBackup
 	for i, c := range changes {
-		if err := c.write(sc); err != nil {
-			var applied, pending []string
-			for _, d := range changes[:i] {
-				applied = append(applied, d.summary)
-			}
-			for _, d := range changes[i:] {
-				pending = append(pending, d.summary)
-			}
-			return "", nil, fmt.Errorf("%s failed: %w\napplied (not rolled back): %s\nnot applied: %s",
-				c.op.label(i), err, listOrNone(applied), strings.Join(pending, ", "))
+		b, err := backupChange(c)
+		if err == nil {
+			backups = append(backups, b...)
+			err = c.write(sc, fsys)
+		}
+		if err != nil {
+			return "", nil, rollbackError(root, changes, i, err, rollback(fsys, backups))
 		}
 		sb.WriteString("\n" + c.summary)
 		switch {

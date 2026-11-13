@@ -2,7 +2,7 @@
 
 ## undo_file
 
-The first time `write_file`, `edit_file` or `apply_patch` changes a file in a session, its contents (or the fact that it did not exist) are saved under `.tinyagent/undo/<session>/`. The `undo_file {path}` tool restores that copy, deleting the file if the session created it. It goes through the same path, symlink, additional-directory, `file_access` and `--read-only` checks as other writes. There is one snapshot per file per session (the state before the session's first change), and changes made by `bash` are not covered; use `--rewind` (below) or git for those. The snapshot folder has its own `*` `.gitignore`, and `/.tinyagent/` is in the repository's `.gitignore`.
+The first time `write_file`, `edit_file` or `apply_patch` changes a file in a session, its contents (or the fact that it did not exist) are saved under `.tinyagent/undo/<session>/`. The `undo_file {path}` tool restores that copy, deleting the file if the session created it. It goes through the same path, symlink, additional-directory, `file_access` and `--read-only` checks as other writes. There is one snapshot per file per session (the state before the session's first change), and changes made by `bash` are not covered; use `--rewind` (below) or git for those. When an `apply_patch` write fails part-way, the tool rolls back its own changes from in-memory copies taken just before the call, not from these snapshots, and the rollback takes no snapshot; see [apply_patch](long-runs.md#apply_patch). The snapshot folder has its own `*` `.gitignore`, and `/.tinyagent/` is in the repository's `.gitignore`.
 
 ### Rewind workspace changes
 
