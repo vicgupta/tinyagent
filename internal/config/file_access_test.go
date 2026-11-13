@@ -9,8 +9,8 @@ import (
 )
 
 func TestFileAccessConfig(t *testing.T) {
-	if Default().FileAccess.Configured() {
-		t.Error("file_access is on by default")
+	if Default().FileAccess.Configured() || !Default().FileAccess.FollowsSymlinks() {
+		t.Error("file_access defaults changed")
 	}
 	p := filepath.Join(t.TempDir(), "config.yaml")
 	write(t, p, "file_access:\n  deny_read: [\".env\", \"secrets/\"]\n  deny_write: [go.sum, \"/vendor/**\"]\n")
@@ -19,12 +19,24 @@ func TestFileAccessConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := FileAccess{DenyRead: []string{".env", "secrets/"}, DenyWrite: []string{"go.sum", "/vendor/**"}}
-	if !reflect.DeepEqual(c.FileAccess, want) || !c.FileAccess.Configured() {
+	if !reflect.DeepEqual(c.FileAccess, want) || !c.FileAccess.Configured() || !c.FileAccess.FollowsSymlinks() {
 		t.Errorf("file_access = %+v", c.FileAccess)
+	}
+	write(t, p, "file_access:\n  follow_symlinks: false\n")
+	c, err = load(t, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.FileAccess.FollowsSymlinks() || c.FileAccess.FollowSymlinks == nil || !c.FileAccess.Configured() {
+		t.Errorf("follow_symlinks = %+v", c.FileAccess)
 	}
 	write(t, p, "file_access:\n  deny_exec: [x]\n")
 	if _, err := load(t, p); err == nil || !strings.Contains(err.Error(), "deny_exec") {
 		t.Errorf("unknown key: %v", err)
+	}
+	write(t, p, "file_access:\n  follow_symlinks: sometimes\n")
+	if _, err := load(t, p); err == nil {
+		t.Error("non-bool follow_symlinks accepted")
 	}
 	for _, bad := range []string{`""`, `"!keep.txt"`, `"["`, `"a/../b"`, `"/"`} {
 		write(t, p, "file_access:\n  deny_write: ["+bad+"]\n")

@@ -102,6 +102,10 @@ type Executor struct {
 	// directories, and all of them in read-only mode, refuse writes. nil
 	// keeps the tools inside Root.
 	ExtraDirs []ExtraDir
+	// EnforceSymlinks refuses a path whose symlinks resolve outside Root and
+	// ExtraDirs (file_access.follow_symlinks: false). The zero value keeps
+	// the lexical behavior, following such symlinks.
+	EnforceSymlinks bool
 	// Redactor, when set (redact_secrets), masks known secret values in
 	// the results of every tool except the built-in file tools, before
 	// truncation, saving and hooks. nil masks nothing.

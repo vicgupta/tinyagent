@@ -398,8 +398,9 @@ Please do not paste API keys, tokens, or other secrets into issues or PRs.
 ## Security
 
 The `bash` tool runs in a new process and **is not sandboxed** unless `--sandbox`
-is on; path sandboxing for the file tools is lexical and symlinks inside the root
-can point outside it. Every unsandboxed local run prints
+is on; path sandboxing for the file tools is lexical by default, so symlinks
+inside the root can point outside it (set `file_access.follow_symlinks: false`
+to also refuse evaluated targets outside `--cwd` and `additional_dirs`). Every unsandboxed local run prints
 `warning: commands run unsandboxed ...` on stderr (#415,
 `cmd/tinyagent/exec_posture.go`, called from `startEnvironment`), and `--check`
 reports the same state (`commands:`/`web:` lines, `commands`/`web_tools` in

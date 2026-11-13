@@ -108,6 +108,53 @@ func within(dir, p string) bool {
 	return err == nil && r != "." && r != ".." && !strings.HasPrefix(r, ".."+string(filepath.Separator)) && !filepath.IsAbs(r)
 }
 
+// evalPath resolves every symlink in full, even when a link's target or a
+// later component does not exist. Existing paths use EvalSymlinks; the
+// fallback walks the components and reads link targets directly, so a
+// dangling symlink still evaluates to the path a write would follow.
+func evalPath(full string) (string, error) {
+	return evalPathDepth(filepath.Clean(full), 0)
+}
+
+func evalPathDepth(full string, depth int) (string, error) {
+	if depth > 255 {
+		return "", fmt.Errorf("too many levels of symbolic links: %s", full)
+	}
+	if r, err := filepath.EvalSymlinks(full); err == nil {
+		return r, nil
+	}
+	vol := filepath.VolumeName(full)
+	rest := strings.TrimPrefix(full, vol)
+	cur := vol + string(filepath.Separator)
+	parts := strings.Split(strings.Trim(rest, string(filepath.Separator)), string(filepath.Separator))
+	for i, part := range parts {
+		if part == "" || part == "." {
+			continue
+		}
+		next := filepath.Join(cur, part)
+		fi, err := os.Lstat(next)
+		if err != nil {
+			return filepath.Join(append([]string{next}, parts[i+1:]...)...), nil
+		}
+		if fi.Mode()&os.ModeSymlink == 0 {
+			cur = next
+			continue
+		}
+		target, err := os.Readlink(next)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(cur, target)
+		}
+		if i+1 < len(parts) {
+			target = filepath.Join(append([]string{target}, parts[i+1:]...)...)
+		}
+		return evalPathDepth(target, depth+1)
+	}
+	return cur, nil
+}
+
 // scope is the set of paths the built-in file tools may touch: the root,
 // any additional directories and the file_access rules. A nil *scope (or
 // one with no extras) reaches only the root, as before additional
@@ -119,11 +166,22 @@ type scope struct {
 	// snapDir, when set, is the undo snapshot directory: each built-in
 	// write snapshots the file's current contents first (see snapshot).
 	snapDir string
+	// enforceSymlinks makes resolve and the walks refuse or hide a target
+	// whose evaluated path leaves the root and the additional directories.
+	enforceSymlinks bool
+	root            string // lexical root, for walk checks
+	realRoot        string // root with symlinks resolved
 }
 
 // scope returns e's path scope for the built-in file tools.
 func (e *Executor) scope() *scope {
-	sc := &scope{fa: e.FileAccess, extra: e.ExtraDirs, readOnly: e.ReadOnly}
+	sc := &scope{fa: e.FileAccess, extra: e.ExtraDirs, readOnly: e.ReadOnly, enforceSymlinks: e.EnforceSymlinks, root: e.Root}
+	if e.EnforceSymlinks && e.Root != "" {
+		sc.realRoot = e.Root
+		if r, err := filepath.EvalSymlinks(e.Root); err == nil {
+			sc.realRoot = r
+		}
+	}
 	if !e.ReadOnly && e.Root != "" {
 		sc.snapDir = e.undoSnapDir()
 	}
@@ -137,14 +195,68 @@ func faScope(fa *FileAccess) *scope { return &scope{fa: fa} }
 // resolve against root.
 func (s *scope) resolve(root, path string) (string, error) {
 	full, err := Resolve(root, path)
-	if err == nil || s == nil || len(s.extra) == 0 || !filepath.IsAbs(path) {
-		return full, err
+	if err != nil {
+		if s == nil || len(s.extra) == 0 || !filepath.IsAbs(path) {
+			return full, err
+		}
+		full = filepath.Clean(path)
+		if s.dirOf(full) == nil {
+			return "", Actionablef("use a path under the working directory or an additional directory", "path %q is outside the working directory and the additional directories", path)
+		}
 	}
-	full = filepath.Clean(path)
-	if s.dirOf(full) != nil {
-		return full, nil
+	if err := s.checkSymlinkEscape(root, path, full); err != nil {
+		return "", err
 	}
-	return "", Actionablef("use a path under the working directory or an additional directory", "path %q is outside the working directory and the additional directories", path)
+	return full, nil
+}
+
+// checkSymlinkEscape refuses full when its evaluated target leaves the root
+// and every additional directory. It runs after the lexical check, so an
+// in-tree symlink still works.
+func (s *scope) checkSymlinkEscape(root, path, full string) error {
+	if s == nil || !s.enforceSymlinks {
+		return nil
+	}
+	target, err := evalPath(full)
+	if err != nil {
+		return Actionablef("use a path under the working directory or an additional directory", "path %q: cannot resolve symlinks: %v", path, err)
+	}
+	if s.allowedTarget(root, target) {
+		return nil
+	}
+	return Actionablef("use a path that resolves under the working directory or an additional directory", "path %q resolves to %q, outside the working directory and the additional directories", path, target)
+}
+
+// allowedTarget reports whether target is the root, inside it, or inside an
+// additional directory.
+func (s *scope) allowedTarget(root, target string) bool {
+	realRoot := root
+	if s != nil && s.realRoot != "" && filepath.Clean(root) == filepath.Clean(s.root) {
+		realRoot = s.realRoot
+	} else if r, err := filepath.EvalSymlinks(root); err == nil {
+		realRoot = r
+	}
+	if filepath.Clean(target) == filepath.Clean(realRoot) || within(realRoot, target) {
+		return true
+	}
+	if s != nil {
+		for _, d := range s.extra {
+			if target == d.Path || within(d.Path, target) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// escapes reports whether full resolves outside the root and additional
+// directories. It is false when enforcement is off.
+func (s *scope) escapes(full string) bool {
+	if s == nil || !s.enforceSymlinks || s.root == "" {
+		return false
+	}
+	target, err := evalPath(full)
+	return err == nil && !s.allowedTarget(s.root, target)
 }
 
 // dirOf returns the additional directory containing full (or equal to it),
@@ -179,7 +291,7 @@ func (s *scope) checkWrite(full, name string) error {
 	}
 	if len(s.extra) > 0 {
 		targets := []string{filepath.Clean(full)}
-		if t, ok := resolveExisting(full); ok && t != targets[0] {
+		if t, err := evalPath(full); err == nil && t != targets[0] {
 			targets = append(targets, t)
 		}
 		for _, t := range targets {
