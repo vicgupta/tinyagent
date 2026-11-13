@@ -108,53 +108,6 @@ func within(dir, p string) bool {
 	return err == nil && r != "." && r != ".." && !strings.HasPrefix(r, ".."+string(filepath.Separator)) && !filepath.IsAbs(r)
 }
 
-// evalPath resolves every symlink in full, even when a link's target or a
-// later component does not exist. Existing paths use EvalSymlinks; the
-// fallback walks the components and reads link targets directly, so a
-// dangling symlink still evaluates to the path a write would follow.
-func evalPath(full string) (string, error) {
-	return evalPathDepth(filepath.Clean(full), 0)
-}
-
-func evalPathDepth(full string, depth int) (string, error) {
-	if depth > 255 {
-		return "", fmt.Errorf("too many levels of symbolic links: %s", full)
-	}
-	if r, err := filepath.EvalSymlinks(full); err == nil {
-		return r, nil
-	}
-	vol := filepath.VolumeName(full)
-	rest := strings.TrimPrefix(full, vol)
-	cur := vol + string(filepath.Separator)
-	parts := strings.Split(strings.Trim(rest, string(filepath.Separator)), string(filepath.Separator))
-	for i, part := range parts {
-		if part == "" || part == "." {
-			continue
-		}
-		next := filepath.Join(cur, part)
-		fi, err := os.Lstat(next)
-		if err != nil {
-			return filepath.Join(append([]string{next}, parts[i+1:]...)...), nil
-		}
-		if fi.Mode()&os.ModeSymlink == 0 {
-			cur = next
-			continue
-		}
-		target, err := os.Readlink(next)
-		if err != nil {
-			return "", err
-		}
-		if !filepath.IsAbs(target) {
-			target = filepath.Join(cur, target)
-		}
-		if i+1 < len(parts) {
-			target = filepath.Join(append([]string{target}, parts[i+1:]...)...)
-		}
-		return evalPathDepth(target, depth+1)
-	}
-	return cur, nil
-}
-
 // scope is the set of paths the built-in file tools may touch: the root,
 // any additional directories and the file_access rules. A nil *scope (or
 // one with no extras) reaches only the root, as before additional
