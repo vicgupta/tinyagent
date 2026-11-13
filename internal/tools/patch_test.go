@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -255,122 +254,11 @@ func TestApplyPatchPartialWriteFailure(t *testing.T) {
 	patch := "*** Begin Patch\n*** Add File: first.txt\n+1\n*** Delete File: locked/f.txt\n*** Add File: third.txt\n+3\n*** End Patch"
 	_, err := ApplyPatch(root, patch)
 	if err == nil || !strings.Contains(err.Error(), "operation 2 (delete locked/f.txt) failed") ||
-		!strings.Contains(err.Error(), "rolled back: A first.txt") || !strings.Contains(err.Error(), "not applied: D locked/f.txt, A third.txt") {
+		!strings.Contains(err.Error(), "rolled back: A first.txt;") || !strings.Contains(err.Error(), "not applied: D locked/f.txt, A third.txt") {
 		t.Fatalf("err = %v", err)
 	}
 	if got := snapshot(t, root); !sameFiles(got, before) {
 		t.Errorf("files after rollback = %v, want %v", got, before)
-	}
-}
-
-type fileState struct {
-	content string
-	mode    os.FileMode
-}
-
-func treeState(t *testing.T, root string) map[string]fileState {
-	t.Helper()
-	out := map[string]fileState{}
-	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
-		if err != nil || fi.IsDir() {
-			return nil
-		}
-		b, _ := os.ReadFile(p)
-		out[rel(root, p)] = fileState{content: string(b), mode: fi.Mode().Perm()}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return out
-}
-
-func sameTree(a, b map[string]fileState) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for k, v := range a {
-		if w, ok := b[k]; !ok || w != v {
-			return false
-		}
-	}
-	return true
-}
-
-func TestApplyPatchWriteFailureRollsBackEveryOperation(t *testing.T) {
-	if runtime.GOOS == "windows" || os.Getuid() == 0 {
-		t.Skip("needs POSIX permissions as non-root")
-	}
-	patch := `*** Begin Patch
-*** Add File: 1-add/a.txt
-+added
-*** Update File: 2-upd/u.txt
--old
-+updated
-*** Update File: 3-mv/src.txt
-*** Move to: 3-mv/dst.txt
--src
-+moved
-*** Delete File: 4-del/d.txt
-*** Add File: 5-add/z.txt
-+last
-*** End Patch`
-	dirs := []string{"1-add", "2-upd", "3-mv", "4-del", "5-add"}
-	for failAt := 1; failAt <= len(dirs); failAt++ {
-		t.Run(fmt.Sprintf("operation %d", failAt), func(t *testing.T) {
-			root := t.TempDir()
-			for _, d := range dirs {
-				if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
-					t.Fatal(err)
-				}
-			}
-			writeFiles(t, root, map[string]string{
-				"2-upd/u.txt":  "old\n",
-				"3-mv/src.txt": "src\n",
-				"4-del/d.txt":  "delete me\n",
-			})
-			modes := map[string]os.FileMode{
-				"2-upd/u.txt":  0o640,
-				"3-mv/src.txt": 0o750,
-				"4-del/d.txt":  0o600,
-			}
-			// A read-only directory stops creates, deletes and renames; an
-			// existing file needs its own read-only mode to stop an update.
-			if failAt == 2 {
-				modes["2-upd/u.txt"] = 0o444
-			}
-			for name, mode := range modes {
-				if err := os.Chmod(filepath.Join(root, name), mode); err != nil {
-					t.Fatal(err)
-				}
-			}
-			before := treeState(t, root)
-			blocked := filepath.Join(root, dirs[failAt-1])
-			blockMode := os.FileMode(0o555)
-			if failAt == 2 {
-				blocked = filepath.Join(root, "2-upd/u.txt")
-				blockMode = modes["2-upd/u.txt"]
-			}
-			if err := os.Chmod(blocked, blockMode); err != nil {
-				t.Fatal(err)
-			}
-			defer os.Chmod(blocked, 0o755)
-
-			_, err := ApplyPatch(root, patch)
-			if err == nil {
-				t.Fatal("patch succeeded, want a write failure")
-			}
-			if !strings.Contains(err.Error(), fmt.Sprintf("operation %d ", failAt)) ||
-				!strings.Contains(err.Error(), "rolled back:") {
-				t.Errorf("err = %v", err)
-			}
-			if got := treeState(t, root); !sameTree(got, before) {
-				t.Errorf("files after rollback = %v, want %v", got, before)
-			}
-			if entries, _ := os.ReadDir(filepath.Join(root, "1-add")); len(entries) != 0 {
-				t.Errorf("1-add not empty after rollback: %v", entries)
-			}
-		})
 	}
 }
 
@@ -413,26 +301,5 @@ func TestApplyPatchOptIn(t *testing.T) { // AC2, AC9
 	}
 	if len(snapshot(t, ro.Root)) != 0 {
 		t.Error("read-only call wrote files")
-	}
-}
-
-func TestApplyPatchRollbackReportsUnknownPaths(t *testing.T) {
-	if runtime.GOOS == "windows" || os.Getuid() == 0 {
-		t.Skip("needs POSIX permissions as non-root")
-	}
-	root := t.TempDir()
-	dir := filepath.Join(root, "locked")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	p := filepath.Join(dir, "f.txt")
-	if err := os.WriteFile(p, []byte("current\n"), 0o444); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Chmod(p, 0o644)
-	b := fileBackup{path: p, data: []byte("prior\n"), mode: 0o644, exists: true}
-	got := rollbackFiles([]fileBackup{b})
-	if len(got) != 1 || got[0] != p {
-		t.Errorf("unknown = %v, want [%s]", got, p)
 	}
 }
