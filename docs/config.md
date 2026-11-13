@@ -81,6 +81,7 @@ command_env:               # omitted by default (inherit everything); see Comman
 file_access:               # omitted by default (no rules); see Restricting file access
   deny_read: ["*.pem", "secrets/"]
   deny_write: [go.sum, "vendor/"]
+  # follow_symlinks: false  # default true; false also refuses targets outside --cwd/additional_dirs
 permissions:               # omitted by default (no policy); see Permissions
   default: allow           # allow (default), ask or deny, when no rule matches
   non_interactive: deny    # what an ask becomes with nobody to answer: deny (default) or allow

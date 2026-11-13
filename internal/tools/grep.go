@@ -90,7 +90,7 @@ func grepWithContext(root, pattern, path, include string, ignoreCase, fixedStrin
 				return nil
 			}
 		}
-		if p != start && sc.hidden(p) {
+		if p != start && (sc.hidden(p) || sc.escapes(p)) {
 			hidden++
 			return nil
 		}

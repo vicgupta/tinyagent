@@ -944,10 +944,24 @@ func validateAdditionalDirs(dirs []AdditionalDir) error {
 type FileAccess struct {
 	DenyRead  []string `yaml:"deny_read,omitempty"`
 	DenyWrite []string `yaml:"deny_write,omitempty"`
+	// FollowSymlinks allows a path whose symlinks resolve outside --cwd and
+	// the additional directories. nil (the default) preserves the lexical
+	// behavior; false additionally requires the evaluated target to stay
+	// inside --cwd or an additional directory.
+	FollowSymlinks *bool `yaml:"follow_symlinks,omitempty"`
 }
 
-// Configured reports whether any rule is set.
-func (f FileAccess) Configured() bool { return len(f.DenyRead)+len(f.DenyWrite) > 0 }
+// FollowsSymlinks reports whether the file tools may follow a symlink to a
+// target outside --cwd and the additional directories. Unset means yes, for
+// compatibility.
+func (f FileAccess) FollowsSymlinks() bool {
+	return f.FollowSymlinks == nil || *f.FollowSymlinks
+}
+
+// Configured reports whether any rule or symlink setting is set.
+func (f FileAccess) Configured() bool {
+	return len(f.DenyRead)+len(f.DenyWrite) > 0 || f.FollowSymlinks != nil
+}
 
 // Validate rejects empty patterns, ! negation (reserved for later) and bad
 // glob syntax.

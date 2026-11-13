@@ -37,7 +37,8 @@ func listFiles(root, path, pattern, skip string, sc *scope) (string, error) {
 		var lines []string
 		hidden := 0
 		for _, e := range entries {
-			if sc.hidden(filepath.Join(dir, e.Name())) {
+			full := filepath.Join(dir, e.Name())
+			if sc.hidden(full) || sc.escapes(full) {
 				hidden++
 				continue
 			}
@@ -75,7 +76,7 @@ func listFiles(root, path, pattern, skip string, sc *scope) (string, error) {
 			subject = rel(dir, p)
 		}
 		if ok, _ := filepath.Match(pattern, subject); ok {
-			if sc.hidden(p) {
+			if sc.hidden(p) || sc.escapes(p) {
 				hidden++
 				return nil
 			}
