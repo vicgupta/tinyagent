@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -19,7 +20,8 @@ const MaxPatchBytes = 1 << 20
 // ApplyPatchSpec returns the apply_patch definition.
 func ApplyPatchSpec() model.ToolSpec {
 	return spec(ApplyPatchToolName, "Apply one patch that can add, update (several hunks), rename, and delete several files. "+
-		"The whole patch is checked before anything is written; if any part does not apply, nothing changes. Format:\n"+
+		"The whole patch is checked before anything is written; if any part does not apply, nothing changes. "+
+		"If a write fails part-way, the operations already applied are rolled back. Format:\n"+
 		"*** Begin Patch\n"+
 		"*** Add File: <path>   (then every line prefixed with +)\n"+
 		"*** Delete File: <path>\n"+
@@ -417,9 +419,131 @@ func (c fileChange) write(sc *scope) error {
 	return nil
 }
 
+// fileBackup is the state of one path before this apply_patch call writes it.
+// Rollback restores these values directly; it never takes a new undo snapshot.
+type fileBackup struct {
+	path   string
+	data   []byte
+	mode   os.FileMode
+	exists bool
+	dirs   []string // parent directories this call creates, deepest first
+}
+
+// backupChange records the paths c is about to write, before any of them is
+// changed, plus any parent directories the write will create.
+func backupChange(c fileChange) ([]fileBackup, error) {
+	b, err := backupPath(c.full)
+	if err != nil {
+		return nil, err
+	}
+	if c.op.kind == "add" {
+		b.dirs = missingDirs(filepath.Dir(c.full))
+	}
+	out := []fileBackup{b}
+	if c.dest != "" {
+		d, err := backupPath(c.dest)
+		if err != nil {
+			return nil, err
+		}
+		d.dirs = missingDirs(filepath.Dir(c.dest))
+		out = append(out, d)
+	}
+	return out, nil
+}
+
+func backupPath(full string) (fileBackup, error) {
+	b := fileBackup{path: full}
+	fi, err := os.Stat(full)
+	if errors.Is(err, os.ErrNotExist) {
+		return b, nil
+	}
+	if err != nil {
+		return b, err
+	}
+	if !fi.Mode().IsRegular() {
+		return b, fmt.Errorf("%s is not a regular file", full)
+	}
+	data, err := os.ReadFile(full)
+	if err != nil {
+		return b, err
+	}
+	b.exists, b.data, b.mode = true, data, fi.Mode().Perm()
+	return b, nil
+}
+
+// missingDirs lists dir and its missing ancestors, deepest first.
+func missingDirs(dir string) []string {
+	var out []string
+	for {
+		if _, err := os.Lstat(dir); err == nil || !errors.Is(err, os.ErrNotExist) {
+			break
+		}
+		out = append(out, dir)
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return out
+}
+
+// rollbackFiles restores backups in reverse order and returns the paths it
+// could not restore.
+func rollbackFiles(backups []fileBackup) []string {
+	var unknown []string
+	for i := len(backups) - 1; i >= 0; i-- {
+		if err := backups[i].restore(); err != nil {
+			unknown = append(unknown, backups[i].path)
+		}
+	}
+	return unknown
+}
+
+func (b fileBackup) restore() error {
+	if err := b.restoreFile(); err != nil {
+		return err
+	}
+	for _, dir := range b.dirs {
+		_ = os.Remove(dir) // best effort; a non-empty directory is left alone
+	}
+	return nil
+}
+
+func (b fileBackup) restoreFile() error {
+	if b.matches() {
+		return nil
+	}
+	if !b.exists {
+		if err := os.Remove(b.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(b.path), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(b.path, b.data, b.mode); err != nil {
+		return err
+	}
+	return os.Chmod(b.path, b.mode)
+}
+
+func (b fileBackup) matches() bool {
+	fi, err := os.Stat(b.path)
+	if !b.exists {
+		return errors.Is(err, os.ErrNotExist)
+	}
+	if err != nil || !fi.Mode().IsRegular() || fi.Mode().Perm() != b.mode {
+		return false
+	}
+	data, err := os.ReadFile(b.path)
+	return err == nil && bytes.Equal(data, b.data)
+}
+
 // ApplyPatch parses input, checks every operation before writing anything,
 // then applies the operations in order. A write failure after the check stops
-// the run and reports which operations were applied; those are not rolled back.
+// the run and rolls back the operations already applied.
 func ApplyPatch(root, input string) (string, error) {
 	return applyPatch(root, input, nil)
 }
@@ -445,8 +569,14 @@ func applyPatchFiles(root, input string, sc *scope) (string, []string, error) {
 	var written []string
 	var sb strings.Builder
 	sb.WriteString("ok")
+	var backups []fileBackup
 	for i, c := range changes {
-		if err := c.write(sc); err != nil {
+		b, err := backupChange(c)
+		if err == nil {
+			backups = append(backups, b...)
+			err = c.write(sc)
+		}
+		if err != nil {
 			var applied, pending []string
 			for _, d := range changes[:i] {
 				applied = append(applied, d.summary)
@@ -454,7 +584,15 @@ func applyPatchFiles(root, input string, sc *scope) (string, []string, error) {
 			for _, d := range changes[i:] {
 				pending = append(pending, d.summary)
 			}
-			return "", nil, fmt.Errorf("%s failed: %w\napplied (not rolled back): %s\nnot applied: %s",
+			unknown := rollbackFiles(backups)
+			if len(unknown) > 0 {
+				for j := range unknown {
+					unknown[j] = rel(root, unknown[j])
+				}
+				return "", nil, fmt.Errorf("%s failed: %w\nrollback failed; unknown state: %s\nnot applied: %s",
+					c.op.label(i), err, strings.Join(unknown, ", "), strings.Join(pending, ", "))
+			}
+			return "", nil, fmt.Errorf("%s failed: %w\nrolled back: %s\nnot applied: %s",
 				c.op.label(i), err, listOrNone(applied), strings.Join(pending, ", "))
 		}
 		sb.WriteString("\n" + c.summary)
