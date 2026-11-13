@@ -46,6 +46,99 @@ func countContaining(ws []string, sub string) int {
 	return n
 }
 
+func TestSplitFrontmatter(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantFM   string
+		wantBody string
+		wantErr  string
+	}{
+		{
+			name:     "literal block scalar with indented fence",
+			input:    "---\nname: release-notes\ndescription: |\n  Draft release notes.\n  ---\n  Include a changelog link.\n---\n# Skill: release-notes\n",
+			wantFM:   "name: release-notes\ndescription: |\n  Draft release notes.\n  ---\n  Include a changelog link.\n",
+			wantBody: "# Skill: release-notes\n",
+		},
+		{
+			name:     "folded block scalar with indented fence",
+			input:    "---\nname: release-notes\ndescription: >\n  Draft release notes.\n  ---\n  Include a changelog link.\n---\n# Skill: release-notes\n",
+			wantFM:   "name: release-notes\ndescription: >\n  Draft release notes.\n  ---\n  Include a changelog link.\n",
+			wantBody: "# Skill: release-notes\n",
+		},
+		{
+			name:     "fence with trailing whitespace",
+			input:    "---\nname: x\n--- \t\r\nbody",
+			wantFM:   "name: x\n",
+			wantBody: "body",
+		},
+		{
+			name:     "empty frontmatter",
+			input:    "---\n---\nbody",
+			wantBody: "body",
+		},
+		{
+			name:     "BOM prefixed frontmatter",
+			input:    "\xef\xbb\xbf---\nname: x\n---\nbody",
+			wantFM:   "name: x\n",
+			wantBody: "body",
+		},
+		{
+			name:    "missing frontmatter",
+			input:   "name: x\n---\nbody",
+			wantErr: "missing YAML frontmatter",
+		},
+		{
+			name:    "unterminated frontmatter",
+			input:   "---\nname: x\nbody",
+			wantErr: "unterminated YAML frontmatter",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fm, body, err := split([]byte(tt.input))
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(fm) != tt.wantFM || string(body) != tt.wantBody {
+				t.Errorf("fm = %q, body = %q; want fm %q, body %q", fm, body, tt.wantFM, tt.wantBody)
+			}
+		})
+	}
+}
+
+func TestParseBlockScalarDescription(t *testing.T) {
+	tests := []struct {
+		name string
+		desc string
+		want string
+	}{
+		{"literal", "|", "Draft release notes.\n---\nInclude a changelog link."},
+		{"folded", ">", "Draft release notes. --- Include a changelog link."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "SKILL.md")
+			content := "---\nname: release-notes\ndescription: " + tt.desc +
+				"\n  Draft release notes.\n  ---\n  Include a changelog link.\n---\n# Skill: release-notes\n"
+			write(t, path, content)
+			k, err := parse(path, "fallback")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if k.Name != "release-notes" || k.Description != tt.want {
+				t.Errorf("name = %q, description = %q; want %q and %q", k.Name, k.Description, "release-notes", tt.want)
+			}
+		})
+	}
+}
+
 func TestDiscoverScansOnlyCwdSkills(t *testing.T) {
 	root, cwd := repo(t)
 	write(t, filepath.Join(cwd, "skills/release/SKILL.md"), skillMD("release", "Cut a release.", "Steps"))

@@ -289,7 +289,7 @@ func split(b []byte) (fm, body []byte, err error) {
 	}
 	for off := 0; off <= len(rest); {
 		line, next, more := bytes.Cut(rest[off:], []byte("\n"))
-		if strings.TrimSpace(string(line)) == "---" {
+		if isFence(line) {
 			body := []byte(nil)
 			if more {
 				body = next
@@ -302,6 +302,13 @@ func split(b []byte) (fm, body []byte, err error) {
 		off += len(line) + 1
 	}
 	return nil, nil, errors.New("unterminated YAML frontmatter (no closing --- line)")
+}
+
+// isFence reports whether line is a closing --- delimiter: exactly --- at
+// column 0, optionally followed by whitespace. Indented --- lines are YAML
+// block-scalar content, not delimiters.
+func isFence(line []byte) bool {
+	return bytes.Equal(bytes.TrimRight(line, " \t\r"), []byte("---"))
 }
 
 func readCapped(path string) ([]byte, error) {
