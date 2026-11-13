@@ -325,7 +325,11 @@ func TestApplyPatchRollbackSymlinks(t *testing.T) {
 	for _, enforce := range []bool{false, true} {
 		t.Run(fmt.Sprintf("enforce=%v", enforce), func(t *testing.T) {
 			sc := func(root string) *scope {
-				return &scope{enforceSymlinks: enforce, root: root, realRoot: root}
+				real, err := filepath.EvalSymlinks(root) // macOS: /var is /private/var
+				if err != nil {
+					t.Fatal(err)
+				}
+				return &scope{enforceSymlinks: enforce, root: root, realRoot: real}
 			}
 			root := setup(t)
 			count := &faultFS{}
