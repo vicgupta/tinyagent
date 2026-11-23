@@ -60,7 +60,7 @@ func TestReportWorkersSilentWithoutKeptBranches(t *testing.T) {
 
 func TestReportSummaryIncludesWorkerBranches(t *testing.T) {
 	var b bytes.Buffer
-	reportSummary(&b, "openai/gpt-4o", workerSummaryTrajectory(filepath.Join(string(filepath.Separator)+"r")), time.Second, "")
+	reportSummary(&b, modelOrigin{spec: "openai/gpt-4o"}, workerSummaryTrajectory(filepath.Join(string(filepath.Separator)+"r")), time.Second, "")
 	lines := strings.Split(strings.TrimSpace(b.String()), "\n")
 	if !strings.HasPrefix(lines[0], "Submitted after 3 steps") || len(lines) < 2 || !strings.HasPrefix(lines[1], "workers: 2 branches kept") {
 		t.Errorf("unexpected summary:\n%s", b.String())

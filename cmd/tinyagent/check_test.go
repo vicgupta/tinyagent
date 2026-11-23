@@ -234,7 +234,7 @@ func TestCheckMissingKeyExits2WithHint(t *testing.T) {
 	if code != 2 || stdout != "" {
 		t.Fatalf("exit %d, stdout %q", code, stdout)
 	}
-	if !strings.HasPrefix(stderr, "error: ANTHROPIC_API_KEY is not set\nhint: ANTHROPIC_API_KEY isn't set") {
+	if !strings.HasPrefix(stderr, "error: ANTHROPIC_API_KEY is not set for model anthropic/claude-sonnet-4-5 (from -m/--model)\nhint: ANTHROPIC_API_KEY isn't set") {
 		t.Errorf("stderr %q", stderr)
 	}
 	if hits.Load() != 0 {

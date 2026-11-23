@@ -105,6 +105,7 @@ Environment: `OPENAI_API_KEY`, `OPENAI_BASE_URL` (any OpenAI-compatible endpoint
 | `config.path`, `config.source` | The config file (`""` for none) and where it came from, the same label as the text `config:` line without its parentheses or `from ` (`-c`, `cwd` for `./.tinyagent/tinyagent.yaml`, `built-in defaults`) |
 | `profile` | `--profile`, or `""` |
 | `model.spec`, `model.source` | The model and where it came from (`-m`, `$AGENT_MODEL`, `config`, `default`, or `attempt 1, from --attempt-model`) |
+| `model.overrides` | The config file's `model:` that an exported `$AGENT_MODEL` replaced; only when they differ (added without a schema bump; see [Where the model came from](models.md#where-the-model-came-from)) |
 | `provider.name`, `provider.api_key_env`, `provider.api_key` | The provider, the key variable it reads (`""` if none) and `set`, `missing` or `n/a` |
 | `fallbacks` | Fallback model specs, in order |
 | `sandbox` | `enabled`, the `backend` (`auto`, `landlock`, `bwrap`), whether the engine is `available` on this host, and the text `detail` |

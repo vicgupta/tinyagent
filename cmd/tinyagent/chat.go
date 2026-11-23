@@ -435,7 +435,7 @@ func (c *chat) turn(msg string, asFollowUp bool) {
 		}
 	case agent.StatusError:
 		fmt.Fprintln(errw, c.st.Red("error: ")+t.Submission)
-		printHint(errw, s.modelName, t.Submission)
+		printHintFrom(errw, originFor(s.origin, s.modelName), t.Submission)
 		fmt.Fprintln(errw, c.st.Dim("the conversation is kept; send a message to retry or carry on, or /help"))
 	default:
 		extra := ""

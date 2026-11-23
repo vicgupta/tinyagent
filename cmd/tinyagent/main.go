@@ -846,11 +846,11 @@ func printUsage(w io.Writer, fs *flag.FlagSet) {
 // time, and token and cost totals when known. For an error that looks like a
 // setup problem, a hint line follows; for a resumable stop, resume is the
 // ready-to-paste command (empty prints nothing).
-func reportSummary(w io.Writer, modelName string, t *trajectory.Trajectory, elapsed time.Duration, resume string) {
+func reportSummary(w io.Writer, mo modelOrigin, t *trajectory.Trajectory, elapsed time.Duration, resume string) {
 	fmt.Fprintln(w, summaryLine(t, elapsed))
 	reportWorkers(w, t)
 	if t.ExitStatus == agent.StatusError {
-		printHint(w, modelName, t.Submission)
+		printHintFrom(w, mo, t.Submission)
 	}
 	if q := t.PendingQuestion; t.ExitStatus == agent.StatusNeedsInput && q != nil && len(q.Options) > 0 {
 		fmt.Fprintln(w, "  options: "+strings.Join(q.Options, " | "))

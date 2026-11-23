@@ -95,14 +95,14 @@ func TestApplyFlagOverridesTimeLimit(t *testing.T) {
 func TestReportSummary(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	var b strings.Builder
-	reportSummary(&b, "openai/gpt-4o", &trajectory.Trajectory{ExitStatus: agent.StatusError, Submission: "HTTP 401: Incorrect API key"}, 0, "")
+	reportSummary(&b, modelOrigin{spec: "openai/gpt-4o"}, &trajectory.Trajectory{ExitStatus: agent.StatusError, Submission: "HTTP 401: Incorrect API key"}, 0, "")
 	lines := strings.Split(strings.TrimSpace(b.String()), "\n")
 	if len(lines) != 2 || lines[0] != "Error after 0 steps in 0s: HTTP 401: Incorrect API key" || !strings.HasPrefix(lines[1], "hint: OPENAI_API_KEY isn't set") {
 		t.Errorf("got %q, want the summary line then a hint", b.String())
 	}
 
 	b.Reset()
-	reportSummary(&b, "openai/gpt-4o", &trajectory.Trajectory{ExitStatus: agent.StatusSubmitted, Steps: 2, InputTokens: 10, OutputTokens: 5, Cost: 0.5}, 3*time.Second, "")
+	reportSummary(&b, modelOrigin{spec: "openai/gpt-4o"}, &trajectory.Trajectory{ExitStatus: agent.StatusSubmitted, Steps: 2, InputTokens: 10, OutputTokens: 5, Cost: 0.5}, 3*time.Second, "")
 	if got := b.String(); got != "Submitted after 2 steps in 3s (10 input / 5 output tokens, $0.50)\n" {
 		t.Errorf("success: got %q", got)
 	}
@@ -110,7 +110,7 @@ func TestReportSummary(t *testing.T) {
 
 func TestReportSummaryResume(t *testing.T) {
 	var b strings.Builder
-	reportSummary(&b, "openai/gpt-4o", &trajectory.Trajectory{ExitStatus: agent.StatusStepLimit, Steps: 30}, 252*time.Second, "tinyagent --resume run.json --cwd /src --step-limit 60 -o run-2.json")
+	reportSummary(&b, modelOrigin{spec: "openai/gpt-4o"}, &trajectory.Trajectory{ExitStatus: agent.StatusStepLimit, Steps: 30}, 252*time.Second, "tinyagent --resume run.json --cwd /src --step-limit 60 -o run-2.json")
 	if got, want := b.String(), "StepLimitExceeded after 30 steps in 4m12s\nresume: tinyagent --resume run.json --cwd /src --step-limit 60 -o run-2.json\n"; got != want {
 		t.Errorf("got  %q\nwant %q", got, want)
 	}

@@ -643,7 +643,7 @@ func (r *resumeRun) runAgent(ctx context.Context, a *agent.Agent, events *runEve
 	if !o.jsonOutput {
 		resume = resumeCommand(t, o.output, r.root, r.cfg)
 	}
-	reportSummary(os.Stderr, r.modelName, t, elapsed, resume)
+	reportSummary(os.Stderr, modelOrigin{spec: r.modelName}, t, elapsed, resume)
 	if events.finish(t, elapsed) != nil {
 		return 1
 	}

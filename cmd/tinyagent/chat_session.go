@@ -38,6 +38,7 @@ func newChatSession(o *options, fs *flag.FlagSet, errw io.Writer) (s *session, p
 		fmt.Fprintf(errw, "error: --cwd %s: %v\n", o.cwd, err)
 		return nil, nil, 2
 	}
+	fromCheckpoint := false
 	if o.resume != "" {
 		if o.output != "" && sameFile(o.resume, o.output) {
 			fmt.Fprintln(errw, "error: -o must differ from the --resume checkpoint")
@@ -50,9 +51,10 @@ func newChatSession(o *options, fs *flag.FlagSet, errw io.Writer) (s *session, p
 		}
 		if !flagWasSet(fs, "model", "m") && prev.Model != "" {
 			fs.Set("model", prev.Model)
+			fromCheckpoint = true
 		}
 	}
-	s = &session{o: o, fs: fs, root: root, closeEnv: func() {}}
+	s = &session{o: o, fs: fs, root: root, closeEnv: func() {}, modelFromCheckpoint: fromCheckpoint}
 	if err := s.setup(context.Background(), sessionMode{
 		interactive: true,
 		setupLockdown: func(cfg *config.AgentConfig) (*lockdown.State, error) {
