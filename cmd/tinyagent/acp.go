@@ -145,14 +145,6 @@ func newACPSession(ctx context.Context, o *options, fs *flag.FlagSet, id, cwd st
 	return s, nil
 }
 
-// withHint is msg followed by the hint a headless run prints for errMsg.
-func withHint(spec, msg, errMsg string) error {
-	if h := model.Hint(spec, errMsg); h != "" {
-		msg += "\nhint: " + h
-	}
-	return errors.New(msg)
-}
-
 // mcpServers returns the MCP servers to start: the config's (none when
 // read-only) and, with acp.client_mcp_servers, the client's. Ignored client
 // servers are named in a note before the first turn. Values of the

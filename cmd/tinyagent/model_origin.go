@@ -178,7 +178,8 @@ func printHintFrom(w io.Writer, mo modelOrigin, errMsg string) {
 	}
 }
 
-// withHintFrom is withHint naming the model's source in the hint.
+// withHintFrom is msg followed by the hint a headless run prints for
+// errMsg, naming the model's source.
 func withHintFrom(mo modelOrigin, msg, errMsg string) error {
 	if h := hintFrom(mo, errMsg); h != "" {
 		msg += "\nhint: " + h
