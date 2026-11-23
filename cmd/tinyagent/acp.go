@@ -289,7 +289,7 @@ func (s *acpSession) Prompt(ctx context.Context, p acp.Prompt, u *acp.Updates) (
 	s.setText(nil)
 	text.flush()
 	elapsed := time.Since(start)
-	reportSummary(os.Stderr, s.modelName, t, elapsed, "")
+	reportSummary(os.Stderr, originFor(s.origin, s.modelName), t, elapsed, "")
 	events.finish(t, elapsed)
 	s.traj = t
 	return s.stopReason(t, elapsed, u)

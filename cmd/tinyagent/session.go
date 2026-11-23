@@ -36,6 +36,8 @@ type session struct {
 	root    string
 
 	modelName, openaiAPI         string
+	origin                       modelOrigin // where modelName came from (#429)
+	modelFromCheckpoint          bool        // chat/web --resume set -m from the checkpoint
 	providerAPI, providerBaseURL string
 	fallbacks                    []string
 	model                        model.Model
@@ -217,7 +219,12 @@ func (s *session) applySessionFlags(m sessionMode) error {
 // and builds the fallbacks, subagents, workers and helper models.
 func (s *session) resolveSessionModel() error {
 	o, fs, cfg := s.o, s.fs, &s.cfg
-	s.modelName = resolveModel(fs, o.modelName, cfg.Model)
+	s.origin = resolveModelOrigin(fs, o.modelName, cfg.Model, s.cfgPath)
+	if s.modelFromCheckpoint && s.origin.kind == originFlag {
+		s.origin.kind = originCheckpoint
+	}
+	s.modelName = s.origin.spec
+	noteModelOverride(os.Stderr, s.origin)
 	if flagWasSet(fs, "reasoning-effort") {
 		cfg.ReasoningEffort = o.reasoningEffort
 	}
@@ -235,10 +242,10 @@ func (s *session) resolveSessionModel() error {
 	}
 	s.openaiAPI = model.OpenAITransport(s.modelName, cfg.OpenAIAPI)
 	if err := model.CheckProviderEnv(s.modelName); err != nil {
-		return withHint(s.modelName, err.Error(), err.Error())
+		return withHintFrom(s.origin, err.Error(), err.Error())
 	}
 	if env := model.MissingKeyEnv(s.modelName); env != "" {
-		return withHint(s.modelName, fmt.Sprintf("%s is not set; export it, or set it under env: in ./%s (for ACP, the agent's env in the editor's agent settings also works)", env, config.ProjectFile), "HTTP 401: ")
+		return withHintFrom(s.origin, fmt.Sprintf("%s; export it, or set it under env: in ./%s (for ACP, the agent's env in the editor's agent settings also works)", s.origin.missingKey(env), config.ProjectFile), "HTTP 401: ")
 	}
 	var err error
 	if s.fallbacks, err = fallbackModels(fs, o.fallbackModels, o.noFallback, *cfg); err == nil {
@@ -317,7 +324,7 @@ func (s *session) buildSessionModel() error {
 	announceProvider(os.Stderr, s.modelName, o.verbose)
 	var err error
 	if s.model, err = model.NewWith(s.modelName, onText, model.Options{OpenAIAPI: s.openaiAPI, Handoff: model.HandoffOptions{Dir: s.root, ReadOnly: cfg.ReadOnly}}); err != nil {
-		return withHint(s.modelName, err.Error(), err.Error())
+		return withHintFrom(s.origin, err.Error(), err.Error())
 	}
 	if err := model.SetReasoningEffort(s.model, s.modelName, cfg.ReasoningEffort); err != nil {
 		return err

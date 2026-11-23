@@ -74,7 +74,9 @@ var tuneNow = time.Now
 
 // tuneModel builds the auxiliary tuning model; tests replace it.
 var tuneModel = func(cfg config.AgentConfig, fs *flag.FlagSet, o *options) (model.Model, string, error) {
-	main := resolveModel(fs, o.modelName, cfg.Model)
+	mo := resolveModelOrigin(fs, o.modelName, cfg.Model, configPathFor(o))
+	noteModelOverride(os.Stderr, mo)
+	main := mo.spec
 	r := routing.Auxiliary(cfg, main, routing.TaskTuning)
 	m, err := routedModel(cfg, r, main, "")
 	if err != nil {

@@ -30,7 +30,7 @@ func TestAttemptsPrevalidatesModels(t *testing.T) {
 		{[]string{"--attempt-model", "nope/x", "--attempt-model", "openai/gpt-4o"}, `attempt 1 model "nope/x"`},
 		{[]string{"-c", gw, "--attempt-model", "openai/gpt-4o", "--attempt-model", "gw/m"},
 			`attempt 2 model "gw/m": provider "gw": api_key_env GW_KEY is unset or empty`},
-		{[]string{"-m", "anthropic/claude-sonnet-4-5"}, `attempt 1 model "anthropic/claude-sonnet-4-5": ANTHROPIC_API_KEY is not set`},
+		{[]string{"-m", "anthropic/claude-sonnet-4-5"}, `attempt 1 model "anthropic/claude-sonnet-4-5" (from -m/--model): ANTHROPIC_API_KEY is not set`},
 	} {
 		args := append([]string{"--attempts", "2", "--attempt-check", "true", "-t", "MODE_PASS", "--cwd", repo, "--no-stream"}, c.args...)
 		code, _, stderr := runCLI(t, args...)

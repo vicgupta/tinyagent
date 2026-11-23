@@ -14,6 +14,16 @@ tinyagent -m ollama/llama3.1 -t "..."
 
 Everything after the first `/` is the provider's model name, so `openrouter/qwen/qwen3-coder` sends `qwen/qwen3-coder`. Without `-m`, the model is `$AGENT_MODEL` (exported in the environment), then `model:` in the [config file](config.md), then the built-in default `openai/gpt-4o`. `tinyagent --check` prints the resolved model and key status without calling the model.
 
+### Where the model came from
+
+An exported `$AGENT_MODEL` outranks `model:` in the config file, so a shell that still exports an old `AGENT_MODEL` can make a run use a model the file never mentions. When that `$AGENT_MODEL` differs from the file's `model:`, every entry point that resolves the model (one-shot `-t` runs and the subcommands built on them, `tinyagent chat`, `tinyagent web`, ACP sessions, `--attempts` and `tune`) prints one note on stderr at startup:
+
+```
+note: using $AGENT_MODEL=openai/gpt-6-luna instead of model: codex-exec/gpt-6-luna in ./.tinyagent/tinyagent.yaml (unset AGENT_MODEL to use the file)
+```
+
+The precedence doesn't change, and there is no note when `-m` is given, when the two name the same model, or when the file has no `model:`. A missing-API-key error and its hint name the model and where it came from (`-m/--model`, `$AGENT_MODEL`, `model: in <file>`, the built-in default, or chat/web's `--resume` checkpoint), for example `error: OPENAI_API_KEY is not set for model openai/gpt-6-luna (from $AGENT_MODEL)`, and the hint ends with `unset AGENT_MODEL to use model: ... in <file>` when `$AGENT_MODEL` replaced the file's model. `--check` shows the source on its `model:` line and adds an `overrides:` line in that case (`overrides` in [`--check --json`](json-output.md#check---json)). Only model names and file paths are printed, never key values.
+
 ## Switching mid-session
 
 In [`tinyagent chat`](chat.md) and [`tinyagent web`](web.md), `/model` with no argument shows the current main model, its [fallback chain](providers.md#model-fallback), and any [role routes](#model-roles) that `--check` would list. `/model <provider/model>` switches the **main** model for the rest of the session: the spec is validated the same way as `-m` (known provider, credentials, reasoning effort, output-token cap, and that it is not already a fallback), roles with their own models stay put, and conversation history is kept. An invalid spec is refused and the current model stays. The web UI's model picker uses the same path (`POST /api/model`).

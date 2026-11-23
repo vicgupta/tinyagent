@@ -42,8 +42,9 @@ type checkConfig struct {
 }
 
 type checkModel struct {
-	Spec   string `json:"spec"`
-	Source string `json:"source"`
+	Spec      string `json:"spec"`
+	Source    string `json:"source"`
+	Overrides string `json:"overrides,omitempty"` // the config's model: that $AGENT_MODEL replaced (#429)
 }
 
 type checkProvider struct {

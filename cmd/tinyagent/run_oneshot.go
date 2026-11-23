@@ -41,6 +41,7 @@ type oneShot struct {
 	cfgSrc     config.Source
 	cfg        config.AgentConfig
 	cfgPath    string
+	origin     modelOrigin // where o.modelName came from (#429)
 	taskImages []model.Image
 	hookRunner *hooks.Runner
 	policy     *permissions.Policy
@@ -300,7 +301,9 @@ func (r *oneShot) checkSnapshotsAndEnv() (int, bool) {
 // budget and OpenAI transport, checks the provider environment, and builds
 // the fallbacks, helper models, subagents and workers.
 func (r *oneShot) resolveModels() (int, bool) {
-	r.o.modelName = resolveModel(r.fs, r.o.modelName, r.cfg.Model)
+	r.origin = resolveModelOrigin(r.fs, r.o.modelName, r.cfg.Model, r.cfgPath)
+	r.o.modelName = r.origin.spec
+	noteModelOverride(os.Stderr, r.origin)
 	if err := r.checkModelSettings(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 2, true
@@ -552,7 +555,7 @@ func (r *oneShot) newModel(deltas *textDeltas) (model.Model, int, bool) {
 	m, err := model.NewWith(o.modelName, onText, model.Options{OpenAIAPI: r.openaiAPI, Handoff: model.HandoffOptions{Dir: r.root, ReadOnly: cfg.ReadOnly}})
 	if err != nil {
 		code := fail(err)
-		printHint(os.Stderr, o.modelName, err.Error())
+		printHintFrom(os.Stderr, originFor(r.origin, o.modelName), err.Error())
 		return nil, code, true
 	}
 	if err := model.SetReasoningEffort(m, o.modelName, cfg.ReasoningEffort); err != nil {
@@ -721,7 +724,7 @@ func (r *oneShot) runAgent(ctx context.Context, a *agent.Agent, events *runEvent
 		resume = resumeCommand(t, o.output, r.root, r.cfg)
 	}
 	handoffState.finish(t, o.modelName, o.output, events, warn)
-	reportSummary(os.Stderr, o.modelName, t, elapsed, resume)
+	reportSummary(os.Stderr, originFor(r.origin, o.modelName), t, elapsed, resume)
 	if r.worktree != nil {
 		fmt.Fprintf(os.Stderr, "worktree kept: %s (branch %s)\n", r.worktree.Path, r.worktree.Branch)
 	}

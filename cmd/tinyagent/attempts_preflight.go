@@ -20,8 +20,11 @@ const dirtyWorktreeWarning = "warning: the main checkout has uncommitted changes
 // provider's variables must be set, a built-in provider's API key variable
 // must be set, and the client must build (unknown provider, missing model
 // name, missing Codex login). No request is made. Each distinct spec is
-// checked once; the error names the first attempt that uses it.
-func checkAttemptModels(models []string, cfg config.AgentConfig, openaiAPI string) error {
+// checked once; the error names the first attempt that uses it. def is
+// the model a single run would resolve (#429): the error names its source
+// for an attempt that uses it, every attempt when derived (no
+// --attempt-model) and an empty --attempt-model otherwise.
+func checkAttemptModels(models []string, cfg config.AgentConfig, openaiAPI string, def modelOrigin, derived bool) error {
 	registerProviders(cfg)
 	seen := map[string]bool{}
 	for i, spec := range models {
@@ -29,12 +32,19 @@ func checkAttemptModels(models []string, cfg config.AgentConfig, openaiAPI strin
 			continue
 		}
 		seen[spec] = true
+		from := modelOrigin{}
+		if derived {
+			from = def
+		}
 		wrap := func(err error) error {
-			return fmt.Errorf("attempt %d model %q: %w", i+1, spec, err)
+			return attemptModelError(i+1, spec, from, err)
 		}
 		if spec == "" {
 			// An empty -m leaves the child on its own default model.
 			spec = resolveModel(flag.NewFlagSet("", flag.ContinueOnError), "", cfg.Model)
+			if def.spec == spec {
+				from = def
+			}
 		}
 		if err := model.CheckProviderEnv(spec); err != nil {
 			return wrap(err)

@@ -41,8 +41,9 @@ func runCheck(o *options, fs *flag.FlagSet, w io.Writer) int {
 		sum.Error = &checkError{Message: err.Error()}
 		var hint checkHint
 		if errors.As(err, &hint) {
-			printHint(os.Stderr, hint.spec, hint.msg)
-			sum.Error.Hint = model.Hint(hint.spec, hint.msg)
+			mo := originFor(hint.origin, hint.spec)
+			printHintFrom(os.Stderr, mo, hint.msg)
+			sum.Error.Hint = hintFrom(mo, hint.msg)
 		} else {
 			printSetupHint(os.Stderr, err)
 			sum.Error.Hint = setupHint(err)
@@ -73,6 +74,7 @@ func runCheck(o *options, fs *flag.FlagSet, w io.Writer) int {
 type checkHint struct {
 	spec, msg string
 	err       error
+	origin    modelOrigin // where spec came from, for the hint (#429)
 }
 
 func (h checkHint) Error() string { return h.err.Error() }
@@ -93,6 +95,7 @@ type checkReport struct {
 
 	spec       string
 	specSource string
+	origin     modelOrigin // where spec came from (#429)
 	fallbacks  []string
 	m          model.Model
 	root       string
@@ -159,13 +162,16 @@ func newCheckReport(o *options, fs *flag.FlagSet, sum *checkSummary) (*checkRepo
 // the provider's credentials.
 func (rp *checkReport) resolveModel() error {
 	o, fs, cfg := rp.o, rp.fs, &rp.cfg
-	spec := resolveModel(fs, o.modelName, cfg.Model)
+	origin := resolveModelOrigin(fs, o.modelName, cfg.Model, rp.cfgPath)
+	spec := origin.spec
 	specSource := modelSource(fs, cfg.Model)
 	if attemptsActive(fs) && len(o.attempts.models) > 0 {
 		// --attempt-model replaces -m: report and check attempt 1's model
 		// here; checkAttempts checks every attempt's.
 		spec, specSource = o.attempts.models[0], "attempt 1, from --attempt-model"
+		origin = modelOrigin{spec: spec}
 	}
+	rp.origin = origin
 	if flagWasSet(fs, "reasoning-effort") {
 		cfg.ReasoningEffort = o.reasoningEffort
 	}
@@ -184,6 +190,9 @@ func (rp *checkReport) resolveModel() error {
 	rp.spec, rp.specSource = spec, specSource
 	rp.sum.Profile = o.profile
 	rp.sum.Model = checkModel{Spec: spec, Source: strings.TrimPrefix(specSource, "from ")}
+	if origin.overridesConfig() {
+		rp.sum.Model.Overrides = origin.cfgModel
+	}
 	rp.sum.setProvider(spec)
 	rp.sum.Limits = checkLimits{Steps: cfg.StepLimit, CostUSD: cfg.CostLimit, Tokens: cfg.TokenLimit, TimeSec: cfg.WallTimeSec}
 	if err := model.CheckProviderEnv(spec); err != nil {
@@ -201,10 +210,10 @@ func (rp *checkReport) resolveModel() error {
 	// a missing model name or a missing Codex login, as a run would.
 	m, err := model.NewWith(spec, nil, model.Options{OpenAIAPI: model.OpenAITransport(spec, cfg.OpenAIAPI)})
 	if err != nil {
-		return checkHint{spec: spec, msg: err.Error(), err: err}
+		return checkHint{spec: spec, msg: err.Error(), err: err, origin: rp.origin}
 	}
 	if env := model.MissingKeyEnv(spec); env != "" {
-		return checkHint{spec: spec, msg: "HTTP 401: ", err: fmt.Errorf("%s is not set", env)}
+		return checkHint{spec: spec, msg: "HTTP 401: ", err: errors.New(rp.origin.missingKey(env)), origin: rp.origin}
 	}
 	rp.m = m
 	return nil
@@ -258,6 +267,9 @@ func (rp *checkReport) headerLines() {
 		rp.add("env", env) // names only, never values (#410)
 	}
 	rp.add("model", rp.spec+" ("+rp.specSource+")")
+	if rp.origin.overridesConfig() {
+		rp.add("overrides", fmt.Sprintf("model: %s in %s (%s)", rp.origin.cfgModel, rp.origin.configLabel(), "unset AGENT_MODEL to use it"))
+	}
 	rp.add("provider", providerStatus(rp.spec, rp.m))
 	switch {
 	case len(rp.fallbacks) == 0 && o.noFallback:

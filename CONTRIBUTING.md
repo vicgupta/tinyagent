@@ -110,6 +110,14 @@ embed/prompts/        system prompt templates
   `tools.Actionable` / `tools.Actionablef` (or the MCP `actionable` helpers);
   add a wording assertion for each new key error. See
   [Tool error messages](docs/tools.md#tool-error-messages).
+- **Resolving the main model:** a new entry point resolves it with
+  `resolveModelOrigin` (`cmd/tinyagent/model_origin.go`), not bare
+  `resolveModel`, so it prints the `$AGENT_MODEL` override note
+  (`noteModelOverride`) and its missing-key error and hint name the model's
+  source (`missingKey`, `withHintFrom`, `printHintFrom`). Keep the precedence
+  in `resolveModel`, print model specs and paths only, never key values, and
+  cover the note and the error in tests with fakes. See
+  [Where the model came from](docs/models.md#where-the-model-came-from).
 - **Every tool call path must emit a tool result.** A denial, error, timeout,
   lockdown refusal, format error, ask_user answer/rejection, or resume close of
   an interrupted call still needs a `tool.result` event and a matching tool

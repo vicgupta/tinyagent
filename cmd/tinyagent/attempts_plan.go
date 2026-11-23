@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -72,10 +73,15 @@ func planAttempts(o *options, fs *flag.FlagSet, cfg config.AgentConfig, forCheck
 		}
 	}
 	models := []string(a.models)
-	if len(models) == 0 {
-		// The model a single run would use: -m, else $AGENT_MODEL, else
-		// the config's model, else the built-in default.
-		spec := resolveModel(fs, o.modelName, cfg.Model)
+	// The model a single run would use: -m, else $AGENT_MODEL, else the
+	// config's model, else the built-in default; and where it came from.
+	def := resolveModelOrigin(fs, o.modelName, cfg.Model, configPathFor(o))
+	derived := len(models) == 0
+	if derived {
+		if !forCheck {
+			noteModelOverride(os.Stderr, def)
+		}
+		spec := def.spec
 		models = make([]string, a.n)
 		for i := range models {
 			models[i] = spec
@@ -90,7 +96,7 @@ func planAttempts(o *options, fs *flag.FlagSet, cfg config.AgentConfig, forCheck
 	if flagWasSet(fs, "openai-api") {
 		openaiAPI = o.openaiAPI
 	}
-	if err := checkAttemptModels(models, cfg, openaiAPI); err != nil {
+	if err := checkAttemptModels(models, cfg, openaiAPI, def, derived); err != nil {
 		return attemptPlan{}, usage("%v", err)
 	}
 
